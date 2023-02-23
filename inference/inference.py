@@ -340,6 +340,9 @@ if __name__ == '__main__':
     logging_utils.log_versions()
     params.log()
 
+    if params.log_to_wandb:
+       wandb.init(config=params, group=args.config, project='fourcastnet-era5', entity='ai2cm')
+
     n_ics = params['n_initial_conditions']
 
     if fld == "z500" or fld == "t850":
@@ -453,6 +456,23 @@ if __name__ == '__main__':
             del f["predicted"]
             f.create_dataset("predicted", data = seq_pred, shape = (n_ics, prediction_length, n_out_channels, img_shape_x, img_shape_y), dtype = np.float32)
             f["predicted"][...]= seq_pred
+
+        if params.log_to_wandb:
+            gap = np.zeros((prediction_length, n_out_channels, img_shape_x, 10))
+            video_data = np.concatenate((seq_pred[0], gap, seq_real[0]), axis=-1)
+            for c in range(n_out_channels):
+              # wandb.Video requires 4D array, hence keeping singleton channel dim
+              channel_video_data = video_data[:, [c], :, :]
+              # rescale appropriately given that wandb.Video casts data to np.uint8
+              # use 'real' data for determining max/min scaling bounds. 'pred' data
+              # may saturate bounds, so clip at 0 and 255.
+              data_min = seq_real[0][:, c, :, :].min()
+              data_max = seq_real[0][:, c, :, :].max()
+              channel_video_data = 255 * (channel_video_data - data_min) / (data_max - data_min)
+              channel_video_data = np.minimum(channel_video_data, 255)
+              channel_video_data = np.maximum(channel_video_data, 0)
+              wandb_video = wandb.Video(channel_video_data, caption=f'Autoregressive (left) prediction and (right) target for channel {c}')
+              wandb.log({f'prediction_video_channel{c}': wandb_video})
 
       if params.masked_acc:
         try:

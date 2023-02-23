@@ -334,6 +334,7 @@ class Trainer():
 
     sample_idx = np.random.randint(len(self.valid_data_loader))
     with torch.no_grad():
+      image_logs = {}
       for i, data in enumerate(self.valid_data_loader, 0):
         if (not self.precip) and i>=n_valid_batches:
           break    
@@ -385,16 +386,17 @@ class Trainer():
                 valid_weighted_rmse += weighted_rmse_torch(gen, tar)
 
 
-        if not self.precip:
-            try:
-                os.mkdir(params['experiment_dir'] + "/" + str(i))
-            except:
-                pass
-            #save first channel of image
-            if self.params.two_step_training:
-                save_image(torch.cat((gen_step_one[0,0], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,0]), axis = 1), params['experiment_dir'] + "/" + str(i) + "/" + str(self.epoch) + ".png")
-            else:
-                save_image(torch.cat((gen[0,0], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,0]), axis = 1), params['experiment_dir'] + "/" + str(i) + "/" + str(self.epoch) + ".png")
+        if not self.precip and i % 10 == 0:
+            for j in range(gen.shape[1]):
+              image_path = os.path.join(params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
+              os.makedirs(os.path.dirname(image_path), exist_ok=True)
+              if self.params.two_step_training:
+                  image = torch.cat((gen_step_one[0,j], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,j]), axis = 1)
+              else:
+                  image = torch.cat((gen[0,j], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,j]), axis = 1)
+              save_image(image, image_path)
+              wandb_image = wandb.Image(image, caption=f'Channel {j} one step prediction for sample {i}; (left) generated and (right) target.')
+              image_logs[f'channel{j}_sample{i}_image'] = wandb_image
 
            
     if dist.is_initialized():
@@ -426,7 +428,7 @@ class Trainer():
         fig = vis_precip(fields)
         logs['vis'] = wandb.Image(fig)
         plt.close(fig)
-      wandb.log(logs, step=self.epoch)
+      wandb.log({**logs, **image_logs}, step=self.epoch)
 
     return valid_time, logs
 

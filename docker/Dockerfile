@@ -14,7 +14,8 @@ RUN pip install wandb && \
     pip install ruamel.yaml && \
     pip install --upgrade tqdm && \
     pip install timm && \
-    pip install einops
+    pip install einops && \
+    pip install moviepy imageio
 
 # benchy
 RUN pip install git+https://github.com/romerojosh/benchy.git
@@ -29,6 +30,7 @@ COPY copernicus /opt/ERA5_wind/copernicus
 COPY docker /opt/ERA5_wind/docker
 COPY networks /opt/ERA5_wind/networks
 COPY utils /opt/ERA5_wind/utils
+COPY inference /opt/ERA5_wind/inference
 COPY *.py /opt/ERA5_wind/
 COPY *.sh /opt/ERA5_wind/
 
