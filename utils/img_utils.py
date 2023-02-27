@@ -78,7 +78,7 @@ class PeriodicPad2d(nn.Module):
         out = F.pad(out, (0, 0, self.pad_width, self.pad_width), mode="constant", value=0) 
         return out
 
-def reshape_fields(img, inp_or_tar, crop_size_x, crop_size_y,rnd_x, rnd_y, params, y_roll, train, normalize=True, orog=None, add_noise=False):
+def reshape_fields(img, inp_or_tar, crop_size_x, crop_size_y,rnd_x, rnd_y, params, y_roll, train, means, stds, normalize=True, orog=None, add_noise=False):
     #Takes in np array of size (n_history+1, c, h, w) and returns torch tensor of size ((n_channels*(n_history+1), crop_size_x, crop_size_y)
 
     if len(np.shape(img)) ==3:
@@ -90,9 +90,6 @@ def reshape_fields(img, inp_or_tar, crop_size_x, crop_size_y,rnd_x, rnd_y, param
     img_shape_x = np.shape(img)[-2]
     img_shape_y = np.shape(img)[-1]
     n_channels = np.shape(img)[1] #this will either be N_in_channels or N_out_channels
-    channels = params.in_channels if inp_or_tar =='inp' else params.out_channels
-    means = np.load(params.global_means_path)[:, channels]
-    stds = np.load(params.global_stds_path)[:, channels]
     if crop_size_x == None:
         crop_size_x = img_shape_x
     if crop_size_y == None:
