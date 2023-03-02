@@ -73,6 +73,7 @@ from utils.weighted_acc_rmse import (
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
+from utils.constants import CHANNEL_NAMES
 from networks.afnonet import AFNONet
 import wandb
 import matplotlib.pyplot as plt
@@ -172,6 +173,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     out_channels = np.array(params.out_channels)
     n_in_channels = len(in_channels)
     n_out_channels = len(out_channels)
+    out_names = [CHANNEL_NAMES[c] for c in out_channels]
     means = params.means
     stds = params.stds
 
@@ -297,17 +299,17 @@ def autoregressive_inference(params, ic, valid_data_full, model):
             logging.info('[COARSE] Predicted timestep {} of {}. {} RMS Error: {}, ACC: {}'.format(i, prediction_length, fld, valid_loss_coarse[i, idx],
                         acc_coarse[i, idx]))
         if params.log_to_wandb:
-          rmse_metrics = {f'rmse/ic{ic}/channel{c}': valid_loss[i, c] for c in range(n_out_channels)}
-          acc_metrics = {f'acc/ic{ic}/channel{c}': acc[i, c] for c in range(n_out_channels)}
-          mean_pred_metrics = {f'global_mean_prediction/ic{ic}/channel{c}': global_mean_pred[i, c] for c in range(n_out_channels)}
-          mean_target_metrics = {f'global_mean_target/ic{ic}/channel{c}': global_mean_target[i, c] for c in range(n_out_channels)}
+          rmse_metrics = {f'rmse/ic{ic}/channel{c}-{name}': valid_loss[i, c] for c, name in enumerate(out_names)}
+          acc_metrics = {f'acc/ic{ic}/channel{c}-{name}': acc[i, c] for c, name in enumerate(out_names)}
+          mean_pred_metrics = {f'global_mean_prediction/ic{ic}/channel{c}-{name}': global_mean_pred[i, c] for c, name in enumerate(out_names)}
+          mean_target_metrics = {f'global_mean_target/ic{ic}/channel{c}-{name}': global_mean_target[i, c] for c, name in enumerate(out_names)}
           grad_mag_pred_metrics = {
-            f'global_mean_gradient_magnitude_prediction/ic{ic}/channel{c}':
-            gradient_magnitude_pred[i, c] for c in range(n_out_channels)
+            f'global_mean_gradient_magnitude_prediction/ic{ic}/channel{c}-{name}':
+            gradient_magnitude_pred[i, c] for c, name in enumerate(out_names)
           }
           grad_mag_target_metrics = {
-            f'global_mean_gradient_magnitude_target/ic{ic}/channel{c}':
-            gradient_magnitude_target[i, c] for c in range(n_out_channels)
+            f'global_mean_gradient_magnitude_target/ic{ic}/channel{c}-{name}':
+            gradient_magnitude_target[i, c] for c, name in enumerate(out_names)
           }
           wandb.log(
             {

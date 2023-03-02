@@ -388,6 +388,7 @@ class Trainer():
 
         if not self.precip and i % 10 == 0:
             for j in range(gen.shape[1]):
+              name = self.valid_dataset.out_names[j]
               image_path = os.path.join(params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
               os.makedirs(os.path.dirname(image_path), exist_ok=True)
               if self.params.two_step_training:
@@ -395,8 +396,8 @@ class Trainer():
               else:
                   image = torch.cat((gen[0,j], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,j]), axis = 1)
               save_image(image, image_path)
-              wandb_image = wandb.Image(image, caption=f'Channel {j} one step prediction for sample {i}; (left) generated and (right) target.')
-              image_logs[f'channel{j}_sample{i}_image'] = wandb_image
+              wandb_image = wandb.Image(image, caption=f'Channel {j} ({name}) one step prediction for sample {i}; (left) generated and (right) target.')
+              image_logs[f'image-full-field/sample{i}/channel{j}-{name}'] = wandb_image
 
            
     if dist.is_initialized():
