@@ -66,7 +66,7 @@ from utils.data_loader_multifiles import get_data_loader
 from networks.afnonet import AFNONet, PrecipNet
 from utils.img_utils import vis_precip
 import wandb
-from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch
+from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch, weighted_global_mean_gradient_magnitude
 from apex import optimizers
 from utils.darcy_loss import LpLoss
 import matplotlib.pyplot as plt
@@ -329,6 +329,7 @@ class Trainer():
     valid_steps = valid_buff[2].view(-1)
     valid_weighted_rmse = torch.zeros((self.params.N_out_channels), dtype=torch.float32, device=self.device)
     valid_weighted_acc = torch.zeros((self.params.N_out_channels), dtype=torch.float32, device=self.device)
+    valid_gradient_magnitude_diff = torch.zeros((self.params.N_out_channels), dtype=torch.float32, device=self.device)
 
     valid_start = time.time()
 
@@ -376,28 +377,45 @@ class Trainer():
         #direct prediction weighted rmse
         if self.params.two_step_training:
             if 'residual_field' in self.params.target:
-                valid_weighted_rmse += weighted_rmse_torch((gen_step_one + inp), (tar[:,0:self.params.N_out_channels] + inp))
+                gen_for_rmse = gen_step_one + inp
+                tar_for_rmse = tar[:,0:self.params.N_out_channels] + inp
             else:
-                valid_weighted_rmse += weighted_rmse_torch(gen_step_one, tar[:,0:self.params.N_out_channels])
+                gen_for_rmse = gen_step_one
+                tar_for_rmse = tar[:,0:self.params.N_out_channels]
         else:
             if 'residual_field' in self.params.target:
-                valid_weighted_rmse += weighted_rmse_torch((gen + inp), (tar + inp))
+                gen_for_rmse = gen + inp
+                tar_for_rmse = tar + inp
             else:
-                valid_weighted_rmse += weighted_rmse_torch(gen, tar)
-
+                gen_for_rmse = gen
+                tar_for_rmse = tar
+        valid_weighted_rmse += weighted_rmse_torch(gen_for_rmse, tar_for_rmse)
+        gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(gen_for_rmse)
+        tar_gradient_magnitude = weighted_global_mean_gradient_magnitude(tar_for_rmse)
+        valid_gradient_magnitude_diff += 100 * (gen_gradient_magnitude - tar_gradient_magnitude) / tar_gradient_magnitude
 
         if not self.precip and i % 10 == 0:
             for j in range(gen.shape[1]):
               name = self.valid_dataset.out_names[j]
-              image_path = os.path.join(params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
-              os.makedirs(os.path.dirname(image_path), exist_ok=True)
-              if self.params.two_step_training:
-                  image = torch.cat((gen_step_one[0,j], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,j]), axis = 1)
+              gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float)
+              gen_for_image = gen_step_one[0,j] if self.params.two_step_training else gen[0,j]
+              if 'residual_field' in self.params.target:
+                  image_full_field = torch.cat((inp[0,j] + gen_for_image, gap, inp[0,j] + tar[0,j]), axis=1)
+                  image_residual = torch.cat((gen_for_image, gap, tar[0,j]), axis=1)
               else:
-                  image = torch.cat((gen[0,j], torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float), tar[0,j]), axis = 1)
-              save_image(image, image_path)
-              wandb_image = wandb.Image(image, caption=f'Channel {j} ({name}) one step prediction for sample {i}; (left) generated and (right) target.')
-              image_logs[f'image-full-field/sample{i}/channel{j}-{name}'] = wandb_image
+                  image_full_field = torch.cat((gen_for_image, gap, tar[0,j]), axis=1)
+                  image_residual = torch.cat((gen_for_image - inp[0,j], gap, tar[0,j] - inp[0,j]), axis=1)
+              if self.params.log_to_wandb:
+                  caption = f'Channel {j} ({name}) one step full field for sample {i}; (left) generated and (right) target.'
+                  wandb_image = wandb.Image(image_full_field, caption=caption)
+                  image_logs[f'image-full-field/sample{i}/channel{j}-{name}'] = wandb_image
+                  caption = f'Channel {j} ({name}) one step residual for sample {i}; (left) generated and (right) target.'
+                  wandb_image = wandb.Image(image_residual, caption=caption)
+                  image_logs[f'image-residual/sample{i}/channel{j}-{name}'] = wandb_image
+              else:
+                  image_path = os.path.join(params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
+                  os.makedirs(os.path.dirname(image_path), exist_ok=True)
+                  save_image(image_full_field, image_path)
 
            
     if dist.is_initialized():
@@ -407,29 +425,38 @@ class Trainer():
     # divide by number of steps
     valid_buff[0:2] = valid_buff[0:2] / valid_buff[2]
     valid_weighted_rmse = valid_weighted_rmse / valid_buff[2]
+    valid_gradient_magnitude_diff = valid_gradient_magnitude_diff / valid_buff[2]
     if not self.precip:
       valid_weighted_rmse *= mult
 
     # download buffers
     valid_buff_cpu = valid_buff.detach().cpu().numpy()
     valid_weighted_rmse_cpu = valid_weighted_rmse.detach().cpu().numpy()
+    valid_gradient_magnitude_diff_cpu = valid_gradient_magnitude_diff.detach().cpu().numpy()
 
     valid_time = time.time() - valid_start
     valid_weighted_rmse = mult*torch.mean(valid_weighted_rmse, axis = 0)
     if self.precip:
       logs = {'valid_l1': valid_buff_cpu[1], 'valid_loss': valid_buff_cpu[0], 'valid_rmse_tp': valid_weighted_rmse_cpu[0]}
     else:
-      try:
-        logs = {'valid_l1': valid_buff_cpu[1], 'valid_loss': valid_buff_cpu[0], 'valid_rmse_u10': valid_weighted_rmse_cpu[0], 'valid_rmse_v10': valid_weighted_rmse_cpu[1]}
-      except:
-        logs = {'valid_l1': valid_buff_cpu[1], 'valid_loss': valid_buff_cpu[0], 'valid_rmse_u10': valid_weighted_rmse_cpu[0]}#, 'valid_rmse_v10': valid_weighted_rmse[1]}
+      logs = {
+         'valid_l1': valid_buff_cpu[1],
+         'valid_loss': valid_buff_cpu[0],
+         'valid_rmse_u10': valid_weighted_rmse_cpu[0],
+         'valid_rmse_v10': valid_weighted_rmse_cpu[1],
+         
+      }
+      grad_mag_logs = {
+         f'valid_gradient_magnitude_percent_diff/channel{c}-{name}': valid_gradient_magnitude_diff_cpu[c]
+         for c, name in enumerate(self.valid_dataset.out_names)
+      }
     
     if self.params.log_to_wandb:
       if self.precip:
         fig = vis_precip(fields)
         logs['vis'] = wandb.Image(fig)
         plt.close(fig)
-      wandb.log({**logs, **image_logs}, step=self.epoch)
+      wandb.log({**logs, **grad_mag_logs, **image_logs}, step=self.epoch)
 
     return valid_time, logs
 

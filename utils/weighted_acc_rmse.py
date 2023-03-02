@@ -182,10 +182,24 @@ def weighted_global_mean_gradient_magnitude_channels(pred: torch.Tensor) -> torc
     lat_t = torch.arange(start=0, end=num_lat, device=pred.device)
     s = torch.sum(torch.cos(3.1416/180. * lat(lat_t, num_lat)))
     weight = torch.reshape(latitude_weighting_factor_torch(lat_t, num_lat, s), (1, 1, -1, 1))
-    gradient_x, gradient_y = torch.gradient(pred, dim=(-1, -2))
+    # workaround for https://github.com/pytorch/pytorch/issues/67919
+    if pred.shape[0] == 1:
+        workaround = True
+        pred_ = torch.cat((pred, pred), dim=0)
+    else:
+        workaround = False
+        pred_ = pred
+    gradient_x, gradient_y = torch.gradient(pred_, dim=(-1, -2))
+    if workaround:
+        gradient_x, gradient_y = gradient_x[0], gradient_y[0]
     gradient_magnitude = torch.sqrt(gradient_x**2 + gradient_y**2)
     result = torch.mean(weight * gradient_magnitude, dim=(-1,-2))
     return result
+
+@torch.jit.script
+def weighted_global_mean_gradient_magnitude(pred: torch.Tensor) -> torch.Tensor:
+    result = weighted_global_mean_gradient_magnitude_channels(pred)
+    return torch.mean(result, dim=0)
 
 @torch.jit.script
 def weighted_acc_masked_torch_channels(pred: torch.Tensor, target: torch.Tensor, maskarray: torch.Tensor) -> torch.Tensor:
