@@ -62,7 +62,14 @@ from collections import OrderedDict
 from torch.nn.parallel import DistributedDataParallel
 import logging
 from utils import logging_utils
-from utils.weighted_acc_rmse import weighted_rmse_torch_channels, weighted_acc_torch_channels, unweighted_acc_torch_channels, weighted_acc_masked_torch_channels
+from utils.weighted_acc_rmse import (
+    weighted_rmse_torch_channels,
+    weighted_acc_torch_channels,
+    unweighted_acc_torch_channels,
+    weighted_acc_masked_torch_channels,
+    weighted_global_mean_channels,
+    weighted_global_mean_gradient_magnitude_channels,
+)
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
@@ -84,10 +91,11 @@ def gaussian_perturb(x, level=0.01, device=0):
     noise = level * torch.randn(x.shape).to(device, dtype=torch.float)
     return (x + noise)
 
-def load_model(model, params, checkpoint_file):
+def load_model(model, params, checkpoint_file, device=None):
     model.zero_grad()
     checkpoint_fname = checkpoint_file
-    checkpoint = torch.load(checkpoint_fname)
+    kwargs = dict(map_location=torch.device('cpu')) if device == 'cpu' else {}
+    checkpoint = torch.load(checkpoint_fname, **kwargs)
     try:
         new_state_dict = OrderedDict()
         for key, val in checkpoint['model_state'].items():
@@ -134,7 +142,7 @@ def setup(params):
       raise Exception("not implemented")
 
     checkpoint_file  = params['best_checkpoint_path']
-    model = load_model(model, params, checkpoint_file)
+    model = load_model(model, params, checkpoint_file, device)
     model = model.to(device)
 
     # load the validation data
@@ -170,6 +178,10 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     #initialize memory for image sequences and RMSE/ACC
     valid_loss = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
     acc = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
+    global_mean_pred = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
+    global_mean_target = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
+    gradient_magnitude_pred = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
+    gradient_magnitude_target = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
 
     # compute metrics in a coarse resolution too if params.interp is nonzero
     valid_loss_coarse = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
@@ -206,6 +218,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
         m_coarse = downsample(m, scale=params.interp)
 
     std = torch.as_tensor(stds[:,0,0]).to(device, dtype=torch.float)
+    mean_ = torch.as_tensor(means[:,0,0]).to(device, dtype=torch.float)
 
     orography = params.orography
     orography_path = params.orography_path
@@ -261,6 +274,10 @@ def autoregressive_inference(params, ic, valid_data_full, model):
         valid_loss[i] = weighted_rmse_torch_channels(pred, tar) * std
         acc[i] = weighted_acc_torch_channels(pred-clim, tar-clim)
         acc_unweighted[i] = unweighted_acc_torch_channels(pred-clim, tar-clim)
+        global_mean_pred[i] = weighted_global_mean_channels(pred) * std + mean_
+        global_mean_target[i] = weighted_global_mean_channels(tar) * std + mean_
+        gradient_magnitude_pred[i] = weighted_global_mean_gradient_magnitude_channels(pred) * std
+        gradient_magnitude_target[i] = weighted_global_mean_gradient_magnitude_channels(tar) * std
 
         if params.masked_acc:
           acc_land[i] = weighted_acc_masked_torch_channels(pred-clim, tar-clim, maskarray)
@@ -279,6 +296,30 @@ def autoregressive_inference(params, ic, valid_data_full, model):
           if params.interp > 0:
             logging.info('[COARSE] Predicted timestep {} of {}. {} RMS Error: {}, ACC: {}'.format(i, prediction_length, fld, valid_loss_coarse[i, idx],
                         acc_coarse[i, idx]))
+        if params.log_to_wandb:
+          rmse_metrics = {f'rmse/ic{ic}/channel{c}': valid_loss[i, c] for c in range(n_out_channels)}
+          acc_metrics = {f'acc/ic{ic}/channel{c}': acc[i, c] for c in range(n_out_channels)}
+          mean_pred_metrics = {f'global_mean_prediction/ic{ic}/channel{c}': global_mean_pred[i, c] for c in range(n_out_channels)}
+          mean_target_metrics = {f'global_mean_target/ic{ic}/channel{c}': global_mean_target[i, c] for c in range(n_out_channels)}
+          grad_mag_pred_metrics = {
+            f'global_mean_gradient_magnitude_prediction/ic{ic}/channel{c}':
+            gradient_magnitude_pred[i, c] for c in range(n_out_channels)
+          }
+          grad_mag_target_metrics = {
+            f'global_mean_gradient_magnitude_target/ic{ic}/channel{c}':
+            gradient_magnitude_target[i, c] for c in range(n_out_channels)
+          }
+          wandb.log(
+            {
+              **rmse_metrics,
+              **acc_metrics,
+              **mean_pred_metrics,
+              **mean_target_metrics,
+              **grad_mag_pred_metrics,
+              **grad_mag_target_metrics
+            }
+          )
+              
 
     seq_real = seq_real.cpu().numpy()
     seq_pred = seq_pred.cpu().numpy()
@@ -316,7 +357,9 @@ if __name__ == '__main__':
     params['use_daily_climatology'] = args.use_daily_climatology
     params['global_batch_size'] = params.batch_size
 
-    torch.cuda.set_device(0)
+    device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
+    if device != 'cpu':
+      torch.cuda.set_device(device)
     torch.backends.cudnn.benchmark = True
     vis = args.vis
 
@@ -472,7 +515,7 @@ if __name__ == '__main__':
               channel_video_data = np.minimum(channel_video_data, 255)
               channel_video_data = np.maximum(channel_video_data, 0)
               wandb_video = wandb.Video(channel_video_data, caption=f'Autoregressive (left) prediction and (right) target for channel {c}')
-              wandb.log({f'prediction_video_channel{c}': wandb_video})
+              wandb.log({f'video/channel{c}': wandb_video})
 
       if params.masked_acc:
         try:
