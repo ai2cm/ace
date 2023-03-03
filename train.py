@@ -321,7 +321,7 @@ class Trainer():
     if self.params.normalization == 'minmax':
         raise Exception("minmax normalization not supported")
     elif self.params.normalization == 'zscore':
-        mult = torch.as_tensor(np.load(self.params.global_stds_path)[0, self.params.out_channels, 0, 0]).to(self.device)
+        mult = torch.as_tensor(self._load_global_output_stds()).to(self.device)
 
     valid_buff = torch.zeros((3), dtype=torch.float32, device=self.device)
     valid_loss = valid_buff[0].view(-1)
@@ -467,7 +467,7 @@ class Trainer():
     if self.params.normalization == 'minmax':
         raise Exception("minmax normalization not supported")
     elif self.params.normalization == 'zscore':
-        mult = torch.as_tensor(np.load(self.params.global_stds_path)[0, self.params.out_channels, 0, 0]).to(self.device)
+        mult = torch.as_tensor(self._load_global_output_stds()).to(self.device)
 
     with torch.no_grad():
         for i, data in enumerate(self.valid_data_loader):
@@ -514,6 +514,13 @@ class Trainer():
 
     return valid_weighted_rmse
 
+  def _load_global_output_stds(self):
+     if self.params.data_type == 'ERA5':
+        return np.load(self.params.global_stds_path)[0, self.params.out_channels, 0, 0]
+     elif self.params.data_type == 'FV3GFS':
+        return self.valid_dataset.out_stds.squeeze()
+     else:
+        raise NotImplementedError(f'data_type {self.params.data_type} is unknown.')
 
   def load_model_wind(self, model_path):
     if self.params.log_to_screen:

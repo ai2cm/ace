@@ -187,7 +187,7 @@ class AFNONet(nn.Module):
         ):
         super().__init__()
         self.params = params
-        self.img_size = img_size
+        self.img_size = (params.img_shape_x, params.img_shape_y)  # lat then lon
         self.patch_size = (params.patch_size, params.patch_size)
         self.in_chans = params.N_in_channels
         self.out_chans = params.N_out_channels
@@ -195,7 +195,7 @@ class AFNONet(nn.Module):
         self.num_blocks = params.num_blocks 
         norm_layer = partial(nn.LayerNorm, eps=1e-6)
 
-        self.patch_embed = PatchEmbed(img_size=img_size, patch_size=self.patch_size, in_chans=self.in_chans, embed_dim=embed_dim)
+        self.patch_embed = PatchEmbed(img_size=self.img_size, patch_size=self.patch_size, in_chans=self.in_chans, embed_dim=embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, embed_dim))
@@ -203,8 +203,8 @@ class AFNONet(nn.Module):
 
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]
 
-        self.h = img_size[0] // self.patch_size[0]
-        self.w = img_size[1] // self.patch_size[1]
+        self.h = self.img_size[0] // self.patch_size[0]
+        self.w = self.img_size[1] // self.patch_size[1]
 
         self.blocks = nn.ModuleList([
             Block(dim=embed_dim, mlp_ratio=mlp_ratio, drop=drop_rate, drop_path=dpr[i], norm_layer=norm_layer,
