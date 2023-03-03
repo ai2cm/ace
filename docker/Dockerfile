@@ -15,7 +15,8 @@ RUN pip install wandb && \
     pip install --upgrade tqdm && \
     pip install timm && \
     pip install einops && \
-    pip install moviepy imageio
+    pip install moviepy imageio && \
+    pip install netCDF4
 
 # benchy
 RUN pip install git+https://github.com/romerojosh/benchy.git
