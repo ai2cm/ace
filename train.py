@@ -88,7 +88,7 @@ class Trainer():
     self.device = torch.cuda.current_device() if torch.cuda.is_available() else 'cpu'
 
     if params.log_to_wandb:
-      wandb.init(config=params, group=params.group, project=params.project, entity=params.entity)
+      wandb.init(config=params, project=params.project, entity=params.entity)
 
     logging.info('rank %d, begin data loader init'%world_rank)
     self.train_data_loader, self.train_dataset, self.train_sampler = get_data_loader(params, params.train_data_path, dist.is_initialized(), train=True)
@@ -617,7 +617,6 @@ if __name__ == '__main__':
   params['enable_amp'] = args.enable_amp
 
   # wandb parameters
-  params['group'] = args.config
   params['project'] = "fourcastnet-era5"
   params['entity'] = "ai2cm"
   if world_rank==0:

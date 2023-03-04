@@ -386,7 +386,7 @@ if __name__ == '__main__':
     params.log()
 
     if params.log_to_wandb:
-       wandb.init(config=params, group=args.config, project='fourcastnet-era5', entity='ai2cm')
+       wandb.init(config=params, project='fourcastnet-era5', entity='ai2cm')
 
     n_ics = params['n_initial_conditions']
 
