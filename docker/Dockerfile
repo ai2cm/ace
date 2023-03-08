@@ -3,6 +3,39 @@ FROM nvcr.io/nvidia/pytorch:21.11-py3
 # update repo info
 RUN apt update -y
 
+ENV TZ="America/Los_Angeles"
+
+# Install base tools.
+RUN apt-get update && apt-get install -y \
+#    build-essential \
+#    curl \
+#    git \
+#    jq \
+#    language-pack-en \
+#    make \
+#    man-db \
+#    manpages \
+#    manpages-dev \
+#    manpages-posix \
+#    manpages-posix-dev \
+    sudo #\
+#    unzip \
+#    vim \
+#    wget \
+#    fish \
+#    parallel \
+#    iputils-ping \
+#    htop \
+#    emacs \
+#    tmux \
+#    libglvnd0 \
+#    libgl1 \
+#    libglx0 \
+#    libegl1 \
+#    libgles2 \
+#    libxcb1-dev \
+#    vulkan-utils
+
 # install mpi4py
 RUN pip install mpi4py
 
@@ -37,3 +70,21 @@ COPY *.sh /opt/ERA5_wind/
 
 # create dummy git image
 RUN cd /opt/ERA5_wind && git init
+
+#### https://github.com/allenai/docker-images/blob/main/cuda/Dockerfile ####
+
+# Ensure users can modify their container environment.
+RUN echo '%users ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+
+# Make the base image friendlier for interactive workloads. This makes things like the man command
+# work.
+RUN yes | unminimize
+
+# Shell customization including prompt and colors.
+###### Broken
+# COPY profile.d/ /etc/profile.d/
+
+# TODO(gideond) this still hangs when you try to install the full deps. For
+# now, just remove them I think.
+
+ENTRYPOINT ["bash", "-l"]
