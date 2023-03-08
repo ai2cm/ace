@@ -62,10 +62,12 @@ from utils.constants import CHANNEL_NAMES
 
 def get_data_loader(params, files_pattern, distributed, train):
 
-  data_type = params.data_type if 'data_type' in params else 'ERA5'
-  if data_type == 'ERA5':
+  if 'data_type' not in params:
+     params['data_type'] = 'ERA5'
+
+  if params.data_type == 'ERA5':
     dataset = GetDataset(params, files_pattern, train)
-  elif data_type == 'FV3GFS':
+  elif params.data_type == 'FV3GFS':
     dataset = FV3GFSDataset(params, files_pattern, train)
     if params.num_data_workers > 0:
       # netCDF4 __getitem__ fails with "RuntimeError: Resource temporarily unavailable"
@@ -76,7 +78,7 @@ def get_data_loader(params, files_pattern, distributed, train):
       )
       params['num_data_workers'] = 0
   else:
-    raise NotImplementedError(f'{data_type} does not have an implemented data loader')
+    raise NotImplementedError(f'{params.data_type} does not have an implemented data loader')
   
   sampler = DistributedSampler(dataset, shuffle=train) if distributed else None
   
