@@ -120,6 +120,7 @@ class GetDataset(Dataset):
     self.in_stds = np.load(params.global_stds_path)[:, self.in_channels]
     self.out_means = np.load(params.global_means_path)[:, self.out_channels]
     self.out_stds = np.load(params.global_stds_path)[:, self.out_channels]
+    self.out_time_means = np.load(params.time_means_path)
 
     if self.precip:
         path = params.precip+'/train' if train else params.precip+'/test'
@@ -162,6 +163,14 @@ class GetDataset(Dataset):
       self.orography_field = _orog_file['orog']
     if self.precip:
       self.precip_files[year_idx] = h5py.File(self.precip_paths[year_idx], 'r')['tp']
+
+
+  @property
+  def data_array(self):
+    # returns array of first file of data
+    logging.info(f'Loading data from {self.files_paths[0]}')
+    _file = h5py.File(self.files_paths[0], 'r')
+    return _file['fields']
     
   
   def __len__(self):

@@ -133,8 +133,9 @@ def setup(params):
     else:
       params['N_in_channels'] = n_in_channels
     params['N_out_channels'] = n_out_channels
-    params.means = np.load(params.global_means_path)[0, out_channels] # needed to standardize wind data
-    params.stds = np.load(params.global_stds_path)[0, out_channels]
+    params.means = valid_dataset.out_means[0] # needed to standardize wind data
+    params.stds = valid_dataset.out_stds[0]
+    params.time_means = valid_dataset.out_time_means[0]
 
     # load the model
     if params.nettype == 'afno':
@@ -147,15 +148,9 @@ def setup(params):
     model = model.to(device)
 
     # load the validation data
-    files_paths = glob.glob(params.inf_data_path + "/*.h5")
-    files_paths.sort()
-    # which year
-    yr = 0
     if params.log_to_screen:
         logging.info('Loading inference data')
-        logging.info('Inference data from {}'.format(files_paths[yr]))
-
-    valid_data_full = h5py.File(files_paths[yr], 'r')['fields']
+    valid_data_full = valid_dataset.data_array
 
     return valid_data_full, model
 
@@ -176,6 +171,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     out_names = [CHANNEL_NAMES[c] for c in out_channels]
     means = params.means
     stds = params.stds
+    time_means = params.time_means
 
     #initialize memory for image sequences and RMSE/ACC
     valid_loss = torch.zeros((prediction_length, n_out_channels)).to(device, dtype=torch.float)
@@ -199,14 +195,18 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     if params.masked_acc:
       maskarray = torch.as_tensor(np.load(params.maskpath)[0:720]).to(device, dtype=torch.float)
 
-    valid_data = valid_data_full[ic:(ic+prediction_length*dt+n_history*dt):dt, in_channels, 0:720] #extract valid data from first year
+    valid_data = valid_data_full[ic:(ic+prediction_length*dt+n_history*dt):dt, in_channels] #extract valid data from first year
+    if valid_data.shape[2] > 720:
+       # might be necessary for ERA5 data
+       valid_data = valid_data[:, :, 0:720]
+       
     # standardize
     valid_data = (valid_data - means)/stds
     valid_data = torch.as_tensor(valid_data).to(device, dtype=torch.float)
 
     #load time means
     if not params.use_daily_climatology:
-      m = torch.as_tensor((np.load(params.time_means_path)[0][out_channels] - means)/stds)[:, 0:img_shape_x] # climatology
+      m = torch.as_tensor((time_means[out_channels] - means)/stds)[:, 0:img_shape_x]
       m = torch.unsqueeze(m, 0)
     else:
       # use daily clim like weyn et al. (different from rasp)

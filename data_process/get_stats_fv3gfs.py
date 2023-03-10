@@ -10,9 +10,12 @@ ds = xr.open_mfdataset(os.path.join(DATA_PATH, '*.nc'), chunks=None)
 with xr.set_options(keep_attrs=True):
     global_means = ds.mean(dim=['time', 'grid_xt', 'grid_yt'])
     global_stds = ds.std(dim=['time', 'grid_xt', 'grid_yt'])
+    time_means = ds.mean(dim='time')
 
 global_means.to_netcdf(os.path.join(OUTPUT_PATH, 'fv3gfs-mean.nc'))
 global_stds.to_netcdf(os.path.join(OUTPUT_PATH, 'fv3gfs-stddev.nc'))
+time_means.to_netcdf(os.path.join(OUTPUT_PATH, 'fv3gfs-time-mean.nc'))
 
-print("means: ", global_means)
+print("global means: ", global_means)
 print("stds: ", global_stds)
+print("time means: ", time_means)

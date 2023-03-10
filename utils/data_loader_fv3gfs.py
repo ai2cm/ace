@@ -97,23 +97,26 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
     def _load_stats_data(self):
-        logging.info(f"Opening mean stats data at {self.params.global_means_path}")
-        means_ds = netCDF4.Dataset(self.params.global_means_path)
-        means_ds.set_auto_mask(False)
-        self.in_means = np.array([means_ds.variables[c][:] for c in self.in_names])
-        self.out_means = np.array([means_ds.variables[c][:] for c in self.out_names])
-        self.in_means = self.in_means.reshape((1, self.n_in_channels, 1, 1))
-        self.out_means = self.out_means.reshape((1, self.n_out_channels, 1, 1))
-        means_ds.close()
+        logging.info(f"Opening global mean stats data at {self.params.global_means_path}")
+        in_, out_ = load_arrays_from_netcdf(self.params.global_means_path, self.in_names, self.out_names)
+        self.in_means = in_.reshape((1, self.n_in_channels, 1, 1))
+        self.out_means = out_.reshape((1, self.n_out_channels, 1, 1))
 
         logging.info(f"Opening stddev stats data at {self.params.global_stds_path}")
-        stddev_ds = netCDF4.Dataset(self.params.global_stds_path)
-        stddev_ds.set_auto_mask(False)
-        self.in_stds = np.array([stddev_ds.variables[c][:] for c in self.in_names])
-        self.out_stds = np.array([stddev_ds.variables[c][:] for c in self.out_names])
-        self.in_stds = self.in_stds.reshape((1, self.n_in_channels, 1, 1))
-        self.out_stds = self.out_stds.reshape((1, self.n_out_channels, 1, 1))
-        stddev_ds.close()
+        in_, out_ = load_arrays_from_netcdf(self.params.global_stds_path, self.in_names, self.out_names)
+        self.in_stds = in_.reshape((1, self.n_in_channels, 1, 1))
+        self.out_stds = out_.reshape((1, self.n_out_channels, 1, 1))
+
+        # just used for multistep validation
+        logging.info(f"Opening time mean stats data at {self.params.time_means_path}")
+        in_, out_ = load_arrays_from_netcdf(self.params.time_means_path, self.in_names, self.out_names)
+        self.out_time_means = np.expand_dims(out_, 0)
+
+    @property
+    def data_array(self):
+        fv3gfs_names = [FV3GFS_NAMES[v] for v in CHANNEL_NAMES]
+        arrays = [np.expand_dims(self.ds.variables[v][:], 1) for v in fv3gfs_names]
+        return np.concatenate(arrays, axis=1)
 
     def __len__(self):
         return self.n_samples_total
@@ -157,3 +160,11 @@ class FV3GFSDataset(Dataset):
             self.orography,
         )
         return in_tensor, out_tensor
+
+def load_arrays_from_netcdf(path, in_names, out_names):
+    ds = netCDF4.Dataset(path)
+    ds.set_auto_mask(False)
+    in_array = np.array([ds.variables[c][:] for c in in_names])
+    out_array = np.array([ds.variables[c][:] for c in out_names])
+    ds.close()
+    return in_array, out_array
