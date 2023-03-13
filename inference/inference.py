@@ -336,13 +336,18 @@ def autoregressive_inference(params, ic, valid_data_full, model):
             )
               
     if params.is_log_aggregated_metrics_to_wandb:
-      # each metric is [time x channel]
-      all_metrics = [valid_loss, acc, global_mean_pred, global_mean_target, gradient_magnitude_pred, gradient_magnitude_target]
-      time_avg_metrics = [m.mean(axis=0) for m in all_metrics]
+      # inspect snapshot times at 5-days, 10-days.
+      # N.B. the predictions are 1-indexed, i.e. index 0 is the first prediction.
+      snapshot_timesteps = [(24 // 6 * k - 1, f"{k}-days") for k in [5, 10]]
       metric_names = ['rmse', 'acc', 'global_mean_prediction', 'global_mean_target', 'global_mean_gradient_magnitude_prediction', 'global_mean_gradient_magnitude_target']
-      for m, n in zip(time_avg_metrics, metric_names):
-        for c, name in enumerate(out_names):
-          wandb.log({f'{n}/ic{ic}/channel{c}-{name}': m[c]})
+      # All metrics has shape [metric_type, timestep, channel]
+      all_metrics = [valid_loss, acc, global_mean_pred, global_mean_target, gradient_magnitude_pred, gradient_magnitude_target]
+      all_metrics = np.array([m.cpu().numpy() for m in all_metrics])
+      for i in range(len(metric_names)):
+         for j, time_name in snapshot_timesteps:
+            for k in range(len(out_names)):
+              name = f'{metric_names[i]}/ic{ic}/{out_names[k]}/{time_name}'
+              wandb.log({name: all_metrics[i, j, k]})
 
     seq_real = seq_real.cpu().numpy()
     seq_pred = seq_pred.cpu().numpy()
