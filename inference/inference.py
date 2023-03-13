@@ -325,6 +325,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     # inspect snapshot times at 5-days, 10-days.
     # N.B. the predictions are 1-indexed, i.e. index 0 is the first prediction.
     snapshot_timesteps = [(24 // 6 * k - 1, f"{k}-days") for k in [5, 10]]
+    # TODO(gideond) move these names to a higher-level to avoid potential bugs
     metric_names = ['rmse', 'acc', 'global_mean_prediction', 'global_mean_target', 'global_mean_gradient_magnitude_prediction', 'global_mean_gradient_magnitude_target']
     # All metrics has shape [metric_type, timestep, channel]
     all_metrics = [valid_loss, acc, global_mean_pred, global_mean_target, gradient_magnitude_pred, gradient_magnitude_target]
