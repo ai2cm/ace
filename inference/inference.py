@@ -500,6 +500,7 @@ if __name__ == '__main__':
     n_out_channels = seq_real[0].shape[1]
     img_shape_x = seq_real[0].shape[2]
     img_shape_y = seq_real[0].shape[3]
+    out_names = [CHANNEL_NAMES[c] for c in params['out_channels']]
 
     #save predictions and loss
     if params.log_to_screen:
@@ -535,7 +536,7 @@ if __name__ == '__main__':
               channel_video_data = np.minimum(channel_video_data, 255)
               channel_video_data = np.maximum(channel_video_data, 0)
               wandb_video = wandb.Video(channel_video_data, caption=f'Autoregressive (left) prediction and (right) target for channel {c}')
-              wandb.log({f'video/channel{c}': wandb_video})
+              wandb.log({f'video/channel{c}-{out_names[c]}': wandb_video})
 
       if params.masked_acc:
         try:
