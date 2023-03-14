@@ -334,7 +334,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     for i in range(len(metric_names)):
         for j, time_name in snapshot_timesteps:
           for k in range(len(out_names)):
-            name = f'{metric_names[i]}/ic{ic}/{out_names[k]}/{time_name}'
+            name = f'{metric_names[i]}_{time_name}/ic{ic}/channel{k}-{out_names[k]}'
             try:
               wandb.log({name: all_metrics[i, j, k]})
             except IndexError:
