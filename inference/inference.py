@@ -323,6 +323,24 @@ def autoregressive_inference(params, ic, valid_data_full, model):
           )
               
 
+    if params.log_to_wandb:
+      # inspect snapshot times at 5-days and 10-days.
+      snapshot_timesteps = [(24 // 6 * k, f"{k}-days") for k in [5, 10]]
+
+      # TODO(gideond) move these names to a higher-level to avoid potential bugs
+      metric_names = ['rmse', 'acc', 'global_mean_prediction', 'global_mean_target', 'global_mean_gradient_magnitude_prediction', 'global_mean_gradient_magnitude_target']
+      # All metrics has shape [metric_type, timestep, channel]
+      all_metrics = [valid_loss, acc, global_mean_pred, global_mean_target, gradient_magnitude_pred, gradient_magnitude_target]
+      all_metrics = np.array([m.cpu().numpy() for m in all_metrics])
+      for i in range(len(metric_names)):
+          for j, time_name in snapshot_timesteps:
+            for k in range(len(out_names)):
+              name = f'{metric_names[i]}_{time_name}/ic{ic}/channel{k}-{out_names[k]}'
+              try:
+                wandb.log({name: all_metrics[i, j, k]})
+              except IndexError:
+                logging.error(f"Failed to log {name}")
+
     seq_real = seq_real.cpu().numpy()
     seq_pred = seq_pred.cpu().numpy()
     valid_loss = valid_loss.cpu().numpy()
