@@ -438,6 +438,7 @@ if __name__ == '__main__':
                 hour_of_day = date_obj.timetuple().tm_hour
                 hours_since_jan_01_epoch = 24*day_of_year + hour_of_day
                 ics.append(int(hours_since_jan_01_epoch/6))
+        n_ics = len(ics)
 
     logging.info("Inference for {} initial conditions".format(n_ics))
     try:
