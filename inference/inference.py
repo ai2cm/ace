@@ -322,8 +322,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
             }
           )
               
-    # inspect snapshot times at 5-days, 10-days.
-    # N.B. the predictions are 1-indexed, i.e. index 0 is the first prediction.
+    # inspect snapshot times at 5-days and 10-days.
     snapshot_timesteps = [(24 // 6 * k, f"{k}-days") for k in [5, 10]]
 
     # TODO(gideond) move these names to a higher-level to avoid potential bugs
