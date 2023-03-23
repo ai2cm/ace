@@ -206,7 +206,7 @@ class Trainer():
 #        self.valid_sampler.set_epoch(epoch)
 
       start = time.time()
-      _, _, _ = self.train_one_epoch()
+      _, _, train_logs = self.train_one_epoch()
       valid_time, valid_logs = self.validate_one_epoch()
       inference_logs = self.inference_one_epoch()
 
