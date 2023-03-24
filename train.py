@@ -102,6 +102,12 @@ class Trainer():
     params.crop_size_y = self.valid_dataset.crop_size_y
     params.img_shape_x = self.valid_dataset.img_shape_x
     params.img_shape_y = self.valid_dataset.img_shape_y
+    params.N_in_channels = self.train_dataset.n_in_channels
+    if params.orography:
+      params.N_in_channels += 1
+    params.N_out_channels = self.train_dataset.n_out_channels
+    params.in_names = self.train_dataset.in_names
+    params.out_names = self.train_dataset.out_names
 
     # precip models
     self.precip = True if "precip" in params else False
@@ -647,15 +653,6 @@ if __name__ == '__main__':
 
   params['log_to_wandb'] = (world_rank==0) and params['log_to_wandb']
   params['log_to_screen'] = (world_rank==0) and params['log_to_screen']
-
-  params['in_channels'] = np.array(params['in_channels'])
-  params['out_channels'] = np.array(params['out_channels'])
-  if params.orography:
-    params['N_in_channels'] = len(params['in_channels']) +1
-  else:
-    params['N_in_channels'] = len(params['in_channels'])
-
-  params['N_out_channels'] = len(params['out_channels'])
 
   if world_rank == 0:
     hparams = ruamelDict()

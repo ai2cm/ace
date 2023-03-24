@@ -120,7 +120,7 @@ class GetDataset(Dataset):
     self.in_stds = np.load(params.global_stds_path)[:, self.in_channels]
     self.out_means = np.load(params.global_means_path)[:, self.out_channels]
     self.out_stds = np.load(params.global_stds_path)[:, self.out_channels]
-    self.out_time_means = np.load(params.time_means_path)
+    self.out_time_means = np.load(params.time_means_path)[:, self.out_channels]
 
     if self.precip:
         path = params.precip+'/train' if train else params.precip+'/test'
@@ -167,10 +167,10 @@ class GetDataset(Dataset):
 
   @property
   def data_array(self):
-    # returns array of first file of data
+"""Returns array of first file of data for `self.in_channels` only"""
     logging.info(f'Loading data from {self.files_paths[0]}')
     _file = h5py.File(self.files_paths[0], 'r')
-    return _file['fields']
+    return _file['fields'][:, self.in_channels]
     
   
   def __len__(self):

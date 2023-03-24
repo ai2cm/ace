@@ -123,10 +123,10 @@ def setup(params):
     if params.log_to_screen:
         logging.info('Loading trained model checkpoint from {}'.format(params['best_checkpoint_path']))
 
-    in_channels = np.array(params.in_channels)
-    out_channels = np.array(params.out_channels)
-    n_in_channels = len(in_channels)
-    n_out_channels = len(out_channels)
+    n_in_channels = valid_dataset.n_in_channels
+    n_out_channels = valid_dataset.n_out_channels
+    params.in_names = valid_dataset.in_names
+    params.out_names = valid_dataset.out_names
     
     if params["orography"]:
       params['N_in_channels'] = n_in_channels + 1
@@ -166,11 +166,9 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     n_history = params.n_history
     img_shape_x = params.img_shape_x
     img_shape_y = params.img_shape_y
-    in_channels = np.array(params.in_channels)
-    out_channels = np.array(params.out_channels)
-    n_in_channels = len(in_channels)
-    n_out_channels = len(out_channels)
-    out_names = [CHANNEL_NAMES[c] for c in out_channels]
+    n_in_channels = params.N_in_channels
+    n_out_channels = params.N_out_channels
+    out_names = params.out_names
     means = params.means
     stds = params.stds
     time_means = params.time_means
@@ -197,7 +195,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     if params.masked_acc:
       maskarray = torch.as_tensor(np.load(params.maskpath)[0:720]).to(device, dtype=torch.float)
 
-    valid_data = valid_data_full[ic:(ic+prediction_length*dt+n_history*dt):dt, in_channels] #extract valid data from first year
+    valid_data = valid_data_full[ic:(ic+prediction_length*dt+n_history*dt):dt] #extract valid data from first year
     if valid_data.shape[2] > 720:
        # might be necessary for ERA5 data
        valid_data = valid_data[:, :, 0:720]
@@ -208,14 +206,14 @@ def autoregressive_inference(params, ic, valid_data_full, model):
 
     #load time means
     if not params.use_daily_climatology:
-      m = torch.as_tensor((time_means[out_channels] - means)/stds)[:, 0:img_shape_x]
+      m = torch.as_tensor((time_means - means)/stds)[:, 0:img_shape_x]
       m = torch.unsqueeze(m, 0)
     else:
       # use daily clim like weyn et al. (different from rasp)
       dc_path = params.dc_path
       with h5py.File(dc_path, 'r') as f:
         dc = f['time_means_daily'][ic:ic+prediction_length*dt:dt] # 1460,21,721,1440
-      m = torch.as_tensor((dc[:,out_channels,0:img_shape_x,:] - means)/stds) 
+      m = torch.as_tensor((dc[:,params.out_channels,0:img_shape_x,:] - means)/stds) 
 
     m = m.to(device, dtype=torch.float)
     if params.interp > 0:
