@@ -167,7 +167,7 @@ class GetDataset(Dataset):
 
   @property
   def data_array(self):
-"""Returns array of first file of data for `self.in_channels` only"""
+    """Returns array of first file of data for `self.in_channels` only"""
     logging.info(f'Loading data from {self.files_paths[0]}')
     _file = h5py.File(self.files_paths[0], 'r')
     return _file['fields'][:, self.in_channels]
