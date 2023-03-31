@@ -337,7 +337,8 @@ def autoregressive_inference(params, ic, valid_data_full, model):
       all_metrics = np.array([m.cpu().numpy() for m in all_metrics])
       inference_logs = {}
       for t, time_name in snapshot_timesteps:
-        logging.info(f"Logging metrics at {time_name}")
+        if params.log_to_screen:
+          logging.info(f"Logging metrics at {time_name}")
         for i in range(len(metric_names)):
           for j in range(len(out_names)):
             name = f'{metric_names[i]}_{time_name}/ic{ic}/channel{j}-{out_names[j]}'

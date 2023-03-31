@@ -206,7 +206,8 @@ class Trainer():
 
     best_valid_loss = 1.e6
     for epoch in range(self.startEpoch, self.params.max_epochs):
-      logging.info(f"Epoch: {epoch+1}")
+      if self.params.log_to_screen:
+        logging.info(f"Epoch: {epoch+1}")
       if dist.is_initialized():
         self.train_sampler.set_epoch(epoch)
 #        self.valid_sampler.set_epoch(epoch)
@@ -405,6 +406,7 @@ class Trainer():
               name = self.valid_dataset.out_names[j]
               gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(self.device, dtype = torch.float)
               gen_for_image = gen_step_one[0,j] if self.params.two_step_training else gen[0,j]
+              image_error = gen_for_image - tar[0,j]
               if 'residual_field' in self.params.target:
                   image_full_field = torch.cat((inp[0,j] + gen_for_image, gap, inp[0,j] + tar[0,j]), axis=1)
                   image_residual = torch.cat((gen_for_image, gap, tar[0,j]), axis=1)
@@ -418,6 +420,9 @@ class Trainer():
                   caption = f'Channel {j} ({name}) one step residual for sample {i}; (left) generated and (right) target.'
                   wandb_image = wandb.Image(image_residual, caption=caption)
                   image_logs[f'image-residual/sample{i}/channel{j}-{name}'] = wandb_image
+                  caption = f'Channel {j} ({name}) one step error (generated - target) for sample {i}.'
+                  wandb_image = wandb.Image(image_error, caption=caption)
+                  image_logs[f'image-error/sample{i}/channel{j}-{name}'] = wandb_image
               else:
                   image_path = os.path.join(self.params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
                   os.makedirs(os.path.dirname(image_path), exist_ok=True)
@@ -467,7 +472,8 @@ class Trainer():
     return valid_time, validation_logs
 
   def inference_one_epoch(self):
-    logging.info("Starting inference on validation set...")
+    if self.params.log_to_screen:
+      logging.info("Starting inference on validation set...")
     import copy
     with torch.no_grad():
       inference_params = copy.copy(self.params)
