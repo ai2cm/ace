@@ -419,7 +419,7 @@ class Trainer():
                   wandb_image = wandb.Image(image_residual, caption=caption)
                   image_logs[f'image-residual/sample{i}/channel{j}-{name}'] = wandb_image
               else:
-                  image_path = os.path.join(params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
+                  image_path = os.path.join(self.params['experiment_dir'], f'sample{i}', f'channel{j}', f'epoch{self.epoch}.png')
                   os.makedirs(os.path.dirname(image_path), exist_ok=True)
                   save_image(image_full_field, image_path)
 
