@@ -508,7 +508,7 @@ if __name__ == '__main__':
     n_out_channels = seq_real[0].shape[1]
     img_shape_x = seq_real[0].shape[2]
     img_shape_y = seq_real[0].shape[3]
-    out_names = [CHANNEL_NAMES[c] for c in params['out_channels']]
+    out_names = params.out_names
 
     #save predictions and loss
     if params.log_to_screen:
