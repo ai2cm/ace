@@ -1,0 +1,36 @@
+{
+	"ensemble_members": 1,
+        "noise_amplitude": 0.05,
+        "simulation_length": 4,
+		"weather_event": {
+        "properties": {
+            "name": "Globe",
+            "start_time": "2018-01-01 00:00:00"
+        },
+        "domains": [{
+            "name": "global",
+            "type": "Window",
+            "diagnostics": [
+                {
+                    "type": "raw",
+                    "channels": [
+                        "tcwv",
+                        "t2m",
+                        "u10m",
+                        "v10m"
+                    ]
+                }
+            ]
+        }
+    ]
+    },
+	"output_dir": "./tests/",
+	"output_frequency": 1,
+	"fcn_model": "graphcast_34ch",
+	"seed": 12345,
+	"use_cuda_graphs": false,
+	"ensemble_batch_size": 1,
+	"autocast_fp16": true,
+	"perturbation_strategy": "correlated",
+	"noise_reddening": 2.0
+}

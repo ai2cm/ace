@@ -1,0 +1,11 @@
+include modulus/domain/*.py
+include modulus/eq/*.py
+include modulus/eq/mfd/*.py
+include modulus/eq/pdes/*.py
+include modulus/geometry/*.py
+include modulus/hydra/*.py
+include modulus/hydra/help.yaml
+include modulus/utils/io/*.py
+include modulus/utils/sympy/*.py
+include modulus/utils/vpinn/*.py
+include modulus/utils/training/*.py

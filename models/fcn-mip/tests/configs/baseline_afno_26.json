@@ -1,0 +1,15 @@
+{
+	"ensemble_members": 2,
+        "noise_amplitude": 0.05,
+        "simulation_length": 4,
+        "forecast_name": "EastCoast",
+	"output_dir": "./tests/",
+	"output_frequency": 1,
+	"fcn_model": "baseline_afno_26",
+	"seed": 12345,
+	"use_cuda_graphs": false,
+	"ensemble_batch_size": 2,
+	"autocast_fp16": false,
+	"perturbation_strategy": "correlated",
+	"noise_reddening": 2.0
+}

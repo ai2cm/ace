@@ -1,0 +1,14 @@
+{
+  "ensemble_members": 16,
+        "noise_amplitude": 0.05,
+        "simulation_length": 24,
+        "forecast_name": "HackatonExample",
+  "channels": ["tcwv", "t2m", "u10m", "v10m"],
+	"output_dir": "./tests/",
+  "output_frequency": 1,
+  "fcn_model": "hafno_baseline_26ch_edim512_mlp2",
+  "seed": 12345,
+  "use_cuda_graphs": true,
+  "ensemble_batch_size": 1,
+  "autocast_fp16": false
+}
