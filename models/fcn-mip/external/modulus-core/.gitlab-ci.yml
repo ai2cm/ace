@@ -1,0 +1,55 @@
+# TODO add release and build set up similar to here, https://docs.gitlab.com/ee/user/packages/container_registry/
+image: docker:19.03.12
+services:
+  - docker:19.03.12-dind
+
+stages:
+  - test
+
+variables:
+  CONTAINER_TEST_IMAGE: $CI_REGISTRY_IMAGE:$CI_REGISTRY_IMAGE_TAG
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+
+black:
+  stage: test
+  tags: 
+    - unit
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run -v ${PWD}:/examples $CONTAINER_TEST_IMAGE bash -c "cd ./modulus/ && black --check --verbose --diff --color ./"
+  only:
+    - merge_requests
+
+unit_tests:
+  stage: test
+  tags: 
+    - unit
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run -v ${PWD}:/examples --gpus all $CONTAINER_TEST_IMAGE bash -c "pip install quadpy GPUtil && python3 setup.py develop && cd ./modulus/test/ && python run_tests.py"
+  only:
+    - merge_requests
+
+small_example_test:
+  stage: test
+  tags: 
+    - nightly
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run -v ${PWD}:/examples --gpus all $CONTAINER_TEST_IMAGE bash -c "pip install quadpy GPUtil gdown && python3 setup.py develop && nvidia-smi && cd ./external && git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-master.nvidia.com/modulus/examples.git && cd examples/test && python run_experiments.py --mode=unit_tests && python run_ci_tests.py"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  timeout: 2 hours
+
+single_step_test:
+  stage: test
+  tags: 
+    - nightly
+  script:
+    - docker pull $CONTAINER_TEST_IMAGE
+    - docker run -v ${PWD}:/examples --gpus all $CONTAINER_TEST_IMAGE bash -c "pip install quadpy GPUtil gdown && python3 setup.py develop && nvidia-smi && cd ./external && git clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab-master.nvidia.com/modulus/examples.git && cd examples/test && python run_experiments.py --mode=single_step"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+

@@ -1,0 +1,10 @@
+ARG PYT_VER=22.04
+FROM gitlab-master.nvidia.com:5005/simnet/simnet
+
+ARG UNAME=user
+ARG GNAME=group
+ARG UID=1000
+ARG GID=1000
+
+RUN useradd -m -u ${UID} -g ${GID} -s /bin/bash ${UNAME}
+USER ${UNAME}
