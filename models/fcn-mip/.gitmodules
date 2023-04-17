@@ -1,6 +1,0 @@
-[submodule "external/torch_sht"]
-	path = external/torch_sht
-	url = ../../bbonev/torch_sht.git
-[submodule "external/modulus-core"]
-	path = external/modulus-core
-	url = ../../modulus/modulus.git
