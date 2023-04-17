@@ -1,0 +1,3 @@
+from networks.geometric_v1.sfnonet import FourierNeuralOperatorNet
+
+era5_wind_commit = 'f9fef8371d97aef21342eea184879cd1074158a1'

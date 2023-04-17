@@ -1,0 +1,281 @@
+base_config: &BASE_CONFIG
+
+    nettype: 'fno'
+    scale_factor: 8
+    num_blocks: 8
+    embed_dim: 128
+    num_layers: 4
+    normalization_layer: 'instance_norm'
+    hard_thresholding_fraction: 1.0 # turning it off for now
+    verbose: !!bool False
+    # skip_fno: 'identity' # 'linear', 'identity' or None
+    # nested_skip_fno: !!bool True # whether to nest the inner skip connection or have it be sequential, inside the AFNO block
+
+    loss: 'geometric l2'
+    lr: 5E-4
+
+    # reduce number of samples for testing
+    # n_years: 1
+    # n_train_samples: 160
+    # n_eval_samples: 160
+
+    max_epochs: 150
+    batch_size: 64
+
+    scheduler: 'CosineAnnealingLR' # 'ReduceLROnPlateau'
+    scheduler_T_max: 150
+    lr_warmup_steps: 0
+    weight_decay: 0.0 # 0.1
+
+    # wireup stuff
+    wireup_info: 'mpi'
+    wireup_store: 'tcp'
+
+    train_data_path: '/train'
+    valid_data_path: '/test'
+    exp_dir: '/runs'
+
+    num_data_workers: 4
+    dt: 1 # how many timesteps ahead the model will predict
+    n_history: 0 #how many previous timesteps to consider
+    prediction_type: 'iterative'
+    prediction_length: 35 #applicable only if prediction_type == 'iterative'
+    n_initial_conditions: 5 #applicable only if prediction_type == 'iterative'
+    valid_autoreg_steps: 20 # number of autoregressive steps for validation
+
+    ics_type: 'specify_number'
+    save_raw_forecasts: !!bool True
+    save_channel: !!bool False
+    masked_acc: !!bool False
+    maskpath: None
+    perturb: !!bool False
+    add_noise: !!bool False
+    noise_std: 0.
+
+    add_grid: !!bool False
+    N_grid_channels: 0
+    gridtype: 'sinusoidal' #options 'sinusoidal' or 'linear'
+    roll: !!bool False
+
+    #options default, residual
+    target: 'default'
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    normalization: 'zscore' #options zscore or minmax
+
+    min_path: '/stats/mins.npy'
+    max_path: '/stats/maxs.npy'
+    time_means_path:   '/stats/time_means.npy'
+    global_means_path: '/stats/global_means.npy'
+    global_stds_path:  '/stats/global_stds.npy'
+
+    orography: !!bool False
+    orography_path: None
+
+    finetune: !!bool False
+
+    log_to_screen: !!bool True
+    log_to_wandb: !!bool True
+    log_video: 5
+    save_checkpoint: !!bool True
+
+    enable_nhwc: !!bool False
+    optimizer_type: 'FusedAdam'
+    optimizer_beta1: 0.9
+    optimizer_beta2: 0.999
+    optimizer_max_grad_norm: 1.0
+    crop_size_x: None
+    crop_size_y: None
+
+    # Weights and biases configuration
+    wandb_name: None # If None, config will be used but you can override it here
+    wandb_group: None # If None, will be 'era5_wind' + config, but you can override it here
+    wandb_project: "euclid"
+    wandb_entity: "bbonev" # but your username here
+    wandb_api_key: "02616d14aede6f7c930ac5dd12666bfec8a1b19f"
+
+fno_baseline: &FNO_BASELINE
+    <<: *BASE_CONFIG
+    spectral_transform: 'fft'
+    use_mlp: True
+    append_skip: !!bool True
+
+gfno_baseline: &GFNO_BASELINE
+    <<: *BASE_CONFIG
+    spectral_transform: 'sht'
+    use_mlp: True
+    append_skip: !!bool True
+
+fno_26ch_sc4_layers4:
+    <<: *FNO_BASELINE
+    num_layers: 4
+    scale_factor: 4
+    hard_thresholding_fraction: 0.7 #roughly 1/sqrt(2)
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+gfno_26ch_sc4_layers4:
+    <<: *GFNO_BASELINE
+    num_layers: 4
+    scale_factor: 4
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    
+
+# legacy model
+gfno_26ch_sc4_layers8:
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    hard_thresholding_fraction: 0.5
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+# currently submitted
+gfno_26ch_sc4_layers8_tt64: &GFNO_26CH_SC4_L8_TT64
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    compression: 'tt'
+    rank: 64
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+# with dependency
+gfno_26ch_sc4_layers8_tt64_finetune:
+    <<: *GFNO_26CH_SC4_L8_TT64
+    multigrid_mode: 'none'
+    lr: 2E-4
+    checkpointing: !!bool True
+    
+    scheduler_T_max: 50
+    finetune: !!bool True
+    enable_amp: !!bool False
+
+    pretrained_checkpoint_path: '/runs/gfno_26ch_sc4_layers8_tt64/ngpu64_mp1_sp1/training_checkpoints/best_ckpt_mp0.tar'
+
+
+gfno_26ch_sc4_layers8_tt128:
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    compression: 'tt'
+    rank: 128
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+# currently training
+gfno_26ch_sc4_layers8_edim192_tt32: &GFNO_26CH_SC4_L8_ED192_TT32
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    embed_dim: 192
+    compression: 'tt'
+    rank: 32
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+gfno_26ch_sc4_layers8_edim256_tt64: &GFNO_26CH_SC4_L8_ED256_TT64
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    embed_dim: 256
+    compression: 'tt'
+    rank: 64
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+gfno_26ch_sc4_layers8_edim256_tt64_finetune:
+    <<: *GFNO_26CH_SC4_L8_ED256_TT64
+    multigrid_mode: 'none'
+    lr: 2E-4
+    checkpointing: !!bool True
+    
+    scheduler_T_max: 50
+    finetune: !!bool True
+    enable_amp: !!bool False
+
+    pretrained_checkpoint_path: '/runs/gfno_26ch_sc4_layers8_edim256_tt64/ngpu64_mp1_sp1/training_checkpoints/best_ckpt_mp0.tar'
+
+
+gfno_26ch_sc3_layers8_tt32: &GFNO_26CH_SC3_L8_TT32
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 3
+    compression: 'tt'
+    rank: 32
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+gfno_26ch_sc3_layers8_tt64:
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 3
+    compression: 'tt'
+    rank: 64
+
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+gfno_26ch_sc3_layers8_tt32_finetune:
+    <<: *GFNO_26CH_SC3_L8_TT32
+    multigrid_mode: 'none'
+    lr: 2E-4
+    checkpointing: !!bool True
+    
+    scheduler_T_max: 50
+    finetune: !!bool True
+    enable_amp: !!bool False
+
+    pretrained_checkpoint_path: '/runs/gfno_26ch_sc3_layers8_tt32/ngpu64_mp1_sp1/training_checkpoints/best_ckpt_mp0.tar'
+
+
+gfno_26ch_sc4_layers8_tt128_finetune:
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    compression: 'tt'
+    rank: 128
+
+    multigrid_mode: 'none'
+    lr: 2E-4
+    batch_size: 64
+    max_epochs: 50
+
+    scheduler_T_max: 50
+    finetune: !!bool True
+    enable_amp: !!bool False
+
+    pretrained_checkpoint_path: '/runs/gfno_26ch_sc4_layers8_tt128/ngpu64_mp1_sp1/training_checkpoints/best_ckpt_mp0.tar'
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+
+
+# only for legacy models
+gfno_26ch_sc4_layers8_finetune:
+    <<: *GFNO_BASELINE
+    num_layers: 8
+    scale_factor: 4
+    hard_thresholding_fraction: 0.5
+
+    multigrid_mode: 'none'
+    lr: 2E-4
+    batch_size: 64
+    max_epochs: 50
+
+    scheduler_T_max: 50
+    finetune: !!bool True
+    enable_amp: !!bool False
+
+    pretrained_checkpoint_path: '/runs/gfno_26ch_sc4_layers8/ngpu64_mp1_sp1/training_checkpoints/best_ckpt_mp0.tar'
+    in_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+    out_channels: [0, 1 ,2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
