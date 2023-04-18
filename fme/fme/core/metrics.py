@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -7,14 +7,18 @@ Tensor = torch.Tensor
 
 
 def _create_range(start, stop, num_steps):
+    if num_steps == 1:
+        raise ValueError("Range must include start and stop, e.g. num_steps > 1.")
+
     step = (stop - start) / (num_steps - 1)
     ret = torch.arange(0, num_steps) * step + start
     return ret
 
 
-def _spherical_area_weights(num_lat, num_lon):
-    lats = _create_range(90, -90, num_lat)
-    weights = np.tile(np.cos(np.deg2rad(lats)), (num_lon, 1)).T
+def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
+    """Computes the spherical area weights for a given lat-lon grid."""
+    lats = _create_range(89.9999, -89.9999, num_lat)  # Due to floating point issues, cos(deg2rad(90)) != 0.
+    weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
     return weights
 
 
@@ -25,26 +29,31 @@ def per_variable_fno_loss(
     Namely, for each variable, compute
         ||predictions - ground_truth|| / ||ground_truth||
     """
+    # TODO(gideond) fix this
     residual = predictions.isel(time=time) - ground_truth.isel(time=time)
     normalizer = np.linalg.norm(ground_truth.isel(time=time).to_array().to_numpy())
     ret = np.sqrt(np.square(residual).sum(dim=dim))
     return ret / normalizer 
 
 
-def weighted_mean_bias(ground_truth: Tensor, predicted: Tensor, dim: List[int]) -> Tensor:
+def weighted_mean_bias(
+        ground_truth: Tensor, predicted: Tensor, dim: List[int], weights: Optional[Tensor] = None) -> Tensor:
     """Computes the mean bias across the specified list of dimensions.
     
     Args:
         ground_truth: Tensor of shape (variable, time, grid_yt, grid_xt)
         predicted:    Tensor of shape (variable, time, grid_yt, grid_xt)
         dim:          Dimensions to compute the mean over.
+        weights:      Optional weights to apply to the mean. If None, uses `spherical_area_weights`.
         
     Returns a tensor of the mean biases averaged over the specified dimensions `dim`.
     """
     _, _, num_lat, num_lon = ground_truth.shape
-    weights = _spherical_area_weights(num_lat, num_lon)
-    residuals = predicted - ground_truth
-    means = (residuals * weights).mean(dim=dim)
+    if weights is None:
+        weights = spherical_area_weights(num_lat, num_lon)
+
+    bias = predicted - ground_truth
+    means = (bias * weights).mean(dim=dim)
     return means
 
 
@@ -72,7 +81,7 @@ def weighted_time_mean_bias(ground_truth: Tensor, predicted: Tensor) -> Tensor:
     return weighted_mean_bias(ground_truth, predicted, (-1, -2))
 
 
-def weighted_global_time_rmse(ground_truth: Tensor, predicted: Tensor) -> Tensor:
+def weighted_global_time_rmse(ground_truth: Tensor, predicted: Tensor, weights: Optional[Tensor] = None) -> Tensor:
     """
     Computes the weighted global time RMSE over all variables. Namely, for each variable:
     
@@ -85,10 +94,14 @@ def weighted_global_time_rmse(ground_truth: Tensor, predicted: Tensor) -> Tensor
     Returns a tensor of shape (variable,) of weighted RMSEs.
     """
     _, _, num_lat, num_lon = ground_truth.shape
-    weights = torch.Tensor(_spherical_area_weights(num_lat, num_lon))
     
-    residuals = predicted - ground_truth
-    space_residuals = residuals.mean(dim=(1,))
-    weighted_mean = (weights * torch.square(space_residuals)).mean(dim=(1, 2))
+    if weights is None:
+        weights = spherical_area_weights(num_lat, num_lon)
+    
+    bias = predicted - ground_truth
+    space_mean_bias = bias.mean(dim=(1,))
+    weighted_mean = (weights * torch.square(space_mean_bias)).mean(dim=(-1, -2))
+    print(f"{space_mean_bias=}")
+    print(f"{weighted_mean=}")
     rmse = torch.sqrt(weighted_mean)
     return rmse
