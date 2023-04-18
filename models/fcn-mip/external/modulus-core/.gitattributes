@@ -1,3 +1,2 @@
-NVIDIA-OptiX-SDK-7.0.0-linux64.sh filter=lfs diff=lfs merge=lfs -text
-*.npz filter=lfs diff=lfs merge=lfs -text
-*.csv filter=lfs diff=lfs merge=lfs -text
+*.whl filter=lfs diff=lfs merge=lfs -text
+dockerfiles/onnxruntime_gpu-1.14.0-cp38-cp38-linux_x86_64.whl filter=lfs diff=lfs merge=lfs -text

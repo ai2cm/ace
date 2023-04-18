@@ -1,34 +1,64 @@
-from functools import partial
-from typing import Dict, List, Tuple
+# Copyright (c) 2023, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.fft
-from torch import Tensor
+import modulus
+import modulus.models.layers.fft as fft
 
-from modulus.models.arch import Arch
-from modulus.key import Key
+from functools import partial
+from typing import Tuple, Any
+from dataclasses import dataclass
+from ..meta import ModelMetaData
+from ..module import Module
+
+Tensor = torch.Tensor
 
 
-class Mlp(nn.Module):
+class AFNOMlp(nn.Module):
+    """Fully-connected Multi-layer perception used inside AFNO
+
+    Parameters
+    ----------
+    in_features : int
+        Input feature size
+    latent_features : int
+        Latent feature size
+    out_features : int
+        Output feature size
+    activation_fn :  nn.Module, optional
+        Activation function, by default nn.GELU
+    drop : float, optional
+        Drop out rate, by default 0.0
+    """
+
     def __init__(
         self,
-        in_features,
-        hidden_features=None,
-        out_features=None,
-        act_layer=nn.GELU,
-        drop=0.0,
+        in_features: int,
+        latent_features: int,
+        out_features: int,
+        activation_fn: nn.Module = nn.GELU(),
+        drop: float = 0.0,
     ):
         super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_features
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.fc1 = nn.Linear(in_features, latent_features)
+        self.act = activation_fn
+        self.fc2 = nn.Linear(latent_features, out_features)
         self.drop = nn.Dropout(drop)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         x = self.fc1(x)
         x = self.act(x)
         x = self.drop(x)
@@ -37,19 +67,35 @@ class Mlp(nn.Module):
         return x
 
 
-class AFNO2D(nn.Module):
+class AFNO2DLayer(nn.Module):
+    """AFNO spectral convolution layer
+
+    Parameters
+    ----------
+    hidden_size : int
+        Feature dimensionality
+    num_blocks : int, optional
+        Number of blocks used in the block diagonal weight matrix, by default 8
+    sparsity_threshold : float, optional
+        Sparsity threshold (softshrink) of spectral features, by default 0.01
+    hard_thresholding_fraction : float, optional
+        Threshold for limiting number of modes used [0,1], by default 1
+    hidden_size_factor : int, optional
+        Factor to increase spectral features by after weight multiplication, by default 1
+    """
+
     def __init__(
         self,
-        hidden_size,
-        num_blocks=8,
-        sparsity_threshold=0.01,
-        hard_thresholding_fraction=1,
-        hidden_size_factor=1,
+        hidden_size: int,
+        num_blocks: int = 8,
+        sparsity_threshold: float = 0.01,
+        hard_thresholding_fraction: float = 1,
+        hidden_size_factor: int = 1,
     ):
         super().__init__()
         assert (
             hidden_size % num_blocks == 0
-        ), f"hidden_size {hidden_size} should be divisble by num_blocks {num_blocks}"
+        ), f"hidden_size {hidden_size} should be divisible by num_blocks {num_blocks}"
 
         self.hidden_size = hidden_size
         self.sparsity_threshold = sparsity_threshold
@@ -85,15 +131,17 @@ class AFNO2D(nn.Module):
             self.scale * torch.randn(2, self.num_blocks, self.block_size)
         )
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         bias = x
 
         dtype = x.dtype
         x = x.float()
         B, H, W, C = x.shape
-
-        x = torch.fft.rfft2(x, dim=(1, 2), norm="ortho")
-        x = x.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size)
+        # Using ONNX friendly FFT functions
+        x = fft.rfft2(x, dim=(1, 2), norm="ortho")
+        x_real, x_imag = fft.real(x), fft.imag(x)
+        x_real = x_real.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size)
+        x_imag = x_imag.reshape(B, H, W // 2 + 1, self.num_blocks, self.block_size)
 
         o1_real = torch.zeros(
             [
@@ -115,8 +163,7 @@ class AFNO2D(nn.Module):
             ],
             device=x.device,
         )
-        o2_real = torch.zeros(x.shape, device=x.device)
-        o2_imag = torch.zeros(x.shape, device=x.device)
+        o2 = torch.zeros(x_real.shape + (2,), device=x.device)
 
         total_modes = H // 2 + 1
         kept_modes = int(total_modes * self.hard_thresholding_fraction)
@@ -125,17 +172,17 @@ class AFNO2D(nn.Module):
             :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
         ] = F.relu(
             torch.einsum(
-                "...bi,bio->...bo",
-                x[
+                "nyxbi,bio->nyxbo",
+                x_real[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
-                ].real,
+                ],
                 self.w1[0],
             )
             - torch.einsum(
-                "...bi,bio->...bo",
-                x[
+                "nyxbi,bio->nyxbo",
+                x_imag[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
-                ].imag,
+                ],
                 self.w1[1],
             )
             + self.b1[0]
@@ -145,32 +192,34 @@ class AFNO2D(nn.Module):
             :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
         ] = F.relu(
             torch.einsum(
-                "...bi,bio->...bo",
-                x[
+                "nyxbi,bio->nyxbo",
+                x_imag[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
-                ].imag,
+                ],
                 self.w1[0],
             )
             + torch.einsum(
-                "...bi,bio->...bo",
-                x[
+                "nyxbi,bio->nyxbo",
+                x_real[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
-                ].real,
+                ],
                 self.w1[1],
             )
             + self.b1[1]
         )
 
-        o2_real[:, total_modes - kept_modes : total_modes + kept_modes, :kept_modes] = (
+        o2[
+            :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes, ..., 0
+        ] = (
             torch.einsum(
-                "...bi,bio->...bo",
+                "nyxbi,bio->nyxbo",
                 o1_real[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
                 ],
                 self.w2[0],
             )
             - torch.einsum(
-                "...bi,bio->...bo",
+                "nyxbi,bio->nyxbo",
                 o1_imag[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
                 ],
@@ -179,16 +228,18 @@ class AFNO2D(nn.Module):
             + self.b2[0]
         )
 
-        o2_imag[:, total_modes - kept_modes : total_modes + kept_modes, :kept_modes] = (
+        o2[
+            :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes, ..., 1
+        ] = (
             torch.einsum(
-                "...bi,bio->...bo",
+                "nyxbi,bio->nyxbo",
                 o1_imag[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
                 ],
                 self.w2[0],
             )
             + torch.einsum(
-                "...bi,bio->...bo",
+                "nyxbi,bio->nyxbo",
                 o1_real[
                     :, total_modes - kept_modes : total_modes + kept_modes, :kept_modes
                 ],
@@ -197,46 +248,77 @@ class AFNO2D(nn.Module):
             + self.b2[1]
         )
 
-        x = torch.stack([o2_real, o2_imag], dim=-1)
-        x = F.softshrink(x, lambd=self.sparsity_threshold)
-        x = torch.view_as_complex(x)
-        x = x.reshape(B, H, W // 2 + 1, C)
-        x = torch.fft.irfft2(x, s=(H, W), dim=(1, 2), norm="ortho")
+        x = F.softshrink(o2, lambd=self.sparsity_threshold)
+        x = fft.view_as_complex(x)
+        # TODO(akamenev): replace the following branching with
+        # a one-liner, something like x.reshape(..., -1).squeeze(-1),
+        # but this currently fails during ONNX export.
+        if torch.onnx.is_in_onnx_export():
+            x = x.reshape(B, H, W // 2 + 1, C, 2)
+        else:
+            x = x.reshape(B, H, W // 2 + 1, C)
+        # Using ONNX friendly FFT functions
+        x = fft.irfft2(x, s=(H, W), dim=(1, 2), norm="ortho")
         x = x.type(dtype)
 
         return x + bias
 
 
 class Block(nn.Module):
+    """AFNO block, spectral convolution and MLP
+
+    Parameters
+    ----------
+    embed_dim : int
+        Embedded feature dimensionality
+    num_blocks : int, optional
+        Number of blocks used in the block diagonal weight matrix, by default 8
+    mlp_ratio : float, optional
+        Ratio of MLP latent variable size to input feature size, by default 4.0
+    drop : float, optional
+        Drop out rate in MLP, by default 0.0
+    activation_fn: nn.Module, optional
+        Activation function used in MLP, by default nn.GELU
+    norm_layer : nn.Module, optional
+        Normalization function, by default nn.LayerNorm
+    double_skip : bool, optional
+        Residual, by default True
+    sparsity_threshold : float, optional
+        Sparsity threshold (softshrink) of spectral features, by default 0.01
+    hard_thresholding_fraction : float, optional
+        Threshold for limiting number of modes used [0,1], by default 1
+    """
+
     def __init__(
         self,
-        dim,
-        mlp_ratio=4.0,
-        drop=0.0,
-        act_layer=nn.GELU,
-        norm_layer=nn.LayerNorm,
-        double_skip=True,
-        num_blocks=8,
-        sparsity_threshold=0.01,
-        hard_thresholding_fraction=1.0,
+        embed_dim: int,
+        num_blocks: int = 8,
+        mlp_ratio: float = 4.0,
+        drop: float = 0.0,
+        activation_fn: nn.Module = nn.GELU(),
+        norm_layer: nn.Module = nn.LayerNorm,
+        double_skip: bool = True,
+        sparsity_threshold: float = 0.01,
+        hard_thresholding_fraction: float = 1.0,
     ):
         super().__init__()
-        self.norm1 = norm_layer(dim)
-        self.filter = AFNO2D(
-            dim, num_blocks, sparsity_threshold, hard_thresholding_fraction
+        self.norm1 = norm_layer(embed_dim)
+        self.filter = AFNO2DLayer(
+            embed_dim, num_blocks, sparsity_threshold, hard_thresholding_fraction
         )
         # self.drop_path = nn.Identity()
-        self.norm2 = norm_layer(dim)
-        mlp_hidden_dim = int(dim * mlp_ratio)
-        self.mlp = Mlp(
-            in_features=dim,
-            hidden_features=mlp_hidden_dim,
-            act_layer=act_layer,
+        self.norm2 = norm_layer(embed_dim)
+        mlp_latent_dim = int(embed_dim * mlp_ratio)
+        self.mlp = AFNOMlp(
+            in_features=embed_dim,
+            latent_features=mlp_latent_dim,
+            out_features=embed_dim,
+            activation_fn=activation_fn,
             drop=drop,
         )
         self.double_skip = double_skip
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         residual = x
         x = self.norm1(x)
         x = self.filter(x)
@@ -251,22 +333,134 @@ class Block(nn.Module):
         return x
 
 
-class AFNONet(nn.Module):
+class PatchEmbed(nn.Module):
+    """Patch embedding layer
+
+    Converts 2D patch into a 1D vector for input to AFNO
+
+    Parameters
+    ----------
+    img_size : Tuple[int, int]
+        Input image dimensions (height, width)
+    in_channels : int
+        Number of input channels
+    patch_size : Tuple[int, int], optional
+        Size of image patches, by default (16, 16)
+    embed_dim : int, optional
+        Embedded channel size, by default 256
+    """
+
     def __init__(
         self,
-        img_size=(720, 1440),
-        patch_size=(16, 16),
-        in_channels=1,
-        out_channels=1,
-        embed_dim=768,
-        depth=12,
-        mlp_ratio=4.0,
-        drop_rate=0.0,
-        num_blocks=16,
-        sparsity_threshold=0.01,
-        hard_thresholding_fraction=1.0,
-    ) -> None:
+        img_size: Tuple[int, int],
+        in_channels: int,
+        patch_size: Tuple[int, int] = (16, 16),
+        embed_dim: int = 256,
+    ):
         super().__init__()
+        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+        self.proj = nn.Conv2d(
+            in_channels, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        B, C, H, W = x.shape
+        assert (
+            H == self.img_size[0] and W == self.img_size[1]
+        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+        x = self.proj(x).flatten(2).transpose(1, 2)
+        return x
+
+
+@dataclass
+class MetaData(ModelMetaData):
+    name: str = "AFNO"
+    # Optimization
+    jit: bool = False  # ONNX Ops Conflict
+    cuda_graphs: bool = True
+    amp: bool = True
+    # Inference
+    onnx_cpu: bool = False  # No FFT op on CPU
+    onnx_gpu: bool = True
+    onnx_runtime: bool = True
+    # Physics informed
+    var_dim: int = 1
+    func_torch: bool = False
+    auto_grad: bool = False
+
+
+class AFNO(Module):
+    """Adaptive Fourier neural operator (AFNO) model.
+
+    Note
+    ----
+    AFNO is a model that is designed for 2D images only.
+
+    Parameters
+    ----------
+    img_size : Tuple[int, int]
+        Input image dimensions (height, width)
+    in_channels : int
+        Number of input channels
+    out_channels: int
+        Number of output channels
+    patch_size : Tuple[int, int], optional
+        Size of image patches, by default (16, 16)
+    embed_dim : int, optional
+        Embedded channel size, by default 256
+    depth : int, optional
+        Number of AFNO layers, by default 4
+    mlp_ratio : float, optional
+        Ratio of layer MLP latent variable size to input feature size, by default 4.0
+    drop_rate : float, optional
+        Drop out rate in layer MLPs, by default 0.0
+    num_blocks : int, optional
+        Number of blocks in the block-diag frequency weight matrices, by default 16
+    sparsity_threshold : float, optional
+        Sparsity threshold (softshrink) of spectral features, by default 0.01
+    hard_thresholding_fraction : float, optional
+        Threshold for limiting number of modes used [0,1], by default 1
+
+    Example
+    -------
+    >>> model = modulus.models.afno.AFNO(
+    ...     img_size=(32, 32),
+    ...     in_channels=2,
+    ...     out_channels=1,
+    ...     patch_size=(8, 8),
+    ...     embed_dim=16,
+    ...     depth=2,
+    ...     num_blocks=2,
+    ... )
+    >>> input = torch.randn(32, 2, 32, 32) #(N, C, H, W)
+    >>> output = model(input)
+    >>> output.size()
+    torch.Size([32, 1, 32, 32])
+
+    Note
+    ----
+    Reference: Guibas, John, et al. "Adaptive fourier neural operators:
+    Efficient token mixers for transformers." arXiv preprint arXiv:2111.13587 (2021).
+    """
+
+    def __init__(
+        self,
+        img_size: Tuple[int, int],
+        in_channels: int,
+        out_channels: int,
+        patch_size: Tuple[int, int] = (16, 16),
+        embed_dim: int = 256,
+        depth: int = 4,
+        mlp_ratio: float = 4.0,
+        drop_rate: float = 0.0,
+        num_blocks: int = 16,
+        sparsity_threshold: float = 0.01,
+        hard_thresholding_fraction: float = 1.0,
+    ) -> None:
+        super().__init__(meta=MetaData())
         assert (
             img_size[0] % patch_size[0] == 0 and img_size[1] % patch_size[1] == 0
         ), f"img_size {img_size} should be divisible by patch_size {patch_size}"
@@ -281,8 +475,8 @@ class AFNONet(nn.Module):
 
         self.patch_embed = PatchEmbed(
             img_size=img_size,
+            in_channels=self.in_chans,
             patch_size=self.patch_size,
-            in_chans=self.in_chans,
             embed_dim=embed_dim,
         )
         num_patches = self.patch_embed.num_patches
@@ -296,11 +490,11 @@ class AFNONet(nn.Module):
         self.blocks = nn.ModuleList(
             [
                 Block(
-                    dim=embed_dim,
+                    embed_dim=embed_dim,
+                    num_blocks=self.num_blocks,
                     mlp_ratio=mlp_ratio,
                     drop=drop_rate,
                     norm_layer=norm_layer,
-                    num_blocks=self.num_blocks,
                     sparsity_threshold=sparsity_threshold,
                     hard_thresholding_fraction=hard_thresholding_fraction,
                 )
@@ -318,6 +512,7 @@ class AFNONet(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Init model weights"""
         if isinstance(m, nn.Linear):
             torch.nn.init.trunc_normal_(m.weight, std=0.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -326,11 +521,13 @@ class AFNONet(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    @torch.jit.ignore
-    def no_weight_decay(self):
-        return {"pos_embed", "cls_token"}
+    # What is this for
+    # @torch.jit.ignore
+    # def no_weight_decay(self):
+    #     return {"pos_embed", "cls_token"}
 
-    def forward_features(self, x):
+    def forward_features(self, x: Tensor) -> Tensor:
+        """Forward pass of core AFNO"""
         B = x.shape[0]
         x = self.patch_embed(x)
         x = x + self.pos_embed
@@ -354,114 +551,4 @@ class AFNONet(nn.Module):
         # [b c_out, h, p1, w, p2]
         out = out.reshape(list(out.shape[:2]) + [self.img_size[0], self.img_size[1]])
         # [b c_out, (h*p1), (w*p2)]
-
         return out
-
-
-class PatchEmbed(nn.Module):
-    def __init__(
-        self, img_size=(224, 224), patch_size=(16, 16), in_chans=3, embed_dim=768
-    ):
-        super().__init__()
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.img_size = img_size
-        self.patch_size = patch_size
-        self.num_patches = num_patches
-        self.proj = nn.Conv2d(
-            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
-        )
-
-    def forward(self, x):
-        B, C, H, W = x.shape
-        assert (
-            H == self.img_size[0] and W == self.img_size[1]
-        ), f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
-
-
-class AFNOArch(Arch):
-    """Adaptive Fourier neural operator (AFNO) model.
-
-    Note
-    ----
-    AFNO is a model that is designed for 2D images only.
-
-    Parameters
-    ----------
-    input_keys : List[Key]
-        Input key list. The key dimension size should equal the variables channel dim.
-    output_keys : List[Key]
-        Output key list. The key dimension size should equal the variables channel dim.
-    img_shape : Tuple[int, int]
-        Input image dimensions (height, width)
-    detach_keys : List[Key], optional
-        List of keys to detach gradients, by default []
-    patch_size : int, optional
-        Size of image patchs, by default 16
-    embed_dim : int, optional
-        Embedded channel size, by default 256
-    depth : int, optional
-        Number of AFNO layers, by default 4
-    num_blocks : int, optional
-        Number of blocks in the frequency weight matrices, by default 4
-
-
-    Variable Shape
-    --------------
-    - Input variable tensor shape: :math:`[N, size, H, W]`
-    - Output variable tensor shape: :math:`[N, size, H, W]`
-
-    Example
-    -------
-    >>> afno = .afno.AFNOArch([Key("x", size=2)], [Key("y", size=2)], (64, 64))
-    >>> model = afno.make_node()
-    >>> input = {"x": torch.randn(20, 2, 64, 64)}
-    >>> output = model.evaluate(input)
-    """
-
-    def __init__(
-        self,
-        input_keys: List[Key],
-        output_keys: List[Key],
-        img_shape: Tuple[int, int],
-        detach_keys: List[Key] = [],
-        patch_size: int = 16,
-        embed_dim: int = 256,
-        depth: int = 4,
-        num_blocks: int = 4,
-    ) -> None:
-        super().__init__(input_keys=input_keys, output_keys=output_keys)
-
-        self.input_keys = input_keys
-        self.output_keys = output_keys
-        self.detach_keys = detach_keys
-
-        self.input_key_dict = {var.name: var.size for var in self.input_keys}
-        self.output_key_dict = {var.name: var.size for var in self.output_keys}
-
-        in_channels = sum(self.input_key_dict.values())
-        out_channels = sum(self.output_key_dict.values())
-
-        self._impl = AFNONet(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            patch_size=(patch_size, patch_size),
-            img_size=img_shape,
-            embed_dim=embed_dim,
-            depth=depth,
-            num_blocks=num_blocks,
-        )
-
-    def forward(self, in_vars: Dict[str, Tensor]) -> Dict[str, Tensor]:
-        x = self.prepare_input(
-            in_vars,
-            mask=self.input_key_dict.keys(),
-            detach_dict=self.detach_key_dict,
-            dim=1,
-            input_scales=self.input_scales,
-        )
-        y = self._impl(x)
-        return self.prepare_output(
-            y, output_var=self.output_key_dict, dim=1, output_scales=self.output_scales
-        )

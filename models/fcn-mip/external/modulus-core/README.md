@@ -1,30 +1,41 @@
-# Modulus
+# Modulus (Alpha)
 
-## NVIDIA Modulus
-![NVIDIA Modulus Overview](/Modulus_overview.png)
+[![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
+[![GitHub](https://img.shields.io/github/license/NVIDIA/modulus)](https://github.com/NVIDIA/modulus/blob/master/LICENSE.txt)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-[NVIDIA Modulus](https://developer.nvidia.com/modulus) is a neural network training and inference platform that blends the power of physics in the form of governing partial differential equations (PDEs) with data to build high-fidelity, parameterized surrogate models with near-real-time latency. Whether you’re looking to get started with AI-driven physics problems or designing digital twin models for complex non-linear, multi-physics systems, NVIDIA Modulus can support your work.
+Modulus is a PyTorch based deep-learning toolkit for developing deep learning models for physical systems. This package aims to provide useful utilities for physics-constrained and data-driven workflows.
 
-With NVIDIA Modulus, we aim to provide researchers and industry specialists, various tools that will help accelerate your development of such models for the scientific discipline of your need. Experienced users can start with exploring the Modulus APIs and building the models while beginners can use this User Guide as a portal to explore the possibilities of AI in the domain of scientific computation. The User Guide comes in with several examples that will help you jumpstart your development of AI driven models.
- 
-## Product Documentation
-For information on platform support and getting started, visit the official documentation [repository](https://docs.nvidia.com/deeplearning/modulus/index.html).
+**This is an early-access alpha release**
 
-## Resources
-[Modulus Overview Webinar](https://info.nvidia.com/simulation-in-courses-simnet-reg-page.html?ondemandrgt=yes)
-### Blogs
-* <a href="https://info.nvidia.com/simulation-in-courses-simnet-reg-page.html?ondemandrgt=yes">AI and Machine Learning in Physics</a> 
-* <a href="https://blogs.nvidia.com/blog/2022/03/22/siemens-gamesa-wind-farms-digital-twins">Using NVIDIA Modulus and Omniverse Wind Farm Digital Twin for Siemens Gamesa (using NVIDIA Modulus and Omniverse)</a>
-* <a href="https://blogs.nvidia.com/blog/2021/11/15/siemens-energy-nvidia-industrial-digital-twin-power-plant-omniverse/">Siemens Energy Taps NVIDIA to Develop Industrial Digital Twin of Power Plant in Omniverse and Modulus</a> 
-* <a href="https://developer.nvidia.com/blog/using-hybrid-physics-informed-neural-networks-for-digital-twins-in-prognosis-and-health-management/">Using Hybrid Physics-Informed Neural Networks for Digital Twins in Prognosis and Health Management</a>
-* <a href="https://developer.nvidia.com/blog/using-physics-informed-deep-learning-for-transport-in-porous-media/">Using Physics-Informed Deep Learning for Transport in Porous Media</a>
- 
+<p align="center">
+  <img src="./docs/img/modulus-pipes.jpg" alt="NVIDIA Modulus"/>
+</p>
+
+## Modulus Packages
+
+- [Modulus (Alpha)](https://github.com/NVIDIA/modulus)
+- [Modulus Launch (Alpha)](https://github.com/NVIDIA/modulus-launch)
+- [Modulus Symbolic (Alpha)](https://github.com/NVIDIA/modulus-sym)
+
+## Installing 
+
+Modulus is coming to PyPi soon! In the mean time the best way is to install from source:
+
+```Bash
+git clone git@github.com:NVIDIA/modulus.git && cd modulus
+
+pip install --upgrade pip
+pip install .
+```
+
+## Contributing
+
+Modulus is in an open-source alpha. We are not accepting external contributions at this time.
+
+## Contact
+
+Reach out to Modulus team members and user community on the [NVIDIA developer forums](https://forums.developer.nvidia.com/c/physics-simulation/modulus-physics-ml-model-framework).
+
 ## License
-NVIDIA Modulus and its components are licensed under the Modulus  End-User-Agreement. Please refer to the [License](/LICENSE.txt) for details regarding licensing, distribution and ownership terms.
-
-## Contributions
-[Read the document on contributions](/CONTRIBUTING.md). You can contribute by opening a [merge request](https://docs.gitlab.com/ee/user/project/merge_requests/).
- 
-## Support and Getting Help
-Please open an issue on the GitHub project for any questions. Your feedback is appreciated.
-
+Modulus is provided under the Apache License 2.0, please see [LICENSE.txt](./LICENSE.txt) for full license text.
