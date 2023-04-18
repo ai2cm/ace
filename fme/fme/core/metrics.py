@@ -22,17 +22,20 @@ def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
     return weights
 
 
-def per_variable_fno_loss(
-        ground_truth: Tensor, predictions: Tensor, time:int = 1, dim:List =("grid_yt", "grid_xt")):
-    """Computes the per-variable FNO loss for a given time step.
+def per_variable_fno_loss(ground_truth: Tensor, predicted: Tensor) -> Tensor:
+    """Computes the per-variable Fourier Neural Operator (FNO) loss at a single time step.
     
     Namely, for each variable, compute
-        ||predictions - ground_truth|| / ||ground_truth||
+        ||predicted - ground_truth|| / ||ground_truth||
+
+    Args:
+        ground_truth: Tensor of shape (variable, grid_yt, grid_xt)
+        predicted:    Tensor of shape (variable, grid_yt, grid_xt)
+
+    Returns a tensor of shape (variable,) with the per variable loss.
     """
-    # TODO(gideond) fix this
-    residual = predictions.isel(time=time) - ground_truth.isel(time=time)
-    normalizer = np.linalg.norm(ground_truth.isel(time=time).to_array().to_numpy())
-    ret = np.sqrt(np.square(residual).sum(dim=dim))
+    normalizer = torch.linalg.norm(ground_truth)
+    ret = torch.linalg.norm(predicted - ground_truth, dim=(-1, -2))
     return ret / normalizer 
 
 
