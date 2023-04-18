@@ -63,7 +63,7 @@ from utils import logging_utils
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
-from networks.afnonet import AFNONet, PrecipNet
+from fourcastnet.networks.afnonet import AFNONet, PrecipNet
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import weighted_acc, weighted_rmse, weighted_rmse_torch, unlog_tp_torch, weighted_global_mean_gradient_magnitude
