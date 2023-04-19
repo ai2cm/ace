@@ -65,7 +65,7 @@ def weighted_global_mean_bias(ground_truth: Tensor, predicted: Tensor) -> Tensor
     
     Args:
         ground_truth: Tensor of shape (variable, time, grid_yt, grid_xt)
-        predicted:    Tensor of shape (variable, time, grid_yt, grid_xt)
+        predicted: Tensor of shape (variable, time, grid_yt, grid_xt)
         
     Returns a tensor of shape (variable,) of the mean biases of each variable.
     """
