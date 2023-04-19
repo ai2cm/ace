@@ -51,6 +51,7 @@ def weighted_mean_bias(
         
     Returns a tensor of the mean biases averaged over the specified dimensions `dim`.
     """
+    assert len(ground_truth.shape) == len(predicted.shape) == 4, "Expected 4D tensors."
     _, _, num_lat, num_lon = ground_truth.shape
     if weights is None:
         weights = spherical_area_weights(num_lat, num_lon)
