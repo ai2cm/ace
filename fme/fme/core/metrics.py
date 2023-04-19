@@ -16,7 +16,7 @@ def _create_range(start, stop, num_steps):
 
 
 def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
-    """Computes the spherical area weights for a given lat-lon grid."""
+    """Computes the spherical area weights for a regular lat-lon grid."""
     lats = _create_range(89.9999, -89.9999, num_lat)  # Due to floating point issues, cos(deg2rad(90)) != 0.
     weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
     return weights
