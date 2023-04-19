@@ -4,15 +4,10 @@ import torch
 import metrics
 
 
-variables = [1, 2, 4]
-times = [1, 2, 4]
-grid_yts = [2, 4]
-grid_xts = [1, 2, 4]
-test_parameters = [(variable, time, grid_yt, grid_xt) for variable in variables
-                   for time in times for grid_yt in grid_yts for grid_xt in grid_xts]
-
-
-@pytest.mark.parametrize("variable, time, grid_yt, grid_xt", test_parameters)
+@pytest.mark.parametrize("variable", variables)
+@pytest.mark.parametrize("time", times)
+@pytest.mark.parametrize("grid_xt", grid_xts)
+@pytest.mark.parametrize("grid_yt", grid_yts)
 def test_weighted_global_mean_bias(variable, time, grid_yt, grid_xt):
     """Tests the shapes and a couple simple cases of the global mean bias."""
     x = torch.randn(variable, time, grid_yt, grid_xt)
