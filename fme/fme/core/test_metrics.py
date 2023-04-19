@@ -9,6 +9,15 @@ grid_yts = [2, 4]
 grid_xts = [1, 2, 4]
 
 
+@pytest.mark.parametrize("num_lat_cells, expected", [
+    (2, torch.tensor([-45.0, 45.0])),
+    (4, torch.tensor([-67.5, -22.5, 22.5, 67.5])),
+])
+def test_lat_cell_centers(num_lat_cells, expected):
+    """Tests the lat cell centers."""
+    assert torch.all(torch.isclose(metrics.lat_cell_centers(num_lat_cells), expected))
+
+
 @pytest.mark.parametrize("variable", variables)
 @pytest.mark.parametrize("time", times)
 @pytest.mark.parametrize("grid_xt", grid_xts)

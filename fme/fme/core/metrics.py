@@ -6,7 +6,7 @@ import torch
 Tensor = torch.Tensor
 
 
-def _create_range(start, stop, num_steps):
+def _create_range(start: int , stop: int, num_steps: int) -> Tensor:
     if num_steps == 1:
         raise ValueError("Range must include start and stop, e.g. num_steps > 1.")
 
@@ -15,9 +15,24 @@ def _create_range(start, stop, num_steps):
     return ret
 
 
+def lat_cell_centers(num_points: int) -> Tensor:
+    """Returns the latitudes of the cell centers for a regular lat-lon grid.
+
+    Args:
+        num_points: Number of latitude points.
+
+    Returns a tensor of shape (num_points,) with the latitudes of the cell centers.
+    The order is from negative to positive latitudes, e.g. [-89, -87, ..., 87, 89].
+    """
+    offset = (180.0 / num_points) / 2.0
+    pole_center = 90.0 - offset
+    start, stop = -pole_center, pole_center
+    return _create_range(start, stop, num_points)
+
+
 def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
     """Computes the spherical area weights for a regular lat-lon grid."""
-    lats = _create_range(89.9999, -89.9999, num_lat)  # Due to floating point issues, cos(deg2rad(90)) != 0.
+    lats = lat_cell_centers(num_lat)
     weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
     return weights
 
@@ -30,7 +45,7 @@ def per_variable_fno_loss(ground_truth: Tensor, predicted: Tensor) -> Tensor:
 
     Args:
         ground_truth: Tensor of shape (variable, grid_yt, grid_xt)
-        predicted:    Tensor of shape (variable, grid_yt, grid_xt)
+        predicted: Tensor of shape (variable, grid_yt, grid_xt)
 
     Returns a tensor of shape (variable,) with the per variable loss.
     """
@@ -45,9 +60,9 @@ def weighted_mean_bias(
     
     Args:
         ground_truth: Tensor of shape (variable, time, grid_yt, grid_xt)
-        predicted:    Tensor of shape (variable, time, grid_yt, grid_xt)
-        dim:          Dimensions to compute the mean over.
-        weights:      Optional weights to apply to the mean. If None, uses `spherical_area_weights`.
+        predicted: Tensor of shape (variable, time, grid_yt, grid_xt)
+        dim: Dimensions to compute the mean over.
+        weights: Optional weights to apply to the mean. If None, uses `spherical_area_weights`.
         
     Returns a tensor of the mean biases averaged over the specified dimensions `dim`.
     """
@@ -78,7 +93,7 @@ def weighted_time_mean_bias(ground_truth: Tensor, predicted: Tensor) -> Tensor:
     
     Args:
         ground_truth: Tensor of shape (variable, time, grid_yt, grid_xt)
-        predicted:    Tensor of shape (variable, time, grid_yt, grid_xt)
+        predicted: Tensor of shape (variable, time, grid_yt, grid_xt)
         
     Returns a tensor of shape (variable, time) of the time mean biases of each variable.
     """
