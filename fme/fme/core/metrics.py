@@ -97,6 +97,7 @@ def weighted_global_time_rmse(ground_truth: Tensor, predicted: Tensor, weights: 
         
     Returns a tensor of shape (variable,) of weighted RMSEs.
     """
+    assert len(ground_truth.shape) == len(predicted.shape) == 4, "Expected 4D tensors."
     _, _, num_lat, num_lon = ground_truth.shape
     
     if weights is None:
