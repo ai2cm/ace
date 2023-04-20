@@ -64,7 +64,8 @@ def test_weighted_mean_bias(variable, time, lat, lon):
     result = metrics.weighted_mean_bias(x, y, weights)
     assert torch.all(
         torch.isclose(result, weights.mean())
-    ), "Weighted global mean bias between zero and one should be the mean of the lat weights."
+    ), ("Weighted global mean bias between zero and one "
+        "should be the mean of the lat weights.")
 
     result = metrics.weighted_mean_bias(x, y)
     assert result.shape == tuple(), "Should also work if you do not specify weights."
