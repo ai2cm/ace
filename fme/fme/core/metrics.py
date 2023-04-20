@@ -3,10 +3,11 @@ from typing import Iterable, Optional, TypeAlias, Union
 import torch
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
+Number: TypeAlias = Union[int, float]
 Tensor: TypeAlias = torch.Tensor
 
 
-def _create_range(start: int, stop: int, num_steps: int) -> Tensor:
+def _create_range(start: Number, stop: Number, num_steps: int) -> Tensor:
     if num_steps == 1:
         raise ValueError("Range must include start and stop, e.g. num_steps > 1.")
 
