@@ -68,7 +68,7 @@ def weighted_mean_bias(
     return bias.mean(dim=dim)
 
 
-def mean_squared_error(
+def root_mean_squared_error(
     truth: Tensor,
     predicted: Tensor,
     weights: Optional[Tensor] = None,
