@@ -3,10 +3,12 @@ import torch
 
 import metrics
 
-variables = [1, 2, 4]
-times = [1, 2, 4]
-grid_yts = [2, 4]
-grid_xts = [1, 2, 4]
+test_cases = (
+    "variable, time, lat, lon", [
+        (2, 1, 2, 1),
+        (1, 2, 2, 1),
+        (1, 2, 2, 4),
+])
 
 
 @pytest.mark.parametrize("num_lat_cells, expected", [
@@ -18,83 +20,58 @@ def test_lat_cell_centers(num_lat_cells, expected):
     assert torch.all(torch.isclose(metrics.lat_cell_centers(num_lat_cells), expected))
 
 
-@pytest.mark.parametrize("variable", variables)
-@pytest.mark.parametrize("time", times)
-@pytest.mark.parametrize("grid_xt", grid_xts)
-@pytest.mark.parametrize("grid_yt", grid_yts)
-def test_weighted_global_mean_bias(variable, time, grid_yt, grid_xt):
-    """Tests the shapes and a couple simple cases of the global mean bias."""
-    x = torch.randn(variable, time, grid_yt, grid_xt)
-    y = torch.randn(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_global_mean_bias(x, y)
-    assert result.shape == (variable,), \
-        f"Global mean bias should have shape (variable,)"
-
-    result = metrics.weighted_global_mean_bias(x, x.clone())
-    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Global mean bias between identical tensors should be zero."
-
-    x = torch.zeros(variable, time, grid_yt, grid_xt)
-    y = torch.ones(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_global_mean_bias(x, y)
-    spherical_area_weights = metrics.spherical_area_weights(grid_yt, grid_xt)
-    assert torch.all(torch.isclose(result, spherical_area_weights.mean())), "Global mean bias between zero and one should be the mean of the lat weights."
+@pytest.mark.parametrize("num_lat, num_lon, expected", [
+    (2, 1, torch.tensor([[0.5], [0.5]])),
+    (2, 2, torch.tensor([[0.25, 0.25], [0.25, 0.25]])),
+    (2, 4, torch.tensor([[0.1250, 0.1250, 0.1250, 0.1250],
+                         [0.1250, 0.1250, 0.1250, 0.1250]])),
+])
+def test_spherical_area_weights(num_lat, num_lon, expected):
+    """Tests the shapes and a couple simple cases of the spherical area weights."""
+    result = metrics.spherical_area_weights(num_lat, num_lon)
+    assert torch.all(torch.isclose(result, expected))
 
 
-@pytest.mark.parametrize("variable", variables)
-@pytest.mark.parametrize("time", times)
-@pytest.mark.parametrize("grid_xt", grid_xts)
-@pytest.mark.parametrize("grid_yt", grid_yts)
-def test_weighted_time_mean_bias(variable, time, grid_yt, grid_xt):
-    """Tests the shapes and a couple simple cases of the time mean bias."""
-    x = torch.randn(variable, time, grid_yt, grid_xt)
-    y = torch.randn(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_time_mean_bias(x, y)
-    assert result.shape == (variable, time), "Time mean bias should have shape (variable, time)"
+@pytest.mark.parametrize(*test_cases)
+def test_weighted_mean_bias(variable, time, lat, lon):
+    """Tests the weighted mean bias for a few simple test cases."""
+    x = torch.randn(time, variable, lat, lon)
+    y = torch.randn(time, variable, lat, lon)
+    weights = metrics.spherical_area_weights(lat, lon)
 
-    result = metrics.weighted_time_mean_bias(x, x.clone())
-    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Time mean bias between identical tensors should be zero."
+    result = metrics.weighted_mean_bias(x, x.clone(), weights, dim=(0, 2, 3))
+    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Weighted global mean bias between identical tensors should be zero."
+    assert result.shape == (variable,), "You should be able to specify time as dim = 1."
 
-    x = torch.zeros(variable, time, grid_yt, grid_xt)
-    y = torch.ones(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_time_mean_bias(x, y)
-    spherical_area_weights = metrics.spherical_area_weights(grid_yt, grid_xt)
-    assert torch.all(torch.isclose(result, spherical_area_weights.mean((-1, -2)))), "Time mean bias between zero and one should be the mean of the lat weights."
+    x = torch.zeros(time, variable, lat, lon)
+    y = torch.ones(time, variable, lat, lon)
 
+    result = metrics.weighted_mean_bias(x, y, weights)
+    assert torch.all(torch.isclose(result, weights.mean())), "Weighted global mean bias between zero and one should be the mean of the lat weights."
 
-@pytest.mark.parametrize("variable", variables)
-@pytest.mark.parametrize("time", times)
-@pytest.mark.parametrize("grid_xt", grid_xts)
-@pytest.mark.parametrize("grid_yt", grid_yts)
-def test_weighted_global_time_rmse(variable, time, grid_yt, grid_xt):
-    """Tests the shapes and a couple simple cases of the global time RMSE."""
-    x = torch.randn(variable, time, grid_yt, grid_xt)
-    y = torch.randn(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_global_time_rmse(x, y)
-    assert result.shape == (variable,), "Global time RMSE should have shape (variable,)"
+    result = metrics.weighted_mean_bias(x, y)
+    assert result.shape == tuple(), "Should also work if you do not specify weights."
 
-    result = metrics.weighted_global_time_rmse(x, x.clone())
-    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Global time RMSE between identical tensors should be zero."
-
-    x = torch.zeros(variable, time, grid_yt, grid_xt)
-    y = torch.ones(variable, time, grid_yt, grid_xt)
-    result = metrics.weighted_global_time_rmse(x, y)
-    spherical_area_weights = metrics.spherical_area_weights(grid_yt, grid_xt)
-    expected = torch.sqrt(spherical_area_weights.mean())
-    assert torch.all(torch.isclose(result, expected)), f"Global time RMSE between zero and one should be the sqrt(mean) of the lat weights. {result}"
+    x = torch.randn(variable, time, lon, lat)
+    y = torch.randn(variable, time, lon, lat)
+    result = metrics.weighted_mean_bias(x, x.clone(), weights.t(), dim=(1, 2, 3))
+    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Weighted global mean bias between identical tensors should be zero."
+    assert result.shape == (variable,), "Swapping dims shouldn't change the final shape."
 
 
-@pytest.mark.parametrize("variable", variables)
-@pytest.mark.parametrize("time", times)
-@pytest.mark.parametrize("grid_xt", grid_xts)
-@pytest.mark.parametrize("grid_yt", grid_yts)
-def test_per_variable_fno_loss(variable, time, grid_yt, grid_xt):
-    """Tests the shapes and a couple simple cases of the per variable FNO loss."""
-    del time  # unused in this test
+@pytest.mark.parametrize(*test_cases)
+def test_mean_squared_error(variable, time, lat, lon):
+    """Tests the mean squared error for a few simple test cases."""
+    x = torch.randn(variable, time, lat, lon)
+    random_weights = torch.rand(lat, lon)
 
-    x = torch.randn(variable, grid_yt, grid_xt)
-    y = torch.randn(variable, grid_yt, grid_xt)
-    result = metrics.per_variable_fno_loss(x, y)
-    assert result.shape == (variable,), "Per variable FNO loss should have shape (variable,)"
+    result = metrics.mean_squared_error(x, x.clone(), dim=(0, 2, 3))
+    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Mean squared error between identical tensors should be zero."
 
-    result = metrics.per_variable_fno_loss(x, x.clone())
-    assert torch.all(torch.isclose(result, torch.tensor(0.0))), "Per variable FNO loss between identical tensors should be zero."
+    result = metrics.mean_squared_error(torch.zeros(variable, time, lat, lon),
+                                        torch.ones(variable, time, lat, lon))
+    assert torch.all(torch.isclose(result, torch.tensor(1.0))), "Mean squared error between zero and one should be one."
+
+    result = metrics.mean_squared_error(torch.zeros(variable, time, lat, lon),
+                                        torch.ones(variable, time, lat, lon), weights=random_weights)
+    assert torch.all(torch.isclose(result, random_weights.mean().sqrt())), "Mean squared error between zero and one should be the mean of the weights."
