@@ -1,12 +1,12 @@
-from typing import Iterable, Optional, Union
+from typing import Iterable, Optional, TypeAlias, Union
 
 import torch
 
-Tensor = torch.Tensor
-Dimension = Union[int, Iterable[int]]
+Dimension: TypeAlias = Union[int, Iterable[int]]
+Tensor: TypeAlias = torch.Tensor
 
 
-def _create_range(start: int , stop: int, num_steps: int) -> Tensor:
+def _create_range(start: int, stop: int, num_steps: int) -> Tensor:
     if num_steps == 1:
         raise ValueError("Range must include start and stop, e.g. num_steps > 1.")
 
@@ -32,7 +32,7 @@ def lat_cell_centers(num_points: int) -> Tensor:
 
 def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
     """Computes the spherical area weights (unitless) for a regular lat-lon grid.
-    
+
     Returns a tensor of shape (num_lat, num_lon).
     """
     lats = lat_cell_centers(num_lat)
@@ -42,22 +42,25 @@ def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
 
 
 def weighted_mean_bias(
-        truth: Tensor, 
-        predicted: Tensor,
-        weights: Optional[Tensor] = None,
-        dim: Dimension = ()) -> Tensor:
+    truth: Tensor,
+    predicted: Tensor,
+    weights: Optional[Tensor] = None,
+    dim: Dimension = (),
+) -> Tensor:
     """Computes the mean bias across the specified list of dimensions assuming
     that the weights are applied to the last dimensions, e.g. the spatial dimensions.
-    
+
     Args:
         truth: Tensor
         predicted: Tensor
         dim: Dimensions to compute the mean over.
         weights: Weights to apply to the mean.
-        
+
     Returns a tensor of the mean biases averaged over the specified dimensions `dim`.
     """
-    assert truth.shape == predicted.shape, "Truth and predicted should have the same shape."
+    assert (
+        truth.shape == predicted.shape
+    ), "Truth and predicted should have the same shape."
     bias = predicted - truth
     if weights is not None:
         bias *= weights
@@ -65,27 +68,30 @@ def weighted_mean_bias(
 
 
 def mean_squared_error(
-        truth: Tensor,
-        predicted: Tensor, 
-        weights: Optional[Tensor] = None, 
-        dim: Dimension = ()) -> Tensor:
+    truth: Tensor,
+    predicted: Tensor,
+    weights: Optional[Tensor] = None,
+    dim: Dimension = (),
+) -> Tensor:
     """
     Computes the weighted global RMSE over all variables. Namely, for each variable:
-    
+
         sqrt((weights * ((xhat - x) ** 2)).mean(dims))
 
     If you want to compute the RMSE over the time dimension, then pass in
     `truth.mean(time_dim)` and `predicted.mean(time_dim)` and specify `dims=space_dims`.
-        
+
     Args:
         truth: Tensor whose last dimensions are to be weighted
         predicted: Tensor whose last dimensions are to be weighted
         weights: Tensor to apply to the squared bias.
         dim: Dimensions to average over.
-        
+
     Returns a tensor of shape (variable,) of weighted RMSEs.
     """
-    assert truth.shape == predicted.shape, "Truth and predicted should have the same shape."
+    assert (
+        truth.shape == predicted.shape
+    ), "Truth and predicted should have the same shape."
     sq_bias = torch.square(predicted - truth)
     if weights is not None:
         sq_bias *= weights
