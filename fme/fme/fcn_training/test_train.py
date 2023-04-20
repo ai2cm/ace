@@ -4,18 +4,21 @@ import h5py
 import numpy as np
 import subprocess
 import tempfile
+import contextlib
 
-def _get_test_yaml_file(train_data_path, 
-                        valid_data_path, 
-                        inf_data_path, 
-                        results_dir,
-                        time_means_path,
-                        global_means_path,
-                        global_stds_path,
-                        prediction_length,
-                        num_channels=2,
-                        config_name="unit_test"):
 
+def _get_test_yaml_file(
+    train_data_path,
+    valid_data_path,
+    inf_data_path,
+    results_dir,
+    time_means_path,
+    global_means_path,
+    global_stds_path,
+    prediction_length,
+    num_channels=2,
+    config_name="unit_test",
+):
     channels = list(range(num_channels))
 
     string = f"""
@@ -78,26 +81,38 @@ def _get_test_yaml_file(train_data_path,
 
        add_noise: !!bool False
        noise_std: 0
-    """
+    """  # noqa: E501
 
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.yaml') as f:
+    with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f:
         f.write(string)
         return f.name
 
-def _save_to_tmpfile(data, dir, filetype='h5'):
-    suffices = {'h5': '.h5', 'npy': '.npy'}
-    if filetype not in suffices:
-        raise ValueError(f'Unknown save format {filetype}')
 
-    with tempfile.NamedTemporaryFile(dir=dir, mode='w', delete=False, suffix=suffices[filetype]) as f:
-        if filetype == 'h5':
-            with h5py.File(f.name, 'w') as hf:
-                hf.create_dataset('fields', data=data)
-        elif filetype == 'npy':
+def _save_to_tmpfile(data, dir, filetype="h5"):
+    suffices = {"h5": ".h5", "npy": ".npy"}
+    if filetype not in suffices:
+        raise ValueError(f"Unknown save format {filetype}")
+
+    with tempfile.NamedTemporaryFile(
+        dir=dir, mode="w", delete=False, suffix=suffices[filetype]
+    ) as f:
+        if filetype == "h5":
+            with h5py.File(f.name, "w") as hf:
+                hf.create_dataset("fields", data=data)
+        elif filetype == "npy":
             np.save(f.name, data)
         else:
-            raise ValueError(f'Unknown save format {filetype}')
+            raise ValueError(f"Unknown save format {filetype}")
         return f.name
+
+
+@contextlib.contextmanager
+def train_context():
+    with tempfile.TemporaryDirectory() as train_dir:
+        with tempfile.TemporaryDirectory() as valid_dir:
+            with tempfile.TemporaryDirectory() as stats_dir:
+                with tempfile.TemporaryDirectory() as results_dir:
+                    yield train_dir, valid_dir, stats_dir, results_dir
 
 
 def test_train_runs_era5():
@@ -108,26 +123,53 @@ def test_train_runs_era5():
     np.random.seed(seed)
     num_time_steps, num_channels, height, width = 2, 2, 720, 40
 
-    with tempfile.TemporaryDirectory() as train_dir, \
-         tempfile.TemporaryDirectory() as valid_dir, \
-         tempfile.TemporaryDirectory() as stats_dir, \
-         tempfile.TemporaryDirectory() as results_dir:
-        _ = _save_to_tmpfile(np.random.randn(
-            num_time_steps, num_channels, height + 1, width), dir=train_dir, filetype='h5')
-        _ = _save_to_tmpfile(np.random.randn(
-            num_time_steps, num_channels, height + 1, width), dir=valid_dir, filetype='h5')
-        time_means = _save_to_tmpfile(np.random.randn(
-            1, num_channels + 1, height, width), dir=valid_dir, filetype='npy')
-        global_means = _save_to_tmpfile(np.random.randn(
-            1, num_channels + 1, height, width), dir=stats_dir, filetype='npy')
-        global_stds = _save_to_tmpfile(abs(np.random.randn(
-            1, num_channels + 1, height, width)), dir=stats_dir, filetype='npy')
+    with train_context() as (train_dir, valid_dir, stats_dir, results_dir):
+        _ = _save_to_tmpfile(
+            np.random.randn(num_time_steps, num_channels, height + 1, width),
+            dir=train_dir,
+            filetype="h5",
+        )
+        _ = _save_to_tmpfile(
+            np.random.randn(num_time_steps, num_channels, height + 1, width),
+            dir=valid_dir,
+            filetype="h5",
+        )
+        time_means = _save_to_tmpfile(
+            np.random.randn(1, num_channels + 1, height, width),
+            dir=valid_dir,
+            filetype="npy",
+        )
+        global_means = _save_to_tmpfile(
+            np.random.randn(1, num_channels + 1, height, width),
+            dir=stats_dir,
+            filetype="npy",
+        )
+        global_stds = _save_to_tmpfile(
+            abs(np.random.randn(1, num_channels + 1, height, width)),
+            dir=stats_dir,
+            filetype="npy",
+        )
 
         yaml_config = _get_test_yaml_file(
-            train_dir, valid_dir, valid_dir, 
-            results_dir, time_means, global_means, global_stds, 
-            prediction_length=num_time_steps, 
-            num_channels=num_channels)
+            train_dir,
+            valid_dir,
+            valid_dir,
+            results_dir,
+            time_means,
+            global_means,
+            global_stds,
+            prediction_length=num_time_steps,
+            num_channels=num_channels,
+        )
 
-        train_process = subprocess.run(['python', 'train.py', '--yaml_config', yaml_config, '--config', 'unit_test'])
+        train_process = subprocess.run(
+            [
+                "python",
+                "train.py",
+                "--yaml_config",
+                yaml_config,
+                "--config",
+                "unit_test",
+            ]
+        )
         train_process.check_returncode()
