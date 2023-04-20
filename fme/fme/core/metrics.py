@@ -37,21 +37,22 @@ def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
     return weights
 
 
-def per_variable_fno_loss(ground_truth: Tensor, predicted: Tensor) -> Tensor:
-    """Computes the per-variable Fourier Neural Operator (FNO) loss at a single time step.
+def per_variable_rmse(truth: Tensor, predicted: Tensor) -> Tensor:
+    """Computes the per-variable root mean-squared error between the truth and predicted values.
+    All the dimensions except the first are averaged over, e.g. the spatial dimensions.
     
     Namely, for each variable, compute
-        ||predicted - ground_truth|| / ||ground_truth||
+        ||predicted - truth||_2
 
     Args:
-        ground_truth: Tensor of shape (variable, grid_yt, grid_xt)
-        predicted: Tensor of shape (variable, grid_yt, grid_xt)
+        truth: Tensor of shape (variable, ... mean dims)
+        predicted: Tensor of shape (variable, ... mean dims)
 
     Returns a tensor of shape (variable,) with the per variable loss.
     """
-    normalizer = torch.linalg.norm(ground_truth)
-    ret = torch.linalg.norm(predicted - ground_truth, dim=(-1, -2))
-    return ret / normalizer 
+    mean_dims = tuple(range(1, truth.ndim))
+    ret = (predicted - truth).square().mean(dim=mean_dims).sqrt()
+    return ret
 
 
 def weighted_mean_bias(
