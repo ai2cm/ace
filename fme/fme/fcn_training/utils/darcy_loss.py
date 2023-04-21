@@ -1,24 +1,24 @@
-#MIT License
+# MIT License
 #
-#Copyright (c) 2020 Zongyi Li
+# Copyright (c) 2020 Zongyi Li
 #
-#Permission is hereby granted, free of charge, to any person obtaining a copy
-#of this software and associated documentation files (the "Software"), to deal
-#in the Software without restriction, including without limitation the rights
-#to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-#copies of the Software, and to permit persons to whom the Software is
-#furnished to do so, subject to the following conditions:
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
 #
-#The above copyright notice and this permission notice shall be included in all
-#copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
-#THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-#IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-#FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-#AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-#LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-#OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-#SOFTWARE.
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 import torch
 import numpy as np
@@ -32,7 +32,8 @@ import torch.nn as nn
 # Utilities
 #
 #################################################
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 # reading data
 class MatReader(object):
@@ -53,7 +54,7 @@ class MatReader(object):
         try:
             self.data = scipy.io.loadmat(self.file_path)
             self.old_mat = True
-        except:
+        except:  # noqa: E722
             self.data = h5py.File(self.file_path)
             self.old_mat = False
 
@@ -88,6 +89,7 @@ class MatReader(object):
     def set_float(self, to_float):
         self.to_float = to_float
 
+
 # normalization, pointwise gaussian
 class UnitGaussianNormalizer(object):
     def __init__(self, x, eps=0.00001):
@@ -104,15 +106,15 @@ class UnitGaussianNormalizer(object):
 
     def decode(self, x, sample_idx=None):
         if sample_idx is None:
-            std = self.std + self.eps # n
+            std = self.std + self.eps  # n
             mean = self.mean
         else:
             if len(self.mean.shape) == len(sample_idx[0].shape):
                 std = self.std[sample_idx] + self.eps  # batch*n
                 mean = self.mean[sample_idx]
             if len(self.mean.shape) > len(sample_idx[0].shape):
-                std = self.std[:,sample_idx]+ self.eps # T*batch*n
-                mean = self.mean[:,sample_idx]
+                std = self.std[:, sample_idx] + self.eps  # T*batch*n
+                mean = self.mean[:, sample_idx]
 
         # x is in shape of batch*n or T*batch*n
         x = (x * std) + mean
@@ -125,6 +127,7 @@ class UnitGaussianNormalizer(object):
     def cpu(self):
         self.mean = self.mean.cpu()
         self.std = self.std.cpu()
+
 
 # normalization, Gaussian
 class GaussianNormalizer(object):
@@ -159,29 +162,30 @@ class RangeNormalizer(object):
         mymin = torch.min(x, 0)[0].view(-1)
         mymax = torch.max(x, 0)[0].view(-1)
 
-        self.a = (high - low)/(mymax - mymin)
-        self.b = -self.a*mymax + high
+        self.a = (high - low) / (mymax - mymin)
+        self.b = -self.a * mymax + high
 
     def encode(self, x):
         s = x.size()
         x = x.view(s[0], -1)
-        x = self.a*x + self.b
+        x = self.a * x + self.b
         x = x.view(s)
         return x
 
     def decode(self, x):
         s = x.size()
         x = x.view(s[0], -1)
-        x = (x - self.b)/self.a
+        x = (x - self.b) / self.a
         x = x.view(s)
         return x
 
-#loss function with rel/abs Lp loss
+
+# loss function with rel/abs Lp loss
 class LpLoss(object):
     def __init__(self, d=2, p=2, size_average=True, reduction=True):
         super(LpLoss, self).__init__()
 
-        #Dimension and Lp-norm type are postive
+        # Dimension and Lp-norm type are postive
         assert d > 0 and p > 0
 
         self.d = d
@@ -192,10 +196,12 @@ class LpLoss(object):
     def abs(self, x, y):
         num_examples = x.size()[0]
 
-        #Assume uniform mesh
+        # Assume uniform mesh
         h = 1.0 / (x.size()[1] - 1.0)
 
-        all_norms = (h**(self.d/self.p))*torch.norm(x.view(num_examples,-1) - y.view(num_examples,-1), self.p, 1)
+        all_norms = (h ** (self.d / self.p)) * torch.norm(
+            x.view(num_examples, -1) - y.view(num_examples, -1), self.p, 1
+        )
 
         if self.reduction:
             if self.size_average:
@@ -208,27 +214,32 @@ class LpLoss(object):
     def rel(self, x, y):
         num_examples = x.size()[0]
 
-        diff_norms = torch.norm(x.reshape(num_examples,-1) - y.reshape(num_examples,-1), self.p, 1)
-        y_norms = torch.norm(y.reshape(num_examples,-1), self.p, 1)
+        diff_norms = torch.norm(
+            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), self.p, 1
+        )
+        y_norms = torch.norm(y.reshape(num_examples, -1), self.p, 1)
 
         if self.reduction:
             if self.size_average:
-                return torch.mean(diff_norms/y_norms)
+                return torch.mean(diff_norms / y_norms)
             else:
-                return torch.sum(diff_norms/y_norms)
+                return torch.sum(diff_norms / y_norms)
 
-        return diff_norms/y_norms
+        return diff_norms / y_norms
 
     def __call__(self, x, y):
         return self.rel(x, y)
 
+
 # Sobolev norm (HS norm)
 # where we also compare the numerical derivatives between the output and target
 class HsLoss(object):
-    def __init__(self, d=2, p=2, k=1, a=None, group=False, size_average=True, reduction=True):
+    def __init__(
+        self, d=2, p=2, k=1, a=None, group=False, size_average=True, reduction=True
+    ):
         super(HsLoss, self).__init__()
 
-        #Dimension and Lp-norm type are postive
+        # Dimension and Lp-norm type are postive
         assert d > 0 and p > 0
 
         self.d = d
@@ -238,20 +249,24 @@ class HsLoss(object):
         self.reduction = reduction
         self.size_average = size_average
 
-        if a == None:
-            a = [1,] * k
+        if a is None:
+            a = [
+                1,
+            ] * k
         self.a = a
 
     def rel(self, x, y):
         num_examples = x.size()[0]
-        diff_norms = torch.norm(x.reshape(num_examples,-1) - y.reshape(num_examples,-1), self.p, 1)
-        y_norms = torch.norm(y.reshape(num_examples,-1), self.p, 1)
+        diff_norms = torch.norm(
+            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), self.p, 1
+        )
+        y_norms = torch.norm(y.reshape(num_examples, -1), self.p, 1)
         if self.reduction:
             if self.size_average:
-                return torch.mean(diff_norms/y_norms)
+                return torch.mean(diff_norms / y_norms)
             else:
-                return torch.sum(diff_norms/y_norms)
-        return diff_norms/y_norms
+                return torch.sum(diff_norms / y_norms)
+        return diff_norms / y_norms
 
     def __call__(self, x, y, a=None):
         nx = x.size()[1]
@@ -262,33 +277,56 @@ class HsLoss(object):
         x = x.view(x.shape[0], nx, ny, -1)
         y = y.view(y.shape[0], nx, ny, -1)
 
-        k_x = torch.cat((torch.arange(start=0, end=nx//2, step=1),torch.arange(start=-nx//2, end=0, step=1)), 0).reshape(nx,1).repeat(1,ny)
-        k_y = torch.cat((torch.arange(start=0, end=ny//2, step=1),torch.arange(start=-ny//2, end=0, step=1)), 0).reshape(1,ny).repeat(nx,1)
-        k_x = torch.abs(k_x).reshape(1,nx,ny,1).to(x.device)
-        k_y = torch.abs(k_y).reshape(1,nx,ny,1).to(x.device)
+        k_x = (
+            torch.cat(
+                (
+                    torch.arange(start=0, end=nx // 2, step=1),
+                    torch.arange(start=-nx // 2, end=0, step=1),
+                ),
+                0,
+            )
+            .reshape(nx, 1)
+            .repeat(1, ny)
+        )
+        k_y = (
+            torch.cat(
+                (
+                    torch.arange(start=0, end=ny // 2, step=1),
+                    torch.arange(start=-ny // 2, end=0, step=1),
+                ),
+                0,
+            )
+            .reshape(1, ny)
+            .repeat(nx, 1)
+        )
+        k_x = torch.abs(k_x).reshape(1, nx, ny, 1).to(x.device)
+        k_y = torch.abs(k_y).reshape(1, nx, ny, 1).to(x.device)
 
         x = torch.fft.fftn(x, dim=[1, 2])
         y = torch.fft.fftn(y, dim=[1, 2])
 
-        if balanced==False:
+        if not balanced:
             weight = 1
             if k >= 1:
-                weight += a[0]**2 * (k_x**2 + k_y**2)
+                weight += a[0] ** 2 * (k_x**2 + k_y**2)
             if k >= 2:
-                weight += a[1]**2 * (k_x**4 + 2*k_x**2*k_y**2 + k_y**4)
+                weight += a[1] ** 2 * (k_x**4 + 2 * k_x**2 * k_y**2 + k_y**4)
             weight = torch.sqrt(weight)
-            loss = self.rel(x*weight, y*weight)
+            loss = self.rel(x * weight, y * weight)
         else:
             loss = self.rel(x, y)
             if k >= 1:
                 weight = a[0] * torch.sqrt(k_x**2 + k_y**2)
-                loss += self.rel(x*weight, y*weight)
+                loss += self.rel(x * weight, y * weight)
             if k >= 2:
-                weight = a[1] * torch.sqrt(k_x**4 + 2*k_x**2*k_y**2 + k_y**4)
-                loss += self.rel(x*weight, y*weight)
-            loss = loss / (k+1)
+                weight = a[1] * torch.sqrt(
+                    k_x**4 + 2 * k_x**2 * k_y**2 + k_y**4
+                )
+                loss += self.rel(x * weight, y * weight)
+            loss = loss / (k + 1)
 
         return loss
+
 
 # A simple feedforward neural network
 class DenseNet(torch.nn.Module):
@@ -302,11 +340,11 @@ class DenseNet(torch.nn.Module):
         self.layers = nn.ModuleList()
 
         for j in range(self.n_layers):
-            self.layers.append(nn.Linear(layers[j], layers[j+1]))
+            self.layers.append(nn.Linear(layers[j], layers[j + 1]))
 
             if j != self.n_layers - 1:
                 if normalize:
-                    self.layers.append(nn.BatchNorm1d(layers[j+1]))
+                    self.layers.append(nn.BatchNorm1d(layers[j + 1]))
 
                 self.layers.append(nonlinearity())
 
