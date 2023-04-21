@@ -7,9 +7,9 @@ from metrics import (
 )
 
 __all__ = [
-    'lat_cell_centers',
-    'spherical_area_weights',
-    'weighted_mean',
-    'weighted_mean_bias',
-    'root_mean_squared_error',
+    "lat_cell_centers",
+    "spherical_area_weights",
+    "weighted_mean",
+    "weighted_mean_bias",
+    "root_mean_squared_error",
 ]
