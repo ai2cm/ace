@@ -1,6 +1,5 @@
 import logging
 import os
-from typing import MutableMapping
 import numpy as np
 from torch.utils.data import Dataset
 import netCDF4
@@ -34,7 +33,8 @@ FV3GFS_NAMES = {
 
 
 class FV3GFSDataset(Dataset):
-    def __init__(self, params: MutableMapping, path: str, train: bool):
+    def __init__(self, params, path: str, train: bool):
+        # TODO: refactor this class to take in its own type-hinted params dataclass
         self.params = params
         self._check_for_not_implemented_features()
         self._resolve_channels_and_names()
@@ -58,22 +58,28 @@ class FV3GFSDataset(Dataset):
         if self.params.dt != 1:
             raise NotImplementedError("step size must be 1 for FV3GFSDataset")
         if self.params.n_history != 0:
-            msg = "non-zero n_history is not implemented for FV3GFSDataset"
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "non-zero n_history is not implemented for FV3GFSDataset"
+            )
         if self.params.crop_size_x is not None or self.params.crop_size_y is not None:
-            msg = "non-null crop_size_x or crop_size_y is not implemented for FV3GFSDataset"
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "non-null crop_size_x or crop_size_y is "
+                "not implemented for FV3GFSDataset"
+            )
         if self.params.roll:
             raise NotImplementedError("roll=True not implemented for FV3GFSDataset")
         if self.params.two_step_training:
-            msg = "two_step_training not implemented for FV3GFSDataset"
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "two_step_training not implemented for FV3GFSDataset"
+            )
         if self.params.orography:
-            msg = "training w/ orography not implemented for FV3GFSDataset"
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "training w/ orography not implemented for FV3GFSDataset"
+            )
         if "precip" in self.params:
-            msg = "precip training not implemented for FV3GFSDataset"
-            raise NotImplementedError(msg)
+            raise NotImplementedError(
+                "precip training not implemented for FV3GFSDataset"
+            )
         if self.params.add_grid:
             raise NotImplementedError("add_grid not implemented for FV3GFSDataset")
 
@@ -81,22 +87,27 @@ class FV3GFSDataset(Dataset):
         if "in_channels" in self.params and "in_names" in self.params:
             raise ValueError("Cannot specify both 'in_channels' and 'in_names' params.")
         if "out_channels" in self.params and "out_names" in self.params:
-            raise ValueError("Cannot specify both 'out_channels' and 'out_names' params.")
+            raise ValueError(
+                "Cannot specify both 'out_channels' and 'out_names' params."
+            )
 
         if "in_channels" in self.params:
-            self.in_names = [FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.in_channels]
+            self.in_names = [
+                FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.in_channels
+            ]
         else:
             self.in_names = self.params.in_names
 
         if "out_channels" in self.params:
-            self.out_names = [FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.out_channels]
+            self.out_names = [
+                FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.out_channels
+            ]
         else:
             self.out_names = self.params.out_names
-    
+
         self.n_in_channels = len(self.in_names)
         self.n_out_channels = len(self.out_names)
-       
-        
+
     def _get_files_stats(self):
         logging.info(f"Opening data at {self.full_path}")
         self.ds = netCDF4.MFDataset(self.full_path)
@@ -112,19 +123,27 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
     def _load_stats_data(self):
-        logging.info(f"Opening global mean stats data at {self.params.global_means_path}")
-        in_, out_ = load_arrays_from_netcdf(self.params.global_means_path, self.in_names, self.out_names)
+        logging.info(
+            f"Opening global mean stats data at {self.params.global_means_path}"
+        )
+        in_, out_ = load_arrays_from_netcdf(
+            self.params.global_means_path, self.in_names, self.out_names
+        )
         self.in_means = in_.reshape((1, self.n_in_channels, 1, 1))
         self.out_means = out_.reshape((1, self.n_out_channels, 1, 1))
 
         logging.info(f"Opening stddev stats data at {self.params.global_stds_path}")
-        in_, out_ = load_arrays_from_netcdf(self.params.global_stds_path, self.in_names, self.out_names)
+        in_, out_ = load_arrays_from_netcdf(
+            self.params.global_stds_path, self.in_names, self.out_names
+        )
         self.in_stds = in_.reshape((1, self.n_in_channels, 1, 1))
         self.out_stds = out_.reshape((1, self.n_out_channels, 1, 1))
 
         # just used for multistep validation
         logging.info(f"Opening time mean stats data at {self.params.time_means_path}")
-        in_, out_ = load_arrays_from_netcdf(self.params.time_means_path, self.in_names, self.out_names)
+        in_, out_ = load_arrays_from_netcdf(
+            self.params.time_means_path, self.in_names, self.out_names
+        )
         self.out_time_means = np.flip(np.expand_dims(out_, 0), axis=-2).copy()
 
     @property
@@ -174,6 +193,7 @@ class FV3GFSDataset(Dataset):
             self.orography,
         )
         return in_tensor, out_tensor
+
 
 def load_arrays_from_netcdf(path, in_names, out_names):
     ds = netCDF4.Dataset(path)
