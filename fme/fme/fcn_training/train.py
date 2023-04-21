@@ -60,7 +60,6 @@ from utils import logging_utils
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
-from fourcastnet.networks.afnonet import AFNONet, PrecipNet
 from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import (
@@ -77,6 +76,8 @@ DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
 
+import fme
+from registry import NET_REGISTRY
 from inference import inference
 
 
@@ -112,6 +113,9 @@ class Trainer:
         params.crop_size_y = self.valid_dataset.crop_size_y
         params.img_shape_x = self.valid_dataset.img_shape_x
         params.img_shape_y = self.valid_dataset.img_shape_y
+        # following two params needed by FourierNeuralOperatorNet
+        params.img_crop_shape_x = self.valid_dataset.img_shape_x
+        params.img_crop_shape_y = self.valid_dataset.img_shape_y
         params.N_in_channels = self.train_dataset.n_in_channels
         if params.orography:
             params.N_in_channels += 1
@@ -122,6 +126,8 @@ class Trainer:
         # precip models
         self.precip = True if "precip" in params else False
 
+        BackboneNet = NET_REGISTRY[params.nettype]
+
         if self.precip:
             if "model_wind_path" not in params:
                 raise Exception("no backbone model weights specified")
@@ -131,7 +137,7 @@ class Trainer:
             params["N_out_channels"] = len(out_channels)
 
             if params.nettype_wind == "afno":
-                self.model_wind = AFNONet(params).to(self.device)
+                self.model_wind = BackboneNet(params).to(self.device)
             else:
                 raise Exception("not implemented")
 
@@ -149,14 +155,11 @@ class Trainer:
         if self.precip:
             params["N_out_channels"] = len(params["out_channels"])
 
-        if params.nettype == "afno":
-            self.model = AFNONet(params).to(self.device)
-        else:
-            raise Exception("not implemented")
+        self.model = BackboneNet(params).to(self.device)
 
         # precip model
         if self.precip:
-            self.model = PrecipNet(params, backbone=self.model).to(self.device)
+            self.model = fme.PrecipNet(params, backbone=self.model).to(self.device)
 
         if self.params.enable_nhwc:
             # NHWC: Convert model to channels_last memory format

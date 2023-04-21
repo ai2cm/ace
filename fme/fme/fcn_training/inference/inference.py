@@ -69,9 +69,9 @@ from utils.weighted_acc_rmse import (
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
-from fourcastnet.networks.afnonet import AFNONet
 import wandb
 from datetime import datetime
+from fme.fcn_training import NET_REGISTRY
 
 
 fld = "z500"  # diff flds have diff decor times and hence differnt ics
@@ -119,6 +119,8 @@ def setup(params):
     img_shape_y = valid_dataset.img_shape_y
     params.img_shape_x = img_shape_x
     params.img_shape_y = img_shape_y
+    params.img_crop_shape_x = img_shape_x  # needed by FourierNeuralOperatorNet
+    params.img_crop_shape_y = img_shape_y  # needed by FourierNeuralOperatorNet
     if params.log_to_screen:
         logging.info(
             "Loading trained model checkpoint from {}".format(
@@ -143,10 +145,7 @@ def setup(params):
     params.log_on_each_unroll_step_inference = True
 
     # load the model
-    if params.nettype == "afno":
-        model = AFNONet(params).to(device)
-    else:
-        raise Exception("not implemented")
+    model = NET_REGISTRY[params.nettype](params).to(device)
 
     checkpoint_file = params["best_checkpoint_path"]
     model = load_model(model, params, checkpoint_file, device)
