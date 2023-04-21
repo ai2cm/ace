@@ -1,4 +1,4 @@
-from metrics import (
+from .metrics import (
     lat_cell_centers,
     spherical_area_weights,
     weighted_mean,
