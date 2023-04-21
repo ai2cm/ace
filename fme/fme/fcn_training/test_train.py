@@ -2,6 +2,7 @@
 
 import h5py
 import numpy as np
+import pytest
 import subprocess
 import tempfile
 import contextlib
@@ -18,6 +19,7 @@ def _get_test_yaml_file(
     prediction_length,
     num_channels=2,
     config_name="unit_test",
+    nettype="afno",
 ):
     channels = list(range(num_channels))
 
@@ -47,7 +49,7 @@ def _get_test_yaml_file(
 
        #afno hyperparams
        num_blocks: 8
-       nettype: 'afno'
+       nettype: '{nettype}'
        patch_size: 8
        width: 56
        modes: 32
@@ -115,13 +117,16 @@ def train_context():
                     yield train_dir, valid_dir, stats_dir, results_dir
 
 
-def test_train_runs_era5():
+@pytest.mark.parametrize(
+    "nettype,height,width", [("afno", 720, 40), ("FourierNeuralOperatorNet", 720, 1440)]
+)
+def test_train_runs_era5(nettype, height, width):
     """Make sure that training runs without errors."""
 
     # TODO(gideond) parameterize
     seed = 0
     np.random.seed(seed)
-    num_time_steps, num_channels, height, width = 2, 2, 720, 40
+    num_time_steps, num_channels, height, width = 2, 2, height, width
 
     with train_context() as (train_dir, valid_dir, stats_dir, results_dir):
         _ = _save_to_tmpfile(
@@ -160,6 +165,7 @@ def test_train_runs_era5():
             global_stds,
             prediction_length=num_time_steps,
             num_channels=num_channels,
+            nettype=nettype,
         )
 
         train_process = subprocess.run(
