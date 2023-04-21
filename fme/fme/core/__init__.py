@@ -1,6 +1,4 @@
-from .core.version import __version__
-
-from .core.metrics import (
+from metrics import (
     lat_cell_centers,
     spherical_area_weights,
     weighted_mean,
