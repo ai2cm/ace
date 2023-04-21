@@ -3,17 +3,7 @@ from typing import Iterable, Optional, TypeAlias, Union
 import torch
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
-Number: TypeAlias = Union[int, float]
 Tensor: TypeAlias = torch.Tensor
-
-
-def _create_range(start: Number, stop: Number, num_steps: int) -> Tensor:
-    if num_steps == 1:
-        raise ValueError("Range must include start and stop, e.g. num_steps > 1.")
-
-    step = (stop - start) / (num_steps - 1)
-    ret = torch.arange(0, num_steps) * step + start
-    return ret
 
 
 def lat_cell_centers(num_points: int) -> Tensor:
@@ -28,7 +18,7 @@ def lat_cell_centers(num_points: int) -> Tensor:
     offset = (180.0 / num_points) / 2.0
     pole_center = 90.0 - offset
     start, stop = -pole_center, pole_center
-    return _create_range(start, stop, num_points)
+    return torch.linspace(start, stop, num_points)
 
 
 def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
@@ -40,6 +30,25 @@ def spherical_area_weights(num_lat: int, num_lon: int) -> Tensor:
     weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
     weights /= weights.sum()
     return weights
+
+
+def weighted_mean(
+    tensor: Tensor,
+    weights: Optional[Tensor] = None,
+    dim: Dimension = (),
+) -> Tensor:
+    """Computes the weighted mean across the specified list of dimensions.
+
+    Args:
+        tensor: Tensor
+        weights: Weights to apply to the mean.
+        dim: Dimensions to compute the mean over.
+
+    Returns a tensor of the weighted mean averaged over the specified dimensions `dim`.
+    """
+    if weights is None:
+        return tensor.mean(dim=dim)
+    return (tensor * weights).sum(dim=dim) / weights.sum()
 
 
 def weighted_mean_bias(
@@ -63,9 +72,7 @@ def weighted_mean_bias(
         truth.shape == predicted.shape
     ), "Truth and predicted should have the same shape."
     bias = predicted - truth
-    if weights is not None:
-        bias *= weights
-    return bias.mean(dim=dim)
+    return weighted_mean(bias, weights=weights, dim=dim)
 
 
 def root_mean_squared_error(
@@ -94,6 +101,4 @@ def root_mean_squared_error(
         truth.shape == predicted.shape
     ), "Truth and predicted should have the same shape."
     sq_bias = torch.square(predicted - truth)
-    if weights is not None:
-        sq_bias *= weights
-    return sq_bias.mean(dim=dim).sqrt()
+    return weighted_mean(sq_bias, weights=weights, dim=dim).sqrt()
