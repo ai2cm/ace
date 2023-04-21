@@ -1,4 +1,5 @@
-from typing import Iterable, Optional, TypeAlias, Union
+from typing import Iterable, Optional, Union
+from typing_extensions import TypeAlias
 
 import torch
 
