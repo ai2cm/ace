@@ -1,6 +1,6 @@
 import copy
 import os
-import numpy as np
+from typing import Any, Dict
 import netCDF4
 from .data_loader_fv3gfs import FV3GFSDataset
 import pytest
@@ -9,7 +9,7 @@ TEST_PATH = "/traindata"
 TEST_STATS_PATH = "/statsdata"
 TEST_IN_NAMES = ["UGRD10m", "VGRD10m", "PRMSL", "TCWV"]
 TEST_OUT_NAMES = ["UGRD10m", "VGRD10m", "TMP850", "TCWV"]
-TEST_PARAMS = {
+TEST_PARAMS: Dict[str, Any] = {
     "n_history": 0,
     "crop_size_x": None,
     "crop_size_y": None,
@@ -35,10 +35,11 @@ TEST_PARAMS_SPECIFY_BY_NAME["out_names"] = TEST_OUT_NAMES
 
 
 class DotDict:
-"""Overrides the dot operator for accessing fields to be dict lookup.
+    """Overrides the dot operator for accessing fields to be dict lookup.
 
-e.g. `dotdict.key == dotdict['key']  == dotdict.items['key']`
-"""
+    e.g. `dotdict.key == dotdict['key']  == dotdict.items['key']`
+    """
+
     def __init__(self, items):
         self.items = items
 
@@ -76,11 +77,11 @@ def test_FV3GFSDataset_getitem():
 
 def test_FV3GFSDataset_raises_value_error_if_names_and_channels_both_specified():
     params = copy.copy(TEST_PARAMS)
-    params['in_names'] = ['foo', 'bar']
+    params["in_names"] = ["foo", "bar"]
     with pytest.raises(ValueError):
         FV3GFSDataset(DotDict(params), TEST_PATH, True)
 
     params = copy.copy(TEST_PARAMS)
-    params['out_names'] = ['foo', 'bar']
+    params["out_names"] = ["foo", "bar"]
     with pytest.raises(ValueError):
         FV3GFSDataset(DotDict(params), TEST_PATH, True)
