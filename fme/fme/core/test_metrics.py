@@ -127,6 +127,6 @@ def test_root_mean_squared_error(variable, time, lat, lon):
         torch.ones(variable, time, lat, lon),
         weights=random_weights,
     )
-    # assert torch.all(
-    #     torch.isclose(result, (random_weights / random_weights.sum()).sqrt())
-    # ), "Root mean squared error between zero and one should be the mean of the weights."
+    assert torch.isclose(
+        result, torch.tensor(float(variable) * time).sqrt()
+    ), "RMSE of ones and zeros shoudl be sqrt of the number of elements."
