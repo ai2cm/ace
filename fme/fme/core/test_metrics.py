@@ -62,7 +62,9 @@ def test_weighted_mean(variable, time, lat, lon):
     ), "Weighted mean of zeros should be zero."
 
     result = metrics.weighted_mean(torch.ones(variable, time, lat, lon), weights)
-    assert torch.all(torch.isclose(result, torch.Tensor([1.0]))), "The weighted mean of a constant should be that constant."
+    assert torch.all(
+        torch.isclose(result, torch.Tensor([1.0]))
+    ), "The weighted mean of a constant should be that constant."
 
 
 @pytest.mark.parametrize(*test_cases)
@@ -82,7 +84,9 @@ def test_weighted_mean_bias(variable, time, lat, lon):
     y = torch.ones(time, variable, lat, lon)
 
     result = metrics.weighted_mean_bias(x, y, weights)
-    assert torch.all(torch.isclose(result, torch.Tensor([1.0]))), "The weighted mean of a constant should be that constant."
+    assert torch.all(
+        torch.isclose(result, torch.Tensor([1.0]))
+    ), "The weighted mean of a constant should be that constant."
 
     result = metrics.weighted_mean_bias(x, y)
     assert result.shape == tuple(), "Should also work if you do not specify weights."
@@ -122,5 +126,5 @@ def test_root_mean_squared_error(variable, time, lat, lon):
         weights=random_weights,
     )
     assert torch.isclose(
-        result, torch.tensor(float(variable) * time).sqrt()
-    ), "RMSE of ones and zeros shoudl be sqrt of the number of elements."
+        result, torch.tensor([1.0]).sqrt()
+    ), "Root mean squared error between zero and one should be one."
