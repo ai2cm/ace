@@ -48,11 +48,8 @@ def weighted_mean(
     """
     if weights is None:
         return tensor.mean(dim=dim)
-    
-    a = (tensor * weights).sum(dim=dim)
-    b = weights.sum(dim=dim)
-    print(f"{a=}, {b=}")
-    return (tensor * weights).sum(dim=dim) / weights.sum(dim=dim)
+
+    return (tensor * weights).sum(dim=dim) / weights.expand(tensor.shape).sum(dim=dim)
 
 
 def weighted_mean_bias(
