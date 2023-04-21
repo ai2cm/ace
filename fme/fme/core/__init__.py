@@ -1,6 +1,4 @@
-__version__ = "0.1.0"
-
-from .core.metrics import (
+from .metrics import (
     lat_cell_centers,
     spherical_area_weights,
     weighted_mean,
