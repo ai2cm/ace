@@ -62,10 +62,7 @@ def test_weighted_mean(variable, time, lat, lon):
     ), "Weighted mean of zeros should be zero."
 
     result = metrics.weighted_mean(torch.ones(variable, time, lat, lon), weights)
-    assert torch.all(torch.isclose(result, torch.tensor([float(variable) * time]))), (
-        "Weighted mean of ones should be the dimension of the elements not being "
-        "broadcasted over by the weighing operation."
-    )
+    assert torch.all(torch.isclose(result, torch.Tensor([1.0]))), "The weighted mean of a constant should be that constant."
 
 
 @pytest.mark.parametrize(*test_cases)
@@ -85,10 +82,7 @@ def test_weighted_mean_bias(variable, time, lat, lon):
     y = torch.ones(time, variable, lat, lon)
 
     result = metrics.weighted_mean_bias(x, y, weights)
-    assert torch.all(torch.isclose(result, torch.Tensor([float(time) * variable]))), (
-        "Weighted global mean bias between zero and one should be the number of dims "
-        "not broadcasted over by the weighing operation."
-    )
+    assert torch.all(torch.isclose(result, torch.Tensor([1.0]))), "The weighted mean of a constant should be that constant."
 
     result = metrics.weighted_mean_bias(x, y)
     assert result.shape == tuple(), "Should also work if you do not specify weights."
