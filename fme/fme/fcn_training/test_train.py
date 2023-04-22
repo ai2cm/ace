@@ -1,11 +1,10 @@
 # Author(s): Gideon Dresdner <gideond@allenai.org>
 
-import h5py
+import netCDF4
 import numpy as np
 import pytest
 import subprocess
 import tempfile
-import contextlib
 
 
 def _get_test_yaml_file(
@@ -17,14 +16,13 @@ def _get_test_yaml_file(
     global_means_path,
     global_stds_path,
     prediction_length,
-    num_channels=2,
+    variable_names,
     config_name="unit_test",
     nettype="afno",
 ):
-    channels = list(range(num_channels))
-
     string = f"""
      {config_name}: &{config_name}
+       data_type: 'FV3GFS'
        loss: 'l2'
        lr: 5E-4
        scheduler: 'CosineAnnealingLR'
@@ -51,12 +49,13 @@ def _get_test_yaml_file(
        num_blocks: 8
        nettype: '{nettype}'
        patch_size: 8
+       embed_dim: 8
        width: 56
        modes: 32
        #options default, residual
        target: 'default'
-       in_channels: {channels}
-       out_channels: {channels}   #must be same as in_channels if prediction_type == 'iterative'
+       in_names: {variable_names}
+       out_names: {variable_names}   #must be same as in_channels if prediction_type == 'iterative'
        normalization: 'zscore' #options zscore (minmax not supported)
        train_data_path: '{train_data_path}'
        valid_data_path: '{valid_data_path}'
@@ -90,92 +89,63 @@ def _get_test_yaml_file(
         return f.name
 
 
-def _save_to_tmpfile(data, dir, filetype="h5"):
-    suffices = {"h5": ".h5", "npy": ".npy"}
-    if filetype not in suffices:
-        raise ValueError(f"Unknown save format {filetype}")
-
-    with tempfile.NamedTemporaryFile(
-        dir=dir, mode="w", delete=False, suffix=suffices[filetype]
-    ) as f:
-        if filetype == "h5":
-            with h5py.File(f.name, "w") as hf:
-                hf.create_dataset("fields", data=data)
-        elif filetype == "npy":
-            np.save(f.name, data)
-        else:
-            raise ValueError(f"Unknown save format {filetype}")
-        return f.name
+def _save_netcdf(filename, dim_sizes, variable_names):
+    """Save netCDF with random data and given dims and variables."""
+    ds = netCDF4.Dataset(filename, "w", format="NETCDF4_CLASSIC")
+    for dim_name, size in dim_sizes.items():
+        dim_size = None if dim_name == "time" else size
+        ds.createDimension(dim_name, dim_size)
+        ds.createVariable(dim_name, np.float32, (dim_name,))
+        ds[dim_name][:] = np.arange(size)
+    for name in variable_names:
+        ds.createVariable(name, np.float32, list(dim_sizes))
+        ds[name][:] = np.random.randn(*list(dim_sizes.values()))
+    ds.close()
 
 
-@contextlib.contextmanager
-def train_context():
-    with tempfile.TemporaryDirectory() as train_dir:
-        with tempfile.TemporaryDirectory() as valid_dir:
-            with tempfile.TemporaryDirectory() as stats_dir:
-                with tempfile.TemporaryDirectory() as results_dir:
-                    yield train_dir, valid_dir, stats_dir, results_dir
-
-
-@pytest.mark.parametrize(
-    "nettype,height,width", [("afno", 720, 40), ("FourierNeuralOperatorNet", 720, 1440)]
-)
-def test_train_runs_era5(nettype, height, width):
+@pytest.mark.parametrize("nettype", ["afno", "FourierNeuralOperatorNet"])
+def test_train_runs(tmp_path, nettype):
     """Make sure that training runs without errors."""
 
-    # TODO(gideond) parameterize
     seed = 0
     np.random.seed(seed)
-    num_time_steps, num_channels, height, width = 2, 2, height, width
+    variable_names = ["foo", "bar"]
+    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    stats_dim_sizes = {}
+    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
 
-    with train_context() as (train_dir, valid_dir, stats_dir, results_dir):
-        _ = _save_to_tmpfile(
-            np.random.randn(num_time_steps, num_channels, height + 1, width),
-            dir=train_dir,
-            filetype="h5",
-        )
-        _ = _save_to_tmpfile(
-            np.random.randn(num_time_steps, num_channels, height + 1, width),
-            dir=valid_dir,
-            filetype="h5",
-        )
-        time_means = _save_to_tmpfile(
-            np.random.randn(1, num_channels + 1, height, width),
-            dir=valid_dir,
-            filetype="npy",
-        )
-        global_means = _save_to_tmpfile(
-            np.random.randn(1, num_channels + 1, height, width),
-            dir=stats_dir,
-            filetype="npy",
-        )
-        global_stds = _save_to_tmpfile(
-            abs(np.random.randn(1, num_channels + 1, height, width)),
-            dir=stats_dir,
-            filetype="npy",
-        )
+    data_dir = tmp_path / "data"
+    stats_dir = tmp_path / "stats"
+    results_dir = tmp_path / "output"
+    data_dir.mkdir()
+    stats_dir.mkdir()
+    results_dir.mkdir()
+    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
 
-        yaml_config = _get_test_yaml_file(
-            train_dir,
-            valid_dir,
-            valid_dir,
-            results_dir,
-            time_means,
-            global_means,
-            global_stds,
-            prediction_length=num_time_steps,
-            num_channels=num_channels,
-            nettype=nettype,
-        )
+    yaml_config = _get_test_yaml_file(
+        data_dir,
+        data_dir,
+        data_dir,
+        results_dir,
+        stats_dir / "stats-timemean.nc",
+        stats_dir / "stats-mean.nc",
+        stats_dir / "stats-stddev.nc",
+        prediction_length=2,
+        variable_names=variable_names,
+        nettype=nettype,
+    )
 
-        train_process = subprocess.run(
-            [
-                "python",
-                "train.py",
-                "--yaml_config",
-                yaml_config,
-                "--config",
-                "unit_test",
-            ]
-        )
-        train_process.check_returncode()
+    train_process = subprocess.run(
+        [
+            "python",
+            "train.py",
+            "--yaml_config",
+            yaml_config,
+            "--config",
+            "unit_test",
+        ]
+    )
+    train_process.check_returncode()
