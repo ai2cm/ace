@@ -247,12 +247,6 @@ class Trainer:
                 self.scheduler.step(valid_logs["valid_loss"])
             elif self.params.scheduler == "CosineAnnealingLR":
                 self.scheduler.step()
-                if self.epoch >= self.params.max_epochs:
-                    logging.info(
-                        "Terminating training after reaching params.max_epochs "
-                        "while LR scheduler is set to CosineAnnealingLR"
-                    )
-                    exit()
 
             if self.world_rank == 0:
                 if self.params.save_checkpoint:

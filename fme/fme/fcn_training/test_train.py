@@ -104,8 +104,8 @@ def _save_netcdf(filename, dim_sizes, variable_names):
 
 
 @pytest.mark.parametrize("nettype", ["afno", "FourierNeuralOperatorNet"])
-def test_train_runs(tmp_path, nettype):
-    """Make sure that training runs without errors."""
+def test_train_and_inference_runs(tmp_path, nettype):
+    """Make sure that training and inference run without errors."""
 
     seed = 0
     np.random.seed(seed)
@@ -149,3 +149,15 @@ def test_train_runs(tmp_path, nettype):
         ]
     )
     train_process.check_returncode()
+
+    inference_process = subprocess.run(
+        [
+            "python",
+            "inference/inference.py",
+            "--yaml_config",
+            yaml_config,
+            "--config",
+            "unit_test",
+        ]
+    )
+    inference_process.check_returncode()
