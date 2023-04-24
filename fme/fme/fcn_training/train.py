@@ -94,6 +94,7 @@ class Trainer:
 
         if params.log_to_wandb:
             wandb.init(config=params, project=params.project, entity=params.entity)
+            logging_utils.log_beaker_url()
 
         logging.info("rank %d, begin data loader init" % world_rank)
         (
