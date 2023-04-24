@@ -73,13 +73,7 @@ import wandb
 from datetime import datetime
 from fme.fcn_training import NET_REGISTRY
 
-
-fld = "z500"  # diff flds have diff decor times and hence differnt ics
-if fld == "z500" or fld == "2m_temperature" or fld == "t850":
-    DECORRELATION_TIME = 36  # 9 days (36) for z500, 2 (8 steps) days for u10, v10
-else:
-    DECORRELATION_TIME = 8  # 9 days (36) for z500, 2 (8 steps) days for u10, v10
-idxes = {"u10": 0, "z500": 14, "2m_temperature": 2, "v10": 1, "t850": 5}
+DECORRELATION_TIME = 36
 
 
 def gaussian_perturb(x, level=0.01, device=0):
@@ -352,10 +346,9 @@ def autoregressive_inference(params, ic, valid_data_full, model):
                 )
 
             if params.log_to_screen:
-                idx = idxes[fld]
                 logging.info(
                     "Predicted timestep {} of {}. {} RMS Error: {}, ACC: {}".format(
-                        i, prediction_length, fld, valid_loss[i, idx], acc[i, idx]
+                        i, prediction_length, out_names[0], valid_loss[i, 0], acc[i, 0]
                     )
                 )
                 if params.interp > 0:
@@ -363,9 +356,9 @@ def autoregressive_inference(params, ic, valid_data_full, model):
                         "[COARSE] Predicted timestep {} of {}. {} RMS Error: {}, ACC: {}".format(  # noqa: E501
                             i,
                             prediction_length,
-                            fld,
-                            valid_loss_coarse[i, idx],
-                            acc_coarse[i, idx],
+                            out_names[0],
+                            valid_loss_coarse[i, 0],
+                            acc_coarse[i, 0],
                         )
                     )
             if params.log_to_wandb:
@@ -553,12 +546,8 @@ if __name__ == "__main__":
 
     n_ics = params["n_initial_conditions"]
 
-    if fld == "z500" or fld == "t850":
-        n_samples_per_year = 1336
-    else:
-        n_samples_per_year = 1460
-
     if params["ics_type"] == "default":
+        n_samples_per_year = 1336
         num_samples = n_samples_per_year - params.prediction_length
         stop = num_samples
         ics = np.arange(0, stop, DECORRELATION_TIME)
@@ -597,7 +586,6 @@ if __name__ == "__main__":
     if params.interp > 0:
         autoregressive_inference_filetag = "_coarse"
 
-    autoregressive_inference_filetag += "_" + fld + ""
     if vis:
         autoregressive_inference_filetag += "_vis"
     # get data and models
