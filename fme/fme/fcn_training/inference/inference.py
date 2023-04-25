@@ -58,6 +58,7 @@ from collections import OrderedDict
 import logging
 from utils import logging_utils
 from utils.weighted_acc_rmse import (
+    compute_time_rmse,
     weighted_rmse_torch_channels,
     weighted_acc_torch_channels,
     unweighted_acc_torch_channels,
@@ -71,6 +72,8 @@ from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
 import wandb
 from datetime import datetime
+
+import fme
 from fme.fcn_training import NET_REGISTRY
 
 DECORRELATION_TIME = 36
@@ -449,6 +452,15 @@ def autoregressive_inference(params, ic, valid_data_full, model):
                         inference_logs[name] = all_metrics[i, t, j]
                     except IndexError:
                         logging.error(f"Failed to label {name}")
+
+    lat_dim, lon_dim = 2, 3
+    lat_size, lon_size = seq_real.shape[lat_dim], seq_real.shape[lon_dim]
+    weights = fme.spherical_area_weights(lat_size, lon_size)
+    time_rmse = compute_time_rmse(seq_real, seq_pred, weights=weights)
+    time_rmse *= std.cpu()
+    for i in range(len(out_names)):
+        tag = f"ic{ic}/channel{i}-{out_names[i]}"
+        inference_logs[f"rmse_of_time_mean/{tag}"] = time_rmse[i].item()
 
     seq_real = seq_real.cpu().numpy()
     seq_pred = seq_pred.cpu().numpy()
