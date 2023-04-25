@@ -54,7 +54,7 @@ from torch.utils.data.distributed import DistributedSampler
 import h5py
 
 # import cv2
-from utils.img_utils import reshape_fields, reshape_precip
+from utils.img_utils import reshape_fields
 from utils.data_loader_fv3gfs import FV3GFSDataset
 from utils.constants import CHANNEL_NAMES
 
@@ -103,6 +103,7 @@ def get_data_loader(params, files_pattern, distributed, train):
 class GetDataset(Dataset):
     def __init__(self, params, location, train):
         self.params = params
+        self._check_for_not_implemented_features()
         self.location = location
         self.train = train
         self.dt = params.dt
@@ -118,19 +119,12 @@ class GetDataset(Dataset):
         self.roll = params.roll
         self._get_files_stats()
         self.two_step_training = params.two_step_training
-        self.orography = params.orography
-        self.precip = True if "precip" in params else False
         self.add_noise = params.add_noise if train else False
         self.in_means = np.load(params.global_means_path)[:, self.in_channels]
         self.in_stds = np.load(params.global_stds_path)[:, self.in_channels]
         self.out_means = np.load(params.global_means_path)[:, self.out_channels]
         self.out_stds = np.load(params.global_stds_path)[:, self.out_channels]
         self.out_time_means = np.load(params.time_means_path)[:, self.out_channels]
-
-        if self.precip:
-            path = params.precip + "/train" if train else params.precip + "/test"
-            self.precip_paths = glob.glob(path + "/*.h5")
-            self.precip_paths.sort()
 
         try:
             self.normalize = params.normalize
@@ -139,8 +133,14 @@ class GetDataset(Dataset):
                 True  # by default turn on normalization if not specified in config
             )
 
-        if self.orography:
-            self.orography_path = params.orography_path
+    def _check_for_not_implemented_features(self):
+        """Raise NotImplementedError for features removed from train.py"""
+        if "precip" in self.params:
+            raise NotImplementedError("precip training feature has been removed")
+        if "orography" in self.params:
+            raise NotImplementedError(
+                "feature to add orography to inputs has been removed"
+            )
 
     def _get_files_stats(self):
         self.files_paths = glob.glob(self.location + "/*.h5")
@@ -157,7 +157,6 @@ class GetDataset(Dataset):
 
         self.n_samples_total = self.n_years * self.n_samples_per_year
         self.files = [None for _ in range(self.n_years)]
-        self.precip_files = [None for _ in range(self.n_years)]
         logging.info("Number of samples per year: {}".format(self.n_samples_per_year))
         logging.info(
             "Found data at path {}. Number of examples: {}. Image Shape: {} x {} x {}".format(  # noqa: E501
@@ -178,13 +177,6 @@ class GetDataset(Dataset):
     def _open_file(self, year_idx):
         _file = h5py.File(self.files_paths[year_idx], "r")
         self.files[year_idx] = _file["fields"]
-        if self.orography:
-            _orog_file = h5py.File(self.orography_path, "r")
-            self.orography_field = _orog_file["orog"]
-        if self.precip:
-            self.precip_files[year_idx] = h5py.File(self.precip_paths[year_idx], "r")[
-                "tp"
-            ]
 
     @property
     def data_array(self):
@@ -210,28 +202,13 @@ class GetDataset(Dataset):
         if self.files[year_idx] is None:
             self._open_file(year_idx)
 
-        if not self.precip:
-            # if we are not at least self.dt*n_history timesteps into the prediction
-            if local_idx < self.dt * self.n_history:
-                local_idx += self.dt * self.n_history
+        # if we are not at least self.dt*n_history timesteps into the prediction
+        if local_idx < self.dt * self.n_history:
+            local_idx += self.dt * self.n_history
 
-            # if we are on the last image in a year predict identity,
-            # else predict next timestep
-            step = 0 if local_idx >= self.n_samples_per_year - self.dt else self.dt
-        else:
-            inp_local_idx = local_idx
-            tar_local_idx = local_idx
-            # if we are on the last image in a year predict identity,
-            # else predict next timestep
-            step = 0 if tar_local_idx >= self.n_samples_per_year - self.dt else self.dt
-            # first year has 2 missing samples in precip
-            # (they are first two time points)
-            if year_idx == 0:
-                lim = 1458
-                local_idx = local_idx % lim
-                inp_local_idx = local_idx + 2
-                tar_local_idx = local_idx
-                step = 0 if tar_local_idx >= lim - self.dt else self.dt
+        # if we are on the last image in a year predict identity,
+        # else predict next timestep
+        step = 0 if local_idx >= self.n_samples_per_year - self.dt else self.dt
 
         # if two_step_training flag is true then ensure that local_idx is not
         # the last or last but one sample in a year
@@ -246,11 +223,6 @@ class GetDataset(Dataset):
         else:
             y_roll = 0
 
-        if self.orography:
-            orog = self.orography_field[0:720]
-        else:
-            orog = None
-
         if self.train and (self.crop_size_x or self.crop_size_y):
             rnd_x = random.randint(0, self.img_shape_x - self.crop_size_x)
             rnd_y = random.randint(0, self.img_shape_y - self.crop_size_y)
@@ -258,10 +230,15 @@ class GetDataset(Dataset):
             rnd_x = 0
             rnd_y = 0
 
-        if self.precip:
+        if self.two_step_training:
             return (
                 reshape_fields(
-                    self.files[year_idx][inp_local_idx, self.in_channels],
+                    self.files[year_idx][
+                        (local_idx - self.dt * self.n_history) : (
+                            local_idx + 1
+                        ) : self.dt,
+                        self.in_channels,
+                    ],
                     "inp",
                     self.crop_size_x,
                     self.crop_size_y,
@@ -272,9 +249,13 @@ class GetDataset(Dataset):
                     self.train,
                     self.in_means,
                     self.in_stds,
+                    self.normalize,
+                    self.add_noise,
                 ),
-                reshape_precip(
-                    self.precip_files[year_idx][tar_local_idx + step],
+                reshape_fields(
+                    self.files[year_idx][
+                        local_idx + step : local_idx + step + 2, self.out_channels
+                    ],
                     "tar",
                     self.crop_size_x,
                     self.crop_size_y,
@@ -283,86 +264,45 @@ class GetDataset(Dataset):
                     self.params,
                     y_roll,
                     self.train,
+                    self.out_means,
+                    self.out_stds,
+                    self.normalize,
                 ),
             )
         else:
-            if self.two_step_training:
-                return (
-                    reshape_fields(
-                        self.files[year_idx][
-                            (local_idx - self.dt * self.n_history) : (
-                                local_idx + 1
-                            ) : self.dt,
-                            self.in_channels,
-                        ],
-                        "inp",
-                        self.crop_size_x,
-                        self.crop_size_y,
-                        rnd_x,
-                        rnd_y,
-                        self.params,
-                        y_roll,
-                        self.train,
-                        self.in_means,
-                        self.in_stds,
-                        self.normalize,
-                        orog,
-                        self.add_noise,
-                    ),
-                    reshape_fields(
-                        self.files[year_idx][
-                            local_idx + step : local_idx + step + 2, self.out_channels
-                        ],
-                        "tar",
-                        self.crop_size_x,
-                        self.crop_size_y,
-                        rnd_x,
-                        rnd_y,
-                        self.params,
-                        y_roll,
-                        self.train,
-                        self.out_means,
-                        self.out_stds,
-                        self.normalize,
-                        orog,
-                    ),
-                )
-            else:
-                return (
-                    reshape_fields(
-                        self.files[year_idx][
-                            (local_idx - self.dt * self.n_history) : (
-                                local_idx + 1
-                            ) : self.dt,
-                            self.in_channels,
-                        ],
-                        "inp",
-                        self.crop_size_x,
-                        self.crop_size_y,
-                        rnd_x,
-                        rnd_y,
-                        self.params,
-                        y_roll,
-                        self.train,
-                        self.in_means,
-                        self.in_stds,
-                        self.normalize,
-                        orog,
-                        self.add_noise,
-                    ),
-                    reshape_fields(
-                        self.files[year_idx][local_idx + step, self.out_channels],
-                        "tar",
-                        self.crop_size_x,
-                        self.crop_size_y,
-                        rnd_x,
-                        rnd_y,
-                        self.params,
-                        y_roll,
-                        self.train,
-                        self.out_means,
-                        self.out_stds,
-                        self.normalize,
-                        orog,
-                    ),
-                )
+            return (
+                reshape_fields(
+                    self.files[year_idx][
+                        (local_idx - self.dt * self.n_history) : (
+                            local_idx + 1
+                        ) : self.dt,
+                        self.in_channels,
+                    ],
+                    "inp",
+                    self.crop_size_x,
+                    self.crop_size_y,
+                    rnd_x,
+                    rnd_y,
+                    self.params,
+                    y_roll,
+                    self.train,
+                    self.in_means,
+                    self.in_stds,
+                    self.normalize,
+                    self.add_noise,
+                ),
+                reshape_fields(
+                    self.files[year_idx][local_idx + step, self.out_channels],
+                    "tar",
+                    self.crop_size_x,
+                    self.crop_size_y,
+                    rnd_x,
+                    rnd_y,
+                    self.params,
+                    y_roll,
+                    self.train,
+                    self.out_means,
+                    self.out_stds,
+                    self.normalize,
+                ),
+            )

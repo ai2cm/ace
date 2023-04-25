@@ -35,8 +35,6 @@ def _get_test_yaml_file(
        ics_type: "default"
        save_raw_forecasts: !!bool True
        save_channel: !!bool False
-       masked_acc: !!bool False
-       maskpath: None
        perturb: !!bool False
        add_grid: !!bool False
        N_grid_channels: 0
@@ -52,8 +50,6 @@ def _get_test_yaml_file(
        embed_dim: 8
        width: 56
        modes: 32
-       #options default, residual
-       target: 'default'
        in_names: {variable_names}
        out_names: {variable_names}   #must be same as in_channels if prediction_type == 'iterative'
        normalization: 'zscore' #options zscore (minmax not supported)
@@ -64,9 +60,6 @@ def _get_test_yaml_file(
        time_means_path:   '{time_means_path}'
        global_means_path: '{global_means_path}'
        global_stds_path:  '{global_stds_path}'
-
-       orography: !!bool False
-       orography_path: None
 
        log_to_screen: !!bool True
        log_to_wandb: !!bool False
@@ -109,6 +102,7 @@ def test_train_and_inference_runs(tmp_path, nettype):
 
     seed = 0
     np.random.seed(seed)
+    config_name = "unit_test"
     variable_names = ["foo", "bar"]
     data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
     stats_dim_sizes = {}
@@ -145,11 +139,13 @@ def test_train_and_inference_runs(tmp_path, nettype):
             "--yaml_config",
             yaml_config,
             "--config",
-            "unit_test",
+            config_name,
         ]
     )
     train_process.check_returncode()
 
+    # use --vis flag because this is how the script is called in the
+    # run-train-and-inference.sh script. This option saves dataset/video of output.
     inference_process = subprocess.run(
         [
             "python",
@@ -157,7 +153,8 @@ def test_train_and_inference_runs(tmp_path, nettype):
             "--yaml_config",
             yaml_config,
             "--config",
-            "unit_test",
+            config_name,
+            "--vis",
         ]
     )
     inference_process.check_returncode()

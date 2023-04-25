@@ -47,8 +47,6 @@ class FV3GFSDataset(Dataset):
         self.crop_size_y = params.crop_size_y
         self.roll = params.roll
         self.two_step_training = params.two_step_training
-        self.orography = params.orography
-        self.precip = True if "precip" in params else False
         self.add_noise = params.add_noise if train else False
         self.normalize = params.normalize if "normalize" in params else True
         self._get_files_stats()
@@ -72,9 +70,9 @@ class FV3GFSDataset(Dataset):
             raise NotImplementedError(
                 "two_step_training not implemented for FV3GFSDataset"
             )
-        if self.params.orography:
+        if "orography" in self.params:
             raise NotImplementedError(
-                "training w/ orography not implemented for FV3GFSDataset"
+                "Adding orography to inputs no longer implemented in training code."
             )
         if "precip" in self.params:
             raise NotImplementedError(
@@ -174,7 +172,6 @@ class FV3GFSDataset(Dataset):
             self.in_means,
             self.in_stds,
             self.normalize,
-            self.orography,
             self.add_noise,
         )
         out_tensor = reshape_fields(
@@ -190,7 +187,6 @@ class FV3GFSDataset(Dataset):
             self.out_means,
             self.out_stds,
             self.normalize,
-            self.orography,
         )
         return in_tensor, out_tensor
 

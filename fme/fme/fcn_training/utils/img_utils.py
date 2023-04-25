@@ -48,7 +48,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 class PeriodicPad2d(nn.Module):
@@ -84,7 +83,6 @@ def reshape_fields(
     means,
     stds,
     normalize=True,
-    orog=None,
     add_noise=False,
 ):
     # Takes in np array of size (n_history+1, c, h, w) and returns
@@ -137,10 +135,6 @@ def reshape_fields(
                 )
             img = np.concatenate((img, grid), axis=1)
 
-    if params.orography and inp_or_tar == "inp":
-        img = np.concatenate((img, np.expand_dims(orog, axis=(0, 1))), axis=1)
-        n_channels += 1
-
     if params.roll:
         img = np.roll(img, y_roll, axis=-1)
 
@@ -159,76 +153,3 @@ def reshape_fields(
         img = img + np.random.normal(0, scale=params.noise_std, size=img.shape)
 
     return torch.as_tensor(img)
-
-
-def reshape_precip(
-    img,
-    inp_or_tar,
-    crop_size_x,
-    crop_size_y,
-    rnd_x,
-    rnd_y,
-    params,
-    y_roll,
-    train,
-    normalize=True,
-):
-    if len(np.shape(img)) == 2:
-        img = np.expand_dims(img, 0)
-
-    img = img[:, :720, :]
-    img_shape_x = img.shape[-2]
-    img_shape_y = img.shape[-1]
-    n_channels = 1
-    if crop_size_x is None:
-        crop_size_x = img_shape_x
-    if crop_size_y is None:
-        crop_size_y = img_shape_y
-
-    if normalize:
-        eps = params.precip_eps
-        img = np.log1p(img / eps)
-    if params.add_grid:
-        if inp_or_tar == "inp":
-            if params.gridtype == "linear":
-                assert (
-                    params.N_grid_channels == 2
-                ), "N_grid_channels must be set to 2 for gridtype linear"
-                x = np.meshgrid(np.linspace(-1, 1, img_shape_x))
-                y = np.meshgrid(np.linspace(-1, 1, img_shape_y))
-                grid_x, grid_y = np.meshgrid(y, x)
-                grid = np.stack((grid_x, grid_y), axis=0)
-            elif params.gridtype == "sinusoidal":
-                assert (
-                    params.N_grid_channels == 4
-                ), "N_grid_channels must be set to 4 for gridtype sinusoidal"
-                x1 = np.meshgrid(np.sin(np.linspace(0, 2 * np.pi, img_shape_x)))
-                x2 = np.meshgrid(np.cos(np.linspace(0, 2 * np.pi, img_shape_x)))
-                y1 = np.meshgrid(np.sin(np.linspace(0, 2 * np.pi, img_shape_y)))
-                y2 = np.meshgrid(np.cos(np.linspace(0, 2 * np.pi, img_shape_y)))
-                grid_x1, grid_y1 = np.meshgrid(y1, x1)
-                grid_x2, grid_y2 = np.meshgrid(y2, x2)
-                grid = np.expand_dims(
-                    np.stack((grid_x1, grid_y1, grid_x2, grid_y2), axis=0), axis=0
-                )
-            img = np.concatenate((img, grid), axis=1)
-
-    if params.roll:
-        img = np.roll(img, y_roll, axis=-1)
-
-    if train and (crop_size_x or crop_size_y):
-        img = img[:, rnd_x : rnd_x + crop_size_x, rnd_y : rnd_y + crop_size_y]
-
-    img = np.reshape(img, (n_channels, crop_size_x, crop_size_y))
-    return torch.as_tensor(img)
-
-
-def vis_precip(fields):
-    pred, tar = fields
-    fig, ax = plt.subplots(1, 2, figsize=(24, 12))
-    ax[0].imshow(pred, cmap="coolwarm")
-    ax[0].set_title("tp pred")
-    ax[1].imshow(tar, cmap="coolwarm")
-    ax[1].set_title("tp tar")
-    fig.tight_layout()
-    return fig
