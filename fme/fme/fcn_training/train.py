@@ -60,23 +60,19 @@ from utils import logging_utils
 logging_utils.config_logger()
 from utils.YParams import YParams
 from utils.data_loader_multifiles import get_data_loader
-from utils.img_utils import vis_precip
 import wandb
 from utils.weighted_acc_rmse import (
     weighted_rmse_torch,
-    unlog_tp_torch,
     weighted_global_mean_gradient_magnitude,
 )
 from apex import optimizers
 from utils.darcy_loss import LpLoss
-import matplotlib.pyplot as plt
 from collections import OrderedDict
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
 
-import fme
 from registry import NET_REGISTRY
 from inference import inference
 
@@ -118,49 +114,13 @@ class Trainer:
         params.img_crop_shape_x = self.valid_dataset.img_shape_x
         params.img_crop_shape_y = self.valid_dataset.img_shape_y
         params.N_in_channels = self.train_dataset.n_in_channels
-        if params.orography:
-            params.N_in_channels += 1
         params.N_out_channels = self.train_dataset.n_out_channels
         params.in_names = self.train_dataset.in_names
         params.out_names = self.train_dataset.out_names
 
-        # precip models
-        self.precip = True if "precip" in params else False
-
         BackboneNet = NET_REGISTRY[params.nettype]
 
-        if self.precip:
-            if "model_wind_path" not in params:
-                raise Exception("no backbone model weights specified")
-            # load a wind model
-            # the wind model has out channels = in channels
-            out_channels = np.array(params["in_channels"])
-            params["N_out_channels"] = len(out_channels)
-
-            if params.nettype_wind == "afno":
-                self.model_wind = BackboneNet(params).to(self.device)
-            else:
-                raise Exception("not implemented")
-
-            if dist.is_initialized():
-                self.model_wind = DistributedDataParallel(
-                    self.model_wind,
-                    device_ids=[params.local_rank],
-                    output_device=[params.local_rank],
-                    find_unused_parameters=True,
-                )
-            self.load_model_wind(params.model_wind_path)
-            self.switch_off_grad(self.model_wind)  # no backprop through the wind model
-
-        # reset out_channels for precip models
-        if self.precip:
-            params["N_out_channels"] = len(params["out_channels"])
-
         self.model = BackboneNet(params).to(self.device)
-
-        # precip model
-        if self.precip:
-            self.model = fme.PrecipNet(params, backbone=self.model).to(self.device)
 
         if self.params.enable_nhwc:
             # NHWC: Convert model to channels_last memory format
@@ -213,8 +173,6 @@ class Trainer:
         else:
             self.scheduler = None
 
-        """if params.log_to_screen:
-      logging.info(self.model)"""
         if params.log_to_screen:
             logging.info(
                 "Number of trainable model parameters: {}".format(
@@ -236,15 +194,17 @@ class Trainer:
                 logging.info(f"Epoch: {epoch+1}")
             if dist.is_initialized():
                 self.train_sampler.set_epoch(epoch)
-            #        self.valid_sampler.set_epoch(epoch)
 
-            start = time.time()
+            start_time = time.time()
             _, _, train_logs = self.train_one_epoch()
             _, valid_logs = self.validate_one_epoch()
             inference_logs = self.inference_one_epoch()
 
+            train_loss = train_logs["loss"]
+            valid_loss = valid_logs["valid_loss"]
+
             if self.params.scheduler == "ReduceLROnPlateau":
-                self.scheduler.step(valid_logs["valid_loss"])
+                self.scheduler.step(valid_loss)
             elif self.params.scheduler == "CosineAnnealingLR":
                 self.scheduler.step()
 
@@ -252,30 +212,21 @@ class Trainer:
                 if self.params.save_checkpoint:
                     # checkpoint at the end of every epoch
                     self.save_checkpoint(self.params.checkpoint_path)
-                    if valid_logs["valid_loss"] <= best_valid_loss:
+                    if valid_loss <= best_valid_loss:
                         self.save_checkpoint(self.params.best_checkpoint_path)
-                        best_valid_loss = valid_logs["valid_loss"]
+                        best_valid_loss = valid_loss
 
             if self.params.log_to_screen:
-                logging.info(
-                    "Time taken for epoch {} is {} sec".format(
-                        epoch + 1, time.time() - start
-                    )
-                )
-                logging.info(
-                    "Train loss: {}. Valid loss: {}".format(
-                        train_logs["loss"], valid_logs["valid_loss"]
-                    )
-                )
+                time_elapsed = time.time() - start_time
+                logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
+                logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
 
             if self.params.log_to_wandb:
                 logging.info("Logging to wandb")
                 for pg in self.optimizer.param_groups:
                     lr = pg["lr"]
-                wandb.log(
-                    {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}},
-                    step=self.epoch,
-                )
+                all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
+                wandb.log(all_logs, step=self.epoch)
 
     def train_one_epoch(self):
         self.epoch += 1
@@ -285,18 +236,13 @@ class Trainer:
 
         for i, data in enumerate(self.train_data_loader, 0):
             self.iters += 1
-            # adjust_LR(optimizer, params, iters)
             data_start = time.time()
             inp, tar = map(lambda x: x.to(self.device, dtype=torch.float), data)
-            if self.params.orography and self.params.two_step_training:
-                orog = inp[:, -2:-1]
 
             if self.params.enable_nhwc:
                 inp = inp.to(memory_format=torch.channels_last)
                 tar = tar.to(memory_format=torch.channels_last)
 
-            if "residual_field" in self.params.target:
-                tar -= inp[:, 0 : tar.size()[1]]
             data_time += time.time() - data_start
 
             tr_start = time.time()
@@ -308,14 +254,9 @@ class Trainer:
                     loss_step_one = self.loss_obj(
                         gen_step_one, tar[:, 0 : self.params.N_out_channels]
                     )
-                    if self.params.orography:
-                        gen_step_two = self.model(
-                            torch.cat((gen_step_one, orog), axis=1)
-                        ).to(self.device, dtype=torch.float)
-                    else:
-                        gen_step_two = self.model(gen_step_one).to(
-                            self.device, dtype=torch.float
-                        )
+                    gen_step_two = self.model(gen_step_one).to(
+                        self.device, dtype=torch.float
+                    )
                     loss_step_two = self.loss_obj(
                         gen_step_two,
                         tar[
@@ -326,18 +267,7 @@ class Trainer:
                     loss = loss_step_one + loss_step_two
             else:
                 with amp.autocast(self.params.enable_amp):
-                    if (
-                        self.precip
-                    ):  # use a wind model to predict 17(+n) channels at t+dt
-                        with torch.no_grad():
-                            inp = self.model_wind(inp).to(
-                                self.device, dtype=torch.float
-                            )
-                        gen = self.model(inp.detach()).to(
-                            self.device, dtype=torch.float
-                        )
-                    else:
-                        gen = self.model(inp).to(self.device, dtype=torch.float)
+                    gen = self.model(inp).to(self.device, dtype=torch.float)
                     loss = self.loss_obj(gen, tar)
 
             if self.params.enable_amp:
@@ -352,13 +282,13 @@ class Trainer:
 
             tr_time += time.time() - tr_start
 
-        try:
+        if self.params.two_step_training:
             logs = {
                 "loss": loss,
                 "loss_step_one": loss_step_one,
                 "loss_step_two": loss_step_two,
             }
-        except:  # noqa: E722
+        else:
             logs = {"loss": loss}
 
         if dist.is_initialized():
@@ -389,15 +319,12 @@ class Trainer:
 
         valid_start = time.time()
 
-        sample_idx = np.random.randint(len(self.valid_data_loader))
         with torch.no_grad():
             image_logs = {}
             for i, data in enumerate(self.valid_data_loader, 0):
-                if (not self.precip) and i >= n_valid_batches:
+                if i >= n_valid_batches:
                     break
                 inp, tar = map(lambda x: x.to(self.device, dtype=torch.float), data)
-                if self.params.orography and self.params.two_step_training:
-                    orog = inp[:, -2:-1]
 
                 if self.params.two_step_training:
                     gen_step_one = self.model(inp).to(self.device, dtype=torch.float)
@@ -405,14 +332,9 @@ class Trainer:
                         gen_step_one, tar[:, 0 : self.params.N_out_channels]
                     )
 
-                    if self.params.orography:
-                        gen_step_two = self.model(
-                            torch.cat((gen_step_one, orog), axis=1)
-                        ).to(self.device, dtype=torch.float)
-                    else:
-                        gen_step_two = self.model(gen_step_one).to(
-                            self.device, dtype=torch.float
-                        )
+                    gen_step_two = self.model(gen_step_one).to(
+                        self.device, dtype=torch.float
+                    )
 
                     loss_step_two = self.loss_obj(
                         gen_step_two,
@@ -426,44 +348,19 @@ class Trainer:
                         gen_step_one, tar[:, 0 : self.params.N_out_channels]
                     )
                 else:
-                    if self.precip:
-                        with torch.no_grad():
-                            inp = self.model_wind(inp).to(
-                                self.device, dtype=torch.float
-                            )
-                        gen = self.model(inp.detach())
-                    else:
-                        gen = self.model(inp).to(self.device, dtype=torch.float)
+                    gen = self.model(inp).to(self.device, dtype=torch.float)
                     valid_loss += self.loss_obj(gen, tar)
                     valid_l1 += nn.functional.l1_loss(gen, tar)
 
                 valid_steps += 1.0
-                # save fields for vis before log norm
-                if (i == sample_idx) and (self.precip and self.params.log_to_wandb):
-                    fields = [
-                        gen[0, 0].detach().cpu().numpy(),
-                        tar[0, 0].detach().cpu().numpy(),
-                    ]
-
-                if self.precip:
-                    gen = unlog_tp_torch(gen, self.params.precip_eps)
-                    tar = unlog_tp_torch(tar, self.params.precip_eps)
 
                 # direct prediction weighted rmse
                 if self.params.two_step_training:
-                    if "residual_field" in self.params.target:
-                        gen_for_rmse = gen_step_one + inp
-                        tar_for_rmse = tar[:, 0 : self.params.N_out_channels] + inp
-                    else:
-                        gen_for_rmse = gen_step_one
-                        tar_for_rmse = tar[:, 0 : self.params.N_out_channels]
+                    gen_for_rmse = gen_step_one
+                    tar_for_rmse = tar[:, 0 : self.params.N_out_channels]
                 else:
-                    if "residual_field" in self.params.target:
-                        gen_for_rmse = gen + inp
-                        tar_for_rmse = tar + inp
-                    else:
-                        gen_for_rmse = gen
-                        tar_for_rmse = tar
+                    gen_for_rmse = gen
+                    tar_for_rmse = tar
                 valid_weighted_rmse += weighted_rmse_torch(gen_for_rmse, tar_for_rmse)
                 gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
                     gen_for_rmse
@@ -477,7 +374,7 @@ class Trainer:
                     / tar_gradient_magnitude
                 )
 
-                if not self.precip and i % 10 == 0:
+                if i % 10 == 0:
                     for j in range(gen.shape[1]):
                         name = self.valid_dataset.out_names[j]
                         gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(
@@ -489,22 +386,13 @@ class Trainer:
                             else gen[0, j]
                         )
                         image_error = gen_for_image - tar[0, j]
-                        if "residual_field" in self.params.target:
-                            image_full_field = torch.cat(
-                                (inp[0, j] + gen_for_image, gap, inp[0, j] + tar[0, j]),
-                                axis=1,
-                            )
-                            image_residual = torch.cat(
-                                (gen_for_image, gap, tar[0, j]), axis=1
-                            )
-                        else:
-                            image_full_field = torch.cat(
-                                (gen_for_image, gap, tar[0, j]), axis=1
-                            )
-                            image_residual = torch.cat(
-                                (gen_for_image - inp[0, j], gap, tar[0, j] - inp[0, j]),
-                                axis=1,
-                            )
+                        image_full_field = torch.cat(
+                            (gen_for_image, gap, tar[0, j]), axis=1
+                        )
+                        image_residual = torch.cat(
+                            (gen_for_image - inp[0, j], gap, tar[0, j] - inp[0, j]),
+                            axis=1,
+                        )
                         if self.params.log_to_wandb:
                             caption = (
                                 f"Channel {j} ({name}) one step full field for "
@@ -548,8 +436,7 @@ class Trainer:
         valid_buff[0:2] = valid_buff[0:2] / valid_buff[2]
         valid_weighted_rmse = valid_weighted_rmse / valid_buff[2]
         valid_gradient_magnitude_diff = valid_gradient_magnitude_diff / valid_buff[2]
-        if not self.precip:
-            valid_weighted_rmse *= mult
+        valid_weighted_rmse *= mult
 
         # download buffers
         valid_buff_cpu = valid_buff.detach().cpu().numpy()
@@ -560,31 +447,19 @@ class Trainer:
 
         valid_time = time.time() - valid_start
         valid_weighted_rmse = mult * torch.mean(valid_weighted_rmse, axis=0)
-        if self.precip:
-            logs = {
-                "valid_l1": valid_buff_cpu[1],
-                "valid_loss": valid_buff_cpu[0],
-                "valid_rmse_tp": valid_weighted_rmse_cpu[0],
-            }
-        else:
-            logs = {
-                "valid_l1": valid_buff_cpu[1],
-                "valid_loss": valid_buff_cpu[0],
-                "valid_rmse_u10": valid_weighted_rmse_cpu[0],
-                "valid_rmse_v10": valid_weighted_rmse_cpu[1],
-            }
-            grad_mag_logs = {
-                f"valid_gradient_magnitude_percent_diff/channel{c}-{name}": valid_gradient_magnitude_diff_cpu[  # noqa: E501
-                    c
-                ]
-                for c, name in enumerate(self.valid_dataset.out_names)
-            }
-
-        if self.params.log_to_wandb:
-            if self.precip:
-                fig = vis_precip(fields)
-                logs["vis"] = wandb.Image(fig)
-                plt.close(fig)
+        logs = {
+            "valid_l1": valid_buff_cpu[1],
+            "valid_loss": valid_buff_cpu[0],
+            "valid_rmse_u10": valid_weighted_rmse_cpu[0],
+            "valid_rmse_v10": valid_weighted_rmse_cpu[1],
+        }
+        metric_name_format = "valid_gradient_magnitude_percent_diff/channel{c}-{name}"
+        grad_mag_logs = {
+            metric_name_format.format(
+                c=c, name=name
+            ): valid_gradient_magnitude_diff_cpu[c]
+            for c, name in enumerate(self.valid_dataset.out_names)
+        }
 
         validation_logs = {**logs, **grad_mag_logs, **image_logs}
         return valid_time, validation_logs
@@ -602,7 +477,6 @@ class Trainer:
             inference_params.use_daily_climatology = (
                 False  # TODO(gideond) default value?
             )
-            inference_params.interp = 0  # TODO(gideond) default value?
             inference_params.epoch = self.epoch
             inference_params.iters = self.iters
             inference_params.get_data_loader = False
@@ -610,11 +484,6 @@ class Trainer:
             inference_params.log_to_wandb = True
             inference_params.log_to_screen = False  # reduce noise in logs
             (
-                _,
-                _,
-                _,
-                _,
-                _,
                 _,
                 _,
                 _,
