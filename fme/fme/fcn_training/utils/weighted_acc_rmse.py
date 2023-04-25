@@ -51,6 +51,8 @@ from utils import logging_utils
 logging_utils.config_logger()
 import torch
 
+import fme
+
 
 def unlog_tp(x, eps=1e-5):
     #    return np.exp(x + np.log(eps)) - eps
@@ -310,3 +312,23 @@ def top_quantiles_error_torch(pred: torch.Tensor, target: torch.Tensor) -> torch
     P_tar = torch.quantile(target.view(n, c, h * w), q=qtile, dim=-1)
     P_pred = torch.quantile(pred.view(n, c, h * w), q=qtile, dim=-1)
     return torch.mean(P_pred - P_tar, dim=0)
+
+
+def compute_time_rmse(seq_real, seq_pred, weights=None):
+    """Compute the time-averaged RMSE for each variable in the sequence."""
+    time_dim, variable_dim, lat_dim, lon_dim = 0, 1, 2, 3
+    lat, lon = seq_real.shape[lat_dim], seq_real.shape[lon_dim]
+
+    if weights is None:
+        weights = fme.spherical_area_weights(lat, lon)
+
+    seq_real_time_mean = seq_real.mean(dim=time_dim)
+    seq_pred_time_mean = seq_pred.mean(dim=time_dim)
+
+    ret = fme.root_mean_squared_error(
+        seq_real_time_mean.cpu(), seq_pred_time_mean.cpu(), weights=weights, dim=(1, 2)
+    )
+    assert ret.shape == (
+        seq_pred.shape[variable_dim],
+    ), "Expected one time RMSE per variable."
+    return ret
