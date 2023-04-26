@@ -13,3 +13,7 @@ enter_docker_image: build_docker_image
 
 launch_beaker_session:
 	./launch-beaker-session.sh $(USERNAME)/$(IMAGE)-$(VERSION)
+
+install_local_packages:
+	./install_local_packages.sh
+
