@@ -1,1 +1,8 @@
-torch
+h5py
+imageio<=2.27.0
+moviepy
+netcdf4
+ruamel-yaml
+wandb
+tensorly
+tensorly-torch

@@ -1,0 +1,18 @@
+# This set of requirements assumes torch is already installed, for example
+# as in the nvcr.io/nvidia/pytorch docker image.
+einops==0.6.1
+h5py==3.8.0
+imageio==2.27.0
+moviepy==1.0.3
+netcdf4==1.6.3
+ruamel-yaml==0.17.21
+s3fs==2023.4.0
+timm==0.6.13
+tqdm==4.65.0
+wandb==0.15.0
+tensorly@git+https://github.com/tensorly/tensorly.git@b648944fe94548765537a10cedd621871f7a2ffd
+tensorly-torch@git+https://github.com/tensorly/torch.git@d27d58f16101b7ecc431372eb218ceda59d8b043
+-f https://data.dgl.ai/wheels/cu117/repo.html
+dgl
+-f https://data.dgl.ai/wheels-test/repo.html
+dglgo
