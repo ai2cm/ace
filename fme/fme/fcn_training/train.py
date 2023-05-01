@@ -566,18 +566,11 @@ class Trainer:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run_num", default="00", type=str)
-    parser.add_argument("--yaml_config", default="./config/AFNO.yaml", type=str)
-    parser.add_argument("--config", default="default", type=str)
-    parser.add_argument("--enable_amp", action="store_true")
-    parser.add_argument("--epsilon_factor", default=0, type=float)
-
-    args = parser.parse_args()
-
-    params = YParams(os.path.abspath(args.yaml_config), args.config)
-    params["epsilon_factor"] = args.epsilon_factor
+def main(
+    run_num: str, yaml_config: str, config: str, enable_amp: bool, epsilon_factor: float
+):
+    params = YParams(os.path.abspath(yaml_config), config)
+    params["epsilon_factor"] = epsilon_factor
 
     params["world_size"] = 1
     if "WORLD_SIZE" in os.environ:
@@ -588,7 +581,6 @@ if __name__ == "__main__":
     if params["world_size"] > 1:
         dist.init_process_group(backend="nccl", init_method="env://")
         local_rank = int(os.environ["LOCAL_RANK"])
-        args.gpu = local_rank
         world_rank = dist.get_rank()
         params["global_batch_size"] = params.batch_size
         params["batch_size"] = int(params.batch_size // params["world_size"])
@@ -597,7 +589,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.benchmark = True
 
     # Set up directory
-    expDir = os.path.join(params.exp_dir, args.config, str(args.run_num))
+    expDir = os.path.join(params.exp_dir, config, str(run_num))
     if world_rank == 0:
         if not os.path.isdir(expDir):
             os.makedirs(expDir)
@@ -610,11 +602,11 @@ if __name__ == "__main__":
     )
 
     # Do not comment this line out please:
-    args.resuming = True if os.path.isfile(params.checkpoint_path) else False
+    resuming = True if os.path.isfile(params.checkpoint_path) else False
 
-    params["resuming"] = args.resuming
+    params["resuming"] = resuming
     params["local_rank"] = local_rank
-    params["enable_amp"] = args.enable_amp
+    params["enable_amp"] = enable_amp
 
     # wandb parameters
     params["project"] = "fourcastnet-era5"
@@ -640,3 +632,21 @@ if __name__ == "__main__":
     trainer = Trainer(params, world_rank)
     trainer.train()
     logging.info("DONE ---- rank %d" % world_rank)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_num", default="00", type=str)
+    parser.add_argument("--yaml_config", default="./config/AFNO.yaml", type=str)
+    parser.add_argument("--config", default="default", type=str)
+    parser.add_argument("--enable_amp", action="store_true")
+    parser.add_argument("--epsilon_factor", default=0, type=float)
+
+    args = parser.parse_args()
+    main(
+        args.run_num,
+        args.yaml_config,
+        args.config,
+        args.enable_amp,
+        args.epsilon_factor,
+    )
