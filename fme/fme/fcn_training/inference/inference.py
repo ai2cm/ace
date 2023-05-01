@@ -46,7 +46,7 @@
 
 import os
 import sys
-from typing import Any, List
+from typing import Any, List, Optional
 import numpy as np
 import argparse
 
@@ -377,57 +377,44 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     )
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run_num", default="00", type=str)
-    parser.add_argument("--yaml_config", default="./config/AFNO.yaml", type=str)
-    parser.add_argument("--config", default="full_field", type=str)
-    parser.add_argument("--use_daily_climatology", action="store_true")
-    parser.add_argument("--vis", action="store_true")
-    parser.add_argument(
-        "--override_dir",
-        default=None,
-        type=str,
-        help="Path to store inference outputs; must also set --weights arg",
-    )
-    parser.add_argument(
-        "--weights",
-        default=None,
-        type=str,
-        help="Path to model weights, for use with override_dir option",
-    )
-
-    args = parser.parse_args()
-    params = YParams(os.path.abspath(args.yaml_config), args.config)
+def main(
+    run_num: str,
+    yaml_config: str,
+    config: str,
+    use_daily_climatology: bool,
+    vis: bool,
+    override_dir: Optional[str],
+    weights: Optional[str],
+):
+    params = YParams(os.path.abspath(yaml_config), config)
     params["world_size"] = 1
-    params["use_daily_climatology"] = args.use_daily_climatology
+    params["use_daily_climatology"] = use_daily_climatology
     params["global_batch_size"] = params.batch_size
 
     device = torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
     if device != "cpu":
         torch.cuda.set_device(device)
     torch.backends.cudnn.benchmark = True
-    vis = args.vis
 
     # Set up directory
-    if args.override_dir is not None:
+    if override_dir is not None:
         assert (
-            args.weights is not None
+            weights is not None
         ), "Must set --weights argument if using --override_dir"
-        expDir = args.override_dir
+        expDir = override_dir
     else:
         assert (
-            args.weights is None
+            weights is None
         ), "Cannot use --weights argument without also using --override_dir"
-        expDir = os.path.join(params.exp_dir, args.config, str(args.run_num))
+        expDir = os.path.join(params.exp_dir, config, str(run_num))
 
     if not os.path.isdir(expDir):
         os.makedirs(expDir)
 
     params["experiment_dir"] = os.path.abspath(expDir)
     params["best_checkpoint_path"] = (
-        args.weights
-        if args.override_dir is not None
+        weights
+        if override_dir is not None
         else os.path.join(expDir, "training_checkpoints/best_ckpt.tar")
     )
     params["resuming"] = False
@@ -582,3 +569,36 @@ if __name__ == "__main__":
         )
 
         f.close()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run_num", default="00", type=str)
+    parser.add_argument("--yaml_config", default="./config/AFNO.yaml", type=str)
+    parser.add_argument("--config", default="full_field", type=str)
+    parser.add_argument("--use_daily_climatology", action="store_true")
+    parser.add_argument("--vis", action="store_true")
+    parser.add_argument(
+        "--override_dir",
+        default=None,
+        type=str,
+        help="Path to store inference outputs; must also set --weights arg",
+    )
+    parser.add_argument(
+        "--weights",
+        default=None,
+        type=str,
+        help="Path to model weights, for use with override_dir option",
+    )
+
+    args = parser.parse_args()
+
+    main(
+        run_num=args.run_num,
+        yaml_config=args.yaml_config,
+        config=args.config,
+        vis=args.vis,
+        use_daily_climatology=args.use_daily_climatology,
+        override_dir=args.override_dir,
+        weights=args.weights,
+    )
