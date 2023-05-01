@@ -3,8 +3,9 @@
 import netCDF4
 import numpy as np
 import pytest
-import subprocess
 import tempfile
+from fme.fcn_training.train import main as train_main
+from fme.fcn_training.inference.inference import main as inference_main
 
 
 def _get_test_yaml_file(
@@ -132,29 +133,22 @@ def test_train_and_inference_runs(tmp_path, nettype):
         nettype=nettype,
     )
 
-    train_process = subprocess.run(
-        [
-            "python",
-            "train.py",
-            "--yaml_config",
-            yaml_config,
-            "--config",
-            config_name,
-        ]
+    train_main(
+        run_num="00",
+        yaml_config=yaml_config,
+        config=config_name,
+        enable_amp=False,
+        epsilon_factor=0,
     )
-    train_process.check_returncode()
 
     # use --vis flag because this is how the script is called in the
     # run-train-and-inference.sh script. This option saves dataset/video of output.
-    inference_process = subprocess.run(
-        [
-            "python",
-            "inference/inference.py",
-            "--yaml_config",
-            yaml_config,
-            "--config",
-            config_name,
-            "--vis",
-        ]
+    inference_main(
+        run_num="00",
+        yaml_config=yaml_config,
+        config=config_name,
+        use_daily_climatology=False,
+        vis=True,
+        override_dir=None,
+        weights=None,
     )
-    inference_process.check_returncode()
