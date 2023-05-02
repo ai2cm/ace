@@ -312,8 +312,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
     # leave it as an empty dict.
     inference_logs = {}
     if params.log_to_wandb:
-        # inspect snapshot times at 5-days and 10-days.
-        snapshot_timesteps = [(24 // 6 * k, f"{k}-days") for k in [5, 10]]
+        snapshot_lead_steps = [(k, f"{k}-lead-step") for k in [20, 40]]
 
         # TODO(gideond) move these names to a higher-level to avoid potential bugs
         metric_names = [
@@ -335,7 +334,7 @@ def autoregressive_inference(params, ic, valid_data_full, model):
         ]
         all_metrics = np.array([m.cpu().numpy() for m in all_metrics])
         inference_logs = {}
-        for t, time_name in snapshot_timesteps:
+        for t, time_name in snapshot_lead_steps:
             if params.log_to_screen:
                 logging.info(f"Logging metrics at {time_name}")
             for i in range(len(metric_names)):
