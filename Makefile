@@ -1,5 +1,6 @@
 VERSION ?= $(shell git rev-parse HEAD)
 IMAGE ?= fme
+ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 
 build_docker_image:
@@ -17,3 +18,14 @@ launch_beaker_session:
 install_local_packages:
 	./install_local_packages.sh
 
+install_dependencies:
+	./install_dependencies.sh
+
+# recommended to deactivate current conda environment before running this
+create_environment:
+	conda create -n $(ENVIRONMENT_NAME) python=3.8 pip
+	conda run -n $(ENVIRONMENT_NAME) ./install_dependencies.sh
+	conda run -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
+
+test_fme_unit_tests:
+	pytest -m "not requires_gpu" fme/
