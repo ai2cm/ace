@@ -17,9 +17,11 @@ import contextlib
 from fcn_mip import registry
 from fcn_mip import filesystem
 import modulus
-from modulus.internal.utils.graphcast.graph import Graph
-from modulus.internal.models.gnn.graphcast.graph_cast_net import GraphCastNet
-from modulus.internal.utils.graphcast.data_utils import StaticData
+# skipping these imports, because it is difficult to install the GraphCastNet
+# dependencies using only pip. See https://github.com/ai2cm/full-model/pull/51.
+# from modulus.internal.utils.graphcast.graph import Graph
+# from modulus.internal.models.gnn.graphcast.graph_cast_net import GraphCastNet
+# from modulus.internal.utils.graphcast.data_utils import StaticData
 from modulus.distributed.manager import DistributedManager
 
 from fcn_mip import schema

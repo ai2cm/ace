@@ -53,6 +53,7 @@ class DotDict:
         return key in self.items
 
 
+@pytest.mark.skip(reason="Requires access to sample training data.")
 @pytest.mark.parametrize("params", [TEST_PARAMS, TEST_PARAMS_SPECIFY_BY_NAME])
 def test_FV3GFSDataset_init(params):
     dataset = FV3GFSDataset(DotDict(params), TEST_PATH, True)
@@ -60,6 +61,7 @@ def test_FV3GFSDataset_init(params):
     assert dataset.out_names == TEST_OUT_NAMES
 
 
+@pytest.mark.skip(reason="Requires access to sample training data.")
 def test_FV3GFSDataset_len():
     dataset = FV3GFSDataset(DotDict(TEST_PARAMS), TEST_PATH, True)
     full_path = os.path.join(TEST_PATH, "*.nc")
@@ -67,6 +69,7 @@ def test_FV3GFSDataset_len():
     assert len(dataset) == expected_length
 
 
+@pytest.mark.skip(reason="Requires access to sample training data.")
 def test_FV3GFSDataset_getitem():
     dataset = FV3GFSDataset(DotDict(TEST_PARAMS), TEST_PATH, True)
     output = dataset[150]
@@ -75,6 +78,7 @@ def test_FV3GFSDataset_getitem():
     assert output[1].shape == (len(TEST_PARAMS["out_channels"]), 180, 360)
 
 
+@pytest.mark.skip(reason="Requires access to sample training data.")
 def test_FV3GFSDataset_raises_value_error_if_names_and_channels_both_specified():
     params = copy.copy(TEST_PARAMS)
     params["in_names"] = ["foo", "bar"]

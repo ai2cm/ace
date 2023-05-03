@@ -1,1 +1,1 @@
-from .afnonet import AFNONet, PrecipNet
+from .afnonet import AFNONet

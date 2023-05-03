@@ -17,7 +17,6 @@ from torch.nn.modules.container import Sequential
 from torch.utils.checkpoint import checkpoint_sequential
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from utils.img_utils import PeriodicPad2d
 
 
 class Mlp(nn.Module):
@@ -149,24 +148,6 @@ class Block(nn.Module):
         x = x + residual
         return x
 
-class PrecipNet(nn.Module):
-    def __init__(self, params, backbone):
-        super().__init__()
-        self.params = params
-        self.patch_size = (params.patch_size, params.patch_size)
-        self.in_chans = params.N_in_channels
-        self.out_chans = params.N_out_channels
-        self.backbone = backbone
-        self.ppad = PeriodicPad2d(1)
-        self.conv = nn.Conv2d(self.out_chans, self.out_chans, kernel_size=3, stride=1, padding=0, bias=True)
-        self.act = nn.ReLU()
-
-    def forward(self, x):
-        x = self.backbone(x)
-        x = self.ppad(x)
-        x = self.conv(x)
-        x = self.act(x)
-        return x
 
 class AFNONet(nn.Module):
     def __init__(
