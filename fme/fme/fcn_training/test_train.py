@@ -97,6 +97,7 @@ def _save_netcdf(filename, dim_sizes, variable_names):
     ds.close()
 
 
+@pytest.mark.requires_gpu
 @pytest.mark.parametrize("nettype", ["afno", "FourierNeuralOperatorNet"])
 def test_train_and_inference_runs(tmp_path, nettype):
     """Make sure that training and inference run without errors."""

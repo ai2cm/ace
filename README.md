@@ -25,3 +25,18 @@ have a particular beaker image to use, you can do something like:
 ```
 make VERSION=5df2501e58d5a585b3551979cc8ca1bb9f1585fc launch_beaker_session
 ```
+
+## Environment
+
+The most reliable way to ensure that your development environment is the same
+as the environment used for our training jobs is to run tests within our
+docker/beaker image. This is described in the previous "Development" section.
+
+There is also tooling to install a conda environment in which our unit
+tests can run. Assuming you already have conda/miniconda installed, the
+following rule:
+```
+make create_environment
+```
+will create conda environment called `fme`, which you can then
+activate (`conda activate fme`) and use.

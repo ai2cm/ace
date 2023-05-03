@@ -3,8 +3,8 @@ import os
 import numpy as np
 from torch.utils.data import Dataset
 import netCDF4
-from utils.constants import CHANNEL_NAMES
-from utils.img_utils import reshape_fields
+from .constants import CHANNEL_NAMES
+from .img_utils import reshape_fields
 
 # conversion from 'standard' names defined in utils/constants.py to those
 # in FV3GFS output netCDFs
