@@ -54,9 +54,9 @@ from torch.utils.data.distributed import DistributedSampler
 import h5py
 
 # import cv2
-from utils.img_utils import reshape_fields
-from utils.data_loader_fv3gfs import FV3GFSDataset
-from utils.constants import CHANNEL_NAMES
+from .img_utils import reshape_fields
+from .data_loader_fv3gfs import FV3GFSDataset
+from .constants import CHANNEL_NAMES
 
 
 def get_data_loader(params, files_pattern, distributed, train):

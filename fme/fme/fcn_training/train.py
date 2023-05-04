@@ -55,26 +55,26 @@ import torch.cuda.amp as amp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 import logging
-from utils import logging_utils
+from .utils import logging_utils
 
 logging_utils.config_logger()
-from utils.YParams import YParams
-from utils.data_loader_multifiles import get_data_loader
+from .utils.YParams import YParams
+from .utils.data_loader_multifiles import get_data_loader
 import wandb
-from utils.weighted_acc_rmse import (
+from .utils.weighted_acc_rmse import (
     weighted_rmse_torch,
     weighted_global_mean_gradient_magnitude,
 )
 from apex import optimizers
-from utils.darcy_loss import LpLoss
+from .utils.darcy_loss import LpLoss
 from collections import OrderedDict
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
 
-from registry import NET_REGISTRY
-from inference import inference
+from .registry import NET_REGISTRY
+from .inference import inference
 
 
 class Trainer:
@@ -582,14 +582,16 @@ def main(
         dist.init_process_group(backend="nccl", init_method="env://")
         local_rank = int(os.environ["LOCAL_RANK"])
         world_rank = dist.get_rank()
-        params["global_batch_size"] = params.batch_size
-        params["batch_size"] = int(params.batch_size // params["world_size"])
+        params["global_batch_size"] = params.batch_size  # type: ignore
+        params["batch_size"] = int(
+            params.batch_size // params["world_size"]  # type: ignore
+        )
 
     torch.cuda.set_device(local_rank)
     torch.backends.cudnn.benchmark = True
 
     # Set up directory
-    expDir = os.path.join(params.exp_dir, config, str(run_num))
+    expDir = os.path.join(params.exp_dir, config, str(run_num))  # type: ignore
     if world_rank == 0:
         if not os.path.isdir(expDir):
             os.makedirs(expDir)
@@ -602,7 +604,7 @@ def main(
     )
 
     # Do not comment this line out please:
-    resuming = True if os.path.isfile(params.checkpoint_path) else False
+    resuming = True if os.path.isfile(params.checkpoint_path) else False  # type: ignore
 
     params["resuming"] = resuming
     params["local_rank"] = local_rank
