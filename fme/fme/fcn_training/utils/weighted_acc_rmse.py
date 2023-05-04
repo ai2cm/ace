@@ -46,7 +46,7 @@
 
 import numpy as np
 
-from utils import logging_utils
+from . import logging_utils
 
 logging_utils.config_logger()
 import torch
