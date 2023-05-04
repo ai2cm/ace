@@ -587,8 +587,9 @@ def main(
             params.batch_size // params["world_size"]  # type: ignore
         )
 
-    torch.cuda.set_device(local_rank)
-    torch.backends.cudnn.benchmark = True
+    if torch.cuda.is_available():
+        torch.cuda.set_device(local_rank)
+        torch.backends.cudnn.benchmark = True
 
     # Set up directory
     expDir = os.path.join(params.exp_dir, config, str(run_num))  # type: ignore
