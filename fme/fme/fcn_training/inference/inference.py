@@ -59,6 +59,7 @@ import logging
 from utils import logging_utils
 from utils.weighted_acc_rmse import (
     compute_time_rmse,
+    compute_time_and_global_mean_bias,
     weighted_rmse_torch_channels,
     weighted_acc_torch_channels,
     unweighted_acc_torch_channels,
@@ -352,14 +353,21 @@ def autoregressive_inference(params, ic, valid_data_full, model):
                     except IndexError:
                         logging.error(f"Failed to label {name}")
 
+    # compute time-mean metrics
     lat_dim, lon_dim = 2, 3
     lat_size, lon_size = seq_real.shape[lat_dim], seq_real.shape[lon_dim]
     weights = fme.spherical_area_weights(lat_size, lon_size)
     time_rmse = compute_time_rmse(seq_real, seq_pred, weights=weights)
     time_rmse *= std.cpu()
+    global_time_mean_bias = compute_time_and_global_mean_bias(
+        seq_real, seq_pred, weights=weights
+    )
+    global_time_mean_bias *= std.cpu()
     for i in range(len(out_names)):
         tag = f"ic{ic}/channel{i}-{out_names[i]}"
         inference_logs[f"rmse_of_time_mean/{tag}"] = time_rmse[i].item()
+        bias_value = global_time_mean_bias[i].item()
+        inference_logs[f"global_and_time_mean_bias/{tag}"] = bias_value
 
     seq_real = seq_real.cpu().numpy()
     seq_pred = seq_pred.cpu().numpy()
