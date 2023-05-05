@@ -45,6 +45,7 @@
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
 import numpy as np
+from typing import Optional
 
 from . import logging_utils
 
@@ -314,21 +315,72 @@ def top_quantiles_error_torch(pred: torch.Tensor, target: torch.Tensor) -> torch
     return torch.mean(P_pred - P_tar, dim=0)
 
 
-def compute_time_rmse(seq_real, seq_pred, weights=None):
-    """Compute the time-averaged RMSE for each variable in the sequence."""
+def compute_time_rmse(
+    truth: torch.Tensor,
+    predicted: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Compute the time-averaged RMSE for each variable in the sequence.
+
+    Args:
+        truth: truth tensor of shape (time, variable, lat, lon)
+        predicted: predicted tensor of shape (time, variable, lat, lon)
+        weights: torch.Tensor of shape (lat, lon) or None. If None, do
+            area-weighting inferred from truth tensor's shape.
+
+    Returns:
+        Shape (variable,) tensor. The RMSE between the time-mean of
+        the two input tensors.
+    """
     time_dim, variable_dim, lat_dim, lon_dim = 0, 1, 2, 3
-    lat, lon = seq_real.shape[lat_dim], seq_real.shape[lon_dim]
+    lat, lon = truth.shape[lat_dim], truth.shape[lon_dim]
 
     if weights is None:
         weights = fme.spherical_area_weights(lat, lon)
 
-    seq_real_time_mean = seq_real.mean(dim=time_dim)
-    seq_pred_time_mean = seq_pred.mean(dim=time_dim)
+    truth_time_mean = truth.mean(dim=time_dim)
+    predicted_time_mean = predicted.mean(dim=time_dim)
 
     ret = fme.root_mean_squared_error(
-        seq_real_time_mean.cpu(), seq_pred_time_mean.cpu(), weights=weights, dim=(1, 2)
+        truth_time_mean.cpu(), predicted_time_mean.cpu(), weights=weights, dim=(1, 2)
     )
     assert ret.shape == (
-        seq_pred.shape[variable_dim],
+        truth.shape[variable_dim],
     ), "Expected one time RMSE per variable."
     return ret
+
+
+def compute_time_and_global_mean_bias(
+    truth: torch.Tensor,
+    predicted: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Compute the global- and time-mean bias for each variable in the sequence.
+
+    Args:
+        truth: truth tensor of shape (time, variable, lat, lon)
+        predicted: predicted tensor of shape (time, variable, lat, lon)
+        weights: torch.Tensor of shape (lat, lon) or None. If None, use
+            area-weighting inferred from truth tensor's shape.
+
+    Returns:
+        Shape (variable,) tensor. The global- and time-mean bias between the
+        predicted and truth tensors.
+    """
+    time_dim, variable_dim, lat_dim, lon_dim = 0, 1, 2, 3
+    lat_size, lon_size = truth.shape[lat_dim], truth.shape[lon_dim]
+
+    if weights is None:
+        weights = fme.spherical_area_weights(lat_size, lon_size)
+
+    truth_time_mean = truth.mean(dim=time_dim)
+    predicted_time_mean = predicted.mean(dim=time_dim)
+    result = fme.weighted_mean(
+        predicted_time_mean - truth_time_mean, weights=weights, dim=(1, 2)
+    )
+
+    assert result.shape == (
+        truth.shape[variable_dim],
+    ), "Expected one time-mean global bias per variable."
+
+    return result
