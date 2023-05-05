@@ -3,8 +3,8 @@ import os
 import numpy as np
 from torch.utils.data import Dataset
 import netCDF4
-from .constants import CHANNEL_NAMES
 from .img_utils import reshape_fields
+from .data_loader_params import DataLoaderParams
 
 # conversion from 'standard' names defined in utils/constants.py to those
 # in FV3GFS output netCDFs
@@ -33,11 +33,14 @@ FV3GFS_NAMES = {
 
 
 class FV3GFSDataset(Dataset):
-    def __init__(self, params, path: str, train: bool):
+    def __init__(self, params: DataLoaderParams, path: str, train: bool):
         # TODO: refactor this class to take in its own type-hinted params dataclass
         self.params = params
         self._check_for_not_implemented_features()
-        self._resolve_channels_and_names()
+        self.in_names = params.in_names
+        self.out_names = params.out_names
+        self.n_in_channels = len(self.in_names)
+        self.n_out_channels = len(self.out_names)
         self.path = path
         self.full_path = os.path.join(path, "*.nc")
         self.train = train
@@ -47,8 +50,10 @@ class FV3GFSDataset(Dataset):
         self.crop_size_y = params.crop_size_y
         self.roll = params.roll
         self.two_step_training = params.two_step_training
+        # TODO: Move this logic to the DataLoaderParams init routine
         self.add_noise = params.add_noise if train else False
-        self.normalize = params.normalize if "normalize" in params else True
+        # TODO: move this logic to the DataLoaderParams init routine
+        self.normalize = params.normalize if params.normalize is not None else True
         self._get_files_stats()
         self._load_stats_data()
 
@@ -70,41 +75,8 @@ class FV3GFSDataset(Dataset):
             raise NotImplementedError(
                 "two_step_training not implemented for FV3GFSDataset"
             )
-        if "orography" in self.params:
-            raise NotImplementedError(
-                "Adding orography to inputs no longer implemented in training code."
-            )
-        if "precip" in self.params:
-            raise NotImplementedError(
-                "precip training not implemented for FV3GFSDataset"
-            )
         if self.params.add_grid:
             raise NotImplementedError("add_grid not implemented for FV3GFSDataset")
-
-    def _resolve_channels_and_names(self):
-        if "in_channels" in self.params and "in_names" in self.params:
-            raise ValueError("Cannot specify both 'in_channels' and 'in_names' params.")
-        if "out_channels" in self.params and "out_names" in self.params:
-            raise ValueError(
-                "Cannot specify both 'out_channels' and 'out_names' params."
-            )
-
-        if "in_channels" in self.params:
-            self.in_names = [
-                FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.in_channels
-            ]
-        else:
-            self.in_names = self.params.in_names
-
-        if "out_channels" in self.params:
-            self.out_names = [
-                FV3GFS_NAMES[CHANNEL_NAMES[c]] for c in self.params.out_channels
-            ]
-        else:
-            self.out_names = self.params.out_names
-
-        self.n_in_channels = len(self.in_names)
-        self.n_out_channels = len(self.out_names)
 
     def _get_files_stats(self):
         logging.info(f"Opening data at {self.full_path}")

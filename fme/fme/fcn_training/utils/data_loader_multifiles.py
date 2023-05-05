@@ -46,6 +46,7 @@
 
 import logging
 import glob
+from typing import List
 import torch
 import random
 import numpy as np
@@ -57,12 +58,13 @@ import h5py
 from .img_utils import reshape_fields
 from .data_loader_fv3gfs import FV3GFSDataset
 from .constants import CHANNEL_NAMES
+from .data_loader_params import DataLoaderParams
 
 
-def get_data_loader(params, files_pattern, distributed, train):
-    if "data_type" not in params:
-        params["data_type"] = "ERA5"
-
+def get_data_loader(params: DataLoaderParams, files_pattern, distributed, train):
+    # TODO: move this default to the DataLoaderParams init
+    if params.data_type is None:
+        params.data_type = "ERA5"
     if params.data_type == "ERA5":
         dataset = GetDataset(params, files_pattern, train)
     elif params.data_type == "FV3GFS":
@@ -71,12 +73,13 @@ def get_data_loader(params, files_pattern, distributed, train):
             # netCDF4 __getitem__ fails with
             # "RuntimeError: Resource temporarily unavailable"
             # if num_data_workers > 0
+            # TODO: move this logic to the DataLoaderParams initialization
             logging.warning(
                 "If data_type=='FV3GFS', must use num_data_workers=0. "
                 "Got num_data_workers="
                 f"{params.num_data_workers}, but it is being set to 0."
             )
-            params["num_data_workers"] = 0
+            params.num_data_workers = 0
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"
@@ -101,19 +104,23 @@ def get_data_loader(params, files_pattern, distributed, train):
 
 
 class GetDataset(Dataset):
-    def __init__(self, params, location, train):
+    def __init__(self, params: DataLoaderParams, location, train):
         self.params = params
         self._check_for_not_implemented_features()
         self.location = location
         self.train = train
         self.dt = params.dt
         self.n_history = params.n_history
-        self.in_channels = np.array(params.in_channels)
-        self.out_channels = np.array(params.out_channels)
+        self.in_channels = np.array(
+            [CHANNEL_NAMES.index(name) for name in self.params.in_names]
+        )
+        self.out_channels = np.array(
+            [CHANNEL_NAMES.index(name) for name in self.params.out_names]
+        )
         self.n_in_channels = len(self.in_channels)
         self.n_out_channels = len(self.out_channels)
-        self.in_names = [CHANNEL_NAMES[c] for c in self.in_channels]
-        self.out_names = [CHANNEL_NAMES[c] for c in self.out_channels]
+        self.in_names: List[str] = self.params.in_names
+        self.out_names: List[str] = self.params.out_names
         self.crop_size_x = params.crop_size_x
         self.crop_size_y = params.crop_size_y
         self.roll = params.roll
@@ -131,15 +138,6 @@ class GetDataset(Dataset):
         except:  # noqa: E722
             self.normalize = (
                 True  # by default turn on normalization if not specified in config
-            )
-
-    def _check_for_not_implemented_features(self):
-        """Raise NotImplementedError for features removed from train.py"""
-        if "precip" in self.params:
-            raise NotImplementedError("precip training feature has been removed")
-        if "orography" in self.params:
-            raise NotImplementedError(
-                "feature to add orography to inputs has been removed"
             )
 
     def _get_files_stats(self):

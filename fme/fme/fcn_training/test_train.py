@@ -76,6 +76,8 @@ def _get_test_yaml_file(
 
        add_noise: !!bool False
        noise_std: 0
+       normalize: !!bool True
+       compression: tt
     """  # noqa: E501
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f:

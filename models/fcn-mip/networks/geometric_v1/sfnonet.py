@@ -1,3 +1,4 @@
+import dataclasses
 from functools import partial
 import torch
 import torch.nn as nn
@@ -213,11 +214,35 @@ class FourierNeuralOperatorBlock(nn.Module):
     #     else:
     #         return self._forward(x)
 
+@dataclasses.dataclass
+class FourierNeuralOperatorParams:
+    spectral_transform: str = 'sht'
+    filter_type: str = 'non-linear'
+    img_crop_shape_x: int = 721
+    img_crop_shape_y: int = 1440
+    scale_factor: int = 16
+    N_in_channels: int = 2
+    N_out_channels: int = 2
+    embed_dim: int = 256
+    num_layers: int = 12
+    num_blocks: int = 16
+    hard_thresholding_fraction: float = 1.0
+    normalization_layer: str = 'instance_norm'
+    mlp_mode: str = "none"
+    big_skip: bool = True
+    compression: str = None
+    rank: int = 128
+    complex_network: bool = True
+    complex_activation: str = 'real'
+    spectral_layers: int = 1
+    laplace_weighting: bool = False
+    checkpointing: bool = False
+
 
 class FourierNeuralOperatorNet(nn.Module):
     def __init__(
             self,
-            params,
+            params: FourierNeuralOperatorParams,
             spectral_transform = 'sht',
             filter_type = 'non-linear',
             img_size = (721, 1440),
@@ -240,7 +265,7 @@ class FourierNeuralOperatorNet(nn.Module):
             rank = 128,
             complex_network = True,
             complex_activation = 'real',
-            spectral_layers = 3,
+            spectral_layers = 1,
             laplace_weighting = False,
             checkpointing = False): 
         super(FourierNeuralOperatorNet, self).__init__()

@@ -46,6 +46,9 @@
 
 import os
 import time
+from types import SimpleNamespace
+import types
+from typing import List, Optional, Literal
 import numpy as np
 import argparse
 import torch
@@ -59,7 +62,7 @@ from .utils import logging_utils
 
 logging_utils.config_logger()
 from .utils.YParams import YParams
-from .utils.data_loader_multifiles import get_data_loader
+from .utils.data_loader_multifiles import get_data_loader, DataLoaderParams
 import wandb
 from .utils.weighted_acc_rmse import (
     weighted_rmse_torch,
@@ -72,16 +75,403 @@ from collections import OrderedDict
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-
+from networks.geometric_v1.sfnonet import (
+    FourierNeuralOperatorParams,
+)
+from fourcastnet.networks.afnonet import AFNONetParams
 from .registry import NET_REGISTRY
+
 from .inference import inference
+import dataclasses
+
+
+@dataclasses.dataclass
+class DataParams:
+    img_shape_x: int
+    img_shape_y: int
+    img_crop_shape_x: int
+    img_crop_shape_y: int
+    N_in_channels: int
+    N_out_channels: int
+    in_names: List[str]
+    out_names: List[str]
+
+    @classmethod
+    def from_datasets(cls, train_dataset, valid_dataset) -> "DataParams":
+        return cls(
+            img_shape_x=valid_dataset.img_shape_x,
+            img_shape_y=valid_dataset.img_shape_y,
+            img_crop_shape_x=valid_dataset.img_shape_x,
+            img_crop_shape_y=valid_dataset.img_shape_y,
+            N_in_channels=train_dataset.n_in_channels,
+            N_out_channels=train_dataset.n_out_channels,
+            in_names=train_dataset.in_names,
+            out_names=train_dataset.out_names,
+        )
+
+
+@dataclasses.dataclass
+class TrainerParams:
+    run_num: str
+    config: str
+    enable_amp: bool
+    epsilon_factor: float
+    world_size: int
+    world_rank: int
+    experiment_dir: str
+    checkpoint_path: str
+    best_checkpoint_path: str
+    resuming: bool
+    local_rank: int
+    project: str
+    entity: str
+    log_to_wandb: bool
+    log_to_screen: bool
+    scheduler: str
+    two_step_training: bool
+    optimizer_type: str
+    enable_nhwc: bool
+    nettype: str
+    train_data_path: str
+    valid_data_path: str
+    max_epochs: int
+    save_checkpoint: bool
+    normalization: str
+    data_type: str
+    crop_size_x: int
+    crop_size_y: int
+    num_data_workers: int
+    dt: float
+    n_history: int
+    roll: bool
+    add_noise: bool
+    global_means_path: str
+    global_stds_path: str
+    time_means_path: str
+    add_grid: bool
+    lr: float
+    in_names: List[str]
+    out_names: List[str]
+    batch_size: Optional[int] = None
+    data_params: Optional[DataParams] = None
+    spectral_transform: Literal["sht", "fft"] = "sht"
+    filter_type: Literal["linear", "non-linear"] = "non-linear"
+    scale_factor: int = 16
+    embed_dim: int = 256
+    num_layers: int = 12
+    num_blocks: int = 16
+    hard_thresholding_fraction: float = 1.0
+    normalization_layer: Literal["instance_norm", "layer_norm"] = "instance_norm"
+    mlp_mode: str = "none"
+    big_skip: bool = True
+    compression: Optional[str] = None
+    rank: int = 128  # not the same as local_rank
+    complex_network: bool = True
+    complex_activation: str = "real"
+    spectral_layers: int = 1
+    laplace_weighting: bool = False
+    checkpointing: bool = False
+    patch_size: int = 16
+    pretrained: bool = False
+    pretrained_ckpt_path: Optional[str] = None
+    normalize: bool = True
+    # parameters only for inference
+    prediction_length: int = 2
+    perturb: bool = False
+
+    def __post_init__(self):
+        assert len(self.in_names) > 0
+        assert len(self.out_names) > 0
+
+    @classmethod
+    def new(cls, args):
+        """
+        Create a new TrainerParams instance.
+
+        Side-effects include:
+            - creating the experiment directory and a training_checkpoints subdirectory
+            - calling `dist.init_process_group`, if world_size is greater than 1
+            - setting the GPU device to the local rank
+            - setting global logging configuration
+        """
+
+        params = YParams(os.path.abspath(args.yaml_config), args.config)
+
+        if "precip" in params:
+            raise NotImplementedError("precip training feature has been removed")
+        if "orography" in params:
+            raise NotImplementedError(
+                "feature to add orography to inputs has been removed"
+            )
+
+        params["world_size"] = 1
+        if "WORLD_SIZE" in os.environ:
+            params["world_size"] = int(os.environ["WORLD_SIZE"])
+
+        world_rank = 0
+        local_rank = 0
+        if params["world_size"] > 1:
+            dist.init_process_group(backend="nccl", init_method="env://")
+            local_rank = int(os.environ["LOCAL_RANK"])
+            args.gpu = local_rank
+            world_rank = dist.get_rank()
+            params["batch_size"] = int(params.batch_size // params["world_size"])
+
+        if torch.cuda.is_available():
+            torch.cuda.set_device(local_rank)
+            torch.backends.cudnn.benchmark = True
+
+        # Set up directory
+        expDir = os.path.join(params.exp_dir, args.config, str(args.run_num))
+        if world_rank == 0:
+            if not os.path.isdir(expDir):
+                os.makedirs(expDir)
+                os.makedirs(os.path.join(expDir, "training_checkpoints/"))
+
+        params["experiment_dir"] = os.path.abspath(expDir)
+        params["checkpoint_path"] = os.path.join(
+            expDir, "training_checkpoints/ckpt.tar"
+        )
+        params["best_checkpoint_path"] = os.path.join(
+            expDir, "training_checkpoints/best_ckpt.tar"
+        )
+
+        args.resuming = True if os.path.isfile(params.checkpoint_path) else False
+
+        params["resuming"] = args.resuming
+        params["local_rank"] = local_rank
+        params["enable_amp"] = args.enable_amp
+
+        # wandb parameters
+        if world_rank == 0:
+            logging_utils.log_to_file(
+                logger_name=None, log_filename=os.path.join(expDir, "out.log")
+            )
+            logging_utils.log_versions()
+            params.log()
+
+        model_params = {}
+        for param_name in [
+            "spectral_transform",
+            "filter_type",
+            "scale_factor",
+            "embed_dim",
+            "num_layers",
+            "num_blocks",
+            "hard_thresholding_fraction",
+            "normalization_layer",
+            "mlp_mode",
+            "big_skip",
+            "compression",
+            "rank",
+            "complex_network",
+            "complex_activation",
+            "spectral_layers",
+            "laplace_weighting",
+            "checkpointing",
+            "patch_size",
+        ]:
+            if param_name in params:
+                model_params[param_name] = params[param_name]
+
+        optional_args = {}
+        for optional_param in [
+            "pretrained",
+            "pretrained_ckpt_path",
+            "in_channels",
+            "out_channels",
+            "normalize",
+            "prediction_length",
+            "perturb",
+        ]:
+            if optional_param in params:
+                optional_args[optional_param] = params[optional_param]
+
+        params_instance = TrainerParams(
+            run_num=args.run_num,
+            config=args.config,
+            enable_amp=args.enable_amp,
+            epsilon_factor=args.epsilon_factor,
+            world_size=params["world_size"],
+            world_rank=world_rank,
+            batch_size=params["batch_size"],
+            experiment_dir=os.path.abspath(expDir),
+            checkpoint_path=os.path.join(expDir, "training_checkpoints/ckpt.tar"),
+            best_checkpoint_path=os.path.join(
+                expDir, "training_checkpoints/best_ckpt.tar"
+            ),
+            resuming=args.resuming,
+            local_rank=local_rank,
+            project="fourcastnet-era5",
+            entity="ai2cm",
+            log_to_wandb=(world_rank == 0) and params["log_to_wandb"],
+            log_to_screen=(world_rank == 0) and params["log_to_screen"],
+            scheduler=params["scheduler"],
+            two_step_training=params["two_step_training"],
+            optimizer_type=params["optimizer_type"],
+            enable_nhwc=params["enable_nhwc"],
+            nettype=params["nettype"],
+            train_data_path=params["train_data_path"],
+            valid_data_path=params["valid_data_path"],
+            max_epochs=params["max_epochs"],
+            save_checkpoint=params["save_checkpoint"],
+            normalization=params["normalization"],
+            data_type=params["data_type"],
+            crop_size_x=params["crop_size_x"],
+            crop_size_y=params["crop_size_y"],
+            num_data_workers=params["num_data_workers"],
+            dt=params["dt"],
+            n_history=params["n_history"],
+            roll=params["roll"],
+            add_noise=params["add_noise"],
+            global_means_path=params["global_means_path"],
+            global_stds_path=params["global_stds_path"],
+            time_means_path=params["time_means_path"],
+            add_grid=params["add_grid"],
+            lr=params["lr"],
+            in_names=params["in_names"],
+            out_names=params["out_names"],
+            **model_params,
+            **optional_args,
+        )
+        if world_rank == 0:
+            params_instance._log(args.config, os.path.abspath(args.yaml_config))
+        return params_instance
+
+    def _log(self, config_name, yaml_filename):
+        logging.info("------------------ Configuration ------------------")
+        logging.info("Configuration file: " + str(yaml_filename))
+        logging.info("Configuration name: " + str(config_name))
+        for key, val in self.__dict__.items():
+            logging.info(str(key) + " " + str(val))
+        logging.info("---------------------------------------------------")
+
+    def register_data_params(self, data_params: DataParams):
+        self.data_params = data_params
+
+    @property
+    def img_shape_x(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.img_shape_x
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def img_shape_y(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.img_shape_y
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def img_crop_shape_x(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.img_crop_shape_x
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def img_crop_shape_y(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.img_crop_shape_y
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def N_in_channels(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.N_in_channels
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def N_out_channels(self) -> int:
+        if self.data_params is not None:
+            return self.data_params.N_out_channels
+        else:
+            raise RuntimeError(
+                "data_params must be registered before accessing this attribute"
+            )
+
+    @property
+    def data_loader_params(self):
+        return DataLoaderParams(
+            data_type=self.data_type,
+            batch_size=self.batch_size,
+            num_data_workers=self.num_data_workers,
+            crop_size_x=self.crop_size_x,
+            crop_size_y=self.crop_size_y,
+            dt=self.dt,
+            n_history=self.n_history,
+            roll=self.roll,
+            two_step_training=self.two_step_training,
+            add_noise=self.add_noise,
+            global_means_path=self.global_means_path,
+            global_stds_path=self.global_stds_path,
+            time_means_path=self.time_means_path,
+            normalize=self.normalize,
+            add_grid=self.add_grid,
+            in_names=self.in_names,
+            out_names=self.out_names,
+            normalization=self.normalization,
+        )
+
+    @property
+    def model_params(self):
+        if self.nettype == "FourierNeuralOperatorNet":
+            params = FourierNeuralOperatorParams(
+                spectral_transform=self.spectral_transform,
+                filter_type=self.filter_type,
+                img_crop_shape_x=self.img_crop_shape_x,
+                img_crop_shape_y=self.img_crop_shape_y,
+                scale_factor=self.scale_factor,
+                N_in_channels=self.N_in_channels,
+                N_out_channels=self.N_out_channels,
+                embed_dim=self.embed_dim,
+                num_layers=self.num_layers,
+                num_blocks=self.num_blocks,
+                hard_thresholding_fraction=self.hard_thresholding_fraction,
+                normalization_layer=self.normalization_layer,
+                mlp_mode=self.mlp_mode,
+                big_skip=self.big_skip,
+                compression=self.compression,
+                rank=self.rank,
+                complex_network=self.complex_network,
+                complex_activation=self.complex_activation,
+                spectral_layers=self.spectral_layers,
+                laplace_weighting=self.laplace_weighting,
+                checkpointing=self.checkpointing,
+            )
+        elif self.nettype == "afno":
+            params = AFNONetParams(
+                img_shape_x=self.img_shape_x,
+                img_shape_y=self.img_shape_y,
+                patch_size=self.patch_size,
+                N_in_channels=self.N_in_channels,
+                N_out_channels=self.N_out_channels,
+                embed_dim=self.embed_dim,
+                num_blocks=self.num_blocks,
+            )
+        else:
+            raise ValueError("Unknown nettype: " + str(self.nettype))
+        return params
 
 
 class Trainer:
     def count_parameters(self):
         return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
-    def __init__(self, params, world_rank):
+    def __init__(self, params: TrainerParams, world_rank):
         self.params = params
         self.world_rank = world_rank
         self.device = (
@@ -98,29 +488,27 @@ class Trainer:
             self.train_dataset,
             self.train_sampler,
         ) = get_data_loader(
-            params, params.train_data_path, dist.is_initialized(), train=True
+            params.data_loader_params,
+            params.train_data_path,
+            dist.is_initialized(),
+            train=True,
         )
         self.valid_data_loader, self.valid_dataset = get_data_loader(
-            params, params.valid_data_path, dist.is_initialized(), train=False
+            params.data_loader_params,
+            params.valid_data_path,
+            dist.is_initialized(),
+            train=False,
         )
         self.loss_obj = LpLoss()
         logging.info("rank %d, data loader initialized" % world_rank)
 
-        params.crop_size_x = self.valid_dataset.crop_size_x
-        params.crop_size_y = self.valid_dataset.crop_size_y
-        params.img_shape_x = self.valid_dataset.img_shape_x
-        params.img_shape_y = self.valid_dataset.img_shape_y
-        # following two params needed by FourierNeuralOperatorNet
-        params.img_crop_shape_x = self.valid_dataset.img_shape_x
-        params.img_crop_shape_y = self.valid_dataset.img_shape_y
-        params.N_in_channels = self.train_dataset.n_in_channels
-        params.N_out_channels = self.train_dataset.n_out_channels
-        params.in_names = self.train_dataset.in_names
-        params.out_names = self.train_dataset.out_names
+        data_params = DataParams.from_datasets(self.train_dataset, self.valid_dataset)
+        self.params.register_data_params(data_params)
 
-        BackboneNet = NET_REGISTRY[params.nettype]
+        BackboneNet, ParamsClass = NET_REGISTRY[params.nettype]
+        assert isinstance(params.model_params, ParamsClass)
 
-        self.model = BackboneNet(params).to(self.device)
+        self.model = BackboneNet(params.model_params).to(self.device)
 
         if self.params.enable_nhwc:
             # NHWC: Convert model to channels_last memory format
@@ -420,7 +808,7 @@ class Trainer:
                             ] = wandb_image
                         else:
                             image_path = os.path.join(
-                                self.params["experiment_dir"],
+                                self.params.experiment_dir,
                                 f"sample{i}",
                                 f"channel{j}",
                                 f"epoch{self.epoch}.png",
@@ -467,10 +855,11 @@ class Trainer:
     def inference_one_epoch(self):
         if self.params.log_to_screen:
             logging.info("Starting inference on validation set...")
-        import copy
 
         with torch.no_grad():
-            inference_params = copy.copy(self.params)
+            inference_params = types.SimpleNamespace(
+                **dict(self.params.__dict__, **self.params.data_params.__dict__)
+            )
             inference_params.means = self.valid_dataset.out_means[0]
             inference_params.stds = self.valid_dataset.out_stds[0]
             inference_params.time_means = self.valid_dataset.out_time_means[0]
@@ -569,72 +958,28 @@ class Trainer:
 def main(
     run_num: str, yaml_config: str, config: str, enable_amp: bool, epsilon_factor: float
 ):
-    params = YParams(os.path.abspath(yaml_config), config)
-    params["epsilon_factor"] = epsilon_factor
-
-    params["world_size"] = 1
-    if "WORLD_SIZE" in os.environ:
-        params["world_size"] = int(os.environ["WORLD_SIZE"])
-
-    world_rank = 0
-    local_rank = 0
-    if params["world_size"] > 1:
-        dist.init_process_group(backend="nccl", init_method="env://")
-        local_rank = int(os.environ["LOCAL_RANK"])
-        world_rank = dist.get_rank()
-        params["global_batch_size"] = params.batch_size  # type: ignore
-        params["batch_size"] = int(
-            params.batch_size // params["world_size"]  # type: ignore
-        )
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(local_rank)
-        torch.backends.cudnn.benchmark = True
-
-    # Set up directory
-    expDir = os.path.join(params.exp_dir, config, str(run_num))  # type: ignore
-    if world_rank == 0:
-        if not os.path.isdir(expDir):
-            os.makedirs(expDir)
-            os.makedirs(os.path.join(expDir, "training_checkpoints/"))
-
-    params["experiment_dir"] = os.path.abspath(expDir)
-    params["checkpoint_path"] = os.path.join(expDir, "training_checkpoints/ckpt.tar")
-    params["best_checkpoint_path"] = os.path.join(
-        expDir, "training_checkpoints/best_ckpt.tar"
+    args = SimpleNamespace(
+        run_num=run_num,
+        yaml_config=yaml_config,
+        config=config,
+        enable_amp=enable_amp,
+        epsilon_factor=epsilon_factor,
     )
+    params = TrainerParams.new(args)
 
-    # Do not comment this line out please:
-    resuming = True if os.path.isfile(params.checkpoint_path) else False  # type: ignore
-
-    params["resuming"] = resuming
-    params["local_rank"] = local_rank
-    params["enable_amp"] = enable_amp
-
-    # wandb parameters
-    params["project"] = "fourcastnet-era5"
-    params["entity"] = "ai2cm"
-    if world_rank == 0:
-        logging_utils.log_to_file(
-            logger_name=None, log_filename=os.path.join(expDir, "out.log")
-        )
-        logging_utils.log_versions()
-        params.log()
-
-    params["log_to_wandb"] = (world_rank == 0) and params["log_to_wandb"]
-    params["log_to_screen"] = (world_rank == 0) and params["log_to_screen"]
-
-    if world_rank == 0:
+    if params.world_rank == 0:
         hparams = ruamelDict()
         yaml = YAML()
-        for key, value in params.params.items():
+        for key, value in params.__dict__.items():
             hparams[str(key)] = str(value)
-        with open(os.path.join(expDir, "hyperparams.yaml"), "w") as hpfile:
+        with open(
+            os.path.join(params.experiment_dir, "hyperparams.yaml"), "w"
+        ) as hpfile:
             yaml.dump(hparams, hpfile)
 
-    trainer = Trainer(params, world_rank)
+    trainer = Trainer(params, params.world_rank)
     trainer.train()
-    logging.info("DONE ---- rank %d" % world_rank)
+    logging.info("DONE ---- rank %d" % params.world_rank)
 
 
 if __name__ == "__main__":
@@ -647,9 +992,9 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     main(
-        args.run_num,
-        args.yaml_config,
-        args.config,
-        args.enable_amp,
-        args.epsilon_factor,
+        run_num=args.run_num,
+        yaml_config=args.yaml_config,
+        config=args.config,
+        enable_amp=args.enable_amp,
+        epsilon_factor=args.epsilon_factor,
     )

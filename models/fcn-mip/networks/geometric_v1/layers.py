@@ -327,7 +327,6 @@ class SpectralConvS2(nn.Module):
         ii, jj = torch.tril_indices(self.modes_lat, self.modes_lon)
         self.register_buffer("ii", ii)
         self.register_buffer("jj", jj)
-
         if compression == 'tt':
             self.rank = rank
             # tensortrain coefficients
