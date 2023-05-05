@@ -83,7 +83,7 @@ def gaussian_perturb(x, level=0.01, device=0):
     return x + noise
 
 
-def load_model(model, params, checkpoint_file, device=None):
+def load_model(model, checkpoint_file, device=None):
     model.zero_grad()
     checkpoint_fname = checkpoint_file
     kwargs = dict(map_location=torch.device("cpu")) if device == "cpu" else {}
@@ -91,9 +91,8 @@ def load_model(model, params, checkpoint_file, device=None):
     try:
         new_state_dict = OrderedDict()
         for key, val in checkpoint["model_state"].items():
-            name = key[7:]
-            if name != "ged":
-                new_state_dict[name] = val
+            if key != "ged":
+                new_state_dict[key] = val
         model.load_state_dict(new_state_dict)
     except:  # noqa: E722
         model.load_state_dict(checkpoint["model_state"])
@@ -130,10 +129,12 @@ def setup(params):
     params.log_on_each_unroll_step_inference = True
 
     # load the model
-    model = NET_REGISTRY[params.nettype](params).to(device)
+    BackboneNet, _ = NET_REGISTRY[params.nettype]
+
+    model = BackboneNet(params).to(device)
 
     checkpoint_file = params["best_checkpoint_path"]
-    model = load_model(model, params, checkpoint_file, device)
+    model = load_model(model, checkpoint_file, device)
     model = model.to(device)
 
     # load the validation data
@@ -388,7 +389,6 @@ def main(
     params = YParams(os.path.abspath(yaml_config), config)
     params["world_size"] = 1
     params["use_daily_climatology"] = use_daily_climatology
-    params["global_batch_size"] = params.batch_size
 
     device = torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
     if device != "cpu":
