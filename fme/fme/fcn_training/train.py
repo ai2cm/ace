@@ -58,30 +58,30 @@ import torch.cuda.amp as amp
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 import logging
-from .utils import logging_utils
+from fme.fcn_training.utils import logging_utils
 
 logging_utils.config_logger()
-from .utils.YParams import YParams
-from .utils.data_loader_multifiles import get_data_loader, DataLoaderParams
+from fme.fcn_training.utils.YParams import YParams
+from fme.fcn_training.utils.data_loader_multifiles import (
+    get_data_loader,
+    DataLoaderParams,
+)
 import wandb
-from .utils.weighted_acc_rmse import (
+from fme.fcn_training.utils.weighted_acc_rmse import (
     weighted_rmse_torch,
     weighted_global_mean_gradient_magnitude,
 )
 from apex import optimizers
-from .utils.darcy_loss import LpLoss
+from fme.fcn_training.utils.darcy_loss import LpLoss
 from collections import OrderedDict
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-from networks.geometric_v1.sfnonet import (
-    FourierNeuralOperatorParams,
-)
+from networks.geometric_v1.sfnonet import FourierNeuralOperatorParams
 from fourcastnet.networks.afnonet import AFNONetParams
-from .registry import NET_REGISTRY
-
-from .inference import inference
+from fme.fcn_training.registry import NET_REGISTRY
+from fme.fcn_training.inference import inference
 import dataclasses
 
 
