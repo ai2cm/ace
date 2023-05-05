@@ -2,10 +2,14 @@
 
 import netCDF4
 import numpy as np
+import pathlib
 import pytest
+import subprocess
 import tempfile
 from fme.fcn_training.train import main as train_main
 from fme.fcn_training.inference.inference import main as inference_main
+
+REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 
 
 def _get_test_yaml_file(
@@ -100,9 +104,14 @@ def _save_netcdf(filename, dim_sizes, variable_names):
 
 
 @pytest.mark.parametrize("nettype", ["afno", "FourierNeuralOperatorNet"])
-def test_train_and_inference_runs(tmp_path, nettype):
-    """Make sure that training and inference run without errors."""
+def test_train_and_inference_runs(tmp_path, nettype, debug=False):
+    """Make sure that training and inference run without errors
 
+    Args:
+        tmp_path: pytext fixture for temporary workspace.
+        nettype: parameter indicating model architecture to use.
+        debug: option for developers to allow use of pdb.
+    """
     seed = 0
     np.random.seed(seed)
     config_name = "unit_test"
@@ -135,22 +144,42 @@ def test_train_and_inference_runs(tmp_path, nettype):
         nettype=nettype,
     )
 
-    train_main(
-        run_num="00",
-        yaml_config=yaml_config,
-        config=config_name,
-        enable_amp=False,
-        epsilon_factor=0,
-    )
+    if debug:
+        # using pdb requires calling main functions directly
+        train_main(
+            run_num="00",
+            yaml_config=yaml_config,
+            config=config_name,
+            enable_amp=False,
+            epsilon_factor=0,
+        )
 
-    # use --vis flag because this is how the script is called in the
-    # run-train-and-inference.sh script. This option saves dataset/video of output.
-    inference_main(
-        run_num="00",
-        yaml_config=yaml_config,
-        config=config_name,
-        use_daily_climatology=False,
-        vis=True,
-        override_dir=None,
-        weights=None,
-    )
+        # use --vis flag because this is how the script is called in the
+        # run-train-and-inference.sh script. This option saves dataset/video of output.
+        inference_main(
+            run_num="00",
+            yaml_config=yaml_config,
+            config=config_name,
+            use_daily_climatology=False,
+            vis=True,
+            override_dir=None,
+            weights=None,
+        )
+    else:
+        # in regular testing, call the actual submission script used for batch jobs
+        script_path = (
+            REPOSITORY_PATH
+            / "fme"
+            / "fme"
+            / "fcn_training"
+            / "run-train-and-inference.sh"
+        )
+        train_and_inference_process = subprocess.run(
+            [
+                script_path,
+                yaml_config,
+                config_name,
+                "1",
+            ]
+        )
+        train_and_inference_process.check_returncode()
