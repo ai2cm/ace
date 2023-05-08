@@ -373,8 +373,8 @@ def compute_time_and_global_mean_bias(
     if weights is None:
         weights = fme.spherical_area_weights(lat_size, lon_size)
 
-    truth_time_mean = truth.mean(dim=time_dim)
-    predicted_time_mean = predicted.mean(dim=time_dim)
+    truth_time_mean = truth.mean(dim=time_dim).cpu()
+    predicted_time_mean = predicted.mean(dim=time_dim).cpu()
     result = fme.weighted_mean(
         predicted_time_mean - truth_time_mean, weights=weights, dim=(1, 2)
     )
