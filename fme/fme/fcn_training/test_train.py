@@ -41,10 +41,7 @@ def _get_test_yaml_file(
        save_raw_forecasts: !!bool True
        save_channel: !!bool False
        perturb: !!bool False
-       add_grid: !!bool False
        N_grid_channels: 0
-       gridtype: 'sinusoidal' #options 'sinusoidal' or 'linear'
-       roll: !!bool False
        max_epochs: 1
        batch_size: 2
 
@@ -72,14 +69,10 @@ def _get_test_yaml_file(
 
        enable_nhwc: !!bool False
        optimizer_type: 'Adam'
-       crop_size_x: None
-       crop_size_y: None
 
        two_step_training: !!bool False
        plot_animations: !!bool False
 
-       add_noise: !!bool False
-       noise_std: 0
        normalize: !!bool True
        compression: tt
     """  # noqa: E501
@@ -150,8 +143,7 @@ def test_train_and_inference_runs(tmp_path, nettype, debug=False):
             run_num="00",
             yaml_config=yaml_config,
             config=config_name,
-            enable_amp=False,
-            epsilon_factor=0,
+            enable_automatic_mixed_precision=False,
         )
 
         # use --vis flag because this is how the script is called in the
