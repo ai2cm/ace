@@ -93,7 +93,13 @@ def load_model(model, checkpoint_file, device=None):
         new_state_dict = OrderedDict()
         for key, val in checkpoint["model_state"].items():
             if key != "ged":
-                new_state_dict[key] = val
+                if key.startswith("module."):
+                    # model was stored using ddp which prepends 'module.' if training
+                    # with multiple GPUs
+                    name = str(key[7:])
+                else:
+                    name = key
+                new_state_dict[name] = val
         model.load_state_dict(new_state_dict)
     except:  # noqa: E722
         model.load_state_dict(checkpoint["model_state"])
