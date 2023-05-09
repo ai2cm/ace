@@ -6,7 +6,7 @@ import netCDF4
 from .img_utils import reshape_fields
 from .data_loader_params import DataLoaderParams
 
-# conversion from 'standard' names defined in utils/constants.py to those
+# conversion from 'standard' names defined for ERA5 to those
 # in FV3GFS output netCDFs
 FV3GFS_NAMES = {
     "u10": "UGRD10m",
@@ -33,8 +33,7 @@ FV3GFS_NAMES = {
 
 
 class FV3GFSDataset(Dataset):
-    def __init__(self, params: DataLoaderParams, path: str, train: bool):
-        # TODO: refactor this class to take in its own type-hinted params dataclass
+    def __init__(self, params: DataLoaderParams, path: str):
         self.params = params
         self._check_for_not_implemented_features()
         self.in_names = params.in_names
@@ -43,15 +42,9 @@ class FV3GFSDataset(Dataset):
         self.n_out_channels = len(self.out_names)
         self.path = path
         self.full_path = os.path.join(path, "*.nc")
-        self.train = train
         self.dt = params.dt
         self.n_history = params.n_history
-        self.crop_size_x = params.crop_size_x
-        self.crop_size_y = params.crop_size_y
-        self.roll = params.roll
         self.two_step_training = params.two_step_training
-        # TODO: Move this logic to the DataLoaderParams init routine
-        self.add_noise = params.add_noise if train else False
         # TODO: move this logic to the DataLoaderParams init routine
         self.normalize = params.normalize if params.normalize is not None else True
         self._get_files_stats()
@@ -64,19 +57,10 @@ class FV3GFSDataset(Dataset):
             raise NotImplementedError(
                 "non-zero n_history is not implemented for FV3GFSDataset"
             )
-        if self.params.crop_size_x is not None or self.params.crop_size_y is not None:
-            raise NotImplementedError(
-                "non-null crop_size_x or crop_size_y is "
-                "not implemented for FV3GFSDataset"
-            )
-        if self.params.roll:
-            raise NotImplementedError("roll=True not implemented for FV3GFSDataset")
         if self.params.two_step_training:
             raise NotImplementedError(
                 "two_step_training not implemented for FV3GFSDataset"
             )
-        if self.params.add_grid:
-            raise NotImplementedError("add_grid not implemented for FV3GFSDataset")
 
     def _get_files_stats(self):
         logging.info(f"Opening data at {self.full_path}")
@@ -118,6 +102,8 @@ class FV3GFSDataset(Dataset):
 
     @property
     def data_array(self):
+        # TODO: this is only used in inference.py, consider removing/refactoring it
+        # when we refactor that code
         arrays = [np.expand_dims(self.ds.variables[v][:], 1) for v in self.in_names]
         return np.flip(np.concatenate(arrays, axis=1), axis=-2).copy()
 
@@ -133,29 +119,16 @@ class FV3GFSDataset(Dataset):
         out_array = np.flip(np.concatenate(out_arrays, axis=0), axis=-2).copy()
         in_tensor = reshape_fields(
             in_array,
-            "inp",
-            self.crop_size_x,
-            self.crop_size_y,
-            0,
-            0,
+            "input",
             self.params,
-            self.roll,
-            self.train,
             self.in_means,
             self.in_stds,
             self.normalize,
-            self.add_noise,
         )
         out_tensor = reshape_fields(
             out_array,
-            "tar",
-            self.crop_size_x,
-            self.crop_size_y,
-            0,
-            0,
+            "target",
             self.params,
-            self.roll,
-            self.train,
             self.out_means,
             self.out_stds,
             self.normalize,
