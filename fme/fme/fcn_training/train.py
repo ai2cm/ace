@@ -127,7 +127,6 @@ class TrainerParams:
     log_to_wandb: bool
     log_to_screen: bool
     scheduler: str
-    two_step_training: bool
     optimizer_type: str
     # TODO: is there a way to hard-code nhwc, which controls channels first/last?
     enable_nhwc: bool
@@ -315,7 +314,6 @@ class TrainerParams:
             log_to_wandb=(world_rank == 0) and params["log_to_wandb"],
             log_to_screen=(world_rank == 0) and params["log_to_screen"],
             scheduler=params["scheduler"],
-            two_step_training=params["two_step_training"],
             optimizer_type=params["optimizer_type"],
             enable_nhwc=params["enable_nhwc"],
             nettype=params["nettype"],
@@ -414,7 +412,6 @@ class TrainerParams:
             num_data_workers=self.num_data_workers,
             dt=self.dt,
             n_history=self.n_history,
-            two_step_training=self.two_step_training,
             global_means_path=self.global_means_path,
             global_stds_path=self.global_stds_path,
             time_means_path=self.time_means_path,
@@ -536,15 +533,6 @@ class Trainer:
         if params.resuming:
             logging.info("Loading checkpoint %s" % params.checkpoint_path)
             self.restore_checkpoint(params.checkpoint_path)
-        if params.two_step_training:
-            if params.pretrained and (not params.resuming):
-                logging.info(
-                    "Starting from pretrained one-step afno model at %s"
-                    % params.pretrained_ckpt_path
-                )
-                self.restore_checkpoint(params.pretrained_ckpt_path)
-                self.iters = 0
-                self.startEpoch = 0
 
         self.epoch = self.startEpoch
 
@@ -633,29 +621,9 @@ class Trainer:
                 target_data = target_data.to(memory_format=torch.channels_last)
 
             self.model.zero_grad()
-            if self.params.two_step_training:
-                with amp.autocast(self.params.enable_automatic_mixed_precision):
-                    gen_step_one = self.model(input_data).to(
-                        self.device, dtype=torch.float
-                    )
-                    loss_step_one = self.loss_obj(
-                        gen_step_one, target_data[:, 0 : self.params.N_out_channels]
-                    )
-                    gen_step_two = self.model(gen_step_one).to(
-                        self.device, dtype=torch.float
-                    )
-                    loss_step_two = self.loss_obj(
-                        gen_step_two,
-                        target_data[
-                            :,
-                            self.params.N_out_channels : 2 * self.params.N_out_channels,
-                        ],
-                    )
-                    loss = loss_step_one + loss_step_two
-            else:
-                with amp.autocast(self.params.enable_automatic_mixed_precision):
-                    gen = self.model(input_data).to(self.device, dtype=torch.float)
-                    loss = self.loss_obj(gen, target_data)
+            with amp.autocast(self.params.enable_automatic_mixed_precision):
+                gen = self.model(input_data).to(self.device, dtype=torch.float)
+                loss = self.loss_obj(gen, target_data)
 
             if self.params.enable_automatic_mixed_precision:
                 self.gscaler.scale(loss).backward()
@@ -667,14 +635,7 @@ class Trainer:
             if self.params.enable_automatic_mixed_precision:
                 self.gscaler.update()
 
-        if self.params.two_step_training:
-            logs = {
-                "loss": loss,
-                "loss_step_one": loss_step_one,
-                "loss_step_two": loss_step_two,
-            }
-        else:
-            logs = {"loss": loss}
+        logs = {"loss": loss}
 
         if dist.is_initialized():
             for key in sorted(logs.keys()):
@@ -710,41 +671,15 @@ class Trainer:
                     break
                 inp, tar = map(lambda x: x.to(self.device, dtype=torch.float), data)
 
-                if self.params.two_step_training:
-                    gen_step_one = self.model(inp).to(self.device, dtype=torch.float)
-                    loss_step_one = self.loss_obj(
-                        gen_step_one, tar[:, 0 : self.params.N_out_channels]
-                    )
-
-                    gen_step_two = self.model(gen_step_one).to(
-                        self.device, dtype=torch.float
-                    )
-
-                    loss_step_two = self.loss_obj(
-                        gen_step_two,
-                        tar[
-                            :,
-                            self.params.N_out_channels : 2 * self.params.N_out_channels,
-                        ],
-                    )
-                    valid_loss += loss_step_one + loss_step_two
-                    valid_l1 += nn.functional.l1_loss(
-                        gen_step_one, tar[:, 0 : self.params.N_out_channels]
-                    )
-                else:
-                    gen = self.model(inp).to(self.device, dtype=torch.float)
-                    valid_loss += self.loss_obj(gen, tar)
-                    valid_l1 += nn.functional.l1_loss(gen, tar)
+                gen = self.model(inp).to(self.device, dtype=torch.float)
+                valid_loss += self.loss_obj(gen, tar)
+                valid_l1 += nn.functional.l1_loss(gen, tar)
 
                 valid_steps += 1.0
 
                 # direct prediction weighted rmse
-                if self.params.two_step_training:
-                    gen_for_rmse = gen_step_one
-                    tar_for_rmse = tar[:, 0 : self.params.N_out_channels]
-                else:
-                    gen_for_rmse = gen
-                    tar_for_rmse = tar
+                gen_for_rmse = gen
+                tar_for_rmse = tar
                 valid_weighted_rmse += weighted_rmse_torch(gen_for_rmse, tar_for_rmse)
                 gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
                     gen_for_rmse
@@ -764,11 +699,7 @@ class Trainer:
                         gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(
                             self.device, dtype=torch.float
                         )
-                        gen_for_image = (
-                            gen_step_one[0, j]
-                            if self.params.two_step_training
-                            else gen[0, j]
-                        )
+                        gen_for_image = gen[0, j]
                         image_error = gen_for_image - tar[0, j]
                         image_full_field = torch.cat(
                             (gen_for_image, gap, tar[0, j]), axis=1
@@ -890,27 +821,6 @@ class Trainer:
             return self.valid_dataset.out_stds.squeeze()
         else:
             raise NotImplementedError(f"data_type {self.params.data_type} is unknown.")
-
-    # TODO: delete load_model_wind
-    def load_model_wind(self, model_path):
-        if self.params.log_to_screen:
-            logging.info("Loading the wind model weights from {}".format(model_path))
-        checkpoint = torch.load(
-            model_path, map_location="cuda:{}".format(self.params.local_rank)
-        )
-        if dist.is_initialized():
-            self.model_wind.load_state_dict(checkpoint["model_state"])
-        else:
-            new_model_state = OrderedDict()
-            model_key = "model_state" if "model_state" in checkpoint else "state_dict"
-            for key in checkpoint[model_key].keys():
-                if "module." in key:  # model was stored using ddp which prepends module
-                    name = str(key[7:])
-                    new_model_state[name] = checkpoint[model_key][key]
-                else:
-                    new_model_state[key] = checkpoint[model_key][key]
-            self.model_wind.load_state_dict(new_model_state)
-            self.model_wind.eval()
 
     def save_checkpoint(self, checkpoint_path, model=None):
         """We intentionally require a checkpoint_dir to be passed

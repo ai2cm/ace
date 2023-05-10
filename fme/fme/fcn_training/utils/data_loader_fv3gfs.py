@@ -44,7 +44,6 @@ class FV3GFSDataset(Dataset):
         self.full_path = os.path.join(path, "*.nc")
         self.dt = params.dt
         self.n_history = params.n_history
-        self.two_step_training = params.two_step_training
         # TODO: move this logic to the DataLoaderParams init routine
         self.normalize = params.normalize if params.normalize is not None else True
         self._get_files_stats()
@@ -56,10 +55,6 @@ class FV3GFSDataset(Dataset):
         if self.params.n_history != 0:
             raise NotImplementedError(
                 "non-zero n_history is not implemented for FV3GFSDataset"
-            )
-        if self.params.two_step_training:
-            raise NotImplementedError(
-                "two_step_training not implemented for FV3GFSDataset"
             )
 
     def _get_files_stats(self):
