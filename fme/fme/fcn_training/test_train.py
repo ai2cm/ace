@@ -70,7 +70,6 @@ def _get_test_yaml_file(
        enable_nhwc: !!bool False
        optimizer_type: 'Adam'
 
-       two_step_training: !!bool False
        plot_animations: !!bool False
 
        normalize: !!bool True

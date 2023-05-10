@@ -13,7 +13,6 @@ TEST_PARAMS: Dict[str, Any] = {
     "n_history": 0,
     "in_channels": [0, 1, 4, 19],
     "out_channels": [0, 1, 5, 19],
-    "two_step_training": False,
     "dt": 1,
     "n_history": 0,
     "normalization": "zscore",

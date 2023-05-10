@@ -9,7 +9,6 @@ class DataLoaderParams:
     num_data_workers: int
     dt: float
     n_history: int
-    two_step_training: bool
     global_means_path: str
     global_stds_path: str
     time_means_path: str

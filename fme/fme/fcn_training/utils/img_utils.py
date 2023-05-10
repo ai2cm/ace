@@ -102,10 +102,7 @@ def reshape_fields(
     if input_or_target == "input":
         n_steps = n_history + 1
     elif input_or_target == "target":
-        if params.two_step_training:
-            n_steps = 2
-        else:
-            n_steps = 1
+        n_steps = 1
     img = np.reshape(img, (n_channels * n_steps, img_shape_x, img_shape_y))
 
     return torch.as_tensor(img)
