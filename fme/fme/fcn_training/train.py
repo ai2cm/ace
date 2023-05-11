@@ -335,6 +335,7 @@ class TrainerParams:
             **model_params,
             **optional_args,
         )
+
         if world_rank == 0:
             params_instance._log(config, os.path.abspath(yaml_config))
         return params_instance
@@ -474,7 +475,13 @@ class Trainer:
         )
 
         if params.log_to_wandb:
-            wandb.init(config=params, project=params.project, entity=params.entity)
+            wandb.init(
+                config=params,
+                project=params.project,
+                entity=params.entity,
+                resume=True,
+                dir=params.experiment_dir,
+            )
             logging_utils.log_beaker_url()
 
         logging.info("rank %d, begin data loader init" % world_rank)
