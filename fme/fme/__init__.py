@@ -7,6 +7,7 @@ from .core.metrics import (
     weighted_mean_bias,
     root_mean_squared_error,
 )
+from .core import get_device
 
 __all__ = [
     "lat_cell_centers",
@@ -14,4 +15,5 @@ __all__ = [
     "weighted_mean",
     "weighted_mean_bias",
     "root_mean_squared_error",
+    "get_device",
 ]

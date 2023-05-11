@@ -74,7 +74,7 @@ class PeriodicPad2d(nn.Module):
 def reshape_fields(
     img,
     input_or_target: Literal["input", "target"],
-    params,
+    normalization,
     means,
     stds,
     normalize=True,
@@ -93,9 +93,9 @@ def reshape_fields(
     # Note: this is the only place normalization happens right now!
     # TODO: move normalization from data loading into training logic
     if normalize:
-        if params.normalization == "minmax":
+        if normalization == "minmax":
             raise Exception("minmax not supported. Use zscore")
-        elif params.normalization == "zscore":
+        elif normalization == "zscore":
             img -= means
             img /= stds
 
