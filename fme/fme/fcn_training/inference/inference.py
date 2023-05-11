@@ -91,7 +91,7 @@ def load_model(model, checkpoint_file, device=None):
     checkpoint = torch.load(checkpoint_fname, **kwargs)
     try:
         new_state_dict = OrderedDict()
-        for key, val in checkpoint["model_state"].items():
+        for key, val in checkpoint["stepper"]["module"].items():
             if key != "ged":
                 if key.startswith("module."):
                     # model was stored using ddp which prepends 'module.' if training
@@ -102,13 +102,13 @@ def load_model(model, checkpoint_file, device=None):
                 new_state_dict[name] = val
         model.load_state_dict(new_state_dict)
     except:  # noqa: E722
-        model.load_state_dict(checkpoint["model_state"])
+        model.load_state_dict(checkpoint["stepper"]["module"])
     model.eval()
     return model
 
 
 def setup(params):
-    device = torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
+    device = fme.get_device()
     _, valid_dataset = get_data_loader(
         params, params.inf_data_path, dist.is_initialized(), train=False
     )
@@ -155,7 +155,7 @@ def setup(params):
 def autoregressive_inference(params, ic, valid_data_full, model):
     ic = int(ic)
     # initialize global variables
-    device = torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
+    device = fme.get_device()
     dt = int(params.dt)
     prediction_length = int(params.prediction_length / dt)
     n_history = params.n_history
@@ -404,7 +404,7 @@ def main(
     params["world_size"] = 1
     params["use_daily_climatology"] = use_daily_climatology
 
-    device = torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
+    device = fme.get_device()
     if device != "cpu":
         torch.cuda.set_device(device)
     torch.backends.cudnn.benchmark = True
