@@ -115,7 +115,7 @@ class FV3GFSDataset(Dataset):
         in_tensor = reshape_fields(
             in_array,
             "input",
-            self.params,
+            self.params.normalization,
             self.in_means,
             self.in_stds,
             self.normalize,
@@ -123,7 +123,7 @@ class FV3GFSDataset(Dataset):
         out_tensor = reshape_fields(
             out_array,
             "target",
-            self.params,
+            self.params.normalization,
             self.out_means,
             self.out_stds,
             self.normalize,

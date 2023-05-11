@@ -72,7 +72,6 @@ from fme.fcn_training.utils.weighted_acc_rmse import (
 )
 from apex import optimizers
 from fme.fcn_training.utils.darcy_loss import LpLoss
-from collections import OrderedDict
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
@@ -82,6 +81,7 @@ from fourcastnet.networks.afnonet import AFNONetParams
 from fme.fcn_training.registry import NET_REGISTRY
 from fme.fcn_training.inference import inference
 import dataclasses
+import fme
 
 
 @dataclasses.dataclass
@@ -109,6 +109,152 @@ class DataParams:
         )
 
 
+class SingleModuleStepper:
+    """
+    Stepper class for a single pytorch module.
+    """
+
+    def __init__(
+        self,
+        module: nn.Module,
+        optimizer_type: Literal["Adam", "FusedAdam"],
+        lr: float,
+        enable_automatic_mixed_precision: bool,
+        scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"],
+        max_epochs: int,
+        start_epoch: int,
+        loss_obj: nn.Module,
+    ):
+        """
+        Args:
+            module: The module to train.
+            optimizer_type: The optimizer type. Currently supports "Adam"
+                and "FusedAdam".
+            lr: The learning rate.
+            enable_automatic_mixed_precision: Whether to use automatic mixed precision.
+            scheduler: The scheduler type. Currently supports
+                "ReduceLROnPlateau" and "CosineAnnealingLR".
+            max_epochs: The maximum number of epochs to train for.
+            start_epoch: The epoch to start training from.
+            loss_obj: The loss object to use.
+        """
+        self.module = module
+        if optimizer_type == "FusedAdam":
+            self.optimizer = optimizers.FusedAdam(self.module.parameters(), lr=lr)
+        else:
+            self.optimizer = torch.optim.Adam(self.module.parameters(), lr=lr)
+
+        if enable_automatic_mixed_precision:
+            self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
+        else:
+            self.gscaler = None
+
+        if dist.is_initialized():
+            self.module = DistributedDataParallel(
+                self.module,
+                device_ids=[int(os.environ["LOCAL_RANK"])],
+                output_device=[int(os.environ["LOCAL_RANK"])],
+                find_unused_parameters=True,
+            )
+
+        if scheduler == "ReduceLROnPlateau":
+            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, factor=0.2, patience=5, mode="min"
+            )
+        elif scheduler == "CosineAnnealingLR":
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer, T_max=max_epochs, last_epoch=start_epoch - 1
+            )
+        else:
+            self.scheduler = None
+
+        self.loss_obj = loss_obj
+
+    @property
+    def modules(self) -> List[nn.Module]:
+        """
+        Returns:
+            A list of modules being trained.
+        """
+        return [self.module]
+
+    def step_scheduler(self, valid_loss: float):
+        """
+        Step the scheduler.
+
+        Args:
+            valid_loss: The validation loss. Used in schedulers which change the
+                learning rate based on whether the validation loss is decreasing.
+        """
+        if self.scheduler is not None:
+            try:
+                self.scheduler.step(metrics=valid_loss)
+            except TypeError:
+                self.scheduler.step()
+
+    def run_on_batch(self, input_data, target_data, train: bool):
+        """
+        Run the model on a batch of data.
+
+        Args:
+            input_data: The input data.
+            target_data: The target data.
+            train: Whether to train the model.
+        """
+        if train:
+            self.module.train()
+            self.module.zero_grad()
+        else:
+            self.module.eval()
+        automatic_mixed_precision_enabled = self.gscaler is not None
+        with amp.autocast(automatic_mixed_precision_enabled):
+            gen = self.module(input_data).to(fme.get_device(), dtype=torch.float)
+            loss = self.loss_obj(gen, target_data)
+
+        if train:
+            if self.gscaler is not None:
+                self.gscaler.scale(loss).backward()
+                self.gscaler.step(self.optimizer)
+            else:
+                loss.backward()
+                self.optimizer.step()
+
+            if self.gscaler is not None:
+                self.gscaler.update()
+        return loss, gen
+
+    def get_state(self):
+        """
+        Returns:
+            The state of the stepper.
+        """
+        return {
+            "module": self.module.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "scheduler": self.scheduler.state_dict(),
+        }
+
+    def load_state(self, state, load_optimizer: bool = True):
+        """
+        Load the state of the stepper.
+
+        Args:
+            state: The state to load.
+            load_optimizer: Whether to load the optimizer state.
+        """
+        if "module" in state:
+            module_state = state["module"]
+            for key in module_state:
+                if key.startswith("module."):
+                    name = key[7:]
+                    module_state[name] = module_state.pop(key)
+            self.module.load_state_dict(module_state)
+        if load_optimizer and "optimizer" in state:
+            self.optimizer.load_state_dict(state["optimizer"])
+        if load_optimizer and "scheduler" in state:
+            self.scheduler.load_state_dict(state["scheduler"])
+
+
 @dataclasses.dataclass
 class TrainerParams:
     run_num: str
@@ -126,8 +272,8 @@ class TrainerParams:
     entity: str
     log_to_wandb: bool
     log_to_screen: bool
-    scheduler: str
-    optimizer_type: str
+    scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"]
+    optimizer_type: Literal["Adam", "FusedAdam"]
     # TODO: is there a way to hard-code nhwc, which controls channels first/last?
     enable_nhwc: bool
     nettype: str
@@ -465,14 +611,16 @@ class TrainerParams:
 
 class Trainer:
     def count_parameters(self):
-        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        parameters = 0
+        for module in self.stepper.modules:
+            for parameter in module.parameters():
+                if parameter.requires_grad:
+                    parameters += parameter.numel()
+        return parameters
 
     def __init__(self, params: TrainerParams, world_rank):
         self.params = params
         self.world_rank = world_rank
-        self.device = (
-            torch.cuda.current_device() if torch.cuda.is_available() else "cpu"
-        )
 
         if params.log_to_wandb:
             wandb.init(
@@ -501,7 +649,6 @@ class Trainer:
             dist.is_initialized(),
             train=False,
         )
-        self.loss_obj = LpLoss()
         logging.info("rank %d, data loader initialized" % world_rank)
 
         data_params = DataParams.from_datasets(self.train_dataset, self.valid_dataset)
@@ -509,31 +656,6 @@ class Trainer:
 
         BackboneNet, ParamsClass = NET_REGISTRY[params.nettype]
         assert isinstance(params.model_params, ParamsClass)
-
-        self.model = BackboneNet(params.model_params).to(self.device)
-
-        if self.params.enable_nhwc:
-            # NHWC: Convert model to channels_last memory format
-            self.model = self.model.to(memory_format=torch.channels_last)
-
-        if params.log_to_wandb:
-            wandb.watch(self.model)
-
-        if params.optimizer_type == "FusedAdam":
-            self.optimizer = optimizers.FusedAdam(self.model.parameters(), lr=params.lr)
-        else:
-            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=params.lr)
-
-        if params.enable_automatic_mixed_precision:
-            self.gscaler = amp.GradScaler()
-
-        if dist.is_initialized():
-            self.model = DistributedDataParallel(
-                self.model,
-                device_ids=[params.local_rank],
-                output_device=[params.local_rank],
-                find_unused_parameters=True,
-            )
 
         self.iters = 0
         self.startEpoch = 0
@@ -543,16 +665,23 @@ class Trainer:
 
         self.epoch = self.startEpoch
 
-        if params.scheduler == "ReduceLROnPlateau":
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, factor=0.2, patience=5, mode="min"
-            )
-        elif params.scheduler == "CosineAnnealingLR":
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=params.max_epochs, last_epoch=self.startEpoch - 1
-            )
-        else:
-            self.scheduler = None
+        model = BackboneNet(params.model_params).to(fme.get_device())
+        if self.params.enable_nhwc:
+            # NHWC: Convert model to channels_last memory format
+            model = model.to(memory_format=torch.channels_last)
+        self.stepper = SingleModuleStepper(
+            model,
+            optimizer_type=params.optimizer_type,
+            lr=params.lr,
+            scheduler=params.scheduler,
+            max_epochs=params.max_epochs,
+            start_epoch=self.startEpoch,
+            loss_obj=LpLoss(),
+            enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,
+        )
+
+        if params.log_to_wandb:
+            wandb.watch(self.stepper.modules)
 
         if params.log_to_screen:
             logging.info(
@@ -584,12 +713,7 @@ class Trainer:
             train_loss = train_logs["loss"]
             valid_loss = valid_logs["valid_loss"]
 
-            # TODO: make this work for any scheduler
-            # isolate scheduler configuration into its own dataclass
-            if self.params.scheduler == "ReduceLROnPlateau":
-                self.scheduler.step(valid_loss)
-            elif self.params.scheduler == "CosineAnnealingLR":
-                self.scheduler.step()
+            self.stepper.step_scheduler(valid_loss)
 
             if self.world_rank == 0:
                 if self.params.save_checkpoint:
@@ -606,7 +730,7 @@ class Trainer:
 
             if self.params.log_to_wandb:
                 logging.info("Logging to wandb")
-                for pg in self.optimizer.param_groups:
+                for pg in self.stepper.optimizer.param_groups:
                     lr = pg["lr"]
                 all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
                 wandb.log(all_logs, step=self.epoch)
@@ -615,32 +739,17 @@ class Trainer:
         # TODO: clean up and merge train_one_epoch and validate_one_epoch
         # deduplicate code through helper routines or if conditionals
         self.epoch += 1
-        self.model.train()
 
         for data in self.train_data_loader:
             self.iters += 1
             input_data, target_data = map(
-                lambda x: x.to(self.device, dtype=torch.float), data
+                lambda x: x.to(fme.get_device(), dtype=torch.float), data
             )
 
             if self.params.enable_nhwc:
                 input_data = input_data.to(memory_format=torch.channels_last)
                 target_data = target_data.to(memory_format=torch.channels_last)
-
-            self.model.zero_grad()
-            with amp.autocast(self.params.enable_automatic_mixed_precision):
-                gen = self.model(input_data).to(self.device, dtype=torch.float)
-                loss = self.loss_obj(gen, target_data)
-
-            if self.params.enable_automatic_mixed_precision:
-                self.gscaler.scale(loss).backward()
-                self.gscaler.step(self.optimizer)
-            else:
-                loss.backward()
-                self.optimizer.step()
-
-            if self.params.enable_automatic_mixed_precision:
-                self.gscaler.update()
+            loss, _ = self.stepper.run_on_batch(input_data, target_data, train=True)
 
         logs = {"loss": loss}
 
@@ -652,23 +761,22 @@ class Trainer:
         return logs
 
     def validate_one_epoch(self):
-        self.model.eval()
         n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
         if self.params.normalization == "minmax":
             raise Exception("minmax normalization not supported")
         elif self.params.normalization == "zscore":
             # TODO: unify this normalization logic with what's in the data loading
-            mult = torch.as_tensor(self._load_global_output_stds()).to(self.device)
+            mult = torch.as_tensor(self._load_global_output_stds()).to(fme.get_device())
 
-        valid_buff = torch.zeros((3), dtype=torch.float32, device=self.device)
+        valid_buff = torch.zeros((3), dtype=torch.float32, device=fme.get_device())
         valid_loss = valid_buff[0].view(-1)
         valid_l1 = valid_buff[1].view(-1)
         valid_steps = valid_buff[2].view(-1)
         valid_weighted_rmse = torch.zeros(
-            (self.params.N_out_channels), dtype=torch.float32, device=self.device
+            (self.params.N_out_channels), dtype=torch.float32, device=fme.get_device()
         )
         valid_gradient_magnitude_diff = torch.zeros(
-            (self.params.N_out_channels), dtype=torch.float32, device=self.device
+            (self.params.N_out_channels), dtype=torch.float32, device=fme.get_device()
         )
 
         with torch.no_grad():
@@ -676,17 +784,18 @@ class Trainer:
             for i, data in enumerate(self.valid_data_loader, 0):
                 if i >= n_valid_batches:
                     break
-                inp, tar = map(lambda x: x.to(self.device, dtype=torch.float), data)
-
-                gen = self.model(inp).to(self.device, dtype=torch.float)
-                valid_loss += self.loss_obj(gen, tar)
-                valid_l1 += nn.functional.l1_loss(gen, tar)
+                input, target = map(
+                    lambda x: x.to(fme.get_device(), dtype=torch.float), data
+                )
+                batch_loss, gen = self.stepper.run_on_batch(input, target, train=False)
+                valid_loss += batch_loss
+                valid_l1 += nn.functional.l1_loss(gen, target)
 
                 valid_steps += 1.0
 
                 # direct prediction weighted rmse
                 gen_for_rmse = gen
-                tar_for_rmse = tar
+                tar_for_rmse = target
                 valid_weighted_rmse += weighted_rmse_torch(gen_for_rmse, tar_for_rmse)
                 gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
                     gen_for_rmse
@@ -704,15 +813,19 @@ class Trainer:
                     for j in range(gen.shape[1]):
                         name = self.valid_dataset.out_names[j]
                         gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(
-                            self.device, dtype=torch.float
+                            fme.get_device(), dtype=torch.float
                         )
                         gen_for_image = gen[0, j]
-                        image_error = gen_for_image - tar[0, j]
+                        image_error = gen_for_image - target[0, j]
                         image_full_field = torch.cat(
-                            (gen_for_image, gap, tar[0, j]), axis=1
+                            (gen_for_image, gap, target[0, j]), axis=1
                         )
                         image_residual = torch.cat(
-                            (gen_for_image - inp[0, j], gap, tar[0, j] - inp[0, j]),
+                            (
+                                gen_for_image - input[0, j],
+                                gap,
+                                target[0, j] - input[0, j],
+                            ),
                             axis=1,
                         )
                         if self.params.log_to_wandb:
@@ -814,7 +927,7 @@ class Trainer:
                 _,
                 inference_logs,
             ) = inference.autoregressive_inference(
-                inference_params, 0, self.valid_dataset.data_array, self.model
+                inference_params, 0, self.valid_dataset.data_array, self.stepper.module
             )
 
         return inference_logs
@@ -834,14 +947,13 @@ class Trainer:
         in order to allow Ray Tune to use this function"""
 
         if not model:
-            model = self.model
+            model = self.stepper.module
 
         torch.save(
             {
                 "iters": self.iters,
                 "epoch": self.epoch,
-                "model_state": model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
+                "stepper": self.stepper.get_state(),
             },
             checkpoint_path,
         )
@@ -852,21 +964,13 @@ class Trainer:
         checkpoint = torch.load(
             checkpoint_path, map_location="cuda:{}".format(self.params.local_rank)
         )
-        try:
-            self.model.load_state_dict(checkpoint["model_state"])
-        except:  # noqa: E722
-            new_state_dict = OrderedDict()
-            for key, val in checkpoint["model_state"].items():
-                name = key[7:]
-                new_state_dict[name] = val
-            self.model.load_state_dict(new_state_dict)
+        # restore checkpoint is used for finetuning as well as resuming.
+        # If finetuning (i.e., not resuming), restore checkpoint
+        # does not load optimizer state, instead uses config specified lr.
+        load_optimizer = self.params.resuming
+        self.stepper.load_state(checkpoint["stepper"], load_optimizer=load_optimizer)
         self.iters = checkpoint["iters"]
         self.startEpoch = checkpoint["epoch"]
-        if self.params.resuming:
-            # restore checkpoint is used for finetuning as well as resuming.
-            # If finetuning (i.e., not resuming), restore checkpoint
-            # does not load optimizer state, instead uses config specified lr.
-            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 
 def main(
