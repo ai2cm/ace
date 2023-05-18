@@ -659,9 +659,6 @@ class Trainer:
 
         self.iters = 0
         self.startEpoch = 0
-        if params.resuming:
-            logging.info("Loading checkpoint %s" % params.checkpoint_path)
-            self.restore_checkpoint(params.checkpoint_path)
 
         self.epoch = self.startEpoch
 
@@ -679,6 +676,10 @@ class Trainer:
             loss_obj=LpLoss(),
             enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,
         )
+
+        if params.resuming:
+            logging.info("Loading checkpoint %s" % params.checkpoint_path)
+            self.restore_checkpoint(params.checkpoint_path)
 
         if params.log_to_wandb:
             wandb.watch(self.stepper.modules)
@@ -961,16 +962,19 @@ class Trainer:
     def restore_checkpoint(self, checkpoint_path):
         """We intentionally require a checkpoint_dir to be passed
         in order to allow Ray Tune to use this function"""
-        checkpoint = torch.load(
-            checkpoint_path, map_location="cuda:{}".format(self.params.local_rank)
-        )
-        # restore checkpoint is used for finetuning as well as resuming.
-        # If finetuning (i.e., not resuming), restore checkpoint
-        # does not load optimizer state, instead uses config specified lr.
-        load_optimizer = self.params.resuming
-        self.stepper.load_state(checkpoint["stepper"], load_optimizer=load_optimizer)
-        self.iters = checkpoint["iters"]
-        self.startEpoch = checkpoint["epoch"]
+        _restore_checkpoint(self, checkpoint_path)
+
+
+def _restore_checkpoint(trainer: Trainer, checkpoint_path):
+    # separated into a function only to make it easier to mock
+    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    # restore checkpoint is used for finetuning as well as resuming.
+    # If finetuning (i.e., not resuming), restore checkpoint
+    # does not load optimizer state, instead uses config specified lr.
+    load_optimizer = trainer.params.resuming
+    trainer.stepper.load_state(checkpoint["stepper"], load_optimizer=load_optimizer)
+    trainer.iters = checkpoint["iters"]
+    trainer.startEpoch = checkpoint["epoch"]
 
 
 def main(
