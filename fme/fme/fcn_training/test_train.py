@@ -7,7 +7,9 @@ import pytest
 import subprocess
 import tempfile
 from fme.fcn_training.train import main as train_main
+from fme.fcn_training.train import _restore_checkpoint
 from fme.fcn_training.inference.inference import main as inference_main
+import unittest.mock
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 
@@ -174,3 +176,56 @@ def test_train_and_inference_runs(tmp_path, nettype, debug=False):
             ]
         )
         train_and_inference_process.check_returncode()
+
+
+@pytest.mark.parametrize("nettype", ["FourierNeuralOperatorNet"])
+def test_resume(tmp_path, nettype):
+    """Make sure the training is resumed from a checkpoint when restarted."""
+    seed = 0
+    np.random.seed(seed)
+    config_name = "unit_test"
+    variable_names = ["foo", "bar"]
+    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    stats_dim_sizes = {}
+    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
+
+    data_dir = tmp_path / "data"
+    stats_dir = tmp_path / "stats"
+    results_dir = tmp_path / "output"
+    data_dir.mkdir()
+    stats_dir.mkdir()
+    results_dir.mkdir()
+    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
+
+    yaml_config = _get_test_yaml_file(
+        data_dir,
+        data_dir,
+        data_dir,
+        results_dir,
+        stats_dir / "stats-timemean.nc",
+        stats_dir / "stats-mean.nc",
+        stats_dir / "stats-stddev.nc",
+        prediction_length=2,
+        variable_names=variable_names,
+        nettype=nettype,
+    )
+
+    mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
+    with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
+        train_main(
+            run_num="00",
+            yaml_config=yaml_config,
+            config=config_name,
+            enable_automatic_mixed_precision=False,
+        )
+        assert not mock.called
+        train_main(
+            run_num="00",
+            yaml_config=yaml_config,
+            config=config_name,
+            enable_automatic_mixed_precision=False,
+        )
+    mock.assert_called()
