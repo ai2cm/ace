@@ -20,6 +20,7 @@ jobs:
           cache-dependency-path: |
             requirements_except_torch.txt
             requirements_outside_of_docker.txt
+            requirements_no_deps.txt
             fme/dev-requirements.txt
 
       - name: Install dependencies
