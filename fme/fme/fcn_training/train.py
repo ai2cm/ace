@@ -380,6 +380,7 @@ class TrainerParams:
         if world_rank == 0:
             if not os.path.isdir(expDir):
                 os.makedirs(expDir)
+            if not os.path.isdir(os.path.join(expDir, "training_checkpoints/")):
                 os.makedirs(os.path.join(expDir, "training_checkpoints/"))
 
         params["experiment_dir"] = os.path.abspath(expDir)
