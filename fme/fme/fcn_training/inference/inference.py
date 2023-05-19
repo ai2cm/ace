@@ -404,9 +404,6 @@ def main(
     params["world_size"] = 1
     params["use_daily_climatology"] = use_daily_climatology
 
-    device = fme.get_device()
-    if device != "cpu":
-        torch.cuda.set_device(device)
     torch.backends.cudnn.benchmark = True
 
     # Set up directory
