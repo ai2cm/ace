@@ -1,0 +1,6 @@
+# This file is for packages that we want to install using the --no-deps flag
+# In particular, one of the dependencies of nvidia-modulus (nvidia_dali_cuda110)
+# cannot be installed on MacOS. Since we'd like to be able to do dev on Macs, and
+# since we do not currently require the features in modulus that depend on
+# nvidia_dali_cuda110, we choose to install nvidia-modulus with --no-deps
+nvidia-modulus@git+https://github.com/NVIDIA/modulus.git@b8e27c5c4ebc409e53adaba9832138743ede2785

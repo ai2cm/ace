@@ -10,6 +10,7 @@ s3fs==2023.4.0
 timm==0.6.13
 tqdm==4.65.0
 wandb==0.15.0
+torch-harmonics@git+https://github.com/NVIDIA/torch-harmonics.git@8826246cacf6c37b600cdd63fde210815ba238fd
 tensorly@git+https://github.com/tensorly/tensorly.git@b648944fe94548765537a10cedd621871f7a2ffd
 tensorly-torch@git+https://github.com/tensorly/torch.git@d27d58f16101b7ecc431372eb218ceda59d8b043
 -f https://data.dgl.ai/wheels/cu117/repo.html
