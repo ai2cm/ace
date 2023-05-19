@@ -5,7 +5,9 @@ ENV DGLBACKEND=pytorch
 
 # install python deps
 COPY requirements_except_torch.txt /tmp/requirements.txt
+COPY requirements_no_deps.txt /tmp/requirements_no_deps.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
+RUN python3 -m pip install --no-deps -r /tmp/requirements_no_deps.txt
 
 # copy local code
 COPY models/FourCastNet ${FME_DIR}/models/FourCastNet
