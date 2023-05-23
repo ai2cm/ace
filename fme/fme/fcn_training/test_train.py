@@ -35,7 +35,6 @@ def _get_test_yaml_file(
        scheduler: 'CosineAnnealingLR'
        num_data_workers: 4
        dt: 1 # how many timesteps ahead the model will predict
-       n_history: 0 #how many previous timesteps to consider
        prediction_type: 'iterative'
        prediction_length: {prediction_length} #applicable only if prediction_type == 'iterative'
        n_initial_conditions: 1 #applicable only if prediction_type == 'iterative'
@@ -56,7 +55,6 @@ def _get_test_yaml_file(
        modes: 32
        in_names: {variable_names}
        out_names: {variable_names}   #must be same as in_channels if prediction_type == 'iterative'
-       normalization: 'zscore' #options zscore (minmax not supported)
        train_data_path: '{train_data_path}'
        valid_data_path: '{valid_data_path}'
        inf_data_path: '{inf_data_path}'
@@ -69,12 +67,10 @@ def _get_test_yaml_file(
        log_to_wandb: !!bool False
        save_checkpoint: !!bool True
 
-       enable_nhwc: !!bool False
        optimizer_type: 'Adam'
 
        plot_animations: !!bool False
 
-       normalize: !!bool True
        compression: tt
     """  # noqa: E501
 
@@ -97,8 +93,9 @@ def _save_netcdf(filename, dim_sizes, variable_names):
     ds.close()
 
 
-@pytest.mark.parametrize("nettype", ["afno", "FourierNeuralOperatorNet"])
-def test_train_and_inference_runs(tmp_path, nettype, debug=False):
+@pytest.mark.parametrize("nettype", ["FourierNeuralOperatorNet", "afno"])
+@pytest.mark.parametrize("debug", [True, False])
+def test_train_and_inference_runs(tmp_path, nettype, debug):
     """Make sure that training and inference run without errors
 
     Args:

@@ -8,11 +8,8 @@ class DataLoaderParams:
     batch_size: int
     num_data_workers: int
     dt: float
-    n_history: int
     global_means_path: str
     global_stds_path: str
     time_means_path: str
-    normalize: bool
-    normalization: str
     in_names: List[str] = dataclasses.field(default_factory=list)
     out_names: List[str] = dataclasses.field(default_factory=list)

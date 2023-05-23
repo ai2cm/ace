@@ -52,10 +52,15 @@ from torch.utils.data.distributed import DistributedSampler
 # import cv2
 from .data_loader_fv3gfs import FV3GFSDataset
 from .data_loader_params import DataLoaderParams
+from .data_requirements import DataRequirements
 
 
 def get_data_loader(
-    params: DataLoaderParams, files_pattern: str, distributed, train: bool
+    params: DataLoaderParams,
+    files_pattern: str,
+    distributed,
+    train: bool,
+    requirements: DataRequirements,
 ):
     # TODO: move this default to the DataLoaderParams init
     if params.data_type is None:
@@ -63,7 +68,7 @@ def get_data_loader(
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
     elif params.data_type == "FV3GFS":
-        dataset = FV3GFSDataset(params, files_pattern)
+        dataset = FV3GFSDataset(params, files_pattern, requirements=requirements)
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
             # "RuntimeError: Resource temporarily unavailable"
