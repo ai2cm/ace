@@ -6,3 +6,4 @@ ruamel-yaml
 wandb
 tensorly
 tensorly-torch
+xarray

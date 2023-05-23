@@ -10,12 +10,9 @@ TEST_STATS_PATH = "/statsdata"
 TEST_IN_NAMES = ["UGRD10m", "VGRD10m", "PRMSL", "TCWV"]
 TEST_OUT_NAMES = ["UGRD10m", "VGRD10m", "TMP850", "TCWV"]
 TEST_PARAMS: Dict[str, Any] = {
-    "n_history": 0,
     "in_channels": [0, 1, 4, 19],
     "out_channels": [0, 1, 5, 19],
     "dt": 1,
-    "n_history": 0,
-    "normalization": "zscore",
     "global_means_path": os.path.join(TEST_STATS_PATH, "fv3gfs-mean.nc"),
     "global_stds_path": os.path.join(TEST_STATS_PATH, "fv3gfs-stddev.nc"),
     "time_means_path": os.path.join(TEST_STATS_PATH, "fv3gfs-time-mean.nc"),
