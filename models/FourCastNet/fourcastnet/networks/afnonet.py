@@ -152,20 +152,24 @@ class Block(nn.Module):
 
 
 @dataclasses.dataclass
-class AFNONetParams:
-    img_shape_x: int = 720
-    img_shape_y: int = 1440
+class AFNONetBuilder:
     patch_size: int = 16
-    N_in_channels: int = 2
-    N_out_channels: int = 2
     embed_dim: int = 768
     num_blocks: int = 16
+
+    def build(self, n_in_channels: int, n_out_channels: int, img_shape_x: int, img_shape_y: int):
+        return AFNONet(
+            params=self,
+            img_size=(img_shape_x, img_shape_y),
+            in_chans=n_in_channels,
+            out_chans=n_out_channels,
+        )
 
 
 class AFNONet(nn.Module):
     def __init__(
             self,
-            params: AFNONetParams,
+            params: AFNONetBuilder,
             img_size=(720, 1440),
             patch_size=(16, 16),
             in_chans=2,
@@ -181,10 +185,10 @@ class AFNONet(nn.Module):
         ):
         super().__init__()
         self.params = params
-        self.img_size = (params.img_shape_x, params.img_shape_y)  # lat then lon
+        self.img_size = img_size
         self.patch_size = (params.patch_size, params.patch_size)
-        self.in_chans = params.N_in_channels
-        self.out_chans = params.N_out_channels
+        self.in_chans = in_chans
+        self.out_chans = out_chans
         self.num_features = self.embed_dim = params.embed_dim
         self.num_blocks = params.num_blocks 
         norm_layer = partial(nn.LayerNorm, eps=1e-6)

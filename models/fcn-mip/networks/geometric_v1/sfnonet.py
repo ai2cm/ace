@@ -215,14 +215,10 @@ class FourierNeuralOperatorBlock(nn.Module):
     #         return self._forward(x)
 
 @dataclasses.dataclass
-class FourierNeuralOperatorParams:
+class FourierNeuralOperatorBuilder:
     spectral_transform: str = 'sht'
     filter_type: str = 'non-linear'
-    img_crop_shape_x: int = 721
-    img_crop_shape_y: int = 1440
     scale_factor: int = 16
-    N_in_channels: int = 2
-    N_out_channels: int = 2
     embed_dim: int = 256
     num_layers: int = 12
     num_blocks: int = 16
@@ -238,11 +234,19 @@ class FourierNeuralOperatorParams:
     laplace_weighting: bool = False
     checkpointing: bool = False
 
+    def build(self, n_in_channels: int, n_out_channels: int, img_shape_x: int, img_shape_y: int):
+        return FourierNeuralOperatorNet(
+            params=self,
+            in_chans = n_in_channels,
+            out_chans = n_out_channels,
+            img_size = (img_shape_x, img_shape_y),
+        )
+
 
 class FourierNeuralOperatorNet(nn.Module):
     def __init__(
             self,
-            params: FourierNeuralOperatorParams,
+            params: FourierNeuralOperatorBuilder,
             spectral_transform = 'sht',
             filter_type = 'non-linear',
             img_size = (721, 1440),
@@ -273,7 +277,7 @@ class FourierNeuralOperatorNet(nn.Module):
         self.params = params
         self.spectral_transform = params.spectral_transform if hasattr(params, "spectral_transform") else spectral_transform
         self.filter_type = params.filter_type if hasattr(params, "filter_type") else filter_type
-        self.img_size = (params.img_crop_shape_x, params.img_crop_shape_y)
+        self.img_size = img_size
         self.scale_factor = params.scale_factor if hasattr(params, "scale_factor") else scale_factor
         self.in_chans = params.N_in_channels if hasattr(params, "N_in_channels") else in_chans
         self.out_chans = params.N_out_channels if hasattr(params, "N_out_channels") else out_chans

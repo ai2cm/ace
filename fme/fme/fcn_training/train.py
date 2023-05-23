@@ -48,14 +48,13 @@ import os
 import time
 import types
 from typing import List, Optional, Literal
+from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import numpy as np
 import argparse
 import torch
 from torchvision.utils import save_image
 import torch.nn as nn
-import torch.cuda.amp as amp
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel
 import logging
 from fme.fcn_training.utils import logging_utils
 
@@ -70,18 +69,19 @@ from fme.fcn_training.utils.weighted_acc_rmse import (
     weighted_rmse_torch,
     weighted_global_mean_gradient_magnitude,
 )
-from apex import optimizers
 from fme.fcn_training.utils.darcy_loss import LpLoss
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-from networks.geometric_v1.sfnonet import FourierNeuralOperatorParams
-from fourcastnet.networks.afnonet import AFNONetParams
-from fme.fcn_training.registry import NET_REGISTRY
+from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
+from fourcastnet.networks.afnonet import AFNONetBuilder
+from fme.fcn_training.registry import ModuleBuilder
 from fme.fcn_training.inference import inference
 import dataclasses
 import fme
+from fme.fcn_training.stepper import SingleModuleStepperConfig
+import netCDF4
 
 
 @dataclasses.dataclass
@@ -109,152 +109,6 @@ class DataParams:
         )
 
 
-class SingleModuleStepper:
-    """
-    Stepper class for a single pytorch module.
-    """
-
-    def __init__(
-        self,
-        module: nn.Module,
-        optimizer_type: Literal["Adam", "FusedAdam"],
-        lr: float,
-        enable_automatic_mixed_precision: bool,
-        scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"],
-        max_epochs: int,
-        start_epoch: int,
-        loss_obj: nn.Module,
-    ):
-        """
-        Args:
-            module: The module to train.
-            optimizer_type: The optimizer type. Currently supports "Adam"
-                and "FusedAdam".
-            lr: The learning rate.
-            enable_automatic_mixed_precision: Whether to use automatic mixed precision.
-            scheduler: The scheduler type. Currently supports
-                "ReduceLROnPlateau" and "CosineAnnealingLR".
-            max_epochs: The maximum number of epochs to train for.
-            start_epoch: The epoch to start training from.
-            loss_obj: The loss object to use.
-        """
-        self.module = module
-        if optimizer_type == "FusedAdam":
-            self.optimizer = optimizers.FusedAdam(self.module.parameters(), lr=lr)
-        else:
-            self.optimizer = torch.optim.Adam(self.module.parameters(), lr=lr)
-
-        if enable_automatic_mixed_precision:
-            self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
-        else:
-            self.gscaler = None
-
-        if dist.is_initialized():
-            self.module = DistributedDataParallel(
-                self.module,
-                device_ids=[int(os.environ["LOCAL_RANK"])],
-                output_device=[int(os.environ["LOCAL_RANK"])],
-                find_unused_parameters=True,
-            )
-
-        if scheduler == "ReduceLROnPlateau":
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, factor=0.2, patience=5, mode="min"
-            )
-        elif scheduler == "CosineAnnealingLR":
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=max_epochs, last_epoch=start_epoch - 1
-            )
-        else:
-            self.scheduler = None
-
-        self.loss_obj = loss_obj
-
-    @property
-    def modules(self) -> List[nn.Module]:
-        """
-        Returns:
-            A list of modules being trained.
-        """
-        return [self.module]
-
-    def step_scheduler(self, valid_loss: float):
-        """
-        Step the scheduler.
-
-        Args:
-            valid_loss: The validation loss. Used in schedulers which change the
-                learning rate based on whether the validation loss is decreasing.
-        """
-        if self.scheduler is not None:
-            try:
-                self.scheduler.step(metrics=valid_loss)
-            except TypeError:
-                self.scheduler.step()
-
-    def run_on_batch(self, input_data, target_data, train: bool):
-        """
-        Run the model on a batch of data.
-
-        Args:
-            input_data: The input data.
-            target_data: The target data.
-            train: Whether to train the model.
-        """
-        if train:
-            self.module.train()
-            self.module.zero_grad()
-        else:
-            self.module.eval()
-        automatic_mixed_precision_enabled = self.gscaler is not None
-        with amp.autocast(automatic_mixed_precision_enabled):
-            gen = self.module(input_data).to(fme.get_device(), dtype=torch.float)
-            loss = self.loss_obj(gen, target_data)
-
-        if train:
-            if self.gscaler is not None:
-                self.gscaler.scale(loss).backward()
-                self.gscaler.step(self.optimizer)
-            else:
-                loss.backward()
-                self.optimizer.step()
-
-            if self.gscaler is not None:
-                self.gscaler.update()
-        return loss, gen
-
-    def get_state(self):
-        """
-        Returns:
-            The state of the stepper.
-        """
-        return {
-            "module": self.module.state_dict(),
-            "optimizer": self.optimizer.state_dict(),
-            "scheduler": self.scheduler.state_dict(),
-        }
-
-    def load_state(self, state, load_optimizer: bool = True):
-        """
-        Load the state of the stepper.
-
-        Args:
-            state: The state to load.
-            load_optimizer: Whether to load the optimizer state.
-        """
-        if "module" in state:
-            module_state = state["module"]
-            for key in module_state:
-                if key.startswith("module."):
-                    name = key[7:]
-                    module_state[name] = module_state.pop(key)
-            self.module.load_state_dict(module_state)
-        if load_optimizer and "optimizer" in state:
-            self.optimizer.load_state_dict(state["optimizer"])
-        if load_optimizer and "scheduler" in state:
-            self.scheduler.load_state_dict(state["scheduler"])
-
-
 @dataclasses.dataclass
 class TrainerParams:
     run_num: str
@@ -274,19 +128,15 @@ class TrainerParams:
     log_to_screen: bool
     scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"]
     optimizer_type: Literal["Adam", "FusedAdam"]
-    # TODO: is there a way to hard-code nhwc, which controls channels first/last?
-    enable_nhwc: bool
     nettype: str
     train_data_path: str
     valid_data_path: str
     max_epochs: int
     save_checkpoint: bool
-    normalization: str
     data_type: str
     num_data_workers: int
     # note: dt is only used for inference
     dt: float
-    n_history: int
     global_means_path: str
     global_stds_path: str
     time_means_path: str
@@ -315,7 +165,6 @@ class TrainerParams:
     patch_size: int = 16
     pretrained: bool = False
     pretrained_ckpt_path: Optional[str] = None
-    normalize: bool = True
     # parameters only for inference
     prediction_length: int = 2
     perturb: bool = False
@@ -435,7 +284,6 @@ class TrainerParams:
             "pretrained_ckpt_path",
             "in_channels",
             "out_channels",
-            "normalize",
             "prediction_length",
             "perturb",
         ]:
@@ -462,17 +310,14 @@ class TrainerParams:
             log_to_screen=(world_rank == 0) and params["log_to_screen"],
             scheduler=params["scheduler"],
             optimizer_type=params["optimizer_type"],
-            enable_nhwc=params["enable_nhwc"],
             nettype=params["nettype"],
             train_data_path=params["train_data_path"],
             valid_data_path=params["valid_data_path"],
             max_epochs=params["max_epochs"],
             save_checkpoint=params["save_checkpoint"],
-            normalization=params["normalization"],
             data_type=params["data_type"],
             num_data_workers=params["num_data_workers"],
             dt=params["dt"],
-            n_history=params["n_history"],
             global_means_path=params["global_means_path"],
             global_stds_path=params["global_stds_path"],
             time_means_path=params["time_means_path"],
@@ -495,63 +340,6 @@ class TrainerParams:
             logging.info(str(key) + " " + str(val))
         logging.info("---------------------------------------------------")
 
-    def register_data_params(self, data_params: DataParams):
-        self.data_params = data_params
-
-    @property
-    def img_shape_x(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.img_shape_x
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
-    @property
-    def img_shape_y(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.img_shape_y
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
-    @property
-    def img_crop_shape_x(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.img_crop_shape_x
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
-    @property
-    def img_crop_shape_y(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.img_crop_shape_y
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
-    @property
-    def N_in_channels(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.N_in_channels
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
-    @property
-    def N_out_channels(self) -> int:
-        if self.data_params is not None:
-            return self.data_params.N_out_channels
-        else:
-            raise RuntimeError(
-                "data_params must be registered before accessing this attribute"
-            )
-
     @property
     def data_loader_params(self):
         return DataLoaderParams(
@@ -559,27 +347,20 @@ class TrainerParams:
             batch_size=self.batch_size,
             num_data_workers=self.num_data_workers,
             dt=self.dt,
-            n_history=self.n_history,
             global_means_path=self.global_means_path,
             global_stds_path=self.global_stds_path,
             time_means_path=self.time_means_path,
-            normalize=self.normalize,
             in_names=self.in_names,
             out_names=self.out_names,
-            normalization=self.normalization,
         )
 
     @property
-    def model_params(self):
+    def module_builder(self) -> ModuleBuilder:
         if self.nettype == "FourierNeuralOperatorNet":
-            params = FourierNeuralOperatorParams(
+            params = FourierNeuralOperatorBuilder(
                 spectral_transform=self.spectral_transform,
                 filter_type=self.filter_type,
-                img_crop_shape_x=self.img_crop_shape_x,
-                img_crop_shape_y=self.img_crop_shape_y,
                 scale_factor=self.scale_factor,
-                N_in_channels=self.N_in_channels,
-                N_out_channels=self.N_out_channels,
                 embed_dim=self.embed_dim,
                 num_layers=self.num_layers,
                 num_blocks=self.num_blocks,
@@ -596,12 +377,8 @@ class TrainerParams:
                 checkpointing=self.checkpointing,
             )
         elif self.nettype == "afno":
-            params = AFNONetParams(
-                img_shape_x=self.img_shape_x,
-                img_shape_y=self.img_shape_y,
+            params = AFNONetBuilder(
                 patch_size=self.patch_size,
-                N_in_channels=self.N_in_channels,
-                N_out_channels=self.N_out_channels,
                 embed_dim=self.embed_dim,
                 num_blocks=self.num_blocks,
             )
@@ -633,6 +410,26 @@ class Trainer:
             )
             logging_utils.log_beaker_url()
 
+        stepper_config = SingleModuleStepperConfig(
+            builder=params.module_builder,
+            in_names=params.in_names,
+            out_names=params.out_names,
+            optimizer_type=params.optimizer_type,
+            lr=params.lr,
+            scheduler=params.scheduler,
+            max_epochs=params.max_epochs,
+            loss_obj=LpLoss(),
+            enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,
+        )
+
+        self.n_forward_steps = 1
+        if self.n_forward_steps != 1:
+            raise NotImplementedError(
+                "diagnostics code not updated for n_forward_steps != 1"
+            )
+        data_requirements = stepper_config.get_data_requirements(
+            n_forward_steps=self.n_forward_steps
+        )
         logging.info("rank %d, begin data loader init" % world_rank)
         (
             self.train_data_loader,
@@ -642,41 +439,32 @@ class Trainer:
             params.data_loader_params,
             params.train_data_path,
             dist.is_initialized(),
+            requirements=data_requirements,
             train=True,
         )
         self.valid_data_loader, self.valid_dataset = get_data_loader(
             params.data_loader_params,
             params.valid_data_path,
             dist.is_initialized(),
+            requirements=data_requirements,
             train=False,
         )
         logging.info("rank %d, data loader initialized" % world_rank)
-
-        data_params = DataParams.from_datasets(self.train_dataset, self.valid_dataset)
-        self.params.register_data_params(data_params)
-
-        BackboneNet, ParamsClass = NET_REGISTRY[params.nettype]
-        assert isinstance(params.model_params, ParamsClass)
 
         self.iters = 0
         self.startEpoch = 0
 
         self.epoch = self.startEpoch
 
-        model = BackboneNet(params.model_params).to(fme.get_device())
-        if self.params.enable_nhwc:
-            # NHWC: Convert model to channels_last memory format
-            model = model.to(memory_format=torch.channels_last)
-        self.stepper = SingleModuleStepper(
-            model,
-            optimizer_type=params.optimizer_type,
-            lr=params.lr,
-            scheduler=params.scheduler,
-            max_epochs=params.max_epochs,
-            start_epoch=self.startEpoch,
-            loss_obj=LpLoss(),
-            enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,
+        for data in self.train_data_loader:
+            shapes = {k: v.shape for k, v in data.items()}
+            break
+        normalizer = fme.get_normalizer(
+            global_means_path=params.global_means_path,
+            global_stds_path=params.global_stds_path,
+            names=data_requirements.names,
         )
+        self.stepper = stepper_config.get_stepper(shapes, normalizer)
 
         if params.resuming:
             logging.info("Loading checkpoint %s" % params.checkpoint_path)
@@ -691,6 +479,15 @@ class Trainer:
                     self.count_parameters()
                 )
             )
+
+        # TODO: refactor this into its own dataset configuration
+        inference_ds = netCDF4.MFDataset(os.path.join(params.valid_data_path, "*.nc"))
+        self.inference_data = load_series_data(
+            idx=0,
+            n_steps=params.prediction_length + 1,
+            ds=inference_ds,
+            names=list(set(params.in_names).union(params.out_names)),
+        )
 
     def switch_off_grad(self, model):
         for param in model.parameters():
@@ -732,7 +529,7 @@ class Trainer:
 
             if self.params.log_to_wandb:
                 logging.info("Logging to wandb")
-                for pg in self.stepper.optimizer.param_groups:
+                for pg in self.stepper.optimization.optimizer.param_groups:
                     lr = pg["lr"]
                 all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
                 wandb.log(all_logs, step=self.epoch)
@@ -743,15 +540,9 @@ class Trainer:
         self.epoch += 1
 
         for data in self.train_data_loader:
-            self.iters += 1
-            input_data, target_data = map(
-                lambda x: x.to(fme.get_device(), dtype=torch.float), data
+            loss, _, _, _ = self.stepper.run_on_batch(
+                data, train=True, n_forward_steps=self.n_forward_steps
             )
-
-            if self.params.enable_nhwc:
-                input_data = input_data.to(memory_format=torch.channels_last)
-                target_data = target_data.to(memory_format=torch.channels_last)
-            loss, _ = self.stepper.run_on_batch(input_data, target_data, train=True)
 
         logs = {"loss": loss}
 
@@ -764,102 +555,130 @@ class Trainer:
 
     def validate_one_epoch(self):
         n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
-        if self.params.normalization == "minmax":
-            raise Exception("minmax normalization not supported")
-        elif self.params.normalization == "zscore":
-            # TODO: unify this normalization logic with what's in the data loading
-            mult = torch.as_tensor(self._load_global_output_stds()).to(fme.get_device())
 
         valid_buff = torch.zeros((3), dtype=torch.float32, device=fme.get_device())
         valid_loss = valid_buff[0].view(-1)
         valid_l1 = valid_buff[1].view(-1)
         valid_steps = valid_buff[2].view(-1)
-        valid_weighted_rmse = torch.zeros(
-            (self.params.N_out_channels), dtype=torch.float32, device=fme.get_device()
-        )
-        valid_gradient_magnitude_diff = torch.zeros(
-            (self.params.N_out_channels), dtype=torch.float32, device=fme.get_device()
-        )
+        valid_weighted_rmse = {
+            k: torch.zeros((1), dtype=torch.float32, device=fme.get_device())
+            for k in self.params.out_names
+        }
+        valid_gradient_magnitude_diff = {
+            k: torch.zeros((1), dtype=torch.float32, device=fme.get_device())
+            for k in self.params.out_names
+        }
 
         with torch.no_grad():
             image_logs = {}
             for i, data in enumerate(self.valid_data_loader, 0):
                 if i >= n_valid_batches:
                     break
-                input, target = map(
-                    lambda x: x.to(fme.get_device(), dtype=torch.float), data
-                )
-                batch_loss, gen = self.stepper.run_on_batch(input, target, train=False)
-                valid_loss += batch_loss
-                valid_l1 += nn.functional.l1_loss(gen, target)
-
                 valid_steps += 1.0
+                (
+                    batch_loss,
+                    _,
+                    gen_norm,
+                    data_norm,
+                ) = self.stepper.run_on_batch(
+                    data, train=False, n_forward_steps=self.n_forward_steps
+                )
+                valid_loss += batch_loss
+                for name in gen_norm:
+                    time_dim = 1
+                    input_time = 0
+                    target_time = 1
+                    valid_l1 += nn.functional.l1_loss(
+                        gen_norm[name].select(dim=time_dim, index=target_time),
+                        data_norm[name].select(dim=time_dim, index=target_time),
+                    ) / len(gen_norm[name].select(dim=time_dim, index=target_time))
 
-                # direct prediction weighted rmse
-                gen_for_rmse = gen
-                tar_for_rmse = target
-                valid_weighted_rmse += weighted_rmse_torch(gen_for_rmse, tar_for_rmse)
-                gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
-                    gen_for_rmse
-                )
-                tar_gradient_magnitude = weighted_global_mean_gradient_magnitude(
-                    tar_for_rmse
-                )
-                valid_gradient_magnitude_diff += (
-                    100
-                    * (gen_gradient_magnitude - tar_gradient_magnitude)
-                    / tar_gradient_magnitude
-                )
+                    # direct prediction weighted rmse
+                    assert gen_norm[name].shape[time_dim] == 2, (
+                        "if this assert fails, need to update diagnostics to "
+                        "aggregate across multiple time dimension outputs",
+                    )
+                    gen_for_rmse = (
+                        gen_norm[name]
+                        .select(dim=time_dim, index=target_time)
+                        .unsqueeze(1)
+                    )  # add channel dimension
+                    tar_for_rmse = (
+                        data_norm[name]
+                        .select(dim=time_dim, index=target_time)
+                        .unsqueeze(1)
+                    ).to(
+                        fme.get_device()
+                    )  # add channel dimension
+                    valid_weighted_rmse[name] += weighted_rmse_torch(
+                        gen_for_rmse, tar_for_rmse
+                    )
+                    gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
+                        gen_for_rmse
+                    )
+                    tar_gradient_magnitude = weighted_global_mean_gradient_magnitude(
+                        tar_for_rmse
+                    )
+                    valid_gradient_magnitude_diff[name] += (
+                        100
+                        * (gen_gradient_magnitude - tar_gradient_magnitude)
+                        / tar_gradient_magnitude
+                    )
 
                 if i % 10 == 0:
-                    for j in range(gen.shape[1]):
-                        name = self.valid_dataset.out_names[j]
+                    for name in gen_norm:
                         gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(
                             fme.get_device(), dtype=torch.float
                         )
-                        gen_for_image = gen[0, j]
-                        image_error = gen_for_image - target[0, j]
+                        gen_for_image = gen_norm[name].select(
+                            dim=time_dim, index=target_time
+                        )[
+                            0
+                        ]  # first sample in batch
+                        target_for_image = data_norm[name].select(
+                            dim=time_dim, index=target_time
+                        )[0]
+                        input_for_image = data_norm[name].select(
+                            dim=time_dim, index=input_time
+                        )[0]
+                        image_error = gen_for_image - target_for_image
                         image_full_field = torch.cat(
-                            (gen_for_image, gap, target[0, j]), axis=1
+                            (gen_for_image, gap, target_for_image), axis=1
                         )
                         image_residual = torch.cat(
                             (
-                                gen_for_image - input[0, j],
+                                gen_for_image - input_for_image,
                                 gap,
-                                target[0, j] - input[0, j],
+                                target_for_image - input_for_image,
                             ),
                             axis=1,
                         )
                         if self.params.log_to_wandb:
                             caption = (
-                                f"Channel {j} ({name}) one step full field for "
+                                f"{name} one step full field for "
                                 f"sample {i}; (left) generated and (right) target."
                             )
                             wandb_image = wandb.Image(image_full_field, caption=caption)
                             image_logs[
-                                f"image-full-field/sample{i}/channel{j}-{name}"
+                                f"image-full-field/sample{i}/{name}"
                             ] = wandb_image
                             caption = (
-                                f"Channel {j} ({name}) one step residual for "
+                                f"{name} one step residual for "
                                 f"sample {i}; (left) generated and (right) target."
                             )
                             wandb_image = wandb.Image(image_residual, caption=caption)
-                            image_logs[
-                                f"image-residual/sample{i}/channel{j}-{name}"
-                            ] = wandb_image
+                            image_logs[f"image-residual/sample{i}/{name}"] = wandb_image
                             caption = (
-                                f"Channel {j} ({name}) one step error "
+                                f"{name} one step error "
                                 f"(generated - target) for sample {i}."
                             )
                             wandb_image = wandb.Image(image_error, caption=caption)
-                            image_logs[
-                                f"image-error/sample{i}/channel{j}-{name}"
-                            ] = wandb_image
+                            image_logs[f"image-error/sample{i}/{name}"] = wandb_image
                         else:
                             image_path = os.path.join(
                                 self.params.experiment_dir,
                                 f"sample{i}",
-                                f"channel{j}",
+                                f"{name}",
                                 f"epoch{self.epoch}.png",
                             )
                             os.makedirs(os.path.dirname(image_path), exist_ok=True)
@@ -867,36 +686,33 @@ class Trainer:
 
         if dist.is_initialized():
             dist.all_reduce(valid_buff)
-            dist.all_reduce(valid_weighted_rmse)
-
         # divide by number of steps
         valid_buff[0:2] = valid_buff[0:2] / valid_buff[2]
-        valid_weighted_rmse = valid_weighted_rmse / valid_buff[2]
-        valid_gradient_magnitude_diff = valid_gradient_magnitude_diff / valid_buff[2]
-        valid_weighted_rmse *= mult
-
-        # download buffers
         valid_buff_cpu = valid_buff.detach().cpu().numpy()
-        valid_weighted_rmse_cpu = valid_weighted_rmse.detach().cpu().numpy()
-        valid_gradient_magnitude_diff_cpu = (
-            valid_gradient_magnitude_diff.detach().cpu().numpy()
-        )
-        valid_weighted_rmse = mult * torch.mean(valid_weighted_rmse, axis=0)
         logs = {
             "valid_l1": valid_buff_cpu[1],
             "valid_loss": valid_buff_cpu[0],
-            "valid_rmse_u10": valid_weighted_rmse_cpu[0],
-            "valid_rmse_v10": valid_weighted_rmse_cpu[1],
         }
-        metric_name_format = "valid_gradient_magnitude_percent_diff/channel{c}-{name}"
-        grad_mag_logs = {
-            metric_name_format.format(
-                c=c, name=name
-            ): valid_gradient_magnitude_diff_cpu[c]
-            for c, name in enumerate(self.valid_dataset.out_names)
-        }
+        for name in self.params.out_names:
+            if dist.is_initialized():
+                dist.all_reduce(valid_weighted_rmse[name])
 
-        validation_logs = {**logs, **grad_mag_logs, **image_logs}
+            valid_weighted_rmse[name] = valid_weighted_rmse[name] / valid_buff[2]
+            valid_gradient_magnitude_diff[name] = (
+                valid_gradient_magnitude_diff[name] / valid_buff[2]
+            )
+
+            # download buffers
+            valid_weighted_rmse_cpu = valid_weighted_rmse[name].detach().cpu().numpy()
+            valid_gradient_magnitude_diff_cpu = (
+                valid_gradient_magnitude_diff[name].detach().cpu().numpy()
+            )
+            logs[f"valid_rmse_{name}"] = valid_weighted_rmse_cpu
+            logs[
+                f"valid_gradient_magnitude_percent_diff/{name}"
+            ] = valid_gradient_magnitude_diff_cpu
+
+        validation_logs = {**logs, **image_logs}
         return validation_logs
 
     def inference_one_epoch(self):
@@ -906,30 +722,16 @@ class Trainer:
             logging.info("Starting inference on validation set...")
 
         with torch.no_grad():
-            inference_params = types.SimpleNamespace(
-                **dict(self.params.__dict__, **self.params.data_params.__dict__)
-            )
-            inference_params.means = self.valid_dataset.out_means[0]
-            inference_params.stds = self.valid_dataset.out_stds[0]
-            inference_params.time_means = self.valid_dataset.out_time_means[0]
-            inference_params.use_daily_climatology = (
-                False  # TODO(gideond) default value?
-            )
-            inference_params.epoch = self.epoch
-            inference_params.iters = self.iters
-            inference_params.get_data_loader = False
+            inference_params = types.SimpleNamespace(**self.params.__dict__)
             inference_params.log_on_each_unroll_step_inference = False
             inference_params.log_to_wandb = True
             inference_params.log_to_screen = False  # reduce noise in logs
             (
                 _,
                 _,
-                _,
-                _,
-                _,
                 inference_logs,
             ) = inference.autoregressive_inference(
-                inference_params, 0, self.valid_dataset.data_array, self.stepper.module
+                inference_params, 0, self.inference_data, self.stepper
             )
 
         return inference_logs

@@ -44,11 +44,8 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from typing import Literal
 
 
 class PeriodicPad2d(nn.Module):
@@ -69,40 +66,3 @@ class PeriodicPad2d(nn.Module):
             out, (0, 0, self.pad_width, self.pad_width), mode="constant", value=0
         )
         return out
-
-
-def reshape_fields(
-    img,
-    input_or_target: Literal["input", "target"],
-    normalization,
-    means,
-    stds,
-    normalize=True,
-):
-    # Takes in np array of size (n_history+1, c, h, w) and returns
-    # torch tensor of size ((n_channels*(n_history+1), w, h)
-
-    if len(np.shape(img)) == 3:
-        img = np.expand_dims(img, 0)
-
-    n_history = np.shape(img)[0] - 1
-    img_shape_x = np.shape(img)[-2]
-    img_shape_y = np.shape(img)[-1]
-    n_channels = np.shape(img)[1]  # this will either be N_in_channels or N_out_channels
-
-    # Note: this is the only place normalization happens right now!
-    # TODO: move normalization from data loading into training logic
-    if normalize:
-        if normalization == "minmax":
-            raise Exception("minmax not supported. Use zscore")
-        elif normalization == "zscore":
-            img -= means
-            img /= stds
-
-    if input_or_target == "input":
-        n_steps = n_history + 1
-    elif input_or_target == "target":
-        n_steps = 1
-    img = np.reshape(img, (n_channels * n_steps, img_shape_x, img_shape_y))
-
-    return torch.as_tensor(img)
