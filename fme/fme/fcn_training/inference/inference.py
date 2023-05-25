@@ -44,6 +44,7 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import dataclasses
 import os
 import sys
 from typing import Optional, Mapping
@@ -53,7 +54,10 @@ import argparse
 
 from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
 from fourcastnet.networks.afnonet import AFNONetBuilder
-from fme.fcn_training.registry import ModuleBuilder
+from fme.fcn_training.registry import (
+    ModuleBuilder,
+    SphericalFourierNeuralOperatorBuilder,
+)
 import netCDF4
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
@@ -131,6 +135,15 @@ def module_builder(params) -> ModuleBuilder:
             if param_name in params.__dict__:
                 model_params[param_name] = params.__dict__[param_name]
         builder = FourierNeuralOperatorBuilder(**model_params)
+    elif params.nettype == "SphericalFourierNeuralOperatorNet":
+        model_params = {}
+        param_names = [
+            f.name for f in dataclasses.fields(SphericalFourierNeuralOperatorBuilder)
+        ]
+        for param_name in param_names:
+            if param_name in params.__dict__:
+                model_params[param_name] = params.__dict__[param_name]
+        builder = SphericalFourierNeuralOperatorBuilder(**model_params)
     elif params.nettype == "afno":
         model_params = {}
         for param_name in [
