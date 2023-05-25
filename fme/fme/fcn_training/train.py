@@ -71,7 +71,10 @@ from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
 from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
 from fourcastnet.networks.afnonet import AFNONetBuilder
-from fme.fcn_training.registry import ModuleBuilder
+from fme.fcn_training.registry import (
+    ModuleBuilder,
+    SphericalFourierNeuralOperatorBuilder,
+)
 from fme.fcn_training.inference import inference
 import dataclasses
 import fme
@@ -157,6 +160,17 @@ class TrainerParams:
     spectral_layers: int = 1
     laplace_weighting: bool = False
     checkpointing: bool = False
+    # the fields from operator_type to separable are for the
+    # SphericalFourierNeuralOperatorNet architecture
+    operator_type: Literal[
+        "diagonal", "l-dependant", "block-separable", "dhconv"
+    ] = "diagonal"
+    use_mlp: bool = True
+    activation_function: str = "relu"
+    encoder_layers: int = 1
+    pos_embed: bool = True
+    factorization: Optional[str] = None
+    separable: bool = False
     patch_size: int = 16
     pretrained: bool = False
     pretrained_ckpt_path: Optional[str] = None
@@ -269,6 +283,13 @@ class TrainerParams:
             "laplace_weighting",
             "checkpointing",
             "patch_size",
+            "operator_type",
+            "use_mlp",
+            "activation_function",
+            "encoder_layers",
+            "pos_embed",
+            "factorization",
+            "separable",
         ]:
             if param_name in params:
                 model_params[param_name] = params[param_name]
@@ -376,6 +397,30 @@ class TrainerParams:
                 patch_size=self.patch_size,
                 embed_dim=self.embed_dim,
                 num_blocks=self.num_blocks,
+            )
+        elif self.nettype == "SphericalFourierNeuralOperatorNet":
+            params = SphericalFourierNeuralOperatorBuilder(
+                spectral_transform=self.spectral_transform,
+                filter_type=self.filter_type,
+                operator_type=self.operator_type,
+                scale_factor=self.scale_factor,
+                embed_dim=self.embed_dim,
+                num_layers=self.num_layers,
+                num_blocks=self.num_blocks,
+                hard_thresholding_fraction=self.hard_thresholding_fraction,
+                normalization_layer=self.normalization_layer,
+                use_mlp=self.use_mlp,
+                activation_function=self.activation_function,
+                encoder_layers=self.encoder_layers,
+                pos_embed=self.pos_embed,
+                big_skip=self.big_skip,
+                rank=self.rank,
+                factorization=self.factorization,
+                separable=self.separable,
+                complex_network=self.complex_network,
+                complex_activation=self.complex_activation,
+                spectral_layers=self.spectral_layers,
+                checkpointing=self.checkpointing,
             )
         else:
             raise ValueError("Unknown nettype: " + str(self.nettype))
