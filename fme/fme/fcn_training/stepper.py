@@ -333,13 +333,15 @@ class SingleModuleStepper:
             load_optimizer: Whether to load the optimizer state.
         """
         if "module" in state:
-            module_state = state["module"]
-            for key in module_state:
+            module_state = {}
+            for key in state["module"]:
                 if key.startswith("module."):
                     # model was stored using ddp which prepends 'module.' if training
                     # with multiple GPUs
                     name = key[7:]
-                    module_state[name] = module_state.pop(key)
+                else:
+                    name = key
+                module_state[name] = state["module"][key]
             self.module.load_state_dict(module_state)
         if load_optimizer and "optimization" in state:
             self.optimization.load_state(state["optimization"])
