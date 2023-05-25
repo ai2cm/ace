@@ -128,3 +128,91 @@ def test_root_mean_squared_error(variable, time, lat, lon):
     assert torch.isclose(
         result, torch.tensor([1.0]).sqrt()
     ), "Root mean squared error between zero and one should be one."
+
+
+@pytest.mark.parametrize(*test_cases)
+def test_rmse_of_time_mean(variable, time, lat, lon):
+    x = torch.randn(variable, time, lat, lon)
+    random_weights = torch.rand(lat, lon)
+
+    result = fme.rmse_of_time_mean(x, x.clone(), time_dim=1)
+    torch.testing.assert_close(
+        result,
+        torch.zeros((variable,)),
+        msg="RMSE of time mean between identical tensors should be zero.",
+    )
+
+    result = fme.rmse_of_time_mean(
+        torch.zeros(variable, time, lat, lon),
+        torch.ones(variable, time, lat, lon),
+        weights=random_weights,
+        time_dim=1,
+    )
+    torch.testing.assert_close(
+        result,
+        torch.ones((variable,)),
+        msg="RMSE of time mean between zero and 1 should be 1.",
+    )
+
+
+@pytest.mark.parametrize(*test_cases)
+def test_time_and_global_mean(variable, time, lat, lon):
+    x = torch.randn(variable, time, lat, lon)
+    random_weights = torch.rand(lat, lon)
+
+    result = fme.time_and_global_mean_bias(x, x.clone(), time_dim=1)
+    torch.testing.assert_close(
+        result,
+        torch.zeros((variable,)),
+        msg="Time and global mean bias between identical tensors should be zero.",
+    )
+
+    result = fme.time_and_global_mean_bias(
+        torch.zeros(variable, time, lat, lon),
+        torch.ones(variable, time, lat, lon),
+        weights=random_weights,
+        time_dim=1,
+    )
+    torch.testing.assert_close(
+        result,
+        torch.ones((variable,)),
+        msg="Global mean bias between zero and 1 should be 1.",
+    )
+
+
+def test_gradient_magnitude():
+    constant = torch.ones((5, 2, 4, 4))
+    constant_grad_magnitude = fme.gradient_magnitude(constant, dim=(-2, -1))
+    torch.testing.assert_close(constant_grad_magnitude, torch.zeros_like(constant))
+
+    monotonic = torch.tile(torch.arange(4.0), (5, 2, 4, 1))
+    monotonic_grad_magnitude = fme.gradient_magnitude(monotonic, dim=(-2, -1))
+    torch.testing.assert_close(monotonic_grad_magnitude, torch.ones_like(monotonic))
+
+
+def test_weighted_mean_gradient_magnitude():
+    constant = torch.ones((5, 2, 4, 4))
+    constant_grad_magnitude = fme.weighted_mean_gradient_magnitude(
+        constant, dim=(-2, -1)
+    )
+    torch.testing.assert_close(constant_grad_magnitude, torch.zeros((5, 2)))
+
+    monotonic = torch.tile(torch.arange(4.0), (5, 2, 4, 1))
+    monotonic_grad_magnitude = fme.weighted_mean_gradient_magnitude(
+        monotonic, dim=(-2, -1)
+    )
+    torch.testing.assert_close(monotonic_grad_magnitude, torch.ones((5, 2)))
+
+
+def test_gradient_magnitude_percent_diff():
+    constant = torch.ones((5, 2, 4, 4))
+    self_percent_diff = fme.gradient_magnitude_percent_diff(
+        constant, constant, dim=(-2, -1)
+    )
+    assert torch.all(torch.isnan(self_percent_diff))
+
+    monotonic = torch.tile(torch.arange(4.0), (5, 2, 4, 1))
+    percent_diff = fme.gradient_magnitude_percent_diff(
+        monotonic, constant, dim=(-2, -1)
+    )
+    torch.testing.assert_close(percent_diff, -100 * torch.ones((5, 2)))

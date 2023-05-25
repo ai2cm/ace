@@ -52,7 +52,6 @@ from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import numpy as np
 import argparse
 import torch
-from torchvision.utils import save_image
 import torch.nn as nn
 import torch.distributed as dist
 import logging
@@ -65,10 +64,6 @@ from fme.fcn_training.utils.data_loader_multifiles import (
     DataLoaderParams,
 )
 import wandb
-from fme.fcn_training.utils.weighted_acc_rmse import (
-    weighted_rmse_torch,
-    weighted_global_mean_gradient_magnitude,
-)
 from fme.fcn_training.utils.darcy_loss import LpLoss
 
 DECORRELATION_TIME = 36  # 9 days
@@ -556,6 +551,11 @@ class Trainer:
     def validate_one_epoch(self):
         n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
 
+        area_weights = fme.spherical_area_weights(
+            self.valid_dataset.img_shape_x,
+            self.valid_dataset.img_shape_y,
+            device=fme.get_device(),
+        )
         valid_buff = torch.zeros((3), dtype=torch.float32, device=fme.get_device())
         valid_loss = valid_buff[0].view(-1)
         valid_l1 = valid_buff[1].view(-1)
@@ -577,7 +577,7 @@ class Trainer:
                 valid_steps += 1.0
                 (
                     batch_loss,
-                    _,
+                    gen,
                     gen_norm,
                     data_norm,
                 ) = self.stepper.run_on_batch(
@@ -598,34 +598,19 @@ class Trainer:
                         "if this assert fails, need to update diagnostics to "
                         "aggregate across multiple time dimension outputs",
                     )
-                    gen_for_rmse = (
-                        gen_norm[name]
-                        .select(dim=time_dim, index=target_time)
-                        .unsqueeze(1)
-                    )  # add channel dimension
+                    gen_for_rmse = gen[name].select(dim=time_dim, index=target_time)
                     tar_for_rmse = (
-                        data_norm[name]
-                        .select(dim=time_dim, index=target_time)
-                        .unsqueeze(1)
-                    ).to(
-                        fme.get_device()
-                    )  # add channel dimension
-                    valid_weighted_rmse[name] += weighted_rmse_torch(
-                        gen_for_rmse, tar_for_rmse
-                    )
-                    gen_gradient_magnitude = weighted_global_mean_gradient_magnitude(
-                        gen_for_rmse
-                    )
-                    tar_gradient_magnitude = weighted_global_mean_gradient_magnitude(
-                        tar_for_rmse
-                    )
-                    valid_gradient_magnitude_diff[name] += (
-                        100
-                        * (gen_gradient_magnitude - tar_gradient_magnitude)
-                        / tar_gradient_magnitude
-                    )
+                        data[name].select(dim=time_dim, index=target_time)
+                    ).to(fme.get_device())
+                    valid_weighted_rmse[name] += fme.root_mean_squared_error(
+                        tar_for_rmse, gen_for_rmse, weights=area_weights, dim=[-2, -1]
+                    ).mean(dim=0)
+                    grad_percent_diff = fme.gradient_magnitude_percent_diff(
+                        tar_for_rmse, gen_for_rmse, weights=area_weights, dim=[-2, -1]
+                    ).mean(dim=0)
+                    valid_gradient_magnitude_diff[name] += grad_percent_diff
 
-                if i % 10 == 0:
+                if i == 0:
                     for name in gen_norm:
                         gap = torch.zeros((self.valid_dataset.img_shape_x, 4)).to(
                             fme.get_device(), dtype=torch.float
@@ -674,15 +659,6 @@ class Trainer:
                             )
                             wandb_image = wandb.Image(image_error, caption=caption)
                             image_logs[f"image-error/sample{i}/{name}"] = wandb_image
-                        else:
-                            image_path = os.path.join(
-                                self.params.experiment_dir,
-                                f"sample{i}",
-                                f"{name}",
-                                f"epoch{self.epoch}.png",
-                            )
-                            os.makedirs(os.path.dirname(image_path), exist_ok=True)
-                            save_image(image_full_field, image_path)
 
         if dist.is_initialized():
             dist.all_reduce(valid_buff)
@@ -707,7 +683,7 @@ class Trainer:
             valid_gradient_magnitude_diff_cpu = (
                 valid_gradient_magnitude_diff[name].detach().cpu().numpy()
             )
-            logs[f"valid_rmse_{name}"] = valid_weighted_rmse_cpu
+            logs[f"valid_rmse/{name}"] = valid_weighted_rmse_cpu
             logs[
                 f"valid_gradient_magnitude_percent_diff/{name}"
             ] = valid_gradient_magnitude_diff_cpu
