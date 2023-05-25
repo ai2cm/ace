@@ -49,6 +49,7 @@ def _get_test_yaml_file(
        #afno hyperparams
        num_blocks: 8
        nettype: '{nettype}'
+       spectral_layers: 1
        patch_size: 8
        embed_dim: 8
        width: 56
@@ -93,7 +94,9 @@ def _save_netcdf(filename, dim_sizes, variable_names):
     ds.close()
 
 
-@pytest.mark.parametrize("nettype", ["FourierNeuralOperatorNet", "afno"])
+@pytest.mark.parametrize(
+    "nettype", ["SphericalFourierNeuralOperatorNet", "FourierNeuralOperatorNet", "afno"]
+)
 @pytest.mark.parametrize("debug", [True, False])
 def test_train_and_inference_runs(tmp_path, nettype, debug):
     """Make sure that training and inference run without errors
@@ -175,7 +178,7 @@ def test_train_and_inference_runs(tmp_path, nettype, debug):
         train_and_inference_process.check_returncode()
 
 
-@pytest.mark.parametrize("nettype", ["FourierNeuralOperatorNet"])
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
     seed = 0
