@@ -61,13 +61,6 @@ import torch
 from collections import OrderedDict
 import logging
 from fme.fcn_training.utils import logging_utils
-from fme.fcn_training.utils.weighted_acc_rmse import (
-    compute_time_rmse,
-    compute_time_and_global_mean_bias,
-    weighted_global_mean_channels,
-    weighted_rmse_torch_channels,
-    weighted_global_mean_gradient_magnitude_channels,
-)
 
 logging_utils.config_logger()
 from fme.fcn_training.utils.YParams import YParams
@@ -224,7 +217,9 @@ def autoregressive_inference(
     lat_dim, lon_dim = 2, 3
     example_shape = valid_data[out_names[0]].shape
     lat_size, lon_size = example_shape[lat_dim], example_shape[lon_dim]
-    area_weights = fme.spherical_area_weights(lat_size, lon_size)
+    area_weights = fme.spherical_area_weights(
+        lat_size, lon_size, device=fme.get_device()
+    )
 
     rmse = {}
     global_mean_pred = {}
@@ -241,18 +236,36 @@ def autoregressive_inference(
             for name in gen_data:
                 pred = gen_data[name][0:1, i : i + 1, :]
                 tar = valid_data[name][0:1, i : i + 1, :].to(fme.get_device())
-                rmse[(name, i)] = weighted_rmse_torch_channels(pred, tar).cpu().numpy()
+                rmse[(name, i)] = (
+                    fme.root_mean_squared_error(
+                        tar, pred, weights=area_weights, dim=[-2, -1]
+                    )
+                    .cpu()
+                    .numpy()
+                )
                 global_mean_pred[(name, i)] = (
-                    weighted_global_mean_channels(pred).cpu().numpy()
+                    fme.weighted_mean(pred, weights=area_weights, dim=[-2, -1])
+                    .cpu()
+                    .numpy()
                 )
                 global_mean_target[(name, i)] = (
-                    weighted_global_mean_channels(tar).cpu().numpy()
+                    fme.weighted_mean(tar, weights=area_weights, dim=[-2, -1])
+                    .cpu()
+                    .numpy()
                 )
                 gradient_magnitude_pred[(name, i)] = (
-                    weighted_global_mean_gradient_magnitude_channels(pred).cpu().numpy()
+                    fme.weighted_mean_gradient_magnitude(
+                        pred, weights=area_weights, dim=[-2, -1]
+                    )
+                    .cpu()
+                    .numpy()
                 )
                 gradient_magnitude_target[(name, i)] = (
-                    weighted_global_mean_gradient_magnitude_channels(tar).cpu().numpy()
+                    fme.weighted_mean_gradient_magnitude(
+                        tar, weights=area_weights, dim=[-2, -1]
+                    )
+                    .cpu()
+                    .numpy()
                 )
 
             if params.log_to_screen:
@@ -315,16 +328,16 @@ def autoregressive_inference(
                         ] = gradient_magnitude_target[(name, i)]
 
         for name in gen_data:
-            time_rmse = compute_time_rmse(
-                gen_data[name][0, 1:].unsqueeze(1),
-                valid_data[name][0, 1:].unsqueeze(1),
-                weights=area_weights,
-            )
-            global_time_mean_bias = compute_time_and_global_mean_bias(
-                gen_data[name][0, 1:].unsqueeze(1),
-                valid_data[name][0, 1:].unsqueeze(1),
-                weights=area_weights,
-            )
+            time_rmse = fme.rmse_of_time_mean(
+                valid_data[name][0, 1:].to(fme.get_device()),
+                gen_data[name][0, 1:],
+                area_weights,
+            ).cpu()
+            global_time_mean_bias = fme.time_and_global_mean_bias(
+                valid_data[name][0, 1:].to(fme.get_device()),
+                gen_data[name][0, 1:],
+                area_weights,
+            ).cpu()
             inference_logs[f"rmse_of_time_mean/ic{ic}/{name}"] = time_rmse
             inference_logs[
                 f"global_and_time_mean_bias/ic{ic}/{name}"
