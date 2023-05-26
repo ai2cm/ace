@@ -12,6 +12,9 @@ from fme.fcn_training.inference.inference import main as inference_main
 import unittest.mock
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
+JOB_SUBMISSION_SCRIPT_PATH = (
+    REPOSITORY_PATH / "fme" / "fme" / "fcn_training" / "run-train-and-inference.sh"
+)
 
 
 def _get_test_yaml_file(
@@ -94,6 +97,42 @@ def _save_netcdf(filename, dim_sizes, variable_names):
     ds.close()
 
 
+def _setup(path, nettype):
+    seed = 0
+    np.random.seed(seed)
+    config_name = "unit_test"
+    variable_names = ["foo", "bar"]
+    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    stats_dim_sizes = {}
+    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
+
+    data_dir = path / "data"
+    stats_dir = path / "stats"
+    results_dir = path / "output"
+    data_dir.mkdir()
+    stats_dir.mkdir()
+    results_dir.mkdir()
+    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
+    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
+
+    yaml_config_filename = _get_test_yaml_file(
+        data_dir,
+        data_dir,
+        data_dir,
+        results_dir,
+        stats_dir / "stats-timemean.nc",
+        stats_dir / "stats-mean.nc",
+        stats_dir / "stats-stddev.nc",
+        prediction_length=2,
+        variable_names=variable_names,
+        nettype=nettype,
+        config_name=config_name,
+    )
+    return yaml_config_filename, config_name
+
+
 @pytest.mark.parametrize(
     "nettype", ["SphericalFourierNeuralOperatorNet", "FourierNeuralOperatorNet", "afno"]
 )
@@ -106,37 +145,7 @@ def test_train_and_inference_runs(tmp_path, nettype, debug):
         nettype: parameter indicating model architecture to use.
         debug: option for developers to allow use of pdb.
     """
-    seed = 0
-    np.random.seed(seed)
-    config_name = "unit_test"
-    variable_names = ["foo", "bar"]
-    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
-    stats_dim_sizes = {}
-    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
-
-    data_dir = tmp_path / "data"
-    stats_dir = tmp_path / "stats"
-    results_dir = tmp_path / "output"
-    data_dir.mkdir()
-    stats_dir.mkdir()
-    results_dir.mkdir()
-    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
-
-    yaml_config = _get_test_yaml_file(
-        data_dir,
-        data_dir,
-        data_dir,
-        results_dir,
-        stats_dir / "stats-timemean.nc",
-        stats_dir / "stats-mean.nc",
-        stats_dir / "stats-stddev.nc",
-        prediction_length=2,
-        variable_names=variable_names,
-        nettype=nettype,
-    )
+    yaml_config, config_name = _setup(tmp_path, nettype)
 
     if debug:
         # using pdb requires calling main functions directly
@@ -160,16 +169,9 @@ def test_train_and_inference_runs(tmp_path, nettype, debug):
         )
     else:
         # in regular testing, call the actual submission script used for batch jobs
-        script_path = (
-            REPOSITORY_PATH
-            / "fme"
-            / "fme"
-            / "fcn_training"
-            / "run-train-and-inference.sh"
-        )
         train_and_inference_process = subprocess.run(
             [
-                script_path,
+                JOB_SUBMISSION_SCRIPT_PATH,
                 yaml_config,
                 config_name,
                 "1",
@@ -181,37 +183,7 @@ def test_train_and_inference_runs(tmp_path, nettype, debug):
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    seed = 0
-    np.random.seed(seed)
-    config_name = "unit_test"
-    variable_names = ["foo", "bar"]
-    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
-    stats_dim_sizes = {}
-    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
-
-    data_dir = tmp_path / "data"
-    stats_dir = tmp_path / "stats"
-    results_dir = tmp_path / "output"
-    data_dir.mkdir()
-    stats_dir.mkdir()
-    results_dir.mkdir()
-    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
-
-    yaml_config = _get_test_yaml_file(
-        data_dir,
-        data_dir,
-        data_dir,
-        results_dir,
-        stats_dir / "stats-timemean.nc",
-        stats_dir / "stats-mean.nc",
-        stats_dir / "stats-stddev.nc",
-        prediction_length=2,
-        variable_names=variable_names,
-        nettype=nettype,
-    )
+    yaml_config, config_name = _setup(tmp_path, nettype)
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
@@ -229,3 +201,22 @@ def test_resume(tmp_path, nettype):
             enable_automatic_mixed_precision=False,
         )
     mock.assert_called()
+
+
+# pytorch dist is initialized in train.py with nccl backend, which does not support CPU
+@pytest.mark.requires_gpu
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+def test_resume_two_gpus(tmp_path, nettype):
+    """Make sure the training is resumed from a checkpoint when restarted, using
+    torchrun with NPROC_PER_NODE set to 2."""
+    yaml_config, config_name = _setup(tmp_path, nettype)
+    subprocess_args = [
+        JOB_SUBMISSION_SCRIPT_PATH,
+        yaml_config,
+        config_name,
+        "2",  # this makes the training run on two GPUs
+    ]
+    initial_process = subprocess.run(subprocess_args)
+    initial_process.check_returncode()
+    resume_process = subprocess.run(subprocess_args)
+    resume_process.check_returncode()

@@ -335,7 +335,7 @@ class SingleModuleStepper:
         if "module" in state:
             module_state = {}
             for key in state["module"]:
-                if key.startswith("module."):
+                if key.startswith("module.") and not dist.is_initialized():
                     # model was stored using ddp which prepends 'module.' if training
                     # with multiple GPUs
                     name = key[7:]
