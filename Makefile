@@ -28,4 +28,4 @@ create_environment:
 	conda run -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
 
 test_fme_unit_tests:
-	pytest -m "not requires_gpu" fme/
+	pytest -m "not requires_gpu" --durations 10 fme/
