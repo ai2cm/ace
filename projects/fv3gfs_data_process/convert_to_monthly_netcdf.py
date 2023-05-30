@@ -19,7 +19,7 @@ def main(input_zarr, output_directory, start_date, end_date):
         print(f"Processing month {label}")
         filename = os.path.join(output_directory, label.strftime("%Y%m%d%H") + ".nc")
         # use these options to enable opening data with netCDF4.MFDataset
-        data.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+        data.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF3_64BIT")
 
 
 if __name__ == "__main__":
