@@ -26,7 +26,8 @@ def _get_test_yaml_file(
     global_means_path,
     global_stds_path,
     prediction_length,
-    variable_names,
+    in_variable_names,
+    out_variable_names,
     config_name="unit_test",
     nettype="afno",
 ):
@@ -57,8 +58,8 @@ def _get_test_yaml_file(
        embed_dim: 8
        width: 56
        modes: 32
-       in_names: {variable_names}
-       out_names: {variable_names}   #must be same as in_channels if prediction_type == 'iterative'
+       in_names: {in_variable_names}
+       out_names: {out_variable_names}
        train_data_path: '{train_data_path}'
        valid_data_path: '{valid_data_path}'
        inf_data_path: '{inf_data_path}'
@@ -101,7 +102,9 @@ def _setup(path, nettype):
     seed = 0
     np.random.seed(seed)
     config_name = "unit_test"
-    variable_names = ["foo", "bar"]
+    in_variable_names = ["foo", "bar", "baz"]
+    out_variable_names = ["foo", "bar"]
+    all_variable_names = list(set(in_variable_names + out_variable_names))
     data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
     stats_dim_sizes = {}
     time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
@@ -112,10 +115,12 @@ def _setup(path, nettype):
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
-    _save_netcdf(data_dir / "data.nc", data_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-timemean.nc", time_mean_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, variable_names)
-    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, variable_names)
+    _save_netcdf(data_dir / "data.nc", data_dim_sizes, all_variable_names)
+    _save_netcdf(
+        stats_dir / "stats-timemean.nc", time_mean_dim_sizes, all_variable_names
+    )
+    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, all_variable_names)
+    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, all_variable_names)
 
     yaml_config_filename = _get_test_yaml_file(
         data_dir,
@@ -126,7 +131,8 @@ def _setup(path, nettype):
         stats_dir / "stats-mean.nc",
         stats_dir / "stats-stddev.nc",
         prediction_length=2,
-        variable_names=variable_names,
+        in_variable_names=in_variable_names,
+        out_variable_names=out_variable_names,
         nettype=nettype,
         config_name=config_name,
     )

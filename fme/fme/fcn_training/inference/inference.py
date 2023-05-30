@@ -444,7 +444,7 @@ def main(
         gen_data_per_ic.append(gen_data)
 
     data_vars = {}
-    for name in valid_data_per_ic[0].keys():
+    for name in gen_data_per_ic[0].keys():
         valid = torch.cat([valid_data_per_ic[i][name] for i in range(n_ics)], dim=0)
         gen = torch.cat([gen_data_per_ic[i][name] for i in range(n_ics)], dim=0)
         data = torch.stack([valid, gen.cpu()], dim=0)
