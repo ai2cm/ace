@@ -29,6 +29,7 @@ repos:
     rev: v1.2.0
     hooks:
     - id: mypy
+      additional_dependencies: ["types-PyYaml==5.4.3"]
       args: [
           --follow-imports, silent, --ignore-missing-imports
         ]

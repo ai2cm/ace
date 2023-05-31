@@ -1,10 +1,10 @@
 import dataclasses
-from typing import Optional
+from typing import Literal, Optional
 
 # this package is installed in models/FourCastNet
 from fourcastnet.networks.afnonet import AFNONetBuilder
 from torch import nn
-from typing import Mapping, Protocol
+from typing import Mapping, Protocol, Any, Type
 
 # this package is installed in models/fcn-mip
 from networks.geometric_v1.sfnonet import (
@@ -14,7 +14,15 @@ from networks.geometric_v1.sfnonet import (
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 
 
-class ModuleBuilder(Protocol):
+class ModuleConfig(Protocol):
+    """
+    A protocol for a class that can build a nn.Module given information about the input
+    and output channels and the image shape.
+
+    This is a "Config" as in practice it is a dataclass loaded directly from yaml,
+    allowing us to specify details of the network architecture in a config file.
+    """
+
     def build(
         self,
         n_in_channels: int,
@@ -22,13 +30,26 @@ class ModuleBuilder(Protocol):
         img_shape_x: int,
         img_shape_y: int,
     ) -> nn.Module:
+        """
+        Build a nn.Module given information about the input and output channels
+        and the image shape.
+
+        Args:
+            n_in_channels: number of input channels
+            n_out_channels: number of output channels
+            img_shape_x: width of the input image
+            img_shape_y: height of the input image
+
+        Returns:
+            a nn.Module
+        """
         ...
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
 # https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L292  # noqa: E501
 @dataclasses.dataclass
-class SphericalFourierNeuralOperatorBuilder(ModuleBuilder):
+class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     spectral_transform: str = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
@@ -66,8 +87,74 @@ class SphericalFourierNeuralOperatorBuilder(ModuleBuilder):
         )
 
 
-NET_REGISTRY: Mapping[str, ModuleBuilder] = {
+NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
     "afno": AFNONetBuilder,  # using short acronym for backwards compatibility
     "FourierNeuralOperatorNet": FourierNeuralOperatorBuilder,
     "SphericalFourierNeuralOperatorNet": SphericalFourierNeuralOperatorBuilder,  # type: ignore  # noqa: E501
 }
+
+
+@dataclasses.dataclass
+class ModuleSelector:
+    """
+    A dataclass containing all the information needed to build a ModuleConfig,
+    including the type of the ModuleConfig and the data needed to build it.
+
+    This is helpful as ModuleSelector can be serialized and deserialized
+    without any additional information, whereas to load a ModuleConfig you
+    would need to know the type of the ModuleConfig being loaded.
+
+    It is also convenient because ModuleSelector is a single class that can be
+    used to represent any ModuleConfig, whereas ModuleConfig is a protocol
+    that can be implemented by many different classes.
+
+    Attributes:
+        type: the type of the ModuleConfig
+        config: data for a ModuleConfig instance of the indicated type
+    """
+
+    type: Literal[
+        "afno", "FourierNeuralOperatorNet", "SphericalFourierNeuralOperatorNet"
+    ]
+    config: Mapping[str, Any]
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        img_shape_x: int,
+        img_shape_y: int,
+    ) -> nn.Module:
+        """
+        Build a nn.Module given information about the input and output channels
+        and the image shape.
+
+        Args:
+            n_in_channels: number of input channels
+            n_out_channels: number of output channels
+            img_shape_x: width of the input image
+            img_shape_y: height of the input image
+
+        Returns:
+            a nn.Module
+        """
+        return NET_REGISTRY[self.type](**self.config).build(
+            n_in_channels=n_in_channels,
+            n_out_channels=n_out_channels,
+            img_shape_x=img_shape_x,
+            img_shape_y=img_shape_y,
+        )
+
+    def get_state(self) -> Mapping[str, Any]:
+        """
+        Get a dictionary containing all the information needed to build a ModuleConfig.
+        """
+        return {"type": self.type, "config": self.config}
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "ModuleSelector":
+        """
+        Create a ModuleSelector from a dictionary containing all the information
+        needed to build a ModuleConfig.
+        """
+        return cls(**state)

@@ -1,7 +1,13 @@
-from fme.fcn_training.stepper import run_on_batch
+from fme.core.stepper import (
+    SingleModuleStepper,
+    run_on_batch,
+    SingleModuleStepperConfig,
+)
+from fme.fcn_training.registry import ModuleSelector
 import torch
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
+from fme.core.optimization import OptimizationConfig
 import fme
 from unittest.mock import MagicMock
 
@@ -95,3 +101,48 @@ def test_run_on_batch_addition_series():
     assert torch.allclose(gen_data["b"][:, 0], data["b"][:, 0])
     assert torch.allclose(gen_data_norm["a"][:, 0], full_data_norm["a"][:, 0])
     assert torch.allclose(gen_data_norm["b"][:, 0], full_data_norm["b"][:, 0])
+
+
+def test_reloaded_stepper_gives_same_prediction():
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(
+            type="FourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        optimization=OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.001,
+            enable_automatic_mixed_precision=False,
+            scheduler=None,
+            max_epochs=1,
+        ),
+    )
+    shapes = {
+        "a": (1, 1, 5, 5),
+        "b": (1, 1, 5, 5),
+    }
+    normalizer = StandardNormalizer(
+        means=get_scalar_data(["a", "b"], 0.0),
+        stds=get_scalar_data(["a", "b"], 1.0),
+    )
+    stepper = config.get_stepper(
+        shapes=shapes,
+        normalizer=normalizer,
+    )
+    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
+    data = get_data(["a", "b"], n_samples=5, n_time=2)
+    first_result = stepper.run_on_batch(
+        data=data,
+        train=False,
+        n_forward_steps=1,
+    )
+    second_result = new_stepper.run_on_batch(
+        data=data,
+        train=False,
+        n_forward_steps=1,
+    )
+    assert torch.allclose(first_result[0], second_result[0])
+    for i in range(1, 4):
+        assert torch.allclose(first_result[i]["a"], second_result[i]["a"]), i
+        assert torch.allclose(first_result[i]["b"], second_result[i]["b"]), i

@@ -1,32 +1,26 @@
-import contextlib
-from typing import List, Literal, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional, Union
+from fme.fcn_training.utils.darcy_loss import LpLoss
 
 from fme.fcn_training.utils.data_requirements import DataRequirements
-import torch.cuda.amp as amp
 from torch.nn.parallel import DistributedDataParallel
-from apex import optimizers
 from fme.core.packer import Packer
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 import torch.distributed as dist
 import dataclasses
-from fme.fcn_training.registry import ModuleBuilder
+from fme.fcn_training.registry import ModuleSelector
 from torch import nn
 import torch
 import os
+from .optimization import Optimization, OptimizationConfig, NullOptimization
 
 
 @dataclasses.dataclass
 class SingleModuleStepperConfig:
-    builder: ModuleBuilder
+    builder: ModuleSelector
     in_names: List[str]
     out_names: List[str]
-    optimizer_type: Literal["Adam", "FusedAdam"]
-    lr: float
-    enable_automatic_mixed_precision: bool
-    scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"]
-    max_epochs: int
-    loss_obj: nn.Module
+    optimization: OptimizationConfig
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -41,152 +35,14 @@ class SingleModuleStepperConfig:
         shapes: Dict[str, Tuple[int, ...]],
         normalizer: StandardNormalizer,
     ):
-        optimization_builder = OptimizationParams(
-            optimizer_type=self.optimizer_type,
-            lr=self.lr,
-            enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
-            scheduler=self.scheduler,
-            max_epochs=self.max_epochs,
-        )
         return SingleModuleStepper(
             builder=self.builder,
             data_shapes=shapes,
             normalizer=normalizer,
             in_names=self.in_names,
             out_names=self.out_names,
-            loss_obj=self.loss_obj,
-            optimization_builder=optimization_builder,
+            optimization_builder=self.optimization,
         )
-
-
-class Optimization:
-    def __init__(
-        self,
-        parameters,
-        optimizer_type: str,
-        lr: float,
-        scheduler: str,
-        max_epochs: int,
-        enable_automatic_mixed_precision: bool,
-    ):
-        if optimizer_type == "FusedAdam":
-            self.optimizer = optimizers.FusedAdam(parameters, lr=lr)
-        else:
-            self.optimizer = torch.optim.Adam(parameters, lr=lr)
-
-        if enable_automatic_mixed_precision:
-            self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
-        else:
-            self.gscaler = None
-        if scheduler == "ReduceLROnPlateau":
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, factor=0.2, patience=5, mode="min"
-            )
-        elif scheduler == "CosineAnnealingLR":
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=max_epochs
-            )
-        else:
-            self.scheduler = None
-
-    @contextlib.contextmanager
-    def autocast(self):
-        with amp.autocast(enabled=self.gscaler is not None):
-            yield
-
-    def set_mode(self, module: nn.Module):
-        module.train()
-        module.zero_grad()
-
-    def step_scheduler(self, valid_loss: float):
-        """
-        Step the scheduler.
-
-        Args:
-            valid_loss: The validation loss. Used in schedulers which change the
-                learning rate based on whether the validation loss is decreasing.
-        """
-        if self.scheduler is not None:
-            try:
-                self.scheduler.step(metrics=valid_loss)
-            except TypeError:
-                self.scheduler.step()
-
-    def step_weights(self, loss: torch.Tensor):
-        if self.gscaler is not None:
-            self.gscaler.scale(loss).backward()
-            self.gscaler.step(self.optimizer)
-        else:
-            loss.backward()
-            self.optimizer.step()
-
-        if self.gscaler is not None:
-            self.gscaler.update()
-
-    def get_state(self):
-        """
-        Returns state as a serializable data structure.
-        """
-        state = {
-            "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": self.scheduler.state_dict()
-            if self.scheduler is not None
-            else None,
-            "gscaler_state_dict": self.gscaler.state_dict()
-            if self.gscaler is not None
-            else None,
-        }
-        return state
-
-    def load_state(self, state):
-        """
-        Loads state from a serializable data structure.
-        """
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        if self.scheduler is not None:
-            self.scheduler.load_state_dict(state["scheduler_state_dict"])
-        if self.gscaler is not None:
-            self.gscaler.load_state_dict(state["gscaler_state_dict"])
-
-
-@dataclasses.dataclass
-class OptimizationParams:
-    optimizer_type: Literal["Adam", "FusedAdam"]
-    lr: float
-    enable_automatic_mixed_precision: bool
-    scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"]
-    max_epochs: int
-
-    def build(self, parameters) -> Optimization:
-        return Optimization(
-            parameters=parameters,
-            optimizer_type=self.optimizer_type,
-            lr=self.lr,
-            scheduler=self.scheduler,
-            max_epochs=self.max_epochs,
-            enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
-        )
-
-
-class NullOptimization:
-    @contextlib.contextmanager
-    def autocast(self):
-        yield
-
-    def step_scheduler(self, valid_loss: float):
-        return
-
-    def step_weights(self, loss: torch.Tensor):
-        return
-
-    def get_state(self):
-        return {}
-
-    def load_state(self, state):
-        return
-
-    def set_mode(self, module: nn.Module):
-        module.eval()
 
 
 class SingleModuleStepper:
@@ -196,13 +52,12 @@ class SingleModuleStepper:
 
     def __init__(
         self,
-        builder: ModuleBuilder,
+        builder: ModuleSelector,
         data_shapes: Dict[str, Tuple[int, ...]],
         normalizer: StandardNormalizer,
         in_names: List[str],
         out_names: List[str],
-        loss_obj: nn.Module,
-        optimization_builder: Optional[OptimizationParams] = None,
+        optimization_builder: Optional[OptimizationConfig] = None,
     ):
         """
         Args:
@@ -226,6 +81,9 @@ class SingleModuleStepper:
             img_shape_x=data_shapes[example_name][-2],
             img_shape_y=data_shapes[example_name][-1],
         ).to(get_device())
+        self._data_shapes = data_shapes
+        self._builder = builder
+        self._optimization_builder = optimization_builder
         if optimization_builder is not None:
             self.optimization: Union[
                 Optimization, NullOptimization
@@ -243,7 +101,7 @@ class SingleModuleStepper:
                 find_unused_parameters=True,
             )
 
-        self.loss_obj = loss_obj
+        self.loss_obj = LpLoss()
 
     @property
     def modules(self) -> List[nn.Module]:
@@ -322,6 +180,9 @@ class SingleModuleStepper:
             "normalizer": self.normalizer.get_state(),
             "in_packer": self.in_packer.get_state(),
             "out_packer": self.out_packer.get_state(),
+            "builder": self._builder.get_state(),
+            "optimization_builder": self._optimization_builder.get_state(),
+            "data_shapes": self._data_shapes,
         }
 
     def load_state(self, state, load_optimizer: bool = True):
@@ -348,6 +209,34 @@ class SingleModuleStepper:
         self.normalizer = StandardNormalizer.from_state(state["normalizer"])
         self.in_packer = Packer.from_state(state["in_packer"])
         self.out_packer = Packer.from_state(state["out_packer"])
+        self._builder = ModuleSelector.from_state(state["builder"])
+        self._optimization_builder = OptimizationConfig.from_state(
+            state["optimization_builder"]
+        )
+        self._data_shapes = state["data_shapes"]
+
+    @classmethod
+    def from_state(cls, state, load_optimizer: bool = True) -> "SingleModuleStepper":
+        """
+        Load the state of the stepper.
+
+        Args:
+            state: The state to load.
+            load_optimizer: Whether to load the optimizer state.
+
+        Returns:
+            The stepper.
+        """
+        stepper = cls(
+            in_names=state["in_packer"]["names"],
+            out_names=state["out_packer"]["names"],
+            normalizer=StandardNormalizer.from_state(state["normalizer"]),
+            builder=ModuleSelector.from_state(state["builder"]),
+            data_shapes=state["data_shapes"],
+            optimization_builder=None,  # will be handled by load_state
+        )
+        stepper.load_state(state, load_optimizer=load_optimizer)
+        return stepper
 
 
 def run_on_batch(
@@ -409,12 +298,12 @@ def run_on_batch(
     loss = torch.tensor(0.0, device=get_device())
     input_data_norm = get_input_data_norm(in_packer.names, time_input)
     gen_tensor_norms = []
+    optimization.set_mode(module)
     for _ in range(n_forward_steps):
         input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
         target_tensor_norm = full_target_tensor_norm.select(
             dim=time_dim, index=time_target
         )
-        optimization.set_mode(module)
 
         with optimization.autocast():
             gen_tensor_norm = module(input_tensor_norm).to(
