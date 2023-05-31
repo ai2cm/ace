@@ -142,8 +142,7 @@ def _setup(path, nettype):
 @pytest.mark.parametrize(
     "nettype", ["SphericalFourierNeuralOperatorNet", "FourierNeuralOperatorNet", "afno"]
 )
-@pytest.mark.parametrize("debug", [True, False])
-def test_train_and_inference_runs(tmp_path, nettype, debug):
+def test_train_and_inference_inline(tmp_path, nettype):
     """Make sure that training and inference run without errors
 
     Args:
@@ -153,37 +152,50 @@ def test_train_and_inference_runs(tmp_path, nettype, debug):
     """
     yaml_config, config_name = _setup(tmp_path, nettype)
 
-    if debug:
-        # using pdb requires calling main functions directly
-        train_main(
-            run_num="00",
-            yaml_config=yaml_config,
-            config=config_name,
-            enable_automatic_mixed_precision=False,
-        )
+    # using pdb requires calling main functions directly
+    train_main(
+        run_num="00",
+        yaml_config=yaml_config,
+        config=config_name,
+        enable_automatic_mixed_precision=False,
+    )
 
-        # use --vis flag because this is how the script is called in the
-        # run-train-and-inference.sh script. This option saves dataset/video of output.
-        inference_main(
-            run_num="00",
-            yaml_config=yaml_config,
-            config=config_name,
-            use_daily_climatology=False,
-            vis=True,
-            override_dir=None,
-            weights=None,
-        )
-    else:
-        # in regular testing, call the actual submission script used for batch jobs
-        train_and_inference_process = subprocess.run(
-            [
-                JOB_SUBMISSION_SCRIPT_PATH,
-                yaml_config,
-                config_name,
-                "1",
-            ]
-        )
-        train_and_inference_process.check_returncode()
+    # use --vis flag because this is how the script is called in the
+    # run-train-and-inference.sh script. This option saves dataset/video of output.
+    inference_main(
+        run_num="00",
+        yaml_config=yaml_config,
+        config=config_name,
+        use_daily_climatology=False,
+        vis=True,
+        override_dir=None,
+        weights=None,
+    )
+
+
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+def test_train_and_inference_script(tmp_path, nettype, skip_slow: bool):
+    """Make sure that training and inference run without errors
+
+    Args:
+        tmp_path: pytext fixture for temporary workspace.
+        nettype: parameter indicating model architecture to use.
+        debug: option for developers to allow use of pdb.
+    """
+    if skip_slow:
+        # script is slow as everything is re-imported when it runs
+        pytest.skip("Skipping slow tests")
+    yaml_config, config_name = _setup(tmp_path, nettype)
+
+    train_and_inference_process = subprocess.run(
+        [
+            JOB_SUBMISSION_SCRIPT_PATH,
+            yaml_config,
+            config_name,
+            "1",
+        ]
+    )
+    train_and_inference_process.check_returncode()
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
@@ -212,9 +224,12 @@ def test_resume(tmp_path, nettype):
 # pytorch dist is initialized in train.py with nccl backend, which does not support CPU
 @pytest.mark.requires_gpu
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_resume_two_gpus(tmp_path, nettype):
+def test_resume_two_gpus(tmp_path, nettype, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
+    if skip_slow:
+        # script is slow as everything is re-imported when it runs
+        pytest.skip("Skipping slow tests")
     yaml_config, config_name = _setup(tmp_path, nettype)
     subprocess_args = [
         JOB_SUBMISSION_SCRIPT_PATH,
