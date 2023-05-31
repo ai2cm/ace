@@ -48,6 +48,7 @@ import os
 import time
 import types
 from typing import List, Optional, Literal
+from fme.core.optimization import OptimizationConfig
 from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import numpy as np
 import argparse
@@ -64,21 +65,15 @@ from fme.fcn_training.utils.data_loader_multifiles import (
     DataLoaderParams,
 )
 import wandb
-from fme.fcn_training.utils.darcy_loss import LpLoss
 
 DECORRELATION_TIME = 36  # 9 days
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap as ruamelDict
-from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
-from fourcastnet.networks.afnonet import AFNONetBuilder
-from fme.fcn_training.registry import (
-    ModuleBuilder,
-    SphericalFourierNeuralOperatorBuilder,
-)
+from fme.fcn_training.registry import ModuleSelector
 from fme.fcn_training.inference import inference
 import dataclasses
 import fme
-from fme.fcn_training.stepper import SingleModuleStepperConfig
+from fme.core import SingleModuleStepperConfig
 import netCDF4
 
 
@@ -126,7 +121,9 @@ class TrainerParams:
     log_to_screen: bool
     scheduler: Literal["ReduceLROnPlateau", "CosineAnnealingLR"]
     optimizer_type: Literal["Adam", "FusedAdam"]
-    nettype: str
+    nettype: Literal[
+        "afno", "FourierNeuralOperatorNet", "SphericalFourierNeuralOperatorNet"
+    ]
     train_data_path: str
     valid_data_path: str
     max_epochs: int
@@ -371,9 +368,9 @@ class TrainerParams:
         )
 
     @property
-    def module_builder(self) -> ModuleBuilder:
+    def module_builder(self) -> ModuleSelector:
         if self.nettype == "FourierNeuralOperatorNet":
-            params = FourierNeuralOperatorBuilder(
+            config = dict(
                 spectral_transform=self.spectral_transform,
                 filter_type=self.filter_type,
                 scale_factor=self.scale_factor,
@@ -393,13 +390,13 @@ class TrainerParams:
                 checkpointing=self.checkpointing,
             )
         elif self.nettype == "afno":
-            params = AFNONetBuilder(
+            config = dict(
                 patch_size=self.patch_size,
                 embed_dim=self.embed_dim,
                 num_blocks=self.num_blocks,
             )
         elif self.nettype == "SphericalFourierNeuralOperatorNet":
-            params = SphericalFourierNeuralOperatorBuilder(
+            config = dict(
                 spectral_transform=self.spectral_transform,
                 filter_type=self.filter_type,
                 operator_type=self.operator_type,
@@ -424,7 +421,7 @@ class TrainerParams:
             )
         else:
             raise ValueError("Unknown nettype: " + str(self.nettype))
-        return params
+        return ModuleSelector(type=self.nettype, config=config)
 
 
 class Trainer:
@@ -454,12 +451,13 @@ class Trainer:
             builder=params.module_builder,
             in_names=params.in_names,
             out_names=params.out_names,
-            optimizer_type=params.optimizer_type,
-            lr=params.lr,
-            scheduler=params.scheduler,
-            max_epochs=params.max_epochs,
-            loss_obj=LpLoss(),
-            enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,
+            optimization=OptimizationConfig(
+                optimizer_type=params.optimizer_type,
+                lr=params.lr,
+                scheduler=params.scheduler,
+                max_epochs=params.max_epochs,
+                enable_automatic_mixed_precision=params.enable_automatic_mixed_precision,  # noqa: E501
+            ),
         )
 
         self.n_forward_steps = 1
