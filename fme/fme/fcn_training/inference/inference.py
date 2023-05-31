@@ -44,25 +44,16 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
-import dataclasses
 import os
 import sys
 from typing import Optional, Mapping
-from fme.fcn_training.utils.data_requirements import DataRequirements
 import numpy as np
 import argparse
 
-from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
-from fourcastnet.networks.afnonet import AFNONetBuilder
-from fme.fcn_training.registry import (
-    ModuleBuilder,
-    SphericalFourierNeuralOperatorBuilder,
-)
 import netCDF4
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../")
 import torch
-from collections import OrderedDict
 import logging
 from fme.fcn_training.utils import logging_utils
 
@@ -70,9 +61,7 @@ logging_utils.config_logger()
 from fme.fcn_training.utils.YParams import YParams
 from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import wandb
-from fme.fcn_training.stepper import SingleModuleStepper
-from fme.fcn_training.utils.darcy_loss import LpLoss
-from fme.core.normalizer import get_normalizer
+from fme.core import SingleModuleStepper
 import xarray as xr
 
 import fme
@@ -80,87 +69,15 @@ import fme
 DECORRELATION_TIME = 36
 
 
-def gaussian_perturb(x, level=0.01, device=0):
-    noise = level * torch.randn(x.shape).to(device, dtype=torch.float)
-    return x + noise
-
-
-def load_model(model, checkpoint_file, device=None):
-    model.zero_grad()
-    checkpoint_fname = checkpoint_file
-    kwargs = dict(map_location=torch.device("cpu")) if device == "cpu" else {}
-    checkpoint = torch.load(checkpoint_fname, **kwargs)
-    try:
-        new_state_dict = OrderedDict()
-        for key, val in checkpoint["stepper"]["module"].items():
-            if key != "ged":
-                if key.startswith("module."):
-                    # model was stored using ddp which prepends 'module.' if training
-                    # with multiple GPUs
-                    name = str(key[7:])
-                else:
-                    name = key
-                new_state_dict[name] = val
-        model.load_state_dict(new_state_dict)
-    except:  # noqa: E722
-        model.load_state_dict(checkpoint["stepper"]["module"])
-    model.eval()
-    return model
-
-
-def module_builder(params) -> ModuleBuilder:
-    # TODO: remove duplication with TrainerParams.new when we have a better
-    #       system of configuration classes/files
-    if params.nettype == "FourierNeuralOperatorNet":
-        model_params = {}
-        for param_name in [
-            "spectral_transform",
-            "filter_type",
-            "scale_factor",
-            "embed_dim",
-            "num_layers",
-            "num_blocks",
-            "hard_thresholding_fraction",
-            "normalization_layer",
-            "mlp_mode",
-            "big_skip",
-            "compression",
-            "rank",
-            "complex_network",
-            "complex_activation",
-            "spectral_layers",
-            "laplace_weighting",
-            "checkpointing",
-        ]:
-            if param_name in params.__dict__:
-                model_params[param_name] = params.__dict__[param_name]
-        builder = FourierNeuralOperatorBuilder(**model_params)
-    elif params.nettype == "SphericalFourierNeuralOperatorNet":
-        model_params = {}
-        param_names = [
-            f.name for f in dataclasses.fields(SphericalFourierNeuralOperatorBuilder)
-        ]
-        for param_name in param_names:
-            if param_name in params.__dict__:
-                model_params[param_name] = params.__dict__[param_name]
-        builder = SphericalFourierNeuralOperatorBuilder(**model_params)
-    elif params.nettype == "afno":
-        model_params = {}
-        for param_name in [
-            "patch_size",
-            "embed_dim",
-            "num_blocks",
-        ]:
-            if param_name in params.__dict__:
-                model_params[param_name] = params.__dict__[param_name]
-        builder = AFNONetBuilder(**model_params)
-    else:
-        raise ValueError("Unknown nettype: " + str(params.nettype))
-    return builder
+def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
+    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
+    stepper = SingleModuleStepper.from_state(
+        checkpoint["stepper"], load_optimizer=False
+    )
+    return stepper
 
 
 def setup(params):
-    device = fme.get_device()
     if params.log_to_screen:
         best_checkpoint_path = params["best_checkpoint_path"]
         logging.info(f"Loading trained model checkpoint from {best_checkpoint_path}")
@@ -178,31 +95,8 @@ def setup(params):
         names=list(set(params.in_names).union(params.out_names)),
     )
 
-    builder = module_builder(params)
-
-    shapes = {k: v.shape for k, v in data.items()}
-    data_requirements = DataRequirements(
-        names=list(set(params.in_names).union(params.out_names)),
-        in_names=params.in_names,
-        out_names=params.out_names,
-        n_timesteps=params.prediction_length + 1,
-    )
-    normalizer = get_normalizer(
-        global_means_path=params.global_means_path,
-        global_stds_path=params.global_stds_path,
-        names=data_requirements.names,
-    )
-    stepper = SingleModuleStepper(
-        builder=builder,
-        data_shapes=shapes,
-        normalizer=normalizer,
-        in_names=params.in_names,
-        out_names=params.out_names,
-        loss_obj=LpLoss(),
-    )
-
     checkpoint_file = params["best_checkpoint_path"]
-    stepper.module = load_model(stepper.module, checkpoint_file, device).to(device)
+    stepper = load_stepper(checkpoint_file)
 
     return data, stepper
 
