@@ -91,7 +91,7 @@ def get_data_loader(
         dataset,
         batch_size=int(params.batch_size),
         num_workers=params.num_data_workers,
-        shuffle=False,  # (sampler is None),
+        shuffle=(sampler is None) and train,
         sampler=sampler if train else None,
         drop_last=True,
         pin_memory=torch.cuda.is_available(),
