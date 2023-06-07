@@ -1,4 +1,5 @@
 from fme.core.optimization import Optimization
+from fme.core.scheduler import SchedulerConfig
 import pytest
 from typing import Literal, Optional
 import torch
@@ -9,10 +10,10 @@ import yaml
 import fme
 
 
-@pytest.mark.parametrize("scheduler", [None, "ReduceLROnPlateau", "CosineAnnealingLR"])
+@pytest.mark.parametrize("scheduler", [None, "CosineAnnealingLR"])
 @pytest.mark.parametrize("enable_amp", [False, True])
 def test_optimization_reload(
-    scheduler: Optional[Literal["ReduceLROnPlateau", "CosineAnnealingLR"]],
+    scheduler: Optional[Literal["CosineAnnealingLR"]],
     enable_amp: bool,
 ):
     """
@@ -27,13 +28,20 @@ def test_optimization_reload(
     # set up a toy single-layer model with random training data to optimize
     model = nn.Linear(1, 1).to(fme.get_device())
     x = torch.randn(100, 1).to(fme.get_device())
-
+    if scheduler == "CosineAnnealingLR":
+        scheduler_config = SchedulerConfig(
+            type="CosineAnnealingLR",
+            kwargs={"T_max": max_epochs},
+        )
+    elif scheduler is None:
+        scheduler_config = SchedulerConfig()
+    else:
+        raise NotImplementedError()
     optimization = Optimization(
         parameters=model.parameters(),
         optimizer_type=optimizer_type,
         lr=lr,
-        scheduler=scheduler,
-        max_epochs=max_epochs,
+        scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
     )
     # train the model
@@ -59,8 +67,7 @@ def test_optimization_reload(
         parameters=model.parameters(),
         optimizer_type=optimizer_type,
         lr=lr,
-        scheduler=scheduler,
-        max_epochs=max_epochs,
+        scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
     )
     optimization.load_state(yaml.load(intermediate_state, Loader=yaml.CLoader))

@@ -20,63 +20,51 @@ JOB_SUBMISSION_SCRIPT_PATH = (
 def _get_test_yaml_file(
     train_data_path,
     valid_data_path,
-    inf_data_path,
     results_dir,
-    time_means_path,
     global_means_path,
     global_stds_path,
-    prediction_length,
     in_variable_names,
     out_variable_names,
-    config_name="unit_test",
     nettype="afno",
 ):
     string = f"""
-     {config_name}: &{config_name}
-       data_type: 'FV3GFS'
-       loss: 'l2'
-       lr: 5E-4
-       scheduler: 'CosineAnnealingLR'
-       num_data_workers: 4
-       dt: 1 # how many timesteps ahead the model will predict
-       prediction_type: 'iterative'
-       prediction_length: {prediction_length} #applicable only if prediction_type == 'iterative'
-       n_initial_conditions: 1 #applicable only if prediction_type == 'iterative'
-       ics_type: "default"
-       save_raw_forecasts: !!bool True
-       save_channel: !!bool False
-       perturb: !!bool False
-       N_grid_channels: 0
-       max_epochs: 1
-       batch_size: 2
-
-       #afno hyperparams
-       num_blocks: 8
-       nettype: '{nettype}'
-       spectral_layers: 1
-       patch_size: 8
-       embed_dim: 8
-       width: 56
-       modes: 32
-       in_names: {in_variable_names}
-       out_names: {out_variable_names}
-       train_data_path: '{train_data_path}'
-       valid_data_path: '{valid_data_path}'
-       inf_data_path: '{inf_data_path}'
-       exp_dir: '{results_dir}'
-       time_means_path:   '{time_means_path}'
-       global_means_path: '{global_means_path}'
-       global_stds_path:  '{global_stds_path}'
-
-       log_to_screen: !!bool True
-       log_to_wandb: !!bool False
-       save_checkpoint: !!bool True
-
-       optimizer_type: 'Adam'
-
-       plot_animations: !!bool False
-
-       compression: tt
+train_data:
+  data_path: '{train_data_path}'
+  data_type: "FV3GFS"
+  batch_size: 2
+  num_data_workers: 1
+  dt: 1
+validation_data:
+  data_path: '{valid_data_path}'
+  data_type: "FV3GFS"
+  batch_size: 2
+  num_data_workers: 1
+  dt: 1
+stepper:
+  in_names: {in_variable_names}
+  out_names: {out_variable_names}
+  optimization:
+    optimizer_type: "Adam"
+    lr: 0.001
+    enable_automatic_mixed_precision: true
+    scheduler:
+        type: CosineAnnealingLR
+        kwargs:
+          T_max: 1
+  normalization:
+    global_means_path: '{global_means_path}'
+    global_stds_path: '{global_stds_path}'
+  builder:
+    type: {nettype}
+    config: {{}}
+prediction_length: 2
+max_epochs: 1
+save_checkpoint: true
+log_to_screen: true
+log_to_wandb: false
+project: fme
+entity: ai2cm
+experiment_dir: {results_dir}
     """  # noqa: E501
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f:
@@ -101,7 +89,6 @@ def _save_netcdf(filename, dim_sizes, variable_names):
 def _setup(path, nettype):
     seed = 0
     np.random.seed(seed)
-    config_name = "unit_test"
     in_variable_names = ["foo", "bar", "baz"]
     out_variable_names = ["foo", "bar"]
     all_variable_names = list(set(in_variable_names + out_variable_names))
@@ -123,20 +110,16 @@ def _setup(path, nettype):
     _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, all_variable_names)
 
     yaml_config_filename = _get_test_yaml_file(
-        data_dir,
-        data_dir,
-        data_dir,
-        results_dir,
-        stats_dir / "stats-timemean.nc",
-        stats_dir / "stats-mean.nc",
-        stats_dir / "stats-stddev.nc",
-        prediction_length=2,
+        train_data_path=data_dir,
+        valid_data_path=data_dir,
+        results_dir=results_dir,
+        global_means_path=stats_dir / "stats-mean.nc",
+        global_stds_path=stats_dir / "stats-stddev.nc",
         in_variable_names=in_variable_names,
         out_variable_names=out_variable_names,
         nettype=nettype,
-        config_name=config_name,
     )
-    return yaml_config_filename, config_name
+    return yaml_config_filename
 
 
 @pytest.mark.parametrize(
@@ -150,26 +133,18 @@ def test_train_and_inference_inline(tmp_path, nettype):
         nettype: parameter indicating model architecture to use.
         debug: option for developers to allow use of pdb.
     """
-    yaml_config, config_name = _setup(tmp_path, nettype)
+    yaml_config = _setup(tmp_path, nettype)
 
     # using pdb requires calling main functions directly
     train_main(
-        run_num="00",
         yaml_config=yaml_config,
-        config=config_name,
-        enable_automatic_mixed_precision=False,
     )
 
     # use --vis flag because this is how the script is called in the
     # run-train-and-inference.sh script. This option saves dataset/video of output.
     inference_main(
-        run_num="00",
         yaml_config=yaml_config,
-        config=config_name,
-        use_daily_climatology=False,
         vis=True,
-        override_dir=None,
-        weights=None,
     )
 
 
@@ -185,13 +160,12 @@ def test_train_and_inference_script(tmp_path, nettype, skip_slow: bool):
     if skip_slow:
         # script is slow as everything is re-imported when it runs
         pytest.skip("Skipping slow tests")
-    yaml_config, config_name = _setup(tmp_path, nettype)
+    yaml_config = _setup(tmp_path, nettype)
 
     train_and_inference_process = subprocess.run(
         [
             JOB_SUBMISSION_SCRIPT_PATH,
             yaml_config,
-            config_name,
             "1",
         ]
     )
@@ -201,40 +175,31 @@ def test_train_and_inference_script(tmp_path, nettype, skip_slow: bool):
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    yaml_config, config_name = _setup(tmp_path, nettype)
+    yaml_config = _setup(tmp_path, nettype)
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
         train_main(
-            run_num="00",
             yaml_config=yaml_config,
-            config=config_name,
-            enable_automatic_mixed_precision=False,
         )
         assert not mock.called
         train_main(
-            run_num="00",
             yaml_config=yaml_config,
-            config=config_name,
-            enable_automatic_mixed_precision=False,
         )
     mock.assert_called()
 
 
-# pytorch dist is initialized in train.py with nccl backend, which does not support CPU
-@pytest.mark.requires_gpu
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_resume_two_gpus(tmp_path, nettype, skip_slow: bool):
+def test_resume_two_workers(tmp_path, nettype, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
     if skip_slow:
         # script is slow as everything is re-imported when it runs
         pytest.skip("Skipping slow tests")
-    yaml_config, config_name = _setup(tmp_path, nettype)
+    yaml_config = _setup(tmp_path, nettype)
     subprocess_args = [
         JOB_SUBMISSION_SCRIPT_PATH,
         yaml_config,
-        config_name,
         "2",  # this makes the training run on two GPUs
     ]
     initial_process = subprocess.run(subprocess_args)
