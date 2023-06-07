@@ -5,7 +5,7 @@ from .metrics import (
     weighted_mean_bias,
     root_mean_squared_error,
 )
-from .device import get_device
+from .device import get_device, using_gpu
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
 from .stepper import SingleModuleStepper, SingleModuleStepperConfig

@@ -1,5 +1,6 @@
 import contextlib
 from typing import Any, Literal, Mapping, Optional
+from fme.core.scheduler import SchedulerConfig
 
 import torch.cuda.amp as amp
 from apex import optimizers
@@ -14,8 +15,7 @@ class Optimization:
         parameters,
         optimizer_type: Literal["Adam", "FusedAdam"],
         lr: float,
-        scheduler: Optional[Literal["ReduceLROnPlateau", "CosineAnnealingLR"]],
-        max_epochs: int,
+        scheduler: SchedulerConfig,
         enable_automatic_mixed_precision: bool,
     ):
         if optimizer_type == "FusedAdam":
@@ -29,18 +29,7 @@ class Optimization:
             self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
         else:
             self.gscaler = None
-        if scheduler == "ReduceLROnPlateau":
-            self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                self.optimizer, factor=0.2, patience=5, mode="min"
-            )
-        elif scheduler == "CosineAnnealingLR":
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                self.optimizer, T_max=max_epochs
-            )
-        elif scheduler is None:
-            self.scheduler = None
-        else:
-            raise ValueError(f"Unknown scheduler type: {scheduler}")
+        self.scheduler = scheduler.build(self.optimizer)
 
     @contextlib.contextmanager
     def autocast(self):
@@ -107,19 +96,31 @@ class Optimization:
 
 @dataclasses.dataclass
 class OptimizationConfig:
-    optimizer_type: Literal["Adam", "FusedAdam"]
-    lr: float
-    enable_automatic_mixed_precision: bool
-    max_epochs: int
-    scheduler: Optional[Literal["ReduceLROnPlateau", "CosineAnnealingLR"]] = None
+    """
+    Configuration for optimization.
 
-    def build(self, parameters) -> Optimization:
+    Attributes:
+        optimizer_type: The type of optimizer to use.
+        lr: The learning rate.
+        enable_automatic_mixed_precision: Whether to use automatic mixed
+            precision.
+        scheduler: The type of scheduler to use. If none is given, no scheduler
+            will be used.
+    """
+
+    optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
+    lr: float = 0.001
+    enable_automatic_mixed_precision: bool = True
+    scheduler: SchedulerConfig = dataclasses.field(
+        default_factory=lambda: SchedulerConfig()
+    )
+
+    def build(self, parameters, max_epochs: int) -> Optimization:
         return Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,
             lr=self.lr,
             scheduler=self.scheduler,
-            max_epochs=self.max_epochs,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
         )
 

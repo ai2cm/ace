@@ -7,3 +7,4 @@ wandb
 tensorly
 tensorly-torch
 xarray
+dacite
