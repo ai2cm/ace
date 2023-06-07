@@ -12,7 +12,7 @@ from .core.metrics import (
     time_and_global_mean_bias,
     gradient_magnitude_percent_diff,
 )
-from .core import get_device, get_normalizer, Packer, StandardNormalizer
+from .core import get_device, get_normalizer, Packer, StandardNormalizer, using_gpu
 
 __all__ = [
     "lat_cell_centers",
