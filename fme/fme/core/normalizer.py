@@ -1,9 +1,50 @@
-from typing import List, Dict
+from typing import List, Dict, Mapping, Optional
 import torch
 import netCDF4
 import numpy as np
 from fme.core.device import get_device
 import torch.jit
+import dataclasses
+
+
+@dataclasses.dataclass
+class NormalizationConfig:
+    global_means_path: Optional[str] = None
+    global_stds_path: Optional[str] = None
+    means: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        using_path = (
+            self.global_means_path is not None and self.global_stds_path is not None
+        )
+        using_explicit = len(self.means) > 0 and len(self.stds) > 0
+        if using_path and using_explicit:
+            raise ValueError(
+                "Cannot use both global_means_path and global_stds_path "
+                "and explicit means and stds."
+            )
+        if not (using_path or using_explicit):
+            raise ValueError(
+                "Must use either global_means_path and global_stds_path "
+                "or explicit means and stds."
+            )
+
+    def build(self, names: List[str]):
+        using_path = (
+            self.global_means_path is not None and self.global_stds_path is not None
+        )
+        if using_path:
+            return get_normalizer(
+                global_means_path=self.global_means_path,
+                global_stds_path=self.global_stds_path,
+                names=names,
+            )
+        else:
+            return StandardNormalizer(
+                means={k: torch.tensor(v) for k, v in self.means.items()},
+                stds={k: torch.tensor(v) for k, v in self.stds.items()},
+            )
 
 
 class StandardNormalizer:

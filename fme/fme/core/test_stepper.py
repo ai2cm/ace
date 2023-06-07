@@ -5,7 +5,7 @@ from fme.core.stepper import (
 )
 from fme.fcn_training.registry import ModuleSelector
 import torch
-from fme.core.normalizer import StandardNormalizer
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.optimization import OptimizationConfig
 import fme
@@ -114,21 +114,19 @@ def test_reloaded_stepper_gives_same_prediction():
             optimizer_type="Adam",
             lr=0.001,
             enable_automatic_mixed_precision=False,
-            scheduler=None,
-            max_epochs=1,
+        ),
+        normalization=NormalizationConfig(
+            means={"a": 0.0, "b": 0.0},
+            stds={"a": 1.0, "b": 1.0},
         ),
     )
     shapes = {
         "a": (1, 1, 5, 5),
         "b": (1, 1, 5, 5),
     }
-    normalizer = StandardNormalizer(
-        means=get_scalar_data(["a", "b"], 0.0),
-        stds=get_scalar_data(["a", "b"], 1.0),
-    )
     stepper = config.get_stepper(
         shapes=shapes,
-        normalizer=normalizer,
+        max_epochs=1,
     )
     new_stepper = SingleModuleStepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2)

@@ -45,9 +45,10 @@
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
 import logging
-import torch
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from fme.core.device import using_gpu
+from fme.core.distributed import Distributed
 
 # import cv2
 from .data_loader_fv3gfs import FV3GFSDataset
@@ -57,18 +58,17 @@ from .data_requirements import DataRequirements
 
 def get_data_loader(
     params: DataLoaderParams,
-    files_pattern: str,
-    distributed,
     train: bool,
     requirements: DataRequirements,
 ):
+    dist = Distributed.get_instance()
     # TODO: move this default to the DataLoaderParams init
     if params.data_type is None:
         params.data_type = "ERA5"
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
     elif params.data_type == "FV3GFS":
-        dataset = FV3GFSDataset(params, files_pattern, requirements=requirements)
+        dataset = FV3GFSDataset(params, params.data_path, requirements=requirements)
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
             # "RuntimeError: Resource temporarily unavailable"
@@ -85,16 +85,18 @@ def get_data_loader(
             f"{params.data_type} does not have an implemented data loader"
         )
 
-    sampler = DistributedSampler(dataset, shuffle=train) if distributed else None
+    sampler = (
+        DistributedSampler(dataset, shuffle=train) if dist.is_distributed() else None
+    )
 
     dataloader = DataLoader(
         dataset,
-        batch_size=int(params.batch_size),
+        batch_size=dist.local_batch_size(int(params.batch_size)),
         num_workers=params.num_data_workers,
         shuffle=(sampler is None) and train,
         sampler=sampler if train else None,
         drop_last=True,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=using_gpu(),
     )
 
     if train:

@@ -1,6 +1,7 @@
 # This set of requirements assumes torch is already installed, for example
 # as in the nvcr.io/nvidia/pytorch docker image.
 einops==0.6.1
+dacite==1.8.0
 h5py==3.8.0
 imageio==2.27.0
 moviepy==1.0.3

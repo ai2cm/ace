@@ -1,18 +1,18 @@
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Optional, Tuple, Union
+from fme.core.distributed import Distributed
 from fme.fcn_training.utils.darcy_loss import LpLoss
 
 from fme.fcn_training.utils.data_requirements import DataRequirements
 from torch.nn.parallel import DistributedDataParallel
 from fme.core.packer import Packer
-from fme.core.device import get_device
-from fme.core.normalizer import StandardNormalizer
-import torch.distributed as dist
+from fme.core.device import get_device, using_gpu
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 import dataclasses
 from fme.fcn_training.registry import ModuleSelector
 from torch import nn
 import torch
-import os
 from .optimization import Optimization, OptimizationConfig, NullOptimization
+import dacite
 
 
 @dataclasses.dataclass
@@ -20,7 +20,8 @@ class SingleModuleStepperConfig:
     builder: ModuleSelector
     in_names: List[str]
     out_names: List[str]
-    optimization: OptimizationConfig
+    normalization: NormalizationConfig
+    optimization: Optional[OptimizationConfig] = None
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -33,15 +34,21 @@ class SingleModuleStepperConfig:
     def get_stepper(
         self,
         shapes: Dict[str, Tuple[int, ...]],
-        normalizer: StandardNormalizer,
+        max_epochs: int,
     ):
         return SingleModuleStepper(
-            builder=self.builder,
+            config=self,
             data_shapes=shapes,
-            normalizer=normalizer,
-            in_names=self.in_names,
-            out_names=self.out_names,
-            optimization_builder=self.optimization,
+            max_epochs=max_epochs,
+        )
+
+    def get_state(self):
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_state(cls, state) -> "SingleModuleStepperConfig":
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
 
@@ -52,54 +59,60 @@ class SingleModuleStepper:
 
     def __init__(
         self,
-        builder: ModuleSelector,
+        config: SingleModuleStepperConfig,
         data_shapes: Dict[str, Tuple[int, ...]],
-        normalizer: StandardNormalizer,
-        in_names: List[str],
-        out_names: List[str],
-        optimization_builder: Optional[OptimizationConfig] = None,
+        max_epochs: int,
     ):
         """
         Args:
-            builder: The module builder.
+            config: The configuration.
             data_shapes: The shapes of the data.
             normalizer: The normalizer.
-            in_names: The names of the input fields.
-            out_names: The names of the output fields.
-            loss_obj: The loss object to use.
-            optimization_builder: The optimization builder.
+            max_epochs: The maximum number of epochs. Used when constructing
+                certain learning rate schedulers, if applicable.
         """
-        n_in_channels = len(in_names)
-        n_out_channels = len(out_names)
-        self.in_packer = Packer(in_names)
-        self.out_packer = Packer(out_names)
-        self.normalizer = normalizer
+        dist = Distributed.get_instance()
+        n_in_channels = len(config.in_names)
+        n_out_channels = len(config.out_names)
+        self.in_packer = Packer(config.in_names)
+        self.out_packer = Packer(config.out_names)
+        all_names = list(set(config.in_names).union(config.out_names))
+        self.normalizer = config.normalization.build(all_names)
         example_name = list(data_shapes.keys())[0]
-        self.module = builder.build(
+        self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             img_shape_x=data_shapes[example_name][-2],
             img_shape_y=data_shapes[example_name][-1],
         ).to(get_device())
-        self._data_shapes = data_shapes
-        self._builder = builder
-        self._optimization_builder = optimization_builder
-        if optimization_builder is not None:
+        self.data_shapes = data_shapes
+        self._config = config
+        self._max_epochs = max_epochs
+        if config.optimization is not None:
             self.optimization: Union[
                 Optimization, NullOptimization
-            ] = optimization_builder.build(parameters=self.module.parameters())
+            ] = config.optimization.build(
+                parameters=self.module.parameters(), max_epochs=max_epochs
+            )
         else:
             self.optimization = NullOptimization()
 
         self._no_optimization = NullOptimization()
 
-        if dist.is_initialized():
+        if dist.is_distributed():
+            if using_gpu():
+                device_ids = [dist.rank]
+                output_device = [dist.rank]
+            else:
+                device_ids = None
+                output_device = None
             self.module = DistributedDataParallel(
                 self.module,
-                device_ids=[int(os.environ["LOCAL_RANK"])],
-                output_device=[int(os.environ["LOCAL_RANK"])],
+                device_ids=device_ids,
+                output_device=output_device,
                 find_unused_parameters=True,
             )
+        self._is_distributed = dist.is_distributed()
 
         self.loss_obj = LpLoss()
 
@@ -180,9 +193,9 @@ class SingleModuleStepper:
             "normalizer": self.normalizer.get_state(),
             "in_packer": self.in_packer.get_state(),
             "out_packer": self.out_packer.get_state(),
-            "builder": self._builder.get_state(),
-            "optimization_builder": self._optimization_builder.get_state(),
-            "data_shapes": self._data_shapes,
+            "data_shapes": self.data_shapes,
+            "max_epochs": self._max_epochs,
+            "config": self._config.get_state(),
         }
 
     def load_state(self, state, load_optimizer: bool = True):
@@ -196,7 +209,7 @@ class SingleModuleStepper:
         if "module" in state:
             module_state = {}
             for key in state["module"]:
-                if key.startswith("module.") and not dist.is_initialized():
+                if key.startswith("module.") and not self._is_distributed:
                     # model was stored using ddp which prepends 'module.' if training
                     # with multiple GPUs
                     name = key[7:]
@@ -209,11 +222,6 @@ class SingleModuleStepper:
         self.normalizer = StandardNormalizer.from_state(state["normalizer"])
         self.in_packer = Packer.from_state(state["in_packer"])
         self.out_packer = Packer.from_state(state["out_packer"])
-        self._builder = ModuleSelector.from_state(state["builder"])
-        self._optimization_builder = OptimizationConfig.from_state(
-            state["optimization_builder"]
-        )
-        self._data_shapes = state["data_shapes"]
 
     @classmethod
     def from_state(cls, state, load_optimizer: bool = True) -> "SingleModuleStepper":
@@ -228,12 +236,9 @@ class SingleModuleStepper:
             The stepper.
         """
         stepper = cls(
-            in_names=state["in_packer"]["names"],
-            out_names=state["out_packer"]["names"],
-            normalizer=StandardNormalizer.from_state(state["normalizer"]),
-            builder=ModuleSelector.from_state(state["builder"]),
+            config=SingleModuleStepperConfig.from_state(state["config"]),
             data_shapes=state["data_shapes"],
-            optimization_builder=None,  # will be handled by load_state
+            max_epochs=state["max_epochs"],
         )
         stepper.load_state(state, load_optimizer=load_optimizer)
         return stepper
