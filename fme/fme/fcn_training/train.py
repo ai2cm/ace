@@ -112,10 +112,11 @@ class Trainer:
         )
         logging.info("rank %d, data loader initialized" % self.dist.rank)
 
-        self.iters = 0
+        self.num_batches_seen = 0
         self.startEpoch = 0
 
         self.epoch = self.startEpoch
+        self.num_batches_seen = 0
 
         for data in self.train_data_loader:
             shapes = {k: v.shape for k, v in data.items()}
@@ -158,11 +159,10 @@ class Trainer:
                 self.train_sampler.set_epoch(epoch)
 
             start_time = time.time()
-            train_logs = self.train_one_epoch()
+            train_loss = self.train_one_epoch()
             valid_logs = self.validate_one_epoch()
             inference_logs = self.inference_one_epoch()
 
-            train_loss = train_logs["loss"]
             valid_loss = valid_logs["valid_loss"]
 
             self.stepper.step_scheduler(valid_loss)
@@ -182,24 +182,49 @@ class Trainer:
             logging.info("Logging to wandb")
             for pg in self.stepper.optimization.optimizer.param_groups:
                 lr = pg["lr"]
-            all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
-            wandb.log(all_logs, step=self.epoch)
+            valid_and_inf_logs = {
+                **valid_logs,
+                **inference_logs,
+                **{"lr": lr, "epoch": self.epoch},
+            }
+            wandb.log(valid_and_inf_logs, step=self.epoch)
 
     def train_one_epoch(self):
+        """Train for one epoch and log batch losses to wandb. Returns the final
+        batch loss for the current epoch."""
         # TODO: clean up and merge train_one_epoch and validate_one_epoch
         # deduplicate code through helper routines or if conditionals
 
+        if self.num_batches_seen == 0:
+            # Before training, log the loss on the first batch.
+            with torch.no_grad():
+                data = next(iter(self.train_data_loader))
+                batch_loss, _, _, _ = self.stepper.run_on_batch(
+                    data, train=False, n_forward_steps=self.n_forward_steps
+                )
+
+                if self.config.log_train_every_n_batches > 0:
+                    wandb.log(
+                        {"batch_loss": self.dist.reduce_mean(batch_loss)},
+                        step=self.num_batches_seen,
+                    )
+
         for data in self.train_data_loader:
-            loss, _, _, _ = self.stepper.run_on_batch(
+            batch_loss, _, _, _ = self.stepper.run_on_batch(
                 data, train=True, n_forward_steps=self.n_forward_steps
             )
+            self.num_batches_seen += 1
+            if (
+                self.config.log_train_every_n_batches > 0
+                and self.num_batches_seen % self.config.log_train_every_n_batches == 0
+            ):
+                reduced_batch_loss = self.dist.reduce_mean(batch_loss)
+                wandb.log(
+                    {"batch_loss": reduced_batch_loss},
+                    step=self.num_batches_seen,
+                )
 
-        logs = {"loss": loss}
-
-        for key in sorted(logs.keys()):
-            logs[key] = self.dist.reduce_mean(logs[key].detach())
-
-        return logs
+        return {"train_loss": batch_loss}
 
     def validate_one_epoch(self):
         n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
@@ -372,7 +397,7 @@ class Trainer:
 
         torch.save(
             {
-                "iters": self.iters,
+                "num_batches_seen": self.num_batches_seen,
                 "epoch": self.epoch,
                 "stepper": self.stepper.get_state(),
             },
@@ -393,7 +418,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     # does not load optimizer state, instead uses config specified lr.
     load_optimizer = trainer.config.resuming
     trainer.stepper.load_state(checkpoint["stepper"], load_optimizer=load_optimizer)
-    trainer.iters = checkpoint["iters"]
+    trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["epoch"]
 
 
