@@ -52,6 +52,22 @@ class SingleModuleStepperConfig:
         )
 
 
+class DummyWrapper(nn.Module):
+    """
+    Wrapper class for a single pytorch module, which does nothing.
+
+    Exists so we have an identical module structure to the case where we use
+    a DistributedDataParallel wrapper.
+    """
+
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
+
+
 class SingleModuleStepper:
     """
     Stepper class for a single pytorch module.
@@ -112,6 +128,8 @@ class SingleModuleStepper:
                 output_device=output_device,
                 find_unused_parameters=True,
             )
+        else:
+            self.module = DummyWrapper(self.module)
         self._is_distributed = dist.is_distributed()
 
         self.loss_obj = LpLoss()
@@ -207,16 +225,7 @@ class SingleModuleStepper:
             load_optimizer: Whether to load the optimizer state.
         """
         if "module" in state:
-            module_state = {}
-            for key in state["module"]:
-                if key.startswith("module.") and not self._is_distributed:
-                    # model was stored using ddp which prepends 'module.' if training
-                    # with multiple GPUs
-                    name = key[7:]
-                else:
-                    name = key
-                module_state[name] = state["module"][key]
-            self.module.load_state_dict(module_state)
+            self.module.load_state_dict(state["module"])
         if load_optimizer and "optimization" in state:
             self.optimization.load_state(state["optimization"])
         self.normalizer = StandardNormalizer.from_state(state["normalizer"])
