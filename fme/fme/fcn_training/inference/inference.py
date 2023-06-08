@@ -44,11 +44,9 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
-import dataclasses
 import os
 import sys
 from typing import Mapping
-from fme.core.dicts import to_flat_dict
 import numpy as np
 import argparse
 
@@ -59,11 +57,10 @@ import torch
 import logging
 from fme.fcn_training.utils import logging_utils
 
-logging_utils.config_logger()
 from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
-import wandb
 from fme.core import SingleModuleStepper
 import xarray as xr
+from fme.core.wandb import WandB
 
 import fme
 from fme.fcn_training.train_config import TrainConfig
@@ -71,6 +68,8 @@ import dacite
 import yaml
 
 DECORRELATION_TIME = 36
+
+wandb = WandB.get_instance()
 
 
 def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
@@ -82,13 +81,11 @@ def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
 
 
 def setup(config: TrainConfig):
-    if config.log_to_screen:
-        best_checkpoint_path = config.best_checkpoint_path
-        logging.info(f"Loading trained model checkpoint from {best_checkpoint_path}")
+    best_checkpoint_path = config.best_checkpoint_path
+    logging.info(f"Loading trained model checkpoint from {best_checkpoint_path}")
 
     # load the validation data
-    if config.log_to_screen:
-        logging.info("Loading inference data")
+    logging.info("Loading inference data")
     ds = netCDF4.MFDataset(os.path.join(config.validation_data.data_path, "*.nc"))
     data = load_series_data(
         idx=0,
@@ -107,8 +104,6 @@ def autoregressive_inference(
     ic,
     valid_data_full: Mapping[str, torch.Tensor],
     stepper: SingleModuleStepper,
-    log_to_screen: bool,
-    log_to_wandb: bool,
     log_on_each_unroll_step: bool,
     prediction_length: int,
 ):
@@ -121,8 +116,7 @@ def autoregressive_inference(
     }
 
     # autoregressive inference
-    if log_to_screen:
-        logging.info("Begin autoregressive inference")
+    logging.info("Begin autoregressive inference")
 
     lat_dim, lon_dim = 2, 3
     example_name = list(stepper.data_shapes.keys())[0]
@@ -179,64 +173,60 @@ def autoregressive_inference(
                     .numpy()
                 )
 
-            if log_to_screen:
-                logging.info(
-                    "Predicted timestep {} of {}. {} RMS Error: {}".format(
-                        i, prediction_length, name, rmse[(name, i)]
-                    )
+            logging.info(
+                "Predicted timestep {} of {}. {} RMS Error: {}".format(
+                    i, prediction_length, name, rmse[(name, i)]
                 )
-            if log_to_wandb:
-                rmse_metrics = {
-                    f"rmse/ic{ic}/{name}": rmse[(name, i)] for name in gen_data
-                }
-                mean_pred_metrics = {
-                    f"global_mean_prediction/ic{ic}/{name}": global_mean_pred[  # noqa: E501
-                        (name, i)
-                    ]
-                    for name in gen_data
-                }
-                mean_target_metrics = {
-                    f"global_mean_target/ic{ic}/{name}": global_mean_target[(name, i)]
-                    for name in gen_data
-                }
-                grad_mag_pred_metrics = {
-                    f"global_mean_gradient_magnitude_prediction/ic{ic}/{name}": gradient_magnitude_pred[  # noqa: E501
-                        (name, i)
-                    ]
-                    for name in gen_data
-                }
-                grad_mag_target_metrics = {
-                    f"global_mean_gradient_magnitude_target/ic{ic}/{name}": gradient_magnitude_target[  # noqa: E501
-                        (name, i)
-                    ]
-                    for name in gen_data
-                }
-                if log_on_each_unroll_step:
-                    wandb.log(
-                        {
-                            **rmse_metrics,
-                            **mean_pred_metrics,
-                            **mean_target_metrics,
-                            **grad_mag_pred_metrics,
-                            **grad_mag_target_metrics,
-                        }
-                    )
-                if i in snapshot_lead_steps:
-                    for name in gen_data:
-                        rmse_metric_name = f"rmse_{i}-lead-step/ic{ic}/{name}"
-                        inference_logs[rmse_metric_name] = rmse[(name, i)]
-                        inference_logs[
-                            f"global_mean_prediction_{i}-lead-step/ic{ic}/{name}"
-                        ] = global_mean_pred[(name, i)]
-                        inference_logs[
-                            f"global_mean_target_{i}-lead-step/ic{ic}/{name}"
-                        ] = global_mean_target[(name, i)]
-                        inference_logs[
-                            f"global_mean_gradient_magnitude_prediction_{i}-lead-step/ic{ic}/{name}"  # noqa: E501
-                        ] = gradient_magnitude_pred[(name, i)]
-                        inference_logs[
-                            f"global_mean_gradient_magnitude_target_{i}-lead-step/ic{ic}/{name}"  # noqa: E501
-                        ] = gradient_magnitude_target[(name, i)]
+            )
+            rmse_metrics = {f"rmse/ic{ic}/{name}": rmse[(name, i)] for name in gen_data}
+            mean_pred_metrics = {
+                f"global_mean_prediction/ic{ic}/{name}": global_mean_pred[  # noqa: E501
+                    (name, i)
+                ]
+                for name in gen_data
+            }
+            mean_target_metrics = {
+                f"global_mean_target/ic{ic}/{name}": global_mean_target[(name, i)]
+                for name in gen_data
+            }
+            grad_mag_pred_metrics = {
+                f"global_mean_gradient_magnitude_prediction/ic{ic}/{name}": gradient_magnitude_pred[  # noqa: E501
+                    (name, i)
+                ]
+                for name in gen_data
+            }
+            grad_mag_target_metrics = {
+                f"global_mean_gradient_magnitude_target/ic{ic}/{name}": gradient_magnitude_target[  # noqa: E501
+                    (name, i)
+                ]
+                for name in gen_data
+            }
+            if log_on_each_unroll_step:
+                wandb.log(
+                    {
+                        **rmse_metrics,
+                        **mean_pred_metrics,
+                        **mean_target_metrics,
+                        **grad_mag_pred_metrics,
+                        **grad_mag_target_metrics,
+                    }
+                )
+            if i in snapshot_lead_steps:
+                for name in gen_data:
+                    rmse_metric_name = f"rmse_{i}-lead-step/ic{ic}/{name}"
+                    inference_logs[rmse_metric_name] = rmse[(name, i)]
+                    inference_logs[
+                        f"global_mean_prediction_{i}-lead-step/ic{ic}/{name}"
+                    ] = global_mean_pred[(name, i)]
+                    inference_logs[
+                        f"global_mean_target_{i}-lead-step/ic{ic}/{name}"
+                    ] = global_mean_target[(name, i)]
+                    inference_logs[
+                        f"global_mean_gradient_magnitude_prediction_{i}-lead-step/ic{ic}/{name}"  # noqa: E501
+                    ] = gradient_magnitude_pred[(name, i)]
+                    inference_logs[
+                        f"global_mean_gradient_magnitude_target_{i}-lead-step/ic{ic}/{name}"  # noqa: E501
+                    ] = gradient_magnitude_target[(name, i)]
 
         for name in gen_data:
             time_rmse = fme.rmse_of_time_mean(
@@ -274,25 +264,16 @@ def main(
         data=data,
         config=dacite.Config(strict=True),
     )
+    train_config.configure_logging(log_filename="inference_out.log")
+    train_config.configure_wandb()
 
     torch.backends.cudnn.benchmark = True
 
     if not os.path.isdir(train_config.experiment_dir):
         os.makedirs(train_config.experiment_dir)
 
-    logging_utils.log_to_file(
-        logger_name=None,
-        log_filename=os.path.join(train_config.experiment_dir, "inference_out.log"),
-    )
     logging_utils.log_versions()
-
-    if train_config.log_to_wandb:  # type: ignore
-        wandb.init(
-            config=to_flat_dict(dataclasses.asdict(train_config)),
-            project="fourcastnet-era5",
-            entity="ai2cm",
-        )
-        logging_utils.log_beaker_url()
+    logging_utils.log_beaker_url()
 
     n_ics = 1
     ics = [0]
@@ -315,8 +296,6 @@ def main(
             ic=ic,
             valid_data_full=valid_data_full,
             stepper=stepper,
-            log_to_screen=train_config.log_to_screen,  # type: ignore
-            log_to_wandb=train_config.log_to_wandb,  # type: ignore
             log_on_each_unroll_step=True,
             prediction_length=train_config.prediction_length,  # type: ignore
         )
@@ -347,10 +326,9 @@ def main(
         "autoregressive_predictions" + autoregressive_inference_filetag + ".nc",
     )
     if vis:
-        if train_config.log_to_screen:  # type: ignore
-            logging.info(f"Saving files at {filename}")
+        logging.info(f"Saving files at {filename}")
         ds.to_netcdf(filename)
-        if train_config.log_to_wandb:  # type: ignore
+        if train_config.logging.log_to_wandb:  # type: ignore
             gap = np.zeros((prediction_length, 1, img_shape_x, 10))
             source_valid = 0
             source_gen = 1

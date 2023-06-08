@@ -48,7 +48,6 @@ import os
 import time
 import dacite
 from fme.core.distributed import Distributed
-from fme.core.dicts import to_flat_dict
 from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import argparse
 import torch
@@ -57,17 +56,17 @@ import logging
 from fme.fcn_training.utils import logging_utils
 import yaml
 
-logging_utils.config_logger()
 from fme.fcn_training.utils.data_loader_multifiles import (
     get_data_loader,
 )
-import wandb
+from fme.core.wandb import WandB
 from fme.fcn_training.train_config import TrainConfig
 
 from fme.fcn_training.inference import inference
-import dataclasses
 import fme
 import netCDF4
+
+wandb = WandB.get_instance()
 
 
 class Trainer:
@@ -87,16 +86,6 @@ class Trainer:
             if not os.path.isdir(config.checkpoint_dir):
                 os.makedirs(config.checkpoint_dir)
         self.config = config
-
-        if self.dist.is_root() and config.log_to_wandb:
-            wandb.init(
-                config=to_flat_dict(dataclasses.asdict(config)),
-                project=config.project,
-                entity=config.entity,
-                resume=True,
-                dir=config.experiment_dir,
-            )
-            logging_utils.log_beaker_url()
 
         self.n_forward_steps = 1
         if self.n_forward_steps != 1:
@@ -137,15 +126,11 @@ class Trainer:
             logging.info("Loading checkpoint %s" % config.checkpoint_path)
             self.restore_checkpoint(config.checkpoint_path)
 
-        if self.dist.is_root() and config.log_to_wandb:
-            wandb.watch(self.stepper.modules)
+        wandb.watch(self.stepper.modules)
 
-        if self.dist.is_root() and config.log_to_screen:
-            logging.info(
-                "Number of trainable model parameters: {}".format(
-                    self.count_parameters()
-                )
-            )
+        logging.info(
+            "Number of trainable model parameters: {}".format(self.count_parameters())
+        )
 
         # TODO: refactor this into its own dataset configuration
         inference_ds = netCDF4.MFDataset(
@@ -163,14 +148,12 @@ class Trainer:
             param.requires_grad = False
 
     def train(self):
-        if self.dist.is_root() and self.config.log_to_screen:
-            logging.info("Starting Training Loop...")
+        logging.info("Starting Training Loop...")
 
         best_valid_loss = 1.0e6
         for epoch in range(self.startEpoch, self.config.max_epochs):
             self.epoch = epoch
-            if self.dist.is_root() and self.config.log_to_screen:
-                logging.info(f"Epoch: {epoch+1}")
+            logging.info(f"Epoch: {epoch+1}")
             if self.train_sampler is not None:
                 self.train_sampler.set_epoch(epoch)
 
@@ -192,17 +175,15 @@ class Trainer:
                         self.save_checkpoint(self.config.best_checkpoint_path)
                         best_valid_loss = valid_loss
 
-            if self.dist.is_root() and self.config.log_to_screen:
-                time_elapsed = time.time() - start_time
-                logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
-                logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
+            time_elapsed = time.time() - start_time
+            logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
+            logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
 
-            if self.dist.is_root() and self.config.log_to_wandb:
-                logging.info("Logging to wandb")
-                for pg in self.stepper.optimization.optimizer.param_groups:
-                    lr = pg["lr"]
-                all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
-                wandb.log(all_logs, step=self.epoch)
+            logging.info("Logging to wandb")
+            for pg in self.stepper.optimization.optimizer.param_groups:
+                lr = pg["lr"]
+            all_logs = {**train_logs, **valid_logs, **inference_logs, **{"lr": lr}}
+            wandb.log(all_logs, step=self.epoch)
 
     def train_one_epoch(self):
         # TODO: clean up and merge train_one_epoch and validate_one_epoch
@@ -314,27 +295,24 @@ class Trainer:
                             ),
                             axis=1,
                         )
-                        if self.dist.is_root() and self.config.log_to_wandb:
-                            caption = (
-                                f"{name} one step full field for "
-                                f"sample {i}; (left) generated and (right) target."
-                            )
-                            wandb_image = wandb.Image(image_full_field, caption=caption)
-                            image_logs[
-                                f"image-full-field/sample{i}/{name}"
-                            ] = wandb_image
-                            caption = (
-                                f"{name} one step residual for "
-                                f"sample {i}; (left) generated and (right) target."
-                            )
-                            wandb_image = wandb.Image(image_residual, caption=caption)
-                            image_logs[f"image-residual/sample{i}/{name}"] = wandb_image
-                            caption = (
-                                f"{name} one step error "
-                                f"(generated - target) for sample {i}."
-                            )
-                            wandb_image = wandb.Image(image_error, caption=caption)
-                            image_logs[f"image-error/sample{i}/{name}"] = wandb_image
+                        caption = (
+                            f"{name} one step full field for "
+                            f"sample {i}; (left) generated and (right) target."
+                        )
+                        wandb_image = wandb.Image(image_full_field, caption=caption)
+                        image_logs[f"image-full-field/sample{i}/{name}"] = wandb_image
+                        caption = (
+                            f"{name} one step residual for "
+                            f"sample {i}; (left) generated and (right) target."
+                        )
+                        wandb_image = wandb.Image(image_residual, caption=caption)
+                        image_logs[f"image-residual/sample{i}/{name}"] = wandb_image
+                        caption = (
+                            f"{name} one step error "
+                            f"(generated - target) for sample {i}."
+                        )
+                        wandb_image = wandb.Image(image_error, caption=caption)
+                        image_logs[f"image-error/sample{i}/{name}"] = wandb_image
 
         valid_buff = self.dist.reduce_sum(valid_buff)
         # divide by number of steps
@@ -368,8 +346,7 @@ class Trainer:
     def inference_one_epoch(self):
         # TODO: refactor inference to be more clearly reusable between
         # training, validation, and inference
-        if self.dist.is_root() and self.config.log_to_screen:
-            logging.info("Starting inference on validation set...")
+        logging.info("Starting inference on validation set...")
 
         with torch.no_grad():
             (
@@ -380,8 +357,6 @@ class Trainer:
                 ic=0,
                 valid_data_full=self.inference_data,
                 stepper=self.stepper,
-                log_to_screen=False,
-                log_to_wandb=True,
                 log_on_each_unroll_step=False,
                 prediction_length=self.config.prediction_length,
             )
@@ -432,18 +407,15 @@ def main(
         data = yaml.safe_load(f)
         with open(os.path.join(data["experiment_dir"], "config.yaml"), "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    train_config = dacite.from_dict(
+    train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,
         data=data,
         config=dacite.Config(strict=True),
     )
-    if dist.is_root():
-        logging_utils.log_to_file(
-            logger_name=None,
-            log_filename=os.path.join(train_config.experiment_dir, "out.log"),
-        )
-        logging_utils.log_versions()
-
+    train_config.configure_logging(log_filename="out.log")
+    train_config.configure_wandb()
+    logging_utils.log_versions()
+    logging_utils.log_beaker_url()
     trainer = Trainer(train_config)
     trainer.train()
     logging.info("DONE ---- rank %d" % dist.rank)
