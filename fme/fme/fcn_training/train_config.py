@@ -68,6 +68,7 @@ class TrainConfig:
     max_epochs: int
     save_checkpoint: bool
     experiment_dir: str
+    log_train_every_n_batches: int = 100
     # parameters only for inference
     prediction_length: int = 2
 
