@@ -60,10 +60,12 @@ stepper:
 prediction_length: 2
 max_epochs: 1
 save_checkpoint: true
-log_to_screen: true
-log_to_wandb: false
-project: fme
-entity: ai2cm
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: false
+  project: fme
+  entity: ai2cm
 experiment_dir: {results_dir}
     """  # noqa: E501
 
