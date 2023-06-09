@@ -265,7 +265,7 @@ def main(
         config=dacite.Config(strict=True),
     )
     train_config.configure_logging(log_filename="inference_out.log")
-    train_config.configure_wandb()
+    train_config.configure_wandb(resume=False)
 
     torch.backends.cudnn.benchmark = True
 
