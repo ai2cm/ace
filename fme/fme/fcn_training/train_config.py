@@ -47,14 +47,14 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def configure_wandb(self, config: Mapping[str, Any]):
+    def configure_wandb(self, config: Mapping[str, Any], resume: bool):
         # must ensure wandb.configure is called before wandb.init
         wandb.configure(log_to_wandb=self.log_to_wandb)
         wandb.init(
             config=config,
             project=self.project,
             entity=self.entity,
-            resume=True,
+            resume=resume,
             dir=config["experiment_dir"],
         )
 
@@ -104,8 +104,10 @@ class TrainConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self):
-        self.logging.configure_wandb(config=to_flat_dict(dataclasses.asdict(self)))
+    def configure_wandb(self, resume: bool):
+        self.logging.configure_wandb(
+            config=to_flat_dict(dataclasses.asdict(self)), resume=resume
+        )
 
     def log(self):
         logging.info("------------------ Configuration ------------------")

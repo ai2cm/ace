@@ -438,7 +438,7 @@ def main(
         config=dacite.Config(strict=True),
     )
     train_config.configure_logging(log_filename="out.log")
-    train_config.configure_wandb()
+    train_config.configure_wandb(resume=True)
     logging_utils.log_versions()
     logging_utils.log_beaker_url()
     trainer = Trainer(train_config)
