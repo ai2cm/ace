@@ -56,7 +56,9 @@ stepper:
     global_stds_path: '{global_stds_path}'
   builder:
     type: {nettype}
-    config: {{}}
+    config:
+      num_blocks: 2
+      embed_dim: 12
 prediction_length: 2
 max_epochs: 1
 save_checkpoint: true
