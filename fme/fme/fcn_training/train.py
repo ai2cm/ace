@@ -187,7 +187,7 @@ class Trainer:
                 **inference_logs,
                 **{"lr": lr, "epoch": self.epoch},
             }
-            wandb.log(valid_and_inf_logs, step=self.epoch)
+            wandb.log(valid_and_inf_logs, step=self.num_batches_seen)
 
     def train_one_epoch(self):
         """Train for one epoch and log batch losses to wandb. Returns the final
