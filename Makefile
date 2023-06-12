@@ -1,4 +1,4 @@
-VERSION ?= $(shell git rev-parse HEAD)
+VERSION ?= $(shell git rev-parse --short HEAD)
 IMAGE ?= fme
 ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
