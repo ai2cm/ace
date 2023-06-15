@@ -8,6 +8,7 @@ from torch.nn.parallel import DistributedDataParallel
 from fme.core.packer import Packer
 from fme.core.device import get_device, using_gpu
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.prescriber import PrescriberConfig, Prescriber, NullPrescriber
 import dataclasses
 from fme.fcn_training.registry import ModuleSelector
 from torch import nn
@@ -23,10 +24,11 @@ class SingleModuleStepperConfig:
     out_names: List[str]
     normalization: NormalizationConfig
     optimization: Optional[OptimizationConfig] = None
+    prescriber: Optional[PrescriberConfig] = None
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
-            names=list(self.in_names) + list(self.out_names),
+            names=self.all_names,
             in_names=self.in_names,
             out_names=self.out_names,
             n_timesteps=n_forward_steps + 1,
@@ -51,6 +53,15 @@ class SingleModuleStepperConfig:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+    @property
+    def all_names(self):
+        if self.prescriber is not None:
+            mask_name = [self.prescriber.mask_name]
+        else:
+            mask_name = []
+        all_names = list(set(self.in_names).union(self.out_names).union(mask_name))
+        return all_names
 
 
 class DummyWrapper(nn.Module):
@@ -84,7 +95,6 @@ class SingleModuleStepper:
         Args:
             config: The configuration.
             data_shapes: The shapes of the data.
-            normalizer: The normalizer.
             max_epochs: The maximum number of epochs. Used when constructing
                 certain learning rate schedulers, if applicable.
         """
@@ -93,8 +103,11 @@ class SingleModuleStepper:
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        all_names = list(set(config.in_names).union(config.out_names))
-        self.normalizer = config.normalization.build(all_names)
+        self.normalizer = config.normalization.build(config.all_names)
+        if config.prescriber is not None:
+            self.prescriber = config.prescriber.build(config.in_names, config.out_names)
+        else:
+            self.prescriber = NullPrescriber()
         example_name = list(data_shapes.keys())[0]
         self.module = config.builder.build(
             n_in_channels=n_in_channels,
@@ -206,6 +219,7 @@ class SingleModuleStepper:
             optimization=optimization,
             loss_obj=self.loss_obj,
             n_forward_steps=n_forward_steps,
+            prescriber=self.prescriber,
             aggregator=non_none_aggregator,
         )
 
@@ -223,6 +237,7 @@ class SingleModuleStepper:
             "data_shapes": self.data_shapes,
             "max_epochs": self._max_epochs,
             "config": self._config.get_state(),
+            "prescriber": self.prescriber.get_state(),
         }
 
     def load_state(self, state, load_optimizer: bool = True):
@@ -240,6 +255,7 @@ class SingleModuleStepper:
         self.normalizer = StandardNormalizer.from_state(state["normalizer"])
         self.in_packer = Packer.from_state(state["in_packer"])
         self.out_packer = Packer.from_state(state["out_packer"])
+        self.prescriber.load_state(state["prescriber"])
 
     @classmethod
     def from_state(cls, state, load_optimizer: bool = True) -> "SingleModuleStepper":
@@ -270,6 +286,7 @@ def run_on_batch(
     out_packer: Packer,
     optimization: Union[Optimization, NullOptimization],
     loss_obj: nn.Module,
+    prescriber: Union[Prescriber, NullPrescriber],
     aggregator: Union[OneStepAggregator, NullAggregator],
     n_forward_steps: int = 1,
 ) -> Tuple[
@@ -295,6 +312,7 @@ def run_on_batch(
         optimization: The optimization object. If it is NullOptimization,
             then the model is not trained.
         loss_obj: The loss object.
+        prescriber: Overwrite an output with target value in specified region.
         n_forward_steps: The number of timesteps to run the model for.
 
     Returns:
@@ -321,7 +339,7 @@ def run_on_batch(
     full_target_tensor_norm = out_packer.pack(full_data_norm, axis=channel_dim)
     loss = torch.tensor(0.0, device=get_device())
     input_data_norm = get_input_data_norm(in_packer.names, time_input)
-    gen_tensor_norms = []
+    gen_data_norm = []
     optimization.set_mode(module)
     for _ in range(n_forward_steps):
         input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
@@ -334,29 +352,35 @@ def run_on_batch(
                 get_device(), dtype=torch.float
             )
             loss += loss_obj(gen_tensor_norm, target_tensor_norm)
+        gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+        target_norm = out_packer.unpack(target_tensor_norm, axis=channel_dim)
+        data_time = {
+            k: v.select(dim=time_dim, index=time_target) for k, v in data.items()
+        }
+        gen_norm = prescriber(data_time, gen_norm, target_norm)
         time_input += 1
         time_target += 1
-        gen_tensor_norms.append(gen_tensor_norm)
+        gen_data_norm.append(gen_norm)
         # update input data with generated outputs, and forcings for missing outputs
-        gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
         forcing_names = list(set(in_packer.names).difference(gen_norm.keys()))
         forcing_data_norm = get_input_data_norm(forcing_names, time_input)
         input_data_norm = {**forcing_data_norm, **gen_norm}
 
     optimization.step_weights(loss)
     # prepend the initial (pre-first-timestep) output data to the generated data
-    initial_tensor = full_target_tensor_norm.select(dim=time_dim, index=0)
-    gen_tensor_norms = [initial_tensor] + gen_tensor_norms
-    gen_tensor_norm = torch.stack(gen_tensor_norms, dim=time_dim)
-    gen_data_norm = out_packer.unpack(
-        gen_tensor_norm, axis=channel_dim  # - 1 because no time dim
-    )
-    gen_data = normalizer.denormalize(gen_data_norm)
+    initial = get_input_data_norm(out_packer.names, 0)
+    gen_data_norm = [initial] + gen_data_norm
+    gen_data_norm_timeseries = {}
+    for name in out_packer.names:
+        gen_data_norm_timeseries[name] = torch.stack(
+            [x[name] for x in gen_data_norm], dim=time_dim
+        )
+    gen_data = normalizer.denormalize(gen_data_norm_timeseries)
     aggregator.record_batch(
         loss,
         target_data=data,
         gen_data=gen_data,
         target_data_norm=full_data_norm,
-        gen_data_norm=gen_data_norm,
+        gen_data_norm=gen_data_norm_timeseries,
     )
-    return loss, gen_data, gen_data_norm, full_data_norm
+    return loss, gen_data, gen_data_norm_timeseries, full_data_norm

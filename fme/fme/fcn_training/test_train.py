@@ -25,6 +25,7 @@ def _get_test_yaml_file(
     global_stds_path,
     in_variable_names,
     out_variable_names,
+    mask_name,
     nettype="afno",
 ):
     string = f"""
@@ -59,6 +60,10 @@ stepper:
     config:
       num_blocks: 2
       embed_dim: 12
+  prescriber:
+    prescribed_name: {in_variable_names[0]}
+    mask_name: {mask_name}
+    mask_value: 0
 prediction_length: 2
 max_epochs: 1
 save_checkpoint: true
@@ -95,10 +100,10 @@ def _setup(path, nettype):
     np.random.seed(seed)
     in_variable_names = ["foo", "bar", "baz"]
     out_variable_names = ["foo", "bar"]
-    all_variable_names = list(set(in_variable_names + out_variable_names))
+    mask_name = "mask"
+    all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
     data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
     stats_dim_sizes = {}
-    time_mean_dim_sizes = {k: data_dim_sizes[k] for k in ["grid_yt", "grid_xt"]}
 
     data_dir = path / "data"
     stats_dir = path / "stats"
@@ -107,9 +112,6 @@ def _setup(path, nettype):
     stats_dir.mkdir()
     results_dir.mkdir()
     _save_netcdf(data_dir / "data.nc", data_dim_sizes, all_variable_names)
-    _save_netcdf(
-        stats_dir / "stats-timemean.nc", time_mean_dim_sizes, all_variable_names
-    )
     _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, all_variable_names)
     _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, all_variable_names)
 
@@ -121,6 +123,7 @@ def _setup(path, nettype):
         global_stds_path=stats_dir / "stats-stddev.nc",
         in_variable_names=in_variable_names,
         out_variable_names=out_variable_names,
+        mask_name=mask_name,
         nettype=nettype,
     )
     return yaml_config_filename
