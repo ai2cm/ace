@@ -43,6 +43,7 @@ def test_denormalize_depends_on_std():
 
 
 def test_normalize_and_denormalize_random_tensor():
+    torch.manual_seed(0)
     # randomly set means and stds
     means = {"a": torch.randn(1), "b": torch.randn(1)}
     stds = {"a": torch.randn(1), "b": torch.randn(1)}

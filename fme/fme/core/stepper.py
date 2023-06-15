@@ -1,4 +1,5 @@
-from typing import List, Dict, Optional, Tuple, Union
+from typing import List, Dict, Tuple, Optional, Union
+from fme.core.aggregator import OneStepAggregator, NullAggregator
 from fme.core.distributed import Distributed
 from fme.fcn_training.utils.darcy_loss import LpLoss
 
@@ -157,6 +158,7 @@ class SingleModuleStepper:
         data: Dict[str, torch.Tensor],
         train: bool,
         n_forward_steps: int = 1,
+        aggregator: Optional[OneStepAggregator] = None,
     ) -> Tuple[
         float,
         Dict[str, torch.Tensor],
@@ -175,6 +177,12 @@ class SingleModuleStepper:
             The loss, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
+        if aggregator is None:
+            non_none_aggregator: Union[
+                OneStepAggregator, NullAggregator
+            ] = NullAggregator()
+        else:
+            non_none_aggregator = aggregator
         if train:
             if self.optimization is None:
                 raise ValueError(
@@ -198,6 +206,7 @@ class SingleModuleStepper:
             optimization=optimization,
             loss_obj=self.loss_obj,
             n_forward_steps=n_forward_steps,
+            aggregator=non_none_aggregator,
         )
 
     def get_state(self):
@@ -261,6 +270,7 @@ def run_on_batch(
     out_packer: Packer,
     optimization: Union[Optimization, NullOptimization],
     loss_obj: nn.Module,
+    aggregator: Union[OneStepAggregator, NullAggregator],
     n_forward_steps: int = 1,
 ) -> Tuple[
     float,
@@ -342,5 +352,11 @@ def run_on_batch(
         gen_tensor_norm, axis=channel_dim  # - 1 because no time dim
     )
     gen_data = normalizer.denormalize(gen_data_norm)
-    # TODO: use an aggregator as input instead of returning these sample outputs
+    aggregator.record_batch(
+        loss,
+        target_data=data,
+        gen_data=gen_data,
+        target_data_norm=full_data_norm,
+        gen_data_norm=gen_data_norm,
+    )
     return loss, gen_data, gen_data_norm, full_data_norm
