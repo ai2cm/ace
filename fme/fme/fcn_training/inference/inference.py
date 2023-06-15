@@ -91,7 +91,7 @@ def setup(config: TrainConfig):
         idx=0,
         n_steps=config.prediction_length + 1,
         ds=ds,
-        names=list(set(config.stepper.in_names).union(config.stepper.out_names)),
+        names=config.stepper.all_names,
     )
 
     checkpoint_file = config.best_checkpoint_path
