@@ -66,3 +66,7 @@ class WandB:
     @property
     def Video(self):
         return wandb.Video
+
+    @property
+    def Table(self):
+        return wandb.Table
