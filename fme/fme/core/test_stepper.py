@@ -37,6 +37,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
         n_forward_steps=1,
+        aggregator=MagicMock(),
     )
     assert torch.allclose(
         gen_data["a"], gen_data_norm["a"]
@@ -58,6 +59,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
         n_forward_steps=1,
+        aggregator=MagicMock(),
     )
     assert torch.allclose(gen_data["a"], gen_data_double_std["a"])
     assert torch.allclose(gen_data["a"], 2.0 * gen_data_norm_double_std["a"])
@@ -84,6 +86,7 @@ def test_run_on_batch_addition_series():
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
         n_forward_steps=n_steps,
+        aggregator=MagicMock(),
     )
     assert gen_data["a"].shape == (5, n_steps + 1, 5, 5)
     for i in range(n_steps - 1):
