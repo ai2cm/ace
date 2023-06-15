@@ -8,8 +8,10 @@ import torch
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.optimization import OptimizationConfig
+from fme.core.prescriber import PrescriberConfig, Prescriber, NullPrescriber
 import fme
 from unittest.mock import MagicMock
+import pytest
 
 
 def get_data(names, n_samples, n_time):
@@ -21,6 +23,34 @@ def get_data(names, n_samples, n_time):
 
 def get_scalar_data(names, value):
     return {n: torch.tensor([value], device=fme.get_device()) for n in names}
+
+
+@pytest.mark.parametrize(
+    "in_names,out_names,prescriber_config,expected_all_names",
+    [
+        (["a"], ["b"], None, ["a", "b"]),
+        (["a"], ["a", "b"], None, ["a", "b"]),
+        (["a", "b"], ["b"], None, ["a", "b"]),
+        (["a", "b"], ["a", "b"], None, ["a", "b"]),
+        (["a", "b"], ["a", "b"], PrescriberConfig("a", "mask", 0), ["a", "b", "mask"]),
+        (["a", "b"], ["a", "b"], PrescriberConfig("a", "b", 0), ["a", "b"]),
+    ],
+)
+def test_stepper_config_all_names_property(
+    in_names, out_names, prescriber_config, expected_all_names
+):
+    config = SingleModuleStepperConfig(
+        builder=MagicMock(),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=MagicMock(),
+        optimization=MagicMock(),
+        prescriber=prescriber_config,
+    )
+    # check there are no duplications
+    assert len(config.all_names) == len(set(config.all_names))
+    # check the right items are in there using sets to ignore order
+    assert set(config.all_names) == set(expected_all_names)
 
 
 def test_run_on_batch_normalizer_changes_only_norm_data():
@@ -36,6 +66,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
+        prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
     )
@@ -58,6 +89,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
+        prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
     )
@@ -85,6 +117,7 @@ def test_run_on_batch_addition_series():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
+        prescriber=NullPrescriber(),
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
     )
@@ -104,6 +137,51 @@ def test_run_on_batch_addition_series():
     assert torch.allclose(gen_data["b"][:, 0], data["b"][:, 0])
     assert torch.allclose(gen_data_norm["a"][:, 0], full_data_norm["a"][:, 0])
     assert torch.allclose(gen_data_norm["b"][:, 0], full_data_norm["b"][:, 0])
+
+
+def test_run_on_batch_with_prescriber():
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    n_steps = 3
+    data = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1)
+    data["mask"] = torch.zeros_like(data["mask"], dtype=torch.int)
+    data["mask"][:, :, :, 0] = 1
+    stds = {
+        "a": torch.tensor([2.0], device=fme.get_device()),
+        "b": torch.tensor([3.0], device=fme.get_device()),
+        "mask": torch.tensor([1.0], device=fme.get_device()),
+    }
+    _, gen_data, gen_data_norm, full_data_norm = run_on_batch(
+        data=data,
+        module=AddOne(),
+        normalizer=StandardNormalizer(
+            means=get_scalar_data(["a", "b", "mask"], 0.0),
+            stds=stds,
+        ),
+        in_packer=Packer(["a", "b"]),
+        out_packer=Packer(["a", "b"]),
+        optimization=MagicMock(),
+        loss_obj=torch.nn.MSELoss(),
+        n_forward_steps=n_steps,
+        prescriber=Prescriber("b", "mask", 1),
+        aggregator=MagicMock(),
+    )
+    for i in range(n_steps):
+        # "a" should be increasing by 1 according to AddOne
+        torch.testing.assert_close(
+            gen_data_norm["a"][:, i] + 1, gen_data_norm["a"][:, i + 1]
+        )
+        # "b" should be increasing by 1 where the mask says don't prescribe
+        # note the 1: selection for the last dimension in following two assertions
+        torch.testing.assert_close(
+            gen_data_norm["b"][:, i, :, 1:] + 1, gen_data_norm["b"][:, i + 1, :, 1:]
+        )
+        # now check that the 0th index in last dimension has been overwritten
+        torch.testing.assert_close(
+            gen_data_norm["b"][:, i, :, 0], full_data_norm["b"][:, i, :, 0]
+        )
 
 
 def test_reloaded_stepper_gives_same_prediction():
