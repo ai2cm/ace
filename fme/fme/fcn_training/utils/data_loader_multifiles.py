@@ -67,7 +67,7 @@ def get_data_loader(
         params.data_type = "ERA5"
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
-    elif params.data_type == "FV3GFS":
+    elif params.data_type in ["FV3GFS", "E3SMV2"]:
         dataset = FV3GFSDataset(params, params.data_path, requirements=requirements)
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
@@ -75,7 +75,7 @@ def get_data_loader(
             # if num_data_workers > 0
             # TODO: move this logic to the DataLoaderParams initialization
             logging.warning(
-                "If data_type=='FV3GFS', must use num_data_workers=0. "
+                f"If data_type=={params.data_type}, must use num_data_workers=0. "
                 "Got num_data_workers="
                 f"{params.num_data_workers}, but it is being set to 0."
             )
