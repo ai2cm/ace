@@ -9,32 +9,6 @@ from .data_requirements import DataRequirements
 import numpy as np
 
 
-# conversion from 'standard' names defined for ERA5 to those
-# in FV3GFS output netCDFs
-FV3GFS_NAMES = {
-    "u10": "UGRD10m",
-    "v10": "VGRD10m",
-    "t2m": "TMP2m",
-    "sp": "PRESsfc",
-    "msl": "PRMSL",
-    "t850": "TMP850",
-    "u1000": "UGRD1000",
-    "v1000": "VGRD1000",
-    "z1000": "h1000",
-    "u850": "UGRD850",
-    "v850": "VGRD850",
-    "z850": "h850",
-    "u500": "UGRD500",
-    "v500": "VGRD500",
-    "z500": "h500",
-    "t500": "TMP500",
-    "z50": "h50",
-    "rh500": "RH500",
-    "rh850": "RH850",
-    "tcwv": "TCWV",
-}
-
-
 def load_series_data(idx: int, n_steps: int, ds: netCDF4.MFDataset, names: List[str]):
     # flip the lat dimension so that it is increasing
     arrays = {
@@ -75,8 +49,12 @@ class FV3GFSDataset(Dataset):
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
         # provided ERA5 dataloader gets the "wrong" x/y convention (x is lat, y is lon)
         # so we follow that convention here for consistency
-        self.img_shape_x = len(self.ds.variables["grid_yt"][:])
-        self.img_shape_y = len(self.ds.variables["grid_xt"][:])
+        if "grid_xt" in self.ds.variables:
+            self.img_shape_x = len(self.ds.variables["grid_yt"][:])
+            self.img_shape_y = len(self.ds.variables["grid_xt"][:])
+        else:
+            self.img_shape_x = len(self.ds.variables["lat"][:])
+            self.img_shape_y = len(self.ds.variables["lon"][:])
         logging.info(f"Found {self.n_samples_total} samples.")
         logging.info(f"Image shape is {self.img_shape_x} x {self.img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
