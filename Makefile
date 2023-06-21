@@ -9,6 +9,12 @@ build_docker_image:
 build_beaker_image: build_docker_image
 	beaker image create --name $(IMAGE)-$(VERSION) $(IMAGE):$(VERSION)
 
+# first run `docker login registry.services.nersc.gov` once on your machine
+# NOTE: docker build won't run on NERSC systems
+build_shifter_image:
+	docker build -f docker/Dockerfile -t registry.services.nersc.gov/ai2cm/$(IMAGE):$(VERSION) .; \
+	docker push registry.services.nersc.gov/ai2cm/$(IMAGE):$(VERSION)
+
 enter_docker_image: build_docker_image
 	docker run -it --rm $(IMAGE):$(VERSION) bash
 
