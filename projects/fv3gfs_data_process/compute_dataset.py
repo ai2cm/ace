@@ -224,6 +224,8 @@ def compute_column_advective_moisture_tendency(
 ) -> xr.Dataset:
     evaporation = ds[latent_heat_flux] / latent_heat_vaporiation
     advective_tendency = ds[pwat_tendency] - evaporation + ds[precip]
+    long_name = "tendency of total water path due to advection"
+    advective_tendency.attrs["long_name"] = long_name
     return ds.assign({f"{pwat_tendency}_due_to_advection": advective_tendency})
 
 
