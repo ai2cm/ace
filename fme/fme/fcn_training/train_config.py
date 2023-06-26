@@ -40,7 +40,10 @@ class LoggingConfig:
         logger = logging.getLogger()
         if self.log_to_file and self._dist.is_root():
             if not os.path.exists(experiment_dir):
-                os.makedirs(experiment_dir)
+                raise ValueError(
+                    f"experiment directory {experiment_dir} does not exist, "
+                    "cannot log files to it"
+                )
             log_path = os.path.join(experiment_dir, log_filename)
             fh = logging.FileHandler(log_path)
             fh.setLevel(logging.INFO)
@@ -70,7 +73,7 @@ class TrainConfig:
     experiment_dir: str
     log_train_every_n_batches: int = 100
     # parameters only for inference
-    prediction_length: int = 2
+    inference_n_forward_steps: int = 2
 
     def __post_init__(self):
         scheduler_type = self.stepper.optimization.scheduler.type

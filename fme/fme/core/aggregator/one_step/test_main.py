@@ -20,9 +20,9 @@ def test_labels_exist():
     logs = agg.get_logs(label="test")
     assert "test/mean/loss" in logs
     assert "test/mean/l1/a" in logs
-    assert "test/mean/area_weighted_rmse/a" in logs
-    assert "test/mean/area_weighted_bias/a" in logs
-    assert "test/mean/area_weighted_mean_gradient_magnitude_percent_diff/a" in logs
+    assert "test/mean/weighted_rmse/a" in logs
+    assert "test/mean/weighted_bias/a" in logs
+    assert "test/mean/weighted_grad_mag_percent_diff/a" in logs
     assert "test/snapshot/image-full-field/a" in logs
     assert "test/snapshot/image-residual/a" in logs
     assert "test/snapshot/image-error/a" in logs

@@ -1,5 +1,6 @@
 from typing import Mapping, Optional, Dict
 
+import xarray as xr
 import torch
 from torch import nn
 from fme.core.device import get_device
@@ -50,9 +51,9 @@ class MeanAggregator:
         if self._variable_metrics is None:
             self._variable_metrics = {
                 "l1": {},
-                "area_weighted_rmse": {},
-                "area_weighted_bias": {},
-                "area_weighted_mean_gradient_magnitude_percent_diff": {},
+                "weighted_rmse": {},
+                "weighted_bias": {},
+                "weighted_grad_mag_percent_diff": {},
             }
             device = get_device()
             gen_shape = get_gen_shape(gen_data)
@@ -62,23 +63,23 @@ class MeanAggregator:
             )
             for key in gen_data:
                 self._variable_metrics["l1"][key] = L1Loss(device=device)
-                self._variable_metrics["area_weighted_rmse"][
+                self._variable_metrics["weighted_rmse"][
                     key
                 ] = AreaWeightedReducedMetric(
                     area_weights=area_weights,
                     device=device,
                     compute_metric=metrics.root_mean_squared_error,
                 )
-                self._variable_metrics["area_weighted_bias"][
+                self._variable_metrics["weighted_bias"][
                     key
                 ] = AreaWeightedReducedMetric(
                     area_weights=area_weights,
                     device=device,
                     compute_metric=metrics.weighted_mean_bias,
                 )
-                self._variable_metrics[
-                    "area_weighted_mean_gradient_magnitude_percent_diff"
-                ][key] = AreaWeightedReducedMetric(
+                self._variable_metrics["weighted_grad_mag_percent_diff"][
+                    key
+                ] = AreaWeightedReducedMetric(
                     area_weights=area_weights,
                     device=device,
                     compute_metric=metrics.gradient_magnitude_percent_diff,
@@ -144,3 +145,12 @@ class MeanAggregator:
         for key in sorted(logs.keys()):
             logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
+
+    @torch.no_grad()
+    def get_dataset(self, label: str) -> xr.Dataset:
+        logs = self.get_logs(label=label)
+        logs = {key.replace("/", "-"): logs[key] for key in logs}
+        data_vars = {}
+        for key, value in logs.items():
+            data_vars[key] = xr.DataArray(value)
+        return xr.Dataset(data_vars=data_vars)
