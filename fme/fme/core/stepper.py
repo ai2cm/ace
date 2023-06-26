@@ -148,6 +148,9 @@ class SingleModuleStepper:
 
         self.loss_obj = LpLoss()
 
+    def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
+        return self._config.get_data_requirements(n_forward_steps)
+
     @property
     def modules(self) -> List[nn.Module]:
         """

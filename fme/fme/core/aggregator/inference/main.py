@@ -1,10 +1,15 @@
-from typing import Mapping, Protocol, Dict
-
+from typing import Mapping, Protocol, Dict, Union, List
 from .time_mean import TimeMeanAggregator
 from .reduced import MeanAggregator
+from .video import VideoAggregator
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
+from fme.core.wandb import WandB
+from wandb import Table
+import xarray as xr
 
 import torch
+
+wandb = WandB.get_instance()
 
 
 class _Aggregator(Protocol):
@@ -23,6 +28,10 @@ class _Aggregator(Protocol):
     def get_logs(self, label: str):
         ...
 
+    @torch.no_grad()
+    def get_dataset(self, label: str):
+        ...
+
 
 class InferenceAggregator:
     """
@@ -32,7 +41,12 @@ class InferenceAggregator:
     `get_logs` to get a dictionary of statistics when you're done.
     """
 
-    def __init__(self, record_step_20: bool = False):
+    def __init__(self, record_step_20: bool = False, log_video: bool = False):
+        """
+        Args:
+            record_step_20: Whether to record the mean of the 20th steps.
+            log_video: Whether to log videos of the state evolution.
+        """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(target="denorm"),
             "mean_norm": MeanAggregator(target="norm"),
@@ -40,6 +54,8 @@ class InferenceAggregator:
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(target_time=20)
+        if log_video:
+            self._aggregators["video"] = VideoAggregator()
 
     @torch.no_grad()
     def record_batch(
@@ -76,3 +92,55 @@ class InferenceAggregator:
             logs.update(aggregator.get_logs(label=name))
         logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
+
+    @torch.no_grad()
+    def get_inference_logs(self, label: str) -> List[Dict[str, Union[float, int]]]:
+        """
+        Returns a list of logs to report to WandB.
+
+        This is done because in inference, we use the wandb step
+        as the time step, meaning we need to re-organize the logged data
+        from tables into a list of dictionaries.
+        """
+        return to_inference_logs(self.get_logs(label=label))
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        if "video" not in self._aggregators:
+            raise ValueError("must set log_video=True on init to get dataset")
+        return self._aggregators["video"].get_dataset(label="")
+
+
+def to_inference_logs(
+    log: Mapping[str, Union[Table, float, int]]
+) -> List[Dict[str, Union[float, int]]]:
+    # we have a dictionary which contains WandB tables
+    # which we will convert to a list of dictionaries, one for each
+    # row in the tables. Any scalar values will be reported in the last
+    # dictionary.
+    n_rows = 0
+    for val in log.values():
+        if isinstance(val, wandb.Table):
+            n_rows = max(n_rows, len(val.data))
+    logs: List[Dict[str, Union[float, int]]] = []
+    for i in range(n_rows):
+        logs.append({})
+    for key, val in log.items():
+        if isinstance(val, wandb.Table):
+            for i, row in enumerate(val.data):
+                for j, col in enumerate(val.columns):
+                    key_without_table_name = key[: key.rfind("/")]
+                    logs[i][f"{key_without_table_name}/{col}"] = row[j]
+        else:
+            logs[-1][key] = val
+    return logs
+
+
+def table_to_logs(table: Table) -> List[Dict[str, Union[float, int]]]:
+    """
+    Converts a WandB table into a list of dictionaries.
+    """
+    logs = []
+    for row in table.data:
+        logs.append({table.columns[i]: row[i] for i in range(len(row))})
+    return logs

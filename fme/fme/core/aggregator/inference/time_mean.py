@@ -1,10 +1,11 @@
 from typing import Mapping, Optional, Dict
 
+import torch
+import xarray as xr
+
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-
-import torch
 
 
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
@@ -92,3 +93,12 @@ class TimeMeanAggregator:
                 .numpy()
             )
         return {f"{label}/{key}": logs[key] for key in logs}
+
+    @torch.no_grad()
+    def get_dataset(self, label: str) -> xr.Dataset:
+        logs = self.get_logs(label=label)
+        logs = {key.replace("/", "-"): logs[key] for key in logs}
+        data_vars = {}
+        for key, value in logs.items():
+            data_vars[key] = xr.DataArray(value)
+        return xr.Dataset(data_vars=data_vars)
