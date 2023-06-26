@@ -4,8 +4,8 @@ from fme.core.device import get_device
 import torch
 
 
-def test_labels_exist():
-    agg = InferenceAggregator(record_step_20=True)
+def test_logs_labels_exist():
+    agg = InferenceAggregator(record_step_20=True, log_video=True)
     n_sample = 10
     n_time = 22
     nx = 2
@@ -20,18 +20,47 @@ def test_labels_exist():
     assert "test/mean/series" in logs
     assert "test/mean_norm/series" in logs
     assert "test/mean_step_20/l1/a" in logs
-    assert "test/mean_step_20/area_weighted_rmse/a" in logs
-    assert "test/mean_step_20/area_weighted_bias/a" in logs
-    assert (
-        "test/mean_step_20/area_weighted_mean_gradient_magnitude_percent_diff/a" in logs
-    )
+    assert "test/mean_step_20/weighted_rmse/a" in logs
+    assert "test/mean_step_20/weighted_bias/a" in logs
+    assert "test/mean_step_20/weighted_grad_mag_percent_diff/a" in logs
     table = logs["test/mean/series"]
     assert table.columns == [
-        "rollout_step",
-        "area_weighted_bias/a",
-        "area_weighted_mean_gen/a",
-        "area_weighted_mean_gradient_magnitude_percent_diff/a",
-        "area_weighted_rmse/a",
+        "forecast_step",
+        "weighted_bias/a",
+        "weighted_grad_mag_percent_diff/a",
+        "weighted_mean_gen/a",
+        "weighted_rmse/a",
     ]
     assert "test/time_mean/rmse/a" in logs
     assert "test/time_mean/bias/a" in logs
+    assert "test/video/a" in logs
+
+
+def test_inference_logs_labels_exist():
+    agg = InferenceAggregator(record_step_20=True, log_video=True)
+    n_sample = 10
+    n_time = 22
+    nx = 2
+    ny = 2
+    loss = 1.0
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
+    logs = agg.get_inference_logs(label="test")
+    assert isinstance(logs, list)
+    assert len(logs) == n_time
+    assert "test/mean/weighted_bias/a" in logs[0]
+    assert "test/mean/weighted_mean_gen/a" in logs[0]
+    assert "test/mean/weighted_grad_mag_percent_diff/a" in logs[0]
+    assert "test/mean/weighted_rmse/a" in logs[0]
+    assert "test/mean_norm/weighted_bias/a" in logs[0]
+    assert "test/mean_norm/weighted_mean_gen/a" in logs[0]
+    assert "test/mean_norm/weighted_grad_mag_percent_diff/a" in logs[0]
+    assert "test/mean_norm/weighted_rmse/a" in logs[0]
+    # series/table data should be rolled out, not included as a table
+    assert "test/mean/series" not in logs[0]
+    assert "test/mean_norm/series" not in logs[0]
+    assert "test/reduced/series" not in logs[0]
+    assert "test/reduced_norm/series" not in logs[0]

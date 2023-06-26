@@ -17,8 +17,6 @@ def test_mean_metrics_call_distributed():
         logs = agg.get_logs(label="metrics")
         assert logs["metrics/loss"] == -1.0
         assert logs["metrics/l1/a"] == -1.0
-        assert logs["metrics/area_weighted_rmse/a"] == -1.0
-        assert (
-            logs["metrics/area_weighted_mean_gradient_magnitude_percent_diff/a"] == -1.0
-        )
+        assert logs["metrics/weighted_rmse/a"] == -1.0
+        assert logs["metrics/weighted_grad_mag_percent_diff/a"] == -1.0
         assert mock.reduce_called
