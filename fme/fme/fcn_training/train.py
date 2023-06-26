@@ -138,7 +138,7 @@ class Trainer:
         )
         self.inference_data = load_series_data(
             idx=0,
-            n_steps=config.prediction_length + 1,
+            n_steps=config.inference_n_forward_steps + 1,
             ds=inference_ds,
             names=data_requirements.names,
         )
@@ -256,16 +256,16 @@ class Trainer:
         logging.info("Starting inference on validation set...")
 
         valid_data = {
-            name: tensor[: self.config.prediction_length + 1].unsqueeze(0)
+            name: tensor[: self.config.inference_n_forward_steps + 1].unsqueeze(0)
             for name, tensor in self.inference_data.items()
         }
-        record_step_20 = self.config.prediction_length >= 20
-        aggregator = InferenceAggregator(record_step_20=record_step_20)
+        record_step_20 = self.config.inference_n_forward_steps >= 20
+        aggregator = InferenceAggregator(record_step_20=record_step_20, log_video=False)
         with torch.no_grad():
             self.stepper.run_on_batch(
                 data=valid_data,
                 train=False,
-                n_forward_steps=self.config.prediction_length,
+                n_forward_steps=self.config.inference_n_forward_steps,
                 aggregator=aggregator,
             )
         return aggregator.get_logs(label="inference")
@@ -319,6 +319,9 @@ def main(
         data=data,
         config=dacite.Config(strict=True),
     )
+
+    if not os.path.isdir(train_config.experiment_dir):
+        os.makedirs(train_config.experiment_dir)
     train_config.configure_logging(log_filename="out.log")
     train_config.configure_wandb(resume=True)
     logging_utils.log_versions()

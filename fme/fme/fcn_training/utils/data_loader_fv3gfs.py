@@ -25,7 +25,6 @@ class FV3GFSDataset(Dataset):
         self, params: DataLoaderParams, path: str, requirements: DataRequirements
     ):
         self.params = params
-        self._check_for_not_implemented_features()
         self.in_names = requirements.in_names
         self.out_names = requirements.out_names
         self.names = requirements.names
@@ -33,13 +32,10 @@ class FV3GFSDataset(Dataset):
         self.n_out_channels = len(self.out_names)
         self.path = path
         self.full_path = os.path.join(path, "*.nc")
-        self.dt = params.dt
-        self.n_steps = 2  # one input, one output timestep
+        self.n_steps = requirements.n_timesteps  # one input, one output timestep
         self._get_files_stats()
-
-    def _check_for_not_implemented_features(self):
-        if self.params.dt != 1:
-            raise NotImplementedError("step size must be 1 for FV3GFSDataset")
+        if params.n_samples is not None:
+            self.n_samples_total = params.n_samples
 
     def _get_files_stats(self):
         logging.info(f"Opening data at {self.full_path}")

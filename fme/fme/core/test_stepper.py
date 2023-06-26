@@ -1,3 +1,4 @@
+from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.stepper import (
     SingleModuleStepper,
     run_on_batch,
@@ -225,3 +226,31 @@ def test_reloaded_stepper_gives_same_prediction():
     for i in range(1, 4):
         assert torch.allclose(first_result[i]["a"], second_result[i]["a"]), i
         assert torch.allclose(first_result[i]["b"], second_result[i]["b"]), i
+
+
+def test_inference_dataset_contains_input_only_variable():
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    n_steps = 4
+    aggregator = InferenceAggregator(log_video=True)
+    data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
+    run_on_batch(
+        data=data,
+        module=AddOne(),
+        normalizer=StandardNormalizer(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 1.0),
+        ),
+        in_packer=Packer(["a", "b"]),
+        out_packer=Packer(["a"]),
+        optimization=MagicMock(),
+        loss_obj=torch.nn.MSELoss(),
+        prescriber=NullPrescriber(),
+        n_forward_steps=n_steps,
+        aggregator=aggregator,
+    )
+    ds = aggregator.get_dataset()
+    assert "mean_b" in ds.data_vars
+    assert ds["mean_b"].shape == (2, 5, 5, 5)
