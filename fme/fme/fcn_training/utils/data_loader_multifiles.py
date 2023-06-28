@@ -68,7 +68,7 @@ def get_data_loader(
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
     elif params.data_type in ["FV3GFS", "E3SMV2"]:
-        dataset = FV3GFSDataset(params, params.data_path, requirements=requirements)
+        dataset = FV3GFSDataset(params, requirements=requirements)
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
             # "RuntimeError: Resource temporarily unavailable"
