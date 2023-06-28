@@ -7,8 +7,6 @@ from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 import argparse
 
-import netCDF4
-
 import torch
 import logging
 from fme.fcn_training.utils import logging_utils
@@ -111,7 +109,7 @@ def main(
     data_requirements = stepper.get_data_requirements(
         n_forward_steps=config.n_forward_steps
     )
-    valid_data_loader, _ = get_data_loader(
+    valid_data_loader, valid_dataset = get_data_loader(
         config.validation_data,
         requirements=data_requirements,
         train=False,
@@ -145,21 +143,11 @@ def main(
                 remove_prefix[name] = name[6:]
         ds = ds.rename(remove_prefix)
         # propagate units from validation data
-        validation_ds = netCDF4.MFDataset(
-            os.path.join(config.validation_data.data_path, "*.nc")
-        )
+        metadata = valid_dataset.metadata
         for out_name in ds:
-            for name in validation_ds.variables:
-                if (
-                    name in out_name
-                    and "units" in validation_ds.variables[name].ncattrs()
-                ):
-                    ds[out_name].attrs["units"] = validation_ds[name].units
-                if (
-                    name in out_name
-                    and "long_name" in validation_ds.variables[name].ncattrs()
-                ):
-                    ds[out_name].attrs["long_name"] = validation_ds[name].long_name
+            for name in metadata:
+                ds[out_name].attrs["units"] = metadata[name].units
+                ds[out_name].attrs["long_name"] = metadata[name].long_name
         for out_name in ds.data_vars.keys():
             if len(ds[out_name].shape) > 4:
                 # should only have source, time, x, y

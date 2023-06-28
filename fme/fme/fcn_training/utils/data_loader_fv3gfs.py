@@ -1,6 +1,7 @@
+from collections import namedtuple
 import logging
 import os
-from typing import List
+from typing import List, Mapping
 from torch.utils.data import Dataset
 import torch
 import netCDF4
@@ -20,18 +21,19 @@ def load_series_data(idx: int, n_steps: int, ds: netCDF4.MFDataset, names: List[
     return arrays
 
 
+VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
+
+
 class FV3GFSDataset(Dataset):
-    def __init__(
-        self, params: DataLoaderParams, path: str, requirements: DataRequirements
-    ):
+    def __init__(self, params: DataLoaderParams, requirements: DataRequirements):
         self.params = params
         self.in_names = requirements.in_names
         self.out_names = requirements.out_names
         self.names = requirements.names
         self.n_in_channels = len(self.in_names)
         self.n_out_channels = len(self.out_names)
-        self.path = path
-        self.full_path = os.path.join(path, "*.nc")
+        self.path = params.data_path
+        self.full_path = os.path.join(self.path, "*.nc")
         self.n_steps = requirements.n_timesteps  # one input, one output timestep
         self._get_files_stats()
         if params.n_samples is not None:
@@ -54,6 +56,19 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Found {self.n_samples_total} samples.")
         logging.info(f"Image shape is {self.img_shape_x} x {self.img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
+
+    @property
+    def metadata(self) -> Mapping[str, VariableMetadata]:
+        result = {}
+        for name in self.names:
+            if hasattr(self.ds.variables[name], "units") and hasattr(
+                self.ds.variables[name], "long_name"
+            ):
+                result[name] = VariableMetadata(
+                    units=self.ds.variables[name].units,
+                    long_name=self.ds.variables[name].long_name,
+                )
+        return result
 
     def __len__(self):
         return self.n_samples_total
