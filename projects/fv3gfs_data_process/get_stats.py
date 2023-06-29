@@ -12,6 +12,7 @@ import os
 # masking or to more easily compute vertical integrals. But they are not inputs
 # or outputs to the ML model, so we don't need normalization constants for them.
 DROP_VARIABLES = [
+    "OCNFRAC",
     "land_sea_mask",
     "pressure_thickness_of_atmospheric_layer_0",
     "pressure_thickness_of_atmospheric_layer_1",
@@ -22,19 +23,25 @@ DROP_VARIABLES = [
     "pressure_thickness_of_atmospheric_layer_6",
     "pressure_thickness_of_atmospheric_layer_7",
 ]
-DIMS = ["time", "grid_xt", "grid_yt"]
+
+DIMS = {
+    "FV3GFS": ["time", "grid_xt", "grid_yt"],
+    "E3SMV2": ["time", "lat", "lon"],
+}
 
 
 def add_history_attr(ds, input_zarr, start_date, end_date, full_field):
     scaling_str = "full-field" if full_field else "residual"
     ds.attrs["history"] = (
-        "Created by full-model/fv3gfs_data_process/get_stats_fv3gfs.py. INPUT_ZARR:"
+        "Created by full-model/fv3gfs_data_process/get_stats.py. INPUT_ZARR:"
         f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}, using "
         f" {scaling_str} scaling."
     )
 
 
-def compute_residual_scaling(ds, centering, scaling):
+def compute_residual_scaling(
+    ds, centering, scaling, dims=["time", "grid_xt", "grid_yt"]
+):
     """For some variables (e.g. surface pressure), normalization based on the
     'full field' leads to residuals that are very small and therefore don't
     contribute much to loss function. Here we rescale based on the residual
@@ -44,7 +51,7 @@ def compute_residual_scaling(ds, centering, scaling):
     """
     norm = (ds - centering) / scaling
     norm_residual = norm.diff("time")
-    norm_residual_stddev = norm_residual.std(dim=DIMS)
+    norm_residual_stddev = norm_residual.std(dim=dims)
     # We want to multiply the global_stds by the above norm_residual_stddev variable
     # so that the residuals are more evenly weighted. However, we don't want to
     # make the standard deviations of the normalized inputs/outputs very different from
@@ -64,6 +71,9 @@ def compute_residual_scaling(ds, centering, scaling):
 @click.option("--start-date", help="For subsetting, e.g. '2016-01-01'")
 @click.option("--end-date", help="For subsetting, e.g. '2016-12-31'")
 @click.option(
+    "--data-type", default="FV3GFS", help="Input data type, e.g., 'FV3GFS' or 'E3SMV2'"
+)
+@click.option(
     "--full-field",
     is_flag=True,
     help="If set, compute statistics with full field. If unset, use residual.",
@@ -73,22 +83,26 @@ def compute_residual_scaling(ds, centering, scaling):
     is_flag=True,
     help="If set, print some statistics instead of writing normalization coefficients.",
 )
-def main(input_zarr, output_directory, start_date, end_date, full_field, debug):
+def main(
+    input_zarr, output_directory, start_date, end_date, data_type, full_field, debug
+):
     """Using data at INPUT_ZARR, compute statistics data and save to OUTPUT_DIRECTORY.
     It is assumed that OUTPUT_DIRECTORY does not exist."""
     xr.set_options(keep_attrs=True, display_max_rows=100)
     if not debug:
         os.makedirs(output_directory)
     ds = xr.open_zarr(input_zarr)
-    ds = ds.drop_vars(DROP_VARIABLES)
-    ds = ds.sel(time=slice(start_date, end_date)).load()
+    ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
+    ds = ds.sel(time=slice(start_date, end_date))
 
-    centering = ds.mean(dim=DIMS)
-    scaling = ds.std(dim=DIMS)
+    dims = DIMS[data_type]
+
+    centering = ds.mean(dim=dims)
+    scaling = ds.std(dim=dims)
     time_means = ds.mean(dim="time")
 
     if not full_field:
-        scaling = compute_residual_scaling(ds, centering, scaling)
+        scaling = compute_residual_scaling(ds, centering, scaling, dims)
 
     for dataset in [centering, scaling, time_means]:
         add_history_attr(dataset, input_zarr, start_date, end_date, full_field)
@@ -96,11 +110,11 @@ def main(input_zarr, output_directory, start_date, end_date, full_field, debug):
     if debug:
         normed_data = (ds - centering) / scaling
         print("Printing average of normed data:")
-        print(normed_data.mean(dim=DIMS))
+        print(normed_data.mean(dim=dims))
         print("Printing standard deviation of normed data:")
-        print(normed_data.std(dim=DIMS))
+        print(normed_data.std(dim=dims))
         print("Printing standard deviation computed over all variables:")
-        all_var_stddev = normed_data.to_array().std(dim=["variable"] + DIMS)
+        all_var_stddev = normed_data.to_array().std(dim=["variable"] + dims)
         print(all_var_stddev.values)
     else:
         with ProgressBar():

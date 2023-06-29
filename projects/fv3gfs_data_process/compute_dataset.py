@@ -255,11 +255,19 @@ def assert_column_integral_of_moisture_is_conserved(ds):
     xr.testing.assert_allclose(integrated_pwat, expected_pwat, rtol=1e-1, atol=1e-3)
 
 
-def assert_global_dry_air_mass_conservation(ds, dims=HORIZONTAL_DIMS):
+def assert_global_dry_air_mass_conservation(
+    ds,
+    dims=HORIZONTAL_DIMS,
+    surface_pressure_name=SURFACE_PRESSURE,
+    total_water_path_name=TOTAL_WATER_PATH,
+    latitude_dim=LATITUDE_DIM,
+):
     """Assert that the tendency of global average surface pressure (due to dry air
     only) is close to zero. I.e. dry air mass is conserved."""
-    column_dry_air_mass = ds[SURFACE_PRESSURE] - ds[TOTAL_WATER_PATH] * GRAVITY
-    weights = np.cos(np.deg2rad(ds[LATITUDE_DIM]))
+    column_dry_air_mass = (
+        ds[surface_pressure_name] - ds[total_water_path_name] * GRAVITY
+    )
+    weights = np.cos(np.deg2rad(ds[latitude_dim]))
     global_dry_air_mass = column_dry_air_mass.weighted(weights).mean(dim=dims)
     global_dry_air_mass_tendency = global_dry_air_mass.diff(TIME_DIM)
     print("Mean absolute global dry air pressure tendency [Pa]:")
@@ -271,16 +279,24 @@ def assert_global_dry_air_mass_conservation(ds, dims=HORIZONTAL_DIMS):
     )
 
 
-def assert_global_moisture_conservation(ds, time_dim=TIME_DIM, dims=HORIZONTAL_DIMS):
+def assert_global_moisture_conservation(
+    ds,
+    dims=HORIZONTAL_DIMS,
+    latitude_dim=LATITUDE_DIM,
+    total_water_path_name=TOTAL_WATER_PATH,
+    latent_heat_flux_name=LATENT_HEAT_FLUX,
+    latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
+    precip_rate_name=PRECIP_RATE,
+):
     """Assert that the tendency of global average column integrated moisture is equal
     to the global average flux of moisture through the surface."""
-    integrated_pwat = ds[TOTAL_WATER_PATH]
-    weights = np.cos(np.deg2rad(ds[LATITUDE_DIM]))
+    integrated_pwat = ds[total_water_path_name]
+    weights = np.cos(np.deg2rad(ds[latitude_dim]))
     global_moisture = integrated_pwat.weighted(weights).mean(dim=dims)
-    timestep_seconds = ds[time_dim].diff(time_dim) / np.timedelta64(1, "s")
+    timestep_seconds = ds[TIME_DIM].diff(TIME_DIM) / np.timedelta64(1, "s")
     actual_global_moisture_tendency = global_moisture.diff(TIME_DIM) / timestep_seconds
     evap_minus_precip = (
-        ds[LATENT_HEAT_FLUX] / LATENT_HEAT_OF_VAPORIZATION - ds[PRECIP_RATE]
+        ds[latent_heat_flux_name] / latent_heat_of_vaporization - ds[precip_rate_name]
     )
     expected_global_moisture_tendency = (
         evap_minus_precip.weighted(weights).mean(dim=dims).isel(time=slice(1, None))
