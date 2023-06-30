@@ -11,6 +11,7 @@
 
 import click
 from dask.diagnostics import ProgressBar
+import fsspec
 from typing import List, MutableMapping, Sequence, Tuple
 import numpy as np
 import xarray as xr
@@ -54,6 +55,8 @@ DATASET_URLS = {
     FULL_STATE: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/full_state.zarr",  # noqa: 501
     TENDENCIES_3D: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/tendencies_3d.zarr",  # noqa: 501
 }
+
+VERTICAL_COORDINATE_URL = "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc"  # noqa: 501
 
 # the variables we need from each of the input zarrs
 INPUT_VARIABLE_NAMES = {
@@ -108,6 +111,8 @@ VERTICALLY_RESOLVED_NAMES = [
 TIME_DERIVATIVE_NAMES = [TOTAL_WATER_PATH]
 
 # these indices refer to the vertical interfaces in the input data
+# They were computed in this notebook:
+# https://github.com/ai2cm/explore/blob/master/oliwm/2023-04-16-fme-analysis/2023-05-03-vertical-coordinate-example.ipynb  # noqa: 501
 VERTICAL_LEVEL_INTERFACES = [
     (0, 18),
     (18, 26),
@@ -149,6 +154,46 @@ def open_datasets(
     return {category: xr.open_zarr(url) for category, url in dataset_urls.items()}
 
 
+def get_coarse_ak_bk(
+    url: str,
+    interface_indices: Sequence[Tuple[int, int]],
+    z_dim="xaxis_1",
+    time_dim="Time",
+) -> xr.Dataset:
+    """Return dataset with scalar ak and bk coordinates that define coarse interfaces.
+
+    Args:
+        url: path to netCDF file with ak and bk variables in format output by FV3GFS.
+        interface_indices: list of tuples of indices of the interfaces in the vertical.
+        z_dim: name of dimension along which ak and bk are defined.
+        time_dim: name of time dimension.
+
+    Returns:
+        xr.Dataset with ak and bk variables as scalars labeled as ak_0, bk_0, etc.
+
+    Note:
+        The ak and bk variables will have one more vertical level than the other 3D
+        variables since they represent the interfaces between levels.
+    """
+    with fsspec.open(url) as f:
+        vertical_coordinate = xr.open_dataset(f).load()
+    # squeeze out the singleton time dimension
+    vertical_coordinate = vertical_coordinate.squeeze()
+    data = {}
+    for i, (start, end) in enumerate(interface_indices):
+        data[f"ak_{i}"] = vertical_coordinate["ak"].isel({z_dim: start})
+        data[f"bk_{i}"] = vertical_coordinate["bk"].isel({z_dim: start})
+        if i == len(interface_indices) - 1:
+            data[f"ak_{i + 1}"] = vertical_coordinate["ak"].isel({z_dim: end})
+            data[f"bk_{i + 1}"] = vertical_coordinate["bk"].isel({z_dim: end})
+    for i in range(len(interface_indices) + 1):
+        data[f"ak_{i}"].attrs["units"] = "Pa"
+        data[f"bk_{i}"].attrs["units"] = ""  # unitless quantity
+        for name in ["ak", "bk"]:
+            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop([z_dim, time_dim])
+    return xr.Dataset(data)
+
+
 def merge_inputs(
     input_variable_names: MutableMapping[str, List[str]],
     datasets: MutableMapping[str, xr.Dataset],
@@ -181,14 +226,10 @@ def compute_vertical_coarsening(
 ) -> xr.Dataset:
     """Compute vertical coarsening of 3D variables by mass-weighted mean. Outputs are
     saved as new variables in the dataset with the name '{name}_{i}' where i is the
-    new coarse vertical level index. Pressure thickness is also coarsened and saved."""
+    new coarse vertical level index."""
     coarsened_arrays = {}
     for i, (start, end) in enumerate(interface_indices):
         pressure_thickness = ds[pressure_thickness_name].isel({dim: slice(start, end)})
-        coarsened_pressure = pressure_thickness.sum(dim)
-        current_long_name = pressure_thickness.long_name
-        coarsened_pressure.attrs["long_name"] = current_long_name + f" level-{i}"
-        coarsened_arrays[f"{pressure_thickness_name}_{i}"] = coarsened_pressure
         for name in vertically_resolved_names:
             array_slice = ds[name].isel({dim: slice(start, end)})
             coarsened_da = weighted_mean(array_slice, pressure_thickness, dim)
@@ -325,10 +366,19 @@ def construct_lazy_dataset() -> xr.Dataset:
     ds = compute_column_moisture_integral(ds)
     ds = compute_tendencies(ds, TIME_DERIVATIVE_NAMES)
     ds = compute_column_advective_moisture_tendency(ds)
+    ak_bk_ds = get_coarse_ak_bk(VERTICAL_COORDINATE_URL, VERTICAL_LEVEL_INTERFACES)
+    ds = xr.merge([ds, ak_bk_ds])
     ds = ds.chunk(CHUNKS)
     ds.attrs["history"] = (
-        "Dataset computed by full-model/projects/fv3gfs_data_process/compute_dataset.py"
+        "Dataset computed by full-model/projects/fv3gfs_data_process"
+        "/compute_vertically_coarsened_data_fv3gfs.py"
         f" script, using following input zarrs: {DATASET_URLS}."
+    )
+    ds.attrs["vertical_coordinate"] = (
+        "The pressure at level interfaces can by computed as "
+        "p_i = ak_i + bk_i * PRESsfc, where PRESsfc is the surface pressure and the "
+        "p_i pressure corresponds to the interface at the top of the i'th finite "
+        "volume layer, counting down from the top of atmosphere."
     )
     return ds
 

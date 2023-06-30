@@ -22,7 +22,7 @@ import xarray as xr
 import xpartition  # noqa: 401
 
 
-from compute_dataset import (
+from compute_dataset_fv3gfs import (
     assert_global_dry_air_mass_conservation,
     assert_global_moisture_conservation,
     assert_column_integral_of_moisture_is_conserved,
