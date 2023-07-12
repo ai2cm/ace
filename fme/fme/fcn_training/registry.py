@@ -13,6 +13,8 @@ from networks.geometric_v1.sfnonet import (
 
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 
+import torch_harmonics as harmonics
+
 
 class ModuleConfig(Protocol):
     """
@@ -71,6 +73,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     complex_activation: str = "real"
     spectral_layers: int = 1
     checkpointing: int = 0
+    data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
 
     def build(
         self,
@@ -79,12 +82,35 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         img_shape_x: int,
         img_shape_y: int,
     ):
-        return SphericalFourierNeuralOperatorNet(
+        sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
             img_shape=(img_shape_x, img_shape_y),
         )
+
+        # Patch in the grid that our data lies on rather than the one which is
+        # hard-coded in the modulus codebase [1]. Duplicate the code to compute
+        # the number of SHT modes determined by hard_thresholding_fraction. Note
+        # that this does not handle the distributed case which is handled by
+        # L518 [2] in their codebase.
+
+        # [1] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py  # noqa: E501
+        # [2] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L518  # noqa: E501
+        nlat, nlon = img_shape_y, img_shape_x
+        modes_lat = int(nlat * self.hard_thresholding_fraction)
+        modes_lon = int((nlon // 2 + 1) * self.hard_thresholding_fraction)
+        sht = harmonics.RealSHT(
+            nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid=self.data_grid
+        ).float()
+        isht = harmonics.InverseRealSHT(
+            nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid=self.data_grid
+        ).float()
+
+        sfno_net.trans_down = sht
+        sfno_net.itrans_up = isht
+
+        return sfno_net
 
 
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
