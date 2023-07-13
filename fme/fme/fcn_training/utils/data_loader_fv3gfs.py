@@ -35,26 +35,28 @@ class FV3GFSDataset(Dataset):
         self.path = params.data_path
         self.full_path = os.path.join(self.path, "*.nc")
         self.n_steps = requirements.n_timesteps  # one input, one output timestep
-        self._get_files_stats()
-        if params.n_samples is not None:
-            self.n_samples_total = params.n_samples
-
-    def _get_files_stats(self):
         logging.info(f"Opening data at {self.full_path}")
         self.ds = netCDF4.MFDataset(self.full_path)
         self.ds.set_auto_mask(False)
-        # minus one since don't have an output for the last step
+        self._log_files_stats()
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
-        # provided ERA5 dataloader gets the "wrong" x/y convention (x is lat, y is lon)
-        # so we follow that convention here for consistency
+        if params.n_samples is not None:
+            if params.n_samples > self.n_samples_total:
+                raise ValueError(
+                    f"Requested {params.n_samples} samples, but only "
+                    f"{self.n_samples_total} are available."
+                )
+            self.n_samples_total = params.n_samples
+        logging.info(f"Using {self.n_samples_total} samples.")
+
+    def _log_files_stats(self):
         if "grid_xt" in self.ds.variables:
-            self.img_shape_x = len(self.ds.variables["grid_yt"][:])
-            self.img_shape_y = len(self.ds.variables["grid_xt"][:])
+            img_shape_y = len(self.ds.variables["grid_yt"][:])
+            img_shape_x = len(self.ds.variables["grid_xt"][:])
         else:
-            self.img_shape_x = len(self.ds.variables["lat"][:])
-            self.img_shape_y = len(self.ds.variables["lon"][:])
-        logging.info(f"Found {self.n_samples_total} samples.")
-        logging.info(f"Image shape is {self.img_shape_x} x {self.img_shape_y}.")
+            img_shape_y = len(self.ds.variables["lat"][:])
+            img_shape_x = len(self.ds.variables["lon"][:])
+        logging.info(f"Image shape is {img_shape_x} x {img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
     @property

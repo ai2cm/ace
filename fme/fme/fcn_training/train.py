@@ -131,7 +131,7 @@ class Trainer:
         logging.info(
             "Number of trainable model parameters: {}".format(self.count_parameters())
         )
-
+        self.inference_n_forward_steps = config.inference_n_forward_steps
         # TODO: refactor this into its own dataset configuration
         inference_ds = netCDF4.MFDataset(
             os.path.join(config.validation_data.data_path, "*.nc")
