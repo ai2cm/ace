@@ -1,30 +1,24 @@
-from fme.fcn_training.utils.data_loader_fv3gfs import VariableMetadata, FV3GFSDataset
+"""This file contains unit tests related to creating torch Datasets from climate
+data (e.g. netCDF files)."""
+
+from typing import List
+from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 from fme.fcn_training.utils.data_requirements import DataRequirements
 import numpy as np
+import pathlib
 import xarray as xr
-from typing import Mapping, Optional
-import tempfile
-from pathlib import Path
-import pytest
 
 
-def _save_netcdf(filename, metadata: Mapping[str, Optional[VariableMetadata]]):
-    dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+def _save_netcdf(filename, dim_sizes, variable_names):
     data_vars = {}
-    for name in metadata:
+    for name in variable_names:
         data = np.random.randn(*list(dim_sizes.values()))
         if len(dim_sizes) > 0:
-            data = data.astype(np.float32)
-        item_metadata = metadata[name]
-        if item_metadata is None:
-            attrs = {}
-        else:
-            attrs = {
-                "units": item_metadata.units,
-                "long_name": item_metadata.long_name,
-            }
-        data_vars[name] = xr.DataArray(data, dims=list(dim_sizes), attrs=attrs)
+            data = data.astype(np.float32)  # type: ignore
+        data_vars[name] = xr.DataArray(
+            data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
+        )
     coords = {
         dim_name: xr.DataArray(
             np.arange(size, dtype=np.float32),
@@ -36,44 +30,40 @@ def _save_netcdf(filename, metadata: Mapping[str, Optional[VariableMetadata]]):
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-@pytest.mark.parametrize(
-    "metadata",
-    [
-        pytest.param(
-            {"bar": None},
-            id="one_var_no_metadata",
-        ),
-        pytest.param(
-            {"bar": VariableMetadata("km", "bar_long_name")},
-            id="one_var_metadata",
-        ),
-        pytest.param(
-            {"foo": VariableMetadata("m", "foo_long_name"), "bar": None},
-            id="two_vars_one_metadata",
-        ),
-        pytest.param(
-            {
-                "foo": VariableMetadata("m", "foo_long_name"),
-                "bar": VariableMetadata("km", "bar_long_name"),
-            },
-            id="two_vars_two_metadata",
-        ),
-    ],
-)
-def test_metadata(metadata):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir)
-        _save_netcdf(path / "data.nc", metadata)
-        params = DataLoaderParams(
-            data_path=path, data_type="fv3gfs", batch_size=1, num_data_workers=0
-        )
-        varnames = list(metadata.keys())
-        requirements = DataRequirements(
-            names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
-        )
+def _create_dataset_on_disk(data_dir: pathlib.Path) -> pathlib.Path:
+    seed = 0
+    np.random.seed(seed)
+    in_variable_names = ["foo", "bar", "baz"]
+    out_variable_names = ["foo", "bar"]
+    mask_name = "mask"
+    all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
+    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
 
-        dataset = FV3GFSDataset(params=params, requirements=requirements)
-        target_metadata = {
-            name: metadata[name] for name in metadata if metadata[name] is not None
-        }
-        assert dataset.metadata == target_metadata
+    data_path = data_dir / "data.nc"
+    _save_netcdf(data_path, data_dim_sizes, all_variable_names)
+
+    return data_path
+
+
+def test_ensemble_loader(tmp_path, num_ensemble_members=3):
+    """Tests that the ensemble loader returns the correct number of samples."""
+
+    # Create a dataset for each ensemble member. We assume that each member
+    # corresponds to an initial condition.
+    netcdfs: List[pathlib.Path] = []
+    for i in range(num_ensemble_members):
+        ic_path = tmp_path / f"ic{i}"
+        ic_path.mkdir()
+        _create_dataset_on_disk(ic_path)
+        netcdfs.append(ic_path / "data")
+
+    params = DataLoaderParams(tmp_path, "ensemble", 1, 0, None)
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements([], [], [], window_timesteps)
+
+    n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
+    samples_per_member = n_timesteps - window_timesteps + 1
+
+    _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
+
+    assert len(dataset) == samples_per_member * num_ensemble_members

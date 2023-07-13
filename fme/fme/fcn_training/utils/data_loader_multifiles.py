@@ -55,6 +55,42 @@ from .data_loader_fv3gfs import FV3GFSDataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 
+from pathlib import Path
+
+import torch.utils.data
+
+
+def _all_equal(iterable):
+    it = iter(iterable)
+    try:
+        first = next(it)
+    except StopIteration:
+        return True
+    return all(first == rest for rest in it)
+
+
+def _get_ensemble_dataset(params: DataLoaderParams, requirements: DataRequirements):
+    """Returns a dataset that is a concatenation of the datasets for each
+    ensemble member.
+    """
+    paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
+
+    datasets, metadatas = [], []
+    for path in paths:
+        params_curr_member = DataLoaderParams(
+            path, params.data_type, params.batch_size, params.num_data_workers
+        )
+        dataset = FV3GFSDataset(params_curr_member, requirements)
+
+        datasets.append(dataset)
+        metadatas.append(dataset.metadata)
+
+    assert _all_equal(metadatas), "Metadata for each ensemble member must be equal."
+
+    ensemble = torch.utils.data.ConcatDataset(datasets)
+    ensemble.metadata = metadatas[0]  # type: ignore
+    return ensemble
+
 
 def get_data_loader(
     params: DataLoaderParams,
@@ -80,6 +116,8 @@ def get_data_loader(
                 f"{params.num_data_workers}, but it is being set to 0."
             )
             params.num_data_workers = 0
+    elif params.data_type == "ensemble":
+        dataset = _get_ensemble_dataset(params, requirements)
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"

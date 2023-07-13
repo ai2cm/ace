@@ -38,6 +38,7 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Opening data at {self.full_path}")
         self.ds = netCDF4.MFDataset(self.full_path)
         self.ds.set_auto_mask(False)
+        self.metadata = self._compute_metadata()  # Note: requires `self.ds`
         self._log_files_stats()
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
         if params.n_samples is not None:
@@ -59,8 +60,7 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Image shape is {img_shape_x} x {img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
-    @property
-    def metadata(self) -> Mapping[str, VariableMetadata]:
+    def _compute_metadata(self) -> Mapping[str, VariableMetadata]:
         result = {}
         for name in self.names:
             if hasattr(self.ds.variables[name], "units") and hasattr(
