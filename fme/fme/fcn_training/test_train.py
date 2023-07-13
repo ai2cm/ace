@@ -88,7 +88,7 @@ validation_data:
   data_type: "FV3GFS"
   batch_size: 1
   num_data_workers: 1
-  n_samples: 1
+  n_samples: 3
     """  # noqa: E501
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
@@ -129,7 +129,7 @@ def _setup(path, nettype):
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
-    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
     stats_dim_sizes = {}
 
     data_dir = path / "data"
