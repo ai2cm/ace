@@ -85,7 +85,8 @@ def _get_ensemble_dataset(params: DataLoaderParams, requirements: DataRequiremen
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
 
-    assert _all_equal(metadatas), "Metadata for each ensemble member must be equal."
+    if not _all_equal(metadatas):
+        raise ValueError("Metadata for each ensemble member should be equal.")
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = metadatas[0]  # type: ignore
