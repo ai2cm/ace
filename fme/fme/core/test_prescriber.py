@@ -30,3 +30,10 @@ def test_prescriber():
     prescribed_gen = prescriber(data, gen, target)
     for name in gen:
         torch.testing.assert_allclose(prescribed_gen[name], expected_gen[name])
+    # non-integer valued mask
+    prescriber = Prescriber(prescribed_name="a", mask_name="mask", mask_value=1)
+    data["mask"] = torch.zeros(2, 4, 4, dtype=torch.float32) + 0.1
+    data["mask"][:, :, 2:] = 0.7
+    prescribed_gen = prescriber(data, gen, target)
+    for name in gen:
+        torch.testing.assert_allclose(prescribed_gen[name], expected_gen[name])
