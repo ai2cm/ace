@@ -43,7 +43,7 @@ class Prescriber:
     ):
         # overwrite specified generated variable in given mask region
         prescribed_gen = torch.where(
-            data[self.mask_name] == self.mask_value,
+            torch.round(data[self.mask_name]).to(int) == self.mask_value,
             target_norm[self.prescribed_name],
             gen_norm[self.prescribed_name],
         )

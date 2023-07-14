@@ -11,6 +11,7 @@ import dataclasses
 class NormalizationConfig:
     global_means_path: Optional[str] = None
     global_stds_path: Optional[str] = None
+    exclude_names: Optional[List[str]] = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
 
@@ -31,6 +32,8 @@ class NormalizationConfig:
             )
 
     def build(self, names: List[str]):
+        if self.exclude_names is not None:
+            names = list(set(names) - set(self.exclude_names))
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -41,10 +44,9 @@ class NormalizationConfig:
                 names=names,
             )
         else:
-            return StandardNormalizer(
-                means={k: torch.tensor(v) for k, v in self.means.items()},
-                stds={k: torch.tensor(v) for k, v in self.stds.items()},
-            )
+            means = {k: torch.tensor(self.means[k]) for k in names}
+            stds = {k: torch.tensor(self.stds[k]) for k in names}
+            return StandardNormalizer(means=means, stds=stds)
 
 
 class StandardNormalizer:
@@ -52,7 +54,11 @@ class StandardNormalizer:
     Responsible for normalizing tensors.
     """
 
-    def __init__(self, means: Dict[str, torch.Tensor], stds: Dict[str, torch.Tensor]):
+    def __init__(
+        self,
+        means: Dict[str, torch.Tensor],
+        stds: Dict[str, torch.Tensor],
+    ):
         self.means = means
         self.stds = stds
 
@@ -93,7 +99,10 @@ def _normalize(
     means: Dict[str, torch.Tensor],
     stds: Dict[str, torch.Tensor],
 ) -> Dict[str, torch.Tensor]:
-    return {k: (t - means[k]) / stds[k] for k, t in tensors.items()}
+    return {
+        k: (t - means[k]) / stds[k] if k in means.keys() else t
+        for k, t in tensors.items()
+    }
 
 
 @torch.jit.script
@@ -102,7 +111,10 @@ def _denormalize(
     means: Dict[str, torch.Tensor],
     stds: Dict[str, torch.Tensor],
 ) -> Dict[str, torch.Tensor]:
-    return {k: t * stds[k] + means[k] for k, t in tensors.items()}
+    return {
+        k: t * stds[k] + means[k] if k in means.keys() else t
+        for k, t in tensors.items()
+    }
 
 
 def get_normalizer(
