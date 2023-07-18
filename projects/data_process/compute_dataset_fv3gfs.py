@@ -96,7 +96,7 @@ INPUT_VARIABLE_NAMES = {
         "land_fraction",
         "ocean_fraction",
         "sea_ice_fraction",
-    ]
+    ],
 }
 
 WATER_SPECIES_NAMES = [
@@ -158,7 +158,10 @@ def open_datasets(
     dataset_urls: MutableMapping[str, str], ic: int
 ) -> MutableMapping[str, xr.Dataset]:
     """Open datasets from zarr urls."""
-    return {category: xr.open_zarr(url.format(ic=ic)) for category, url in dataset_urls.items()}
+    return {
+        category: xr.open_zarr(url.format(ic=ic))
+        for category, url in dataset_urls.items()
+    }
 
 
 def get_coarse_ak_bk(
