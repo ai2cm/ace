@@ -52,6 +52,7 @@ from fme.core.distributed import Distributed
 
 # import cv2
 from .data_loader_fv3gfs import FV3GFSDataset
+from .data_loader_xarray import XarrayDataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 
@@ -104,7 +105,7 @@ def get_data_loader(
         params.data_type = "ERA5"
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
-    elif params.data_type in ["FV3GFS", "E3SMV2"]:
+    elif params.data_type == "FV3GFS":
         dataset = FV3GFSDataset(params, requirements=requirements)
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
@@ -117,6 +118,8 @@ def get_data_loader(
                 f"{params.num_data_workers}, but it is being set to 0."
             )
             params.num_data_workers = 0
+    elif params.data_type == "E3SMV2":
+        dataset = XarrayDataset(params, requirements=requirements)
     elif params.data_type == "ensemble":
         dataset = _get_ensemble_dataset(params, requirements)
     else:
