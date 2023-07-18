@@ -21,6 +21,7 @@ FLUXES_2D = "fluxes_2d"
 FOURCASTNET_VANILLA = "fourcastnet_vanilla"
 FULL_STATE = "full_state"
 TENDENCIES_3D = "tendencies_3d"
+SURFACE_FRACTIONS = "surface_fractions"
 
 OUTPUT_URL = "gs://vcm-ml-intermediate/2023-05-10-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: 501
 
@@ -54,6 +55,7 @@ DATASET_URLS = {
     FOURCASTNET_VANILLA: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/fourcastnet_vanilla.zarr",  # noqa: 501
     FULL_STATE: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/full_state.zarr",  # noqa: 501
     TENDENCIES_3D: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/tendencies_3d.zarr",  # noqa: 501
+    SURFACE_FRACTIONS: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/encoded_surface_type.zarr",  # noqa: 501
 }
 
 VERTICAL_COORDINATE_URL = "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc"  # noqa: 501
@@ -88,8 +90,12 @@ INPUT_VARIABLE_NAMES = {
         "northward_wind",
         "eastward_wind",
         PRESSURE_THICKNESS,
-        "land_sea_mask",
     ],
+    SURFACE_FRACTIONS: [
+        "land_fraction",
+        "ocean_fraction",
+        "sea_ice_fraction",
+    ]
 }
 
 WATER_SPECIES_NAMES = [
