@@ -50,10 +50,10 @@ CHUNKS = {"time": 160, "grid_yt": 180, "grid_xt": 360}
 
 # these are assumed to all have the same coordinates
 DATASET_URLS = {
-    FLUXES_2D: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/fluxes_2d.zarr",  # noqa: 501
-    FOURCASTNET_VANILLA: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/fourcastnet_vanilla.zarr",  # noqa: 501
-    FULL_STATE: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/full_state.zarr",  # noqa: 501
-    TENDENCIES_3D: "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/regridded-zarrs/tendencies_3d.zarr",  # noqa: 501
+    FLUXES_2D: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/fluxes_2d.zarr",  # noqa: 501
+    FOURCASTNET_VANILLA: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/fourcastnet_vanilla.zarr",  # noqa: 501
+    FULL_STATE: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/full_state.zarr",  # noqa: 501
+    TENDENCIES_3D: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/tendencies_3d.zarr",  # noqa: 501
 }
 
 VERTICAL_COORDINATE_URL = "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc"  # noqa: 501
@@ -148,10 +148,10 @@ def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray
 
 
 def open_datasets(
-    dataset_urls: MutableMapping[str, str],
+    dataset_urls: MutableMapping[str, str], ic: int
 ) -> MutableMapping[str, xr.Dataset]:
     """Open datasets from zarr urls."""
-    return {category: xr.open_zarr(url) for category, url in dataset_urls.items()}
+    return {category: xr.open_zarr(url.format(ic=ic)) for category, url in dataset_urls.items()}
 
 
 def get_coarse_ak_bk(
@@ -350,8 +350,8 @@ def assert_global_moisture_conservation(
     )
 
 
-def construct_lazy_dataset() -> xr.Dataset:
-    datasets_dict = open_datasets(DATASET_URLS)
+def construct_lazy_dataset(ic: int) -> xr.Dataset:
+    datasets_dict = open_datasets(DATASET_URLS, ic)
     ds = merge_inputs(INPUT_VARIABLE_NAMES, datasets_dict)
     for var in ds:
         del ds[var].encoding["chunks"]
@@ -389,9 +389,10 @@ def construct_lazy_dataset() -> xr.Dataset:
 @click.option("--check-conservation", is_flag=True, help="Check conservation.")
 @click.option("-o", "--output", default=OUTPUT_URL, help="URL to write output to.")
 @click.option("--n-split", default=65, help="Number of steps to split job over.")
-def main(debug, subsample, check_conservation, output, n_split):
+@click.option("--ic", default=1, help="Initial condition index (can be 1 through 11).")
+def main(debug, subsample, check_conservation, output, n_split, ic):
     xr.set_options(keep_attrs=True)
-    ds = construct_lazy_dataset()
+    ds = construct_lazy_dataset(ic)
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
