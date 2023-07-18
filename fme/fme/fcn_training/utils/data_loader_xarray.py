@@ -3,7 +3,7 @@ import torch
 import logging
 import xarray as xr
 from glob import glob
-from typing import Mapping, Tuple
+from typing import Mapping, Optional, Tuple
 from torch.utils.data import Dataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
@@ -33,7 +33,12 @@ def get_file_local_index(
 
 
 class XarrayDataset(Dataset):
-    def __init__(self, params: DataLoaderParams, requirements: DataRequirements):
+    def __init__(
+        self,
+        params: DataLoaderParams,
+        requirements: DataRequirements,
+        window_time_slice: Optional[slice] = None,
+    ):
         self.params = params
         self.in_names = requirements.in_names
         self.out_names = requirements.out_names
@@ -48,6 +53,7 @@ class XarrayDataset(Dataset):
         self._get_files_stats()
         if params.n_samples is not None:
             self.n_samples_total = params.n_samples
+        self.window_time_slice = window_time_slice
 
     def _get_metadata(self, ds):
         result = {}
@@ -129,7 +135,9 @@ class XarrayDataset(Dataset):
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(datasets) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
-            tensor_dict = load_series_data(start, n_steps, ds, self.names)
+            tensor_dict = load_series_data(
+                start, n_steps, ds, self.names, window_time_slice=self.window_time_slice
+            )
             for n in self.names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
         for n, tensor_list in arrays.items():
