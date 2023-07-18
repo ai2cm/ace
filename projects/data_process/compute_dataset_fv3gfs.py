@@ -23,7 +23,7 @@ FULL_STATE = "full_state"
 TENDENCIES_3D = "tendencies_3d"
 SURFACE_FRACTIONS = "surface_fractions"
 
-OUTPUT_URL = "gs://vcm-ml-intermediate/2023-05-10-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: 501
+OUTPUT_URL = "gs://vcm-ml-intermediate/2023-07-18-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr"  # noqa: 501
 
 # constants are defined as in FV3GFS model
 # https://github.com/ai2cm/fv3gfs-fortran/blob/master/FMS/constants/constants.F90
@@ -397,6 +397,7 @@ def construct_lazy_dataset(ic: int) -> xr.Dataset:
 @click.option("--n-split", default=65, help="Number of steps to split job over.")
 @click.option("--ic", default=1, help="Initial condition index (can be 1 through 11).")
 def main(debug, subsample, check_conservation, output, n_split, ic):
+    output = output.format(ic=ic)
     xr.set_options(keep_attrs=True)
     ds = construct_lazy_dataset(ic)
     if subsample:
