@@ -1,0 +1,63 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: compute-fme-dataset-ensemble-
+spec:
+  entrypoint: compute-fme-dataset-ensemble
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+  templates:
+    - name: compute-fme-dataset-ensemble
+      steps:
+      - - name: compute-fme-dataset-individual
+          template: compute-fme-dataset-individual
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.python_script}}"
+            - name: ic
+              value: "{{item}}"
+          withSequence:
+            start: "1"
+            end: "2"
+    - name: compute-fme-dataset-individual
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: ic
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:5a8a41762278f2f1c4418a10a839b195aa3b3082
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-x", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            python script.py --ic {{inputs.parameters.ic}}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+        
