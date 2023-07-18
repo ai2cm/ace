@@ -1,24 +1,12 @@
 from collections import namedtuple
 import logging
 import os
-from typing import List, Mapping
+from typing import Mapping
 from torch.utils.data import Dataset
-import torch
 import netCDF4
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-import numpy as np
-
-
-def load_series_data(idx: int, n_steps: int, ds: netCDF4.MFDataset, names: List[str]):
-    # flip the lat dimension so that it is increasing
-    arrays = {
-        n: torch.as_tensor(
-            np.flip(ds.variables[n][idx : idx + n_steps, :, :], axis=-2).copy()
-        )
-        for n in names
-    }
-    return arrays
+from .data_utils import load_series_data
 
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
