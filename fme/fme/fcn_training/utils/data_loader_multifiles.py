@@ -45,6 +45,7 @@
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
 import logging
+from typing import Optional
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
@@ -70,7 +71,11 @@ def _all_equal(iterable):
     return all(first == rest for rest in it)
 
 
-def _get_ensemble_dataset(params: DataLoaderParams, requirements: DataRequirements):
+def _get_ensemble_dataset(
+    params: DataLoaderParams,
+    requirements: DataRequirements,
+    window_time_slice: Optional[slice] = None,
+):
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
     """
@@ -81,7 +86,9 @@ def _get_ensemble_dataset(params: DataLoaderParams, requirements: DataRequiremen
         params_curr_member = DataLoaderParams(
             path, params.data_type, params.batch_size, params.num_data_workers
         )
-        dataset = FV3GFSDataset(params_curr_member, requirements)
+        dataset = FV3GFSDataset(
+            params_curr_member, requirements, window_time_slice=window_time_slice
+        )
 
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
@@ -98,7 +105,17 @@ def get_data_loader(
     params: DataLoaderParams,
     train: bool,
     requirements: DataRequirements,
+    window_time_slice: Optional[slice] = None,
 ):
+    """
+    Args:
+        params: Parameters for the data loader.
+        train: Whether to use the training or validation data.
+        requirements: Data requirements for the model.
+        window_time_slice: Time slice within each window to use for the data loader,
+            if given the loader will only return data from this time slice.
+            By default it will return the full windows.
+    """
     dist = Distributed.get_instance()
     # TODO: move this default to the DataLoaderParams init
     if params.data_type is None:
@@ -106,7 +123,9 @@ def get_data_loader(
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
     elif params.data_type == "FV3GFS":
-        dataset = FV3GFSDataset(params, requirements=requirements)
+        dataset = FV3GFSDataset(
+            params, requirements=requirements, window_time_slice=window_time_slice
+        )
         if params.num_data_workers > 0:
             # netCDF4 __getitem__ fails with
             # "RuntimeError: Resource temporarily unavailable"
@@ -119,9 +138,13 @@ def get_data_loader(
             )
             params.num_data_workers = 0
     elif params.data_type == "E3SMV2":
-        dataset = XarrayDataset(params, requirements=requirements)
+        dataset = XarrayDataset(
+            params, requirements=requirements, window_time_slice=window_time_slice
+        )
     elif params.data_type == "ensemble":
-        dataset = _get_ensemble_dataset(params, requirements)
+        dataset = _get_ensemble_dataset(
+            params, requirements, window_time_slice=window_time_slice
+        )
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"
