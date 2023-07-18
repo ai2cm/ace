@@ -1,31 +1,32 @@
 from collections import namedtuple
 import logging
 import os
-from typing import List, Mapping
+from typing import Mapping, Optional
 from torch.utils.data import Dataset
-import torch
 import netCDF4
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-import numpy as np
-
-
-def load_series_data(idx: int, n_steps: int, ds: netCDF4.MFDataset, names: List[str]):
-    # flip the lat dimension so that it is increasing
-    arrays = {
-        n: torch.as_tensor(
-            np.flip(ds.variables[n][idx : idx + n_steps, :, :], axis=-2).copy()
-        )
-        for n in names
-    }
-    return arrays
+from .data_utils import load_series_data
 
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
 
 class FV3GFSDataset(Dataset):
-    def __init__(self, params: DataLoaderParams, requirements: DataRequirements):
+    def __init__(
+        self,
+        params: DataLoaderParams,
+        requirements: DataRequirements,
+        window_time_slice: Optional[slice] = None,
+    ):
+        """
+        Args:
+            params: Parameters for the data loader.
+            requirements: Data requirements for the model.
+            window_time_slice: Time slice within each window to use for the data loader,
+                if given the loader will only return data from this time slice.
+                By default it will return the full windows.
+        """
         self.params = params
         self.in_names = requirements.in_names
         self.out_names = requirements.out_names
@@ -49,6 +50,7 @@ class FV3GFSDataset(Dataset):
                 )
             self.n_samples_total = params.n_samples
         logging.info(f"Using {self.n_samples_total} samples.")
+        self.window_time_slice = window_time_slice
 
     def _log_files_stats(self):
         if "grid_xt" in self.ds.variables:
@@ -77,5 +79,9 @@ class FV3GFSDataset(Dataset):
 
     def __getitem__(self, idx):
         return load_series_data(
-            idx=idx, n_steps=self.n_steps, ds=self.ds, names=self.names
+            idx=idx,
+            n_steps=self.n_steps,
+            ds=self.ds,
+            names=self.names,
+            window_time_slice=self.window_time_slice,
         )
