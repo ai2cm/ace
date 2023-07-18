@@ -49,7 +49,6 @@ import time
 from fme.core.aggregator import OneStepAggregator, InferenceAggregator, TrainAggregator
 import dacite
 from fme.core.distributed import Distributed
-from fme.fcn_training.utils.data_loader_fv3gfs import load_series_data
 import argparse
 import torch
 import logging
@@ -59,11 +58,11 @@ import yaml
 from fme.fcn_training.utils.data_loader_multifiles import (
     get_data_loader,
 )
+from fme.fcn_training.utils.data_utils import load_series_data
 from fme.core.wandb import WandB
 from fme.fcn_training.train_config import TrainConfig
 
 import fme
-import netCDF4
 
 wandb = WandB.get_instance()
 
@@ -133,13 +132,10 @@ class Trainer:
         )
         self.inference_n_forward_steps = config.inference_n_forward_steps
         # TODO: refactor this into its own dataset configuration
-        inference_ds = netCDF4.MFDataset(
-            os.path.join(config.validation_data.data_path, "*.nc")
-        )
         self.inference_data = load_series_data(
             idx=0,
             n_steps=config.inference_n_forward_steps + 1,
-            ds=inference_ds,
+            ds=self.valid_dataset.ds,
             names=data_requirements.names,
         )
 

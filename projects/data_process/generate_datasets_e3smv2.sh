@@ -37,7 +37,15 @@ then
     exit 1;
 fi
 
+# output dir should be somewhere on $SCRATCH, even if the intention is to send
+# the data to CFS or some external data store
 mkdir -p $OUTPUT_DIR
+
+# stripe_small is recommended for files of size 1-10 GB on Perlmutter's Lustre
+# scratch filesystem and stripes across 8 OSTs
+# see https://docs.nersc.gov/performance/io/lustre/#nersc-file-striping-recommendations
+# TODO: align HDF5 chunks for Perlmutter's default 1MB stripe size
+stripe_small $OUTPUT_DIR
 
 set -xe
 
@@ -55,7 +63,8 @@ srun -u shifter \
             ${ZARR} \
             ${OUTPUT_DIR}/traindata \
             --start-date 0002-01-01 \
-            --end-date 0020-12-31
+            --end-date 0020-12-31 \
+            --nc-format NETCDF4
     "
 
 # save final year of data to netCDFs (intended for validation)
@@ -65,7 +74,8 @@ srun -u shifter \
             ${ZARR} \
             ${OUTPUT_DIR}/validdata \
             --start-date 0021-01-01 \
-            --end-date 0021-12-31
+            --end-date 0021-12-31 \
+            --nc-format NETCDF4
     "
 
 # compute residual scaling stats
@@ -87,6 +97,6 @@ srun -u shifter \
             ${OUTPUT_DIR}/statsdata/full_field \
             --start-date 0002-01-01 \
             --end-date 0020-12-31 \
-            --data-type E3SMV2
+            --data-type E3SMV2 \
             --full-field
     "
