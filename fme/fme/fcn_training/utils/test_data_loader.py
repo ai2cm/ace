@@ -5,9 +5,11 @@ from typing import List
 from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 from fme.fcn_training.utils.data_requirements import DataRequirements
+from fme.fcn_training.utils.data_utils import apply_slice
 import numpy as np
 import pathlib
 import xarray as xr
+import pytest
 
 
 def _save_netcdf(filename, dim_sizes, variable_names):
@@ -65,5 +67,50 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     samples_per_member = n_timesteps - window_timesteps + 1
 
     _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
-
     assert len(dataset) == samples_per_member * num_ensemble_members
+
+
+@pytest.mark.parametrize(
+    "outer_slice, inner_slice, expected",
+    [
+        pytest.param(
+            slice(0, 2),
+            slice(0, 2),
+            slice(0, 2),
+            id="slice_0_2",
+        ),
+        pytest.param(
+            slice(0, 2),
+            slice(0, 1),
+            slice(0, 1),
+            id="slice_0_1",
+        ),
+        pytest.param(
+            slice(0, 2),
+            slice(1, 2),
+            slice(1, 2),
+            id="slice_1_2",
+        ),
+        pytest.param(
+            slice(1, 3),
+            slice(0, 5),
+            slice(1, 3),
+            id="slice_inner_past_end",
+        ),
+        pytest.param(
+            slice(5, 10),
+            slice(1, 3),
+            slice(6, 8),
+            id="slice_5_10_1_3",
+        ),
+        pytest.param(
+            slice(5, 10),
+            slice(7, 9),
+            slice(10, 10),
+            id="slice_out_of_range",
+        ),
+    ],
+)
+def test_apply_slice(outer_slice, inner_slice, expected):
+    result = apply_slice(outer_slice, inner_slice)
+    assert result == expected
