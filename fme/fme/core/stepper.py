@@ -7,7 +7,11 @@ from fme.fcn_training.utils.data_requirements import DataRequirements
 from torch.nn.parallel import DistributedDataParallel
 from fme.core.packer import Packer
 from fme.core.device import get_device, using_gpu
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import (
+    NormalizationConfig,
+    StandardNormalizer,
+    FromStateNormalizer,
+)
 from fme.core.prescriber import PrescriberConfig, Prescriber, NullPrescriber
 import dataclasses
 from fme.fcn_training.registry import ModuleSelector
@@ -22,7 +26,7 @@ class SingleModuleStepperConfig:
     builder: ModuleSelector
     in_names: List[str]
     out_names: List[str]
-    normalization: NormalizationConfig
+    normalization: Union[NormalizationConfig, FromStateNormalizer]
     optimization: Optional[OptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
 
@@ -255,7 +259,6 @@ class SingleModuleStepper:
             self.module.load_state_dict(state["module"])
         if load_optimizer and "optimization" in state:
             self.optimization.load_state(state["optimization"])
-        self.normalizer = StandardNormalizer.from_state(state["normalizer"])
         self.in_packer = Packer.from_state(state["in_packer"])
         self.out_packer = Packer.from_state(state["out_packer"])
         self.prescriber.load_state(state["prescriber"])
@@ -272,8 +275,10 @@ class SingleModuleStepper:
         Returns:
             The stepper.
         """
+        config = {**state["config"]}  # make a copy to avoid mutating input
+        config["normalization"] = FromStateNormalizer(state["normalizer"])
         stepper = cls(
-            config=SingleModuleStepperConfig.from_state(state["config"]),
+            config=SingleModuleStepperConfig.from_state(config),
             data_shapes=state["data_shapes"],
             max_epochs=state["max_epochs"],
         )

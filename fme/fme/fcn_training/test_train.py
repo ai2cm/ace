@@ -173,6 +173,9 @@ def test_train_and_inference_inline(tmp_path, nettype):
     train_main(
         yaml_config=train_config,
     )
+    # inference should not require stats files
+    (tmp_path / "stats" / "stats-mean.nc").unlink()
+    (tmp_path / "stats" / "stats-stddev.nc").unlink()
     inference_main(
         yaml_config=inference_config,
     )
