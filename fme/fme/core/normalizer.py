@@ -49,6 +49,19 @@ class NormalizationConfig:
             return StandardNormalizer(means=means, stds=stds)
 
 
+class FromStateNormalizer:
+    """
+    An alternative to NormalizationConfig which provides a normalizer
+    initialized from a serializable state.
+    """
+
+    def __init__(self, state):
+        self.state = state
+
+    def build(self, names: List[str]):
+        return StandardNormalizer.from_state(self.state)
+
+
 class StandardNormalizer:
     """
     Responsible for normalizing tensors.
