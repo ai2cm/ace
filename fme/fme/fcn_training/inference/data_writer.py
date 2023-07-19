@@ -57,6 +57,7 @@ class DataWriter:
 
         dims = ("source", "sample", "timestep", "n_lat", "n_lon")
         for variable_name in set(target.keys()).union(prediction.keys()):
+            # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
                 self.dataset.createVariable(
                     variable_name,
@@ -72,38 +73,45 @@ class DataWriter:
                         variable_name
                     ].long_name
 
-        if variable_name in target:
-            target_numpy = target[variable_name].cpu().numpy()
-        else:
-            target_numpy = np.full(
-                shape=target[next(iter(target.keys()))].shape, fill_value=np.nan
-            )
-        if variable_name in prediction:
-            prediction_numpy = prediction[variable_name].cpu().numpy()
-        else:
-            prediction_numpy = np.full(
-                shape=prediction[next(iter(prediction.keys()))].shape, fill_value=np.nan
-            )
+            # Target and prediction may not have the same variables.
+            # The netCDF contains a "source" dimension for all variables
+            # and will have NaN for missing data.
+            if variable_name in target:
+                target_numpy = target[variable_name].cpu().numpy()
+            else:
+                target_numpy = np.full(
+                    shape=target[next(iter(target.keys()))].shape, fill_value=np.nan
+                )
+            if variable_name in prediction:
+                prediction_numpy = prediction[variable_name].cpu().numpy()
+            else:
+                prediction_numpy = np.full(
+                    shape=prediction[next(iter(prediction.keys()))].shape,
+                    fill_value=np.nan,
+                )
 
-        # Broadcast the corresponding dimension to match with the
-        # 'source' dimension of the variable in the netCDF file
-        target_numpy = np.expand_dims(target_numpy, dims.index("source"))
-        prediction_numpy = np.expand_dims(prediction_numpy, dims.index("source"))
+            # Broadcast the corresponding dimension to match with the
+            # 'source' dimension of the variable in the netCDF file
+            target_numpy = np.expand_dims(target_numpy, dims.index("source"))
+            prediction_numpy = np.expand_dims(prediction_numpy, dims.index("source"))
 
-        time_len = self.dataset.variables[variable_name].shape[1]
-        if start_sample + target_numpy.shape[1] > time_len:
-            raise ValueError(
-                f"Batch size {target_numpy.shape[1]} starting at sample {start_sample} "
-                "is too large to fit in the netCDF file with time "
-                f"dimension of length {time_len}."
-            )
-        # Append the data to the variables, this assignment writes directly to disk
-        self.dataset.variables[variable_name][
-            :,
-            start_sample : start_sample + target_numpy.shape[1],
-            start_timestep : start_timestep + target_numpy.shape[2],
-            :,
-        ] = np.concatenate([target_numpy, prediction_numpy], axis=0)
+            n_samples_total = self.dataset.variables[variable_name].shape[1]
+            if start_sample + target_numpy.shape[1] > n_samples_total:
+                raise ValueError(
+                    f"Batch size {target_numpy.shape[1]} starting at sample "
+                    f"{start_sample} "
+                    "is too large to fit in the netCDF file with sample "
+                    f"dimension of length {n_samples_total}."
+                )
+            # Append the data to the variables
+            self.dataset.variables[variable_name][
+                :,
+                start_sample : start_sample + target_numpy.shape[1],
+                start_timestep : start_timestep + target_numpy.shape[2],
+                :,
+            ] = np.concatenate([target_numpy, prediction_numpy], axis=0)
+
+        self.dataset.sync()  # Flush the data to disk
 
 
 class NullDataWriter:

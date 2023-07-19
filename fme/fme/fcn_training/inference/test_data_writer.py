@@ -93,3 +93,25 @@ class TestDataWriter:
                 assert not hasattr(dataset.variables[var_name], "long_name")
 
         dataset.close()
+
+    def test_append_batch_past_end_of_samples(
+        self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
+    ):
+        filename = tmp_path / "test.nc"
+        n_samples = 4
+        writer = DataWriter(
+            str(filename), n_samples=n_samples, metadata=sample_metadata
+        )
+        writer.append_batch(
+            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
+        )
+        writer.append_batch(
+            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=2
+        )
+        with pytest.raises(ValueError):
+            writer.append_batch(
+                sample_target_data,
+                sample_prediction_data,
+                start_timestep=0,
+                start_sample=4,
+            )
