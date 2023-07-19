@@ -179,6 +179,13 @@ def test_train_and_inference_inline(tmp_path, nettype):
     inference_main(
         yaml_config=inference_config,
     )
+    netcdf_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
+    assert netcdf_output_path.exists()
+    ds = xr.open_dataset(netcdf_output_path)
+    assert np.sum(np.isnan(ds["foo"].values)) == 0
+    assert np.sum(np.isnan(ds["bar"].values)) == 0
+    assert np.sum(np.isnan(ds["baz"].sel(source="target").values)) == 0
+    assert np.all(np.isnan(ds["baz"].sel(source="prediction").values))
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
