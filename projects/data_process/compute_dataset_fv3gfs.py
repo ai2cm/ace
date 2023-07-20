@@ -5,7 +5,7 @@
 # which can be installed using fv3net's Makefile. See
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
-# The resulting dataset is about 238GB (the input is about 2.7TB). Running this script
+# The resulting dataset is about 194GB (the input is about 2.5TB). Running this script
 # on my 8-CPU VM takes about 2.5 hours. See "compute_dataset_fv3gfs_argo_workflow.yaml"
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
 # it on our GKE cluster.
