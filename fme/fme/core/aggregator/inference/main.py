@@ -1,13 +1,15 @@
-from typing import Mapping, Protocol, Dict, Union, List
-from .time_mean import TimeMeanAggregator
-from .reduced import MeanAggregator
-from .video import VideoAggregator
-from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from fme.core.wandb import WandB
-from wandb import Table
-import xarray as xr
+from typing import Dict, List, Mapping, Protocol, Union
 
 import torch
+import xarray as xr
+from wandb import Table
+
+from fme.core.wandb import WandB
+
+from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
+from .reduced import MeanAggregator
+from .time_mean import TimeMeanAggregator
+from .video import VideoAggregator
 
 wandb = WandB.get_instance()
 
@@ -41,19 +43,27 @@ class InferenceAggregator:
     `get_logs` to get a dictionary of statistics when you're done.
     """
 
-    def __init__(self, record_step_20: bool = False, log_video: bool = False):
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        record_step_20: bool = False,
+        log_video: bool = False,
+    ):
         """
         Args:
+            area_weights: Area weights for each grid cell.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
         """
         self._aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(target="denorm"),
-            "mean_norm": MeanAggregator(target="norm"),
-            "time_mean": TimeMeanAggregator(),
+            "mean": MeanAggregator(area_weights, "denorm"),
+            "mean_norm": MeanAggregator(area_weights, "norm"),
+            "time_mean": TimeMeanAggregator(area_weights),
         }
         if record_step_20:
-            self._aggregators["mean_step_20"] = OneStepMeanAggregator(target_time=20)
+            self._aggregators["mean_step_20"] = OneStepMeanAggregator(
+                area_weights, target_time=20
+            )
         if log_video:
             self._aggregators["video"] = VideoAggregator()
 

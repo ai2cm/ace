@@ -33,30 +33,13 @@ class MeanMetric(Protocol):
 
 
 class MeanAggregator:
-    def __init__(self, target: Literal["norm", "denorm"]):
+    def __init__(self, area_weights: torch.Tensor, target: Literal["norm", "denorm"]):
+        self._area_weights = area_weights
         self._n_batches = 0
         self._variable_metrics: Optional[Dict[str, Dict[str, MeanMetric]]] = None
-        self._area_weights = None
         self._shape_x = None
         self._shape_y = None
         self._target = target
-
-    def _get_area_weights(self, shape_x, shape_y):
-        if self._area_weights is None:
-            self._area_weights = metrics.spherical_area_weights(
-                shape_x,
-                shape_y,
-                device=get_device(),
-            )
-        elif self._shape_x != shape_x or self._shape_y != shape_y:
-            self._area_weights = metrics.spherical_area_weights(
-                shape_x,
-                shape_y,
-                device=get_device(),
-            )
-        self._shape_x = shape_x
-        self._shape_y = shape_y
-        return self._area_weights
 
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
@@ -67,23 +50,19 @@ class MeanAggregator:
                 "weighted_bias": {},
             }
             device = get_device()
-            gen_shape = get_gen_shape(gen_data)
-            area_weights = self._get_area_weights(
-                shape_x=gen_shape[-2],
-                shape_y=gen_shape[-1],
-            )
+            area_weights = self._area_weights
             for key in gen_data:
                 self._variable_metrics["weighted_rmse"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=metrics.root_mean_squared_error,
                 )
                 self._variable_metrics["weighted_grad_mag_percent_diff"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=metrics.gradient_magnitude_percent_diff,
                 )

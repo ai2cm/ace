@@ -3,26 +3,20 @@ import torch
 
 import fme
 
+
+def _get_lats(num_lat: int):
+    """A simple example of latitudes."""
+    return torch.linspace(-89.5, 89.5, num_lat)
+
+
 test_cases = (
-    "variable, time, lat, lon",
+    "variable, time, lats, n_lon",
     [
-        (2, 1, 2, 1),
-        (1, 2, 2, 1),
-        (1, 2, 2, 4),
+        (2, 1, _get_lats(2), 1),
+        (1, 2, _get_lats(2), 1),
+        (1, 2, _get_lats(2), 4),
     ],
 )
-
-
-@pytest.mark.parametrize(
-    "num_lat_cells, expected",
-    [
-        (2, torch.tensor([-45.0, 45.0])),
-        (4, torch.tensor([-67.5, -22.5, 22.5, 67.5])),
-    ],
-)
-def test_lat_cell_centers(num_lat_cells, expected):
-    """Tests the lat cell centers."""
-    assert torch.all(torch.isclose(fme.lat_cell_centers(num_lat_cells), expected))
 
 
 @pytest.mark.parametrize(
@@ -41,38 +35,39 @@ def test_lat_cell_centers(num_lat_cells, expected):
 )
 def test_spherical_area_weights(num_lat, num_lon, expected):
     """Tests the shapes and a couple simple cases of the spherical area weights."""
-    result = fme.spherical_area_weights(num_lat, num_lon)
+    lats = _get_lats(num_lat)
+    result = fme.spherical_area_weights(lats, num_lon)
     assert torch.all(torch.isclose(result, expected))
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_weighted_mean(variable, time, lat, lon):
+def test_weighted_mean(variable, time, lats, n_lon):
     """Tests the weighted mean for a few simple test cases."""
-    x = torch.randn(time, variable, lat, lon)
-    weights = fme.spherical_area_weights(lat, lon)
+    x = torch.randn(time, variable, len(lats), n_lon)
+    weights = fme.spherical_area_weights(lats, n_lon)
 
     result = fme.weighted_mean(x, weights, dim=(0, 2, 3))
     assert result.shape == (variable,), "You should be able to specify time as dim = 1."
 
     result = fme.weighted_mean(
-        torch.zeros(variable, time, lat, lon), weights, dim=(0, 2, 3)
+        torch.zeros(variable, time, len(lats), n_lon), weights, dim=(0, 2, 3)
     )
     assert torch.all(
         torch.isclose(result, torch.tensor([0.0]))
     ), "Weighted mean of zeros should be zero."
 
-    result = fme.weighted_mean(torch.ones(variable, time, lat, lon), weights)
+    result = fme.weighted_mean(torch.ones(variable, time, len(lats), n_lon), weights)
     assert torch.all(
         torch.isclose(result, torch.Tensor([1.0]))
     ), "The weighted mean of a constant should be that constant."
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_weighted_mean_bias(variable, time, lat, lon):
+def test_weighted_mean_bias(variable, time, lats, n_lon):
     """Tests the weighted mean bias for a few simple test cases."""
-    x = torch.randn(time, variable, lat, lon)
-    y = torch.randn(time, variable, lat, lon)
-    weights = fme.spherical_area_weights(lat, lon)
+    x = torch.randn(time, variable, len(lats), n_lon)
+    y = torch.randn(time, variable, len(lats), n_lon)
+    weights = fme.spherical_area_weights(lats, n_lon)
 
     result = fme.weighted_mean_bias(x, x.clone(), weights, dim=(0, 2, 3))
     assert torch.all(
@@ -80,8 +75,8 @@ def test_weighted_mean_bias(variable, time, lat, lon):
     ), "Weighted global mean bias between identical tensors should be zero."
     assert result.shape == (variable,), "You should be able to specify time as dim = 1."
 
-    x = torch.zeros(time, variable, lat, lon)
-    y = torch.ones(time, variable, lat, lon)
+    x = torch.zeros(time, variable, len(lats), n_lon)
+    y = torch.ones(time, variable, len(lats), n_lon)
 
     result = fme.weighted_mean_bias(x, y, weights)
     assert torch.all(
@@ -91,8 +86,8 @@ def test_weighted_mean_bias(variable, time, lat, lon):
     result = fme.weighted_mean_bias(x, y)
     assert result.shape == tuple(), "Should also work if you do not specify weights."
 
-    x = torch.randn(variable, time, lon, lat)
-    y = torch.randn(variable, time, lon, lat)
+    x = torch.randn(variable, time, n_lon, len(lats))
+    y = torch.randn(variable, time, n_lon, len(lats))
     result = fme.weighted_mean_bias(x, x.clone(), weights.t(), dim=(1, 2, 3))
     assert torch.all(
         torch.isclose(result, torch.tensor(0.0))
@@ -103,10 +98,10 @@ def test_weighted_mean_bias(variable, time, lat, lon):
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_root_mean_squared_error(variable, time, lat, lon):
+def test_root_mean_squared_error(variable, time, lats, n_lon):
     """Tests the mean squared error for a few simple test cases."""
-    x = torch.randn(variable, time, lat, lon)
-    random_weights = torch.rand(lat, lon)
+    x = torch.randn(variable, time, len(lats), n_lon)
+    random_weights = torch.rand(len(lats), n_lon)
 
     result = fme.root_mean_squared_error(x, x.clone(), dim=(0, 2, 3))
     assert torch.all(
@@ -114,15 +109,16 @@ def test_root_mean_squared_error(variable, time, lat, lon):
     ), "Root mean squared error between identical tensors should be zero."
 
     result = fme.root_mean_squared_error(
-        torch.zeros(variable, time, lat, lon), torch.ones(variable, time, lat, lon)
+        torch.zeros(variable, time, len(lats), n_lon),
+        torch.ones(variable, time, len(lats), n_lon),
     )
     assert torch.all(
         torch.isclose(result, torch.tensor(1.0))
     ), "Root mean squared error between zero and one should be one."
 
     result = fme.root_mean_squared_error(
-        torch.zeros(variable, time, lat, lon),
-        torch.ones(variable, time, lat, lon),
+        torch.zeros(variable, time, len(lats), n_lon),
+        torch.ones(variable, time, len(lats), n_lon),
         weights=random_weights,
     )
     assert torch.isclose(
@@ -131,9 +127,9 @@ def test_root_mean_squared_error(variable, time, lat, lon):
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_rmse_of_time_mean(variable, time, lat, lon):
-    x = torch.randn(variable, time, lat, lon)
-    random_weights = torch.rand(lat, lon)
+def test_rmse_of_time_mean(variable, time, lats, n_lon):
+    x = torch.randn(variable, time, len(lats), n_lon)
+    random_weights = torch.rand(len(lats), n_lon)
 
     result = fme.rmse_of_time_mean(x, x.clone(), time_dim=1)
     torch.testing.assert_close(
@@ -143,8 +139,8 @@ def test_rmse_of_time_mean(variable, time, lat, lon):
     )
 
     result = fme.rmse_of_time_mean(
-        torch.zeros(variable, time, lat, lon),
-        torch.ones(variable, time, lat, lon),
+        torch.zeros(variable, time, len(lats), n_lon),
+        torch.ones(variable, time, len(lats), n_lon),
         weights=random_weights,
         time_dim=1,
     )
@@ -156,9 +152,9 @@ def test_rmse_of_time_mean(variable, time, lat, lon):
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_time_and_global_mean(variable, time, lat, lon):
-    x = torch.randn(variable, time, lat, lon)
-    random_weights = torch.rand(lat, lon)
+def test_time_and_global_mean(variable, time, lats, n_lon):
+    x = torch.randn(variable, time, len(lats), n_lon)
+    random_weights = torch.rand(len(lats), n_lon)
 
     result = fme.time_and_global_mean_bias(x, x.clone(), time_dim=1)
     torch.testing.assert_close(
@@ -168,8 +164,8 @@ def test_time_and_global_mean(variable, time, lat, lon):
     )
 
     result = fme.time_and_global_mean_bias(
-        torch.zeros(variable, time, lat, lon),
-        torch.ones(variable, time, lat, lon),
+        torch.zeros(variable, time, len(lats), n_lon),
+        torch.ones(variable, time, len(lats), n_lon),
         weights=random_weights,
         time_dim=1,
     )

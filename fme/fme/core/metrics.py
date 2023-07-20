@@ -1,53 +1,39 @@
 from typing import Iterable, Optional, Union
 from typing_extensions import TypeAlias
+import numpy as np
 
 import torch
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
-Tensor: TypeAlias = torch.Tensor
+Array: TypeAlias = Union[np.ndarray, torch.Tensor]
 
 
-def lat_cell_centers(num_points: int, device=None) -> Tensor:
-    """Returns the latitudes of the cell centers for a regular lat-lon grid.
-
-    Args:
-        num_points: Number of latitude points.
-        device: Device to place the tensor on.
-
-    Returns a tensor of shape (num_points,) with the latitudes of the cell centers.
-    The order is from negative to positive latitudes, e.g. [-89, -87, ..., 87, 89].
-    """
-    offset = (180.0 / num_points) / 2.0
-    pole_center = 90.0 - offset
-    start, stop = -pole_center, pole_center
-    return torch.linspace(start, stop, num_points, device=device)
-
-
-def spherical_area_weights(num_lat: int, num_lon: int, device=None) -> Tensor:
-    """Computes the spherical area weights (unitless) for a regular lat-lon grid.
+def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
+    """Computes area weights given the latitudes of a regular lat-lon grid.
 
     Args:
-        num_lat: Number of latitude points.
+        lats: tensor of shape (num_lat,) with the latitudes of the cell centers.
         num_lon: Number of longitude points.
         device: Device to place the tensor on.
 
-    Returns a tensor of shape (num_lat, num_lon).
+    Returns a torch.tensor of shape (num_lat, num_lon).
     """
-    lats = lat_cell_centers(num_lat, device=device)
+    if isinstance(lats, np.ndarray):
+        lats = torch.from_numpy(lats)
     weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
     weights /= weights.sum()
     return weights
 
 
 def weighted_mean(
-    tensor: Tensor,
-    weights: Optional[Tensor] = None,
+    tensor: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
     dim: Dimension = (),
-) -> Tensor:
+) -> torch.Tensor:
     """Computes the weighted mean across the specified list of dimensions.
 
     Args:
-        tensor: Tensor
+        tensor: torch.Tensor
         weights: Weights to apply to the mean.
         dim: Dimensions to compute the mean over.
 
@@ -60,17 +46,17 @@ def weighted_mean(
 
 
 def weighted_mean_bias(
-    truth: Tensor,
-    predicted: Tensor,
-    weights: Optional[Tensor] = None,
+    truth: torch.Tensor,
+    predicted: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
     dim: Dimension = (),
-) -> Tensor:
+) -> torch.Tensor:
     """Computes the mean bias across the specified list of dimensions assuming
     that the weights are applied to the last dimensions, e.g. the spatial dimensions.
 
     Args:
-        truth: Tensor
-        predicted: Tensor
+        truth: torch.Tensor
+        predicted: torch.Tensor
         dim: Dimensions to compute the mean over.
         weights: Weights to apply to the mean.
 
@@ -84,11 +70,11 @@ def weighted_mean_bias(
 
 
 def root_mean_squared_error(
-    truth: Tensor,
-    predicted: Tensor,
-    weights: Optional[Tensor] = None,
+    truth: torch.Tensor,
+    predicted: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
     dim: Dimension = (),
-) -> Tensor:
+) -> torch.Tensor:
     """
     Computes the weighted global RMSE over all variables. Namely, for each variable:
 
@@ -98,9 +84,9 @@ def root_mean_squared_error(
     `truth.mean(time_dim)` and `predicted.mean(time_dim)` and specify `dims=space_dims`.
 
     Args:
-        truth: Tensor whose last dimensions are to be weighted
-        predicted: Tensor whose last dimensions are to be weighted
-        weights: Tensor to apply to the squared bias.
+        truth: torch.Tensor whose last dimensions are to be weighted
+        predicted: torch.Tensor whose last dimensions are to be weighted
+        weights: torch.Tensor to apply to the squared bias.
         dim: Dimensions to average over.
 
     Returns a tensor of shape (variable,) of weighted RMSEs.
@@ -112,25 +98,25 @@ def root_mean_squared_error(
     return weighted_mean(sq_bias, weights=weights, dim=dim).sqrt()
 
 
-def gradient_magnitude(tensor: Tensor, dim: Dimension = ()) -> Tensor:
+def gradient_magnitude(tensor: torch.Tensor, dim: Dimension = ()) -> torch.Tensor:
     """Compute the magnitude of gradient across the specified dimensions."""
     gradients = torch.gradient(tensor, dim=dim)
     return torch.sqrt(sum([g**2 for g in gradients]))
 
 
 def weighted_mean_gradient_magnitude(
-    tensor: Tensor, weights: Optional[Tensor] = None, dim: Dimension = ()
-) -> Tensor:
+    tensor: torch.Tensor, weights: Optional[torch.Tensor] = None, dim: Dimension = ()
+) -> torch.Tensor:
     """Compute weighted mean of gradient magnitude across the specified dimensions."""
     return weighted_mean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
 
 
 def gradient_magnitude_percent_diff(
-    truth: Tensor,
-    predicted: Tensor,
-    weights: Optional[Tensor] = None,
+    truth: torch.Tensor,
+    predicted: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
     dim: Dimension = (),
-) -> Tensor:
+) -> torch.Tensor:
     """Compute the percent difference of the weighted mean gradient magnitude across
     the specified dimensions."""
     truth_grad_mag = weighted_mean_gradient_magnitude(truth, weights, dim)
