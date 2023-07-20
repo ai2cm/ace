@@ -1,3 +1,4 @@
+from typing import Dict
 import numpy as np
 import pathlib
 import pytest
@@ -102,7 +103,9 @@ validation_data:
     return f_train.name, f_inference.name
 
 
-def _save_netcdf(filename, dim_sizes, variable_names):
+def _save_netcdf(
+    filename, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
+):
     data_vars = {}
     for name in variable_names:
         data = np.random.randn(*list(dim_sizes.values()))
@@ -111,13 +114,17 @@ def _save_netcdf(filename, dim_sizes, variable_names):
         data_vars[name] = xr.DataArray(
             data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
         )
+
     coords = {
         dim_name: xr.DataArray(
             np.arange(size, dtype=np.float32),
             dims=(dim_name,),
         )
+        if dim_name not in coords_override
+        else coords_override[dim_name]
         for dim_name, size in dim_sizes.items()
     }
+
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
@@ -130,6 +137,7 @@ def _setup(path, nettype):
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
     data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
+    grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
     stats_dim_sizes = {}
 
     data_dir = path / "data"
@@ -138,9 +146,24 @@ def _setup(path, nettype):
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
-    _save_netcdf(data_dir / "data.nc", data_dim_sizes, all_variable_names)
-    _save_netcdf(stats_dir / "stats-mean.nc", stats_dim_sizes, all_variable_names)
-    _save_netcdf(stats_dir / "stats-stddev.nc", stats_dim_sizes, all_variable_names)
+    _save_netcdf(
+        data_dir / "data.nc",
+        data_dim_sizes,
+        all_variable_names,
+        coords_override={"grid_yt": grid_yt},
+    )
+    _save_netcdf(
+        stats_dir / "stats-mean.nc",
+        stats_dim_sizes,
+        all_variable_names,
+        coords_override={},
+    )
+    _save_netcdf(
+        stats_dir / "stats-stddev.nc",
+        stats_dim_sizes,
+        all_variable_names,
+        coords_override={},
+    )
 
     train_config_filename, inference_config_filename = _get_test_yaml_files(
         train_data_path=data_dir,

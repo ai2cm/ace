@@ -1,13 +1,17 @@
-from collections import namedtuple
 import logging
 import os
+from collections import namedtuple
 from typing import Mapping, Optional
-from torch.utils.data import Dataset
+
 import netCDF4
+import numpy as np
+from torch.utils.data import Dataset
+
+from fme.core import metrics
+
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 from .data_utils import load_series_data
-
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
@@ -51,6 +55,24 @@ class FV3GFSDataset(Dataset):
             self.n_samples_total = params.n_samples
         logging.info(f"Using {self.n_samples_total} samples.")
         self.window_time_slice = window_time_slice
+        self.lats, self.lons = np.array(self.ds["grid_yt"]), np.array(
+            self.ds["grid_xt"]
+        )
+        self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
+
+        try:
+            self.lats, self.lons = np.array(self.ds.variables["grid_yt"]), np.array(
+                self.ds.variables["grid_xt"]
+            )
+        except AttributeError:
+            raise ValueError(
+                (
+                    "Dataset does not contain grid_yt and"
+                    "grid_xt variables which define the spatial grid."
+                )
+            )
+
+        self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
 
     def _log_files_stats(self):
         if "grid_xt" in self.ds.variables:

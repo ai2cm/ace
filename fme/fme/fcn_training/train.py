@@ -232,7 +232,9 @@ class Trainer:
     def validate_one_epoch(self):
         n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
 
-        aggregator = OneStepAggregator()
+        aggregator = OneStepAggregator(
+            self.train_dataset.area_weights.to(fme.get_device())
+        )
 
         with torch.no_grad():
             for i, data in enumerate(self.valid_data_loader, 0):
@@ -256,7 +258,11 @@ class Trainer:
             for name, tensor in self.inference_data.items()
         }
         record_step_20 = self.config.inference_n_forward_steps >= 20
-        aggregator = InferenceAggregator(record_step_20=record_step_20, log_video=False)
+        aggregator = InferenceAggregator(
+            self.train_dataset.area_weights.to(fme.get_device()),
+            record_step_20=record_step_20,
+            log_video=False,
+        )
         with torch.no_grad():
             self.stepper.run_on_batch(
                 data=valid_data,

@@ -14,9 +14,9 @@ class OneStepAggregator:
     `get_logs` to get a dictionary of statistics when you're done.
     """
 
-    def __init__(self):
+    def __init__(self, area_weights: torch.Tensor):
         self._snapshot = SnapshotAggregator()
-        self._mean = MeanAggregator()
+        self._mean = MeanAggregator(area_weights)
 
     @torch.no_grad()
     def record_batch(
@@ -35,7 +35,7 @@ class OneStepAggregator:
             self._snapshot,
             self._mean,
         ):
-            aggregator.record_batch(
+            aggregator.record_batch(  # type: ignore
                 loss=loss,
                 target_data=target_data,
                 gen_data=gen_data,

@@ -11,7 +11,8 @@ def test_mean_metrics_call_distributed():
     This tests that functionality by modifying the Distributed singleton.
     """
     with mock_distributed(-1.0) as mock:
-        agg = MeanAggregator()
+        area_weights = torch.linspace(-89.5, 89.5, 1).to(get_device())
+        agg = MeanAggregator(area_weights)
         sample_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
