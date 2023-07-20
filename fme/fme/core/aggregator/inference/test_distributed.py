@@ -12,8 +12,10 @@ def test_mean_metrics_call_distributed():
     This tests that functionality by modifying the Distributed singleton.
     """
     with mock_distributed(-1.0):
-        agg = MeanAggregator(target="denorm")
-        sample_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
+        data_a = torch.ones([2, 3, 4, 4], device=get_device())
+        area_weights = torch.ones(1).to(get_device())
+        agg = MeanAggregator(area_weights, "denorm")
+        sample_data = {"a": data_a}
         agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
         table = logs["metrics/series"]
@@ -29,7 +31,8 @@ def test_time_mean_metrics_call_distributed():
     """
     torch.manual_seed(0)
     with mock_distributed(0.0) as mock:
-        agg = TimeMeanAggregator()
+        area_weights = torch.ones(1).to(get_device())
+        agg = TimeMeanAggregator(area_weights)
         target_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         gen_data = {"a": torch.randn([2, 3, 4, 4], device=get_device())}
         agg.record_batch(

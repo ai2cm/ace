@@ -115,7 +115,9 @@ def main(
     )
 
     aggregator = InferenceAggregator(
-        record_step_20=config.n_forward_steps >= 20, log_video=config.log_video
+        valid_dataset.area_weights.to(fme.get_device()),
+        record_step_20=config.n_forward_steps >= 20,
+        log_video=config.log_video,
     )
     n_samples = get_n_samples(valid_data_loader)
     if config.save_prediction_files:

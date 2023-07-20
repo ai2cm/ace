@@ -1,3 +1,4 @@
+import fme
 from fme.core.aggregator.inference import InferenceAggregator
 from fme.core.device import get_device
 
@@ -5,12 +6,13 @@ import torch
 
 
 def test_logs_labels_exist():
-    agg = InferenceAggregator(record_step_20=True, log_video=True)
     n_sample = 10
     n_time = 22
     nx = 2
     ny = 2
     loss = 1.0
+    area_weights = torch.ones(ny).to(fme.get_device())
+    agg = InferenceAggregator(area_weights, record_step_20=True, log_video=True)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -37,12 +39,13 @@ def test_logs_labels_exist():
 
 
 def test_inference_logs_labels_exist():
-    agg = InferenceAggregator(record_step_20=True, log_video=True)
     n_sample = 10
     n_time = 22
     nx = 2
     ny = 2
     loss = 1.0
+    area_weights = torch.ones(ny).to(fme.get_device())
+    agg = InferenceAggregator(area_weights, record_step_20=True, log_video=True)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
