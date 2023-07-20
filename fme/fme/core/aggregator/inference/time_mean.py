@@ -1,10 +1,9 @@
-from typing import Mapping, Optional, Dict
+from typing import Dict, Mapping, MutableMapping, Optional
 
 import torch
 import xarray as xr
 
 from fme.core import metrics
-from fme.core.device import get_device
 from fme.core.distributed import Distributed
 
 
@@ -20,9 +19,10 @@ class TimeMeanAggregator:
     statistics on that time-mean state when logs are retrieved.
     """
 
-    def __init__(self):
-        self._target_data = None
-        self._gen_data = None
+    def __init__(self, area_weights: torch.Tensor):
+        self._area_weights = area_weights
+        self._target_data: Optional[Dict[str, torch.Tensor]] = None
+        self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._target_data_norm = None
         self._gen_data_norm = None
         self._n_batches = 0
@@ -39,15 +39,15 @@ class TimeMeanAggregator:
         time_dim = 1
 
         def add_or_initialize_time_mean(
-            maybe_dict: Optional[Dict[str, torch.Tensor]],
+            maybe_dict: Optional[MutableMapping[str, torch.Tensor]],
             new_data: Mapping[str, torch.Tensor],
-        ) -> Mapping[str, torch.Tensor]:
+        ) -> Dict[str, torch.Tensor]:
             if maybe_dict is None:
                 d: Dict[str, torch.Tensor] = {
                     name: tensor.mean(dim=time_dim) for name, tensor in new_data.items()
                 }
             else:
-                d = maybe_dict
+                d = dict(maybe_dict)
                 for name, tensor in new_data.items():
                     d[name] += tensor.mean(dim=time_dim)
             return d
@@ -65,14 +65,8 @@ class TimeMeanAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        if self._n_batches == 0:
+        if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
-        gen_shape = get_gen_shape(self._gen_data)
-        area_weights = metrics.spherical_area_weights(
-            num_lat=gen_shape[-2],
-            num_lon=gen_shape[-1],
-            device=get_device(),
-        )
         logs = {}
         dist = Distributed.get_instance()
         for name in self._gen_data.keys():
@@ -80,14 +74,14 @@ class TimeMeanAggregator:
             target = dist.reduce_mean(self._target_data[name] / self._n_batches)
             logs[f"rmse/{name}"] = float(
                 metrics.root_mean_squared_error(
-                    predicted=gen, truth=target, weights=area_weights
+                    predicted=gen, truth=target, weights=self._area_weights
                 )
                 .cpu()
                 .numpy()
             )
             logs[f"bias/{name}"] = float(
                 metrics.time_and_global_mean_bias(
-                    predicted=gen, truth=target, weights=area_weights
+                    predicted=gen, truth=target, weights=self._area_weights
                 )
                 .cpu()
                 .numpy()
