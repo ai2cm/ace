@@ -17,9 +17,14 @@ import pytest
 
 def get_data(names, n_samples, n_time):
     data = {}
+    n_lat, n_lon = 5, 5
+    lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
     for name in names:
-        data[name] = torch.rand(n_samples, n_time, 5, 5, device=fme.get_device())
-    return data
+        data[name] = torch.rand(
+            n_samples, n_time, n_lat, n_lon, device=fme.get_device()
+        )
+    area_weights = fme.spherical_area_weights(lats, n_lon).to(fme.get_device())
+    return data, area_weights
 
 
 def get_scalar_data(names, value):
@@ -55,7 +60,7 @@ def test_stepper_config_all_names_property(
 
 
 def test_run_on_batch_normalizer_changes_only_norm_data():
-    data = get_data(["a", "b"], n_samples=5, n_time=2)
+    data, _ = get_data(["a", "b"], n_samples=5, n_time=2)
     loss, gen_data, gen_data_norm, full_data_norm = run_on_batch(
         data=data,
         module=torch.nn.Identity(),
@@ -106,7 +111,7 @@ def test_run_on_batch_addition_series():
             return x + 1
 
     n_steps = 4
-    data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
+    data, _ = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
     _, gen_data, gen_data_norm, full_data_norm = run_on_batch(
         data=data,
         module=AddOne(),
@@ -146,7 +151,7 @@ def test_run_on_batch_with_prescriber():
             return x + 1
 
     n_steps = 3
-    data = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1)
+    data, _ = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1)
     data["mask"] = torch.zeros_like(data["mask"], dtype=torch.int)
     data["mask"][:, :, :, 0] = 1
     stds = {
@@ -211,7 +216,7 @@ def test_reloaded_stepper_gives_same_prediction():
         max_epochs=1,
     )
     new_stepper = SingleModuleStepper.from_state(stepper.get_state())
-    data = get_data(["a", "b"], n_samples=5, n_time=2)
+    data, _ = get_data(["a", "b"], n_samples=5, n_time=2)
     first_result = stepper.run_on_batch(
         data=data,
         train=False,
@@ -234,8 +239,8 @@ def test_inference_dataset_contains_input_only_variable():
             return x + 1
 
     n_steps = 4
-    aggregator = InferenceAggregator(log_video=True)
-    data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
+    data, area_weights = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
+    aggregator = InferenceAggregator(area_weights, log_video=True)
     run_on_batch(
         data=data,
         module=AddOne(),

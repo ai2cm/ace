@@ -6,12 +6,13 @@ import pytest
 
 
 def test_labels_exist():
-    agg = OneStepAggregator()
     n_sample = 10
     n_time = 3
     nx = 2
     ny = 2
     loss = 1.0
+    area_weights = torch.ones(ny).to(get_device())
+    agg = OneStepAggregator(area_weights)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -37,7 +38,8 @@ def test_loss():
     example_data = {
         "a": torch.randn(1, 2, 5, 5, device=get_device()),
     }
-    aggregator = OneStepAggregator()
+    area_weights = torch.ones(1).to(get_device())
+    aggregator = OneStepAggregator(area_weights)
     aggregator.record_batch(
         loss=1.0,
         target_data=example_data,
@@ -70,7 +72,7 @@ def test_aggregator_raises_on_no_data():
     Basic test the aggregator combines loss correctly
     with multiple batches and no distributed training.
     """
-    aggregator = OneStepAggregator()
+    aggregator = OneStepAggregator([])
     with pytest.raises(ValueError) as excinfo:
         aggregator.record_batch(
             loss=1.0, target_data={}, gen_data={}, target_data_norm={}, gen_data_norm={}
