@@ -11,18 +11,25 @@ import os
 # these are auxiliary variables that exist in dataset for convenience, e.g. to do
 # masking or to more easily compute vertical integrals. But they are not inputs
 # or outputs to the ML model, so we don't need normalization constants for them.
-DROP_VARIABLES = [
-    "OCNFRAC",
-    "land_sea_mask",
-    "pressure_thickness_of_atmospheric_layer_0",
-    "pressure_thickness_of_atmospheric_layer_1",
-    "pressure_thickness_of_atmospheric_layer_2",
-    "pressure_thickness_of_atmospheric_layer_3",
-    "pressure_thickness_of_atmospheric_layer_4",
-    "pressure_thickness_of_atmospheric_layer_5",
-    "pressure_thickness_of_atmospheric_layer_6",
-    "pressure_thickness_of_atmospheric_layer_7",
-]
+DROP_VARIABLES = (
+    [
+        "OCNFRAC",
+        "land_sea_mask",
+        "land_fraction",
+        "ocean_fraction",
+        "sea_ice_fraction",
+        "pressure_thickness_of_atmospheric_layer_0",
+        "pressure_thickness_of_atmospheric_layer_1",
+        "pressure_thickness_of_atmospheric_layer_2",
+        "pressure_thickness_of_atmospheric_layer_3",
+        "pressure_thickness_of_atmospheric_layer_4",
+        "pressure_thickness_of_atmospheric_layer_5",
+        "pressure_thickness_of_atmospheric_layer_6",
+        "pressure_thickness_of_atmospheric_layer_7",
+    ]
+    + [f"ak_{i}" for i in range(9)]
+    + [f"bk_{i}" for i in range(9)]
+)
 
 DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
@@ -110,9 +117,9 @@ def main(
     if debug:
         normed_data = (ds - centering) / scaling
         print("Printing average of normed data:")
-        print(normed_data.mean(dim=dims))
+        print(normed_data.mean(dim=dims).compute())
         print("Printing standard deviation of normed data:")
-        print(normed_data.std(dim=dims))
+        print(normed_data.std(dim=dims).compute())
         print("Printing standard deviation computed over all variables:")
         all_var_stddev = normed_data.to_array().std(dim=["variable"] + dims)
         print(all_var_stddev.values)
