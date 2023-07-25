@@ -135,7 +135,7 @@ def _setup(path, nettype):
     in_variable_names = ["foo", "bar", "baz"]
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
-    all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
+    all_variable_names = list(set(in_variable_names + out_variable_names))
     data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
     grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
     stats_dim_sizes = {}
@@ -149,7 +149,7 @@ def _setup(path, nettype):
     _save_netcdf(
         data_dir / "data.nc",
         data_dim_sizes,
-        all_variable_names,
+        all_variable_names + [mask_name],
         coords_override={"grid_yt": grid_yt},
     )
     _save_netcdf(
