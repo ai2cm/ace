@@ -98,6 +98,7 @@ def _get_ensemble_dataset(
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = metadatas[0]  # type: ignore
+    ensemble.area_weights = datasets[0].area_weights
     return ensemble
 
 
