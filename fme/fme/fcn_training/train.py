@@ -155,8 +155,11 @@ class Trainer:
 
             start_time = time.time()
             train_logs = self.train_one_epoch()
+            train_end = time.time()
             valid_logs = self.validate_one_epoch()
+            valid_end = time.time()
             inference_logs = self.inference_one_epoch()
+            inference_end = time.time()
 
             train_loss = train_logs["train/mean/loss"]
             valid_loss = valid_logs["val/mean/loss"]
@@ -185,6 +188,10 @@ class Trainer:
                 **{
                     "lr": lr,
                     "epoch": self.epoch,
+                    "epoch_train_seconds": train_end - start_time,
+                    "epoch_validation_seconds": valid_end - train_end,
+                    "epoch_inference_seconds": inference_end - valid_end,
+                    "epoch_total_seconds": time_elapsed,
                 },
             }
             wandb.log(all_logs, step=self.num_batches_seen)
