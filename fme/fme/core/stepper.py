@@ -67,6 +67,10 @@ class SingleModuleStepperConfig:
         all_names = list(set(self.in_names).union(self.out_names).union(mask_name))
         return all_names
 
+    @property
+    def normalize_names(self):
+        return list(set(self.in_names).union(self.out_names))
+
 
 class DummyWrapper(nn.Module):
     """
@@ -107,7 +111,7 @@ class SingleModuleStepper:
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        self.normalizer = config.normalization.build(config.all_names)
+        self.normalizer = config.normalization.build(config.normalize_names)
         if config.prescriber is not None:
             self.prescriber = config.prescriber.build(config.in_names, config.out_names)
         else:
