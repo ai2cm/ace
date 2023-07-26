@@ -248,16 +248,12 @@ class Trainer:
         return aggregator.get_logs(label="train")
 
     def validate_one_epoch(self):
-        n_valid_batches = 20  # do validation on first 20 images, just for LR scheduler
-
         aggregator = OneStepAggregator(
             self.train_dataset.area_weights.to(fme.get_device())
         )
 
         with torch.no_grad():
             for i, data in enumerate(self.valid_data_loader, 0):
-                if i >= n_valid_batches:
-                    break
                 self.stepper.run_on_batch(
                     data,
                     train=False,
@@ -267,8 +263,6 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        # TODO: refactor inference to be more clearly reusable between
-        # training, validation, and inference
         logging.info("Starting inference on validation set...")
 
         record_step_20 = self.config.inference.n_forward_steps >= 20
