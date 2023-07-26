@@ -1,15 +1,12 @@
 from typing import Dict, List, Mapping, Protocol, Union
-
-import torch
-import xarray as xr
+from .time_mean import TimeMeanAggregator
+from .reduced import MeanAggregator
+from .video import VideoAggregator
+from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
+from fme.core.wandb import WandB
 from wandb import Table
 
-from fme.core.wandb import WandB
-
-from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from .reduced import MeanAggregator
-from .time_mean import TimeMeanAggregator
-from .video import VideoAggregator
+import torch
 
 wandb = WandB.get_instance()
 
@@ -30,10 +27,6 @@ class _Aggregator(Protocol):
     def get_logs(self, label: str):
         ...
 
-    @torch.no_grad()
-    def get_dataset(self, label: str):
-        ...
-
 
 class InferenceAggregator:
     """
@@ -46,6 +39,7 @@ class InferenceAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
+        n_timesteps: int,
         record_step_20: bool = False,
         log_video: bool = False,
     ):
@@ -56,8 +50,12 @@ class InferenceAggregator:
             log_video: Whether to log videos of the state evolution.
         """
         self._aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(area_weights, "denorm"),
-            "mean_norm": MeanAggregator(area_weights, "norm"),
+            "mean": MeanAggregator(
+                area_weights, target="denorm", n_timesteps=n_timesteps
+            ),
+            "mean_norm": MeanAggregator(
+                area_weights, target="norm", n_timesteps=n_timesteps
+            ),
             "time_mean": TimeMeanAggregator(area_weights),
         }
         if record_step_20:
@@ -65,7 +63,7 @@ class InferenceAggregator:
                 area_weights, target_time=20
             )
         if log_video:
-            self._aggregators["video"] = VideoAggregator()
+            self._aggregators["video"] = VideoAggregator(n_timesteps=n_timesteps)
 
     @torch.no_grad()
     def record_batch(
@@ -75,6 +73,7 @@ class InferenceAggregator:
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
         gen_data_norm: Mapping[str, torch.Tensor],
+        i_time_start: int = 0,
     ):
         if len(target_data) == 0:
             raise ValueError("No data in target_data")
@@ -87,6 +86,7 @@ class InferenceAggregator:
                 gen_data=gen_data,
                 target_data_norm=target_data_norm,
                 gen_data_norm=gen_data_norm,
+                i_time_start=i_time_start,
             )
 
     @torch.no_grad()
@@ -113,12 +113,6 @@ class InferenceAggregator:
         from tables into a list of dictionaries.
         """
         return to_inference_logs(self.get_logs(label=label))
-
-    @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset:
-        if "video" not in self._aggregators:
-            raise ValueError("must set log_video=True on init to get dataset")
-        return self._aggregators["video"].get_dataset(label="")
 
 
 def to_inference_logs(

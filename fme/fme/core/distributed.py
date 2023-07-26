@@ -106,3 +106,23 @@ class Distributed:
         with more than 1 worker.
         """
         return self._distributed and self.world_size > 1
+
+
+class NotDistributed(Distributed):
+    def __init__(self, is_root: bool):
+        self._is_root = is_root
+
+    def local_batch_size(self, batch_size: int) -> int:
+        return batch_size
+
+    def reduce_mean(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
+    def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor
+
+    def is_root(self) -> bool:
+        return self._is_root
+
+    def is_distributed(self) -> bool:
+        return False

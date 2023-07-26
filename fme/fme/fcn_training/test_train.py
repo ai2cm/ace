@@ -61,7 +61,9 @@ stepper:
     prescribed_name: {in_variable_names[0]}
     mask_name: {mask_name}
     mask_value: 0
-inference_n_forward_steps: 2
+inference:
+    n_forward_steps: 2
+    forward_steps_in_memory: 2
 max_epochs: 1
 save_checkpoint: true
 logging:
@@ -74,7 +76,8 @@ experiment_dir: {results_dir}
     """  # noqa: E501
     inference_string = f"""
 experiment_dir: {results_dir}
-n_forward_steps: 2
+n_forward_steps: 6
+forward_steps_in_memory: 2
 checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
 log_video: true
 save_prediction_files: true
@@ -199,9 +202,10 @@ def test_train_and_inference_inline(tmp_path, nettype):
     # inference should not require stats files
     (tmp_path / "stats" / "stats-mean.nc").unlink()
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
-    inference_main(
+    inference_logs = inference_main(
         yaml_config=inference_config,
     )
+    assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
     netcdf_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     assert netcdf_output_path.exists()
     ds = xr.open_dataset(netcdf_output_path)

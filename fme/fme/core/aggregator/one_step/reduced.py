@@ -89,19 +89,24 @@ class MeanAggregator:
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
         gen_data_norm: Mapping[str, torch.Tensor],
+        i_time_start: int = 0,
     ):
         self._loss += loss
         variable_metrics = self._get_variable_metrics(gen_data)
         time_dim = 1
-        for name in gen_data.keys():
-            for metric in variable_metrics:
-                variable_metrics[metric][name].record(
-                    target=target_data[name].select(
-                        dim=time_dim, index=self._target_time
-                    ),
-                    gen=gen_data[name].select(dim=time_dim, index=self._target_time),
-                )
-        self._n_batches += 1
+        time_len = gen_data[list(gen_data.keys())[0]].shape[time_dim]
+        target_time = self._target_time - i_time_start
+        if target_time >= 0 and time_len > target_time:
+            for name in gen_data.keys():
+                target = target_data[name].select(dim=time_dim, index=target_time)
+                gen = gen_data[name].select(dim=time_dim, index=target_time)
+                for metric in variable_metrics:
+                    variable_metrics[metric][name].record(
+                        target=target,
+                        gen=gen,
+                    )
+            # only increment n_batches if we actually recorded a batch
+            self._n_batches += 1
 
     @torch.no_grad()
     def get_logs(self, label: str):
