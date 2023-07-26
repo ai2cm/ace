@@ -35,6 +35,7 @@ class TimeMeanAggregator:
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
         gen_data_norm: Mapping[str, torch.Tensor],
+        i_time_start: int = 0,
     ):
         time_dim = 1
 
@@ -55,6 +56,9 @@ class TimeMeanAggregator:
         self._target_data = add_or_initialize_time_mean(self._target_data, target_data)
         self._gen_data = add_or_initialize_time_mean(self._gen_data, gen_data)
 
+        # we can ignore time slicing and just treat segments as though they're
+        # different batches, because we can assume all time segments have the
+        # same length
         self._n_batches += 1
 
     @torch.no_grad()

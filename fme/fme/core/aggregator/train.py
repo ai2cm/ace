@@ -25,7 +25,12 @@ class TrainAggregator:
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
         gen_data_norm: Mapping[str, torch.Tensor],
+        i_time_start: int = 0,
     ):
+        if i_time_start != 0:
+            raise ValueError(
+                "TrainAggregator should only be used on the start of a timeseries"
+            )
         self._loss += loss
         self._n_batches += 1
 

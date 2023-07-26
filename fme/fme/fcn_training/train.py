@@ -44,11 +44,13 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import dataclasses
 import os
 import time
+from typing import Optional
 from fme.core.aggregator import OneStepAggregator, InferenceAggregator, TrainAggregator
 import dacite
-from fme.core.distributed import Distributed
+from fme.core.distributed import Distributed, NotDistributed
 import argparse
 import torch
 import logging
@@ -58,7 +60,7 @@ import yaml
 from fme.fcn_training.utils.data_loader_multifiles import (
     get_data_loader,
 )
-from fme.fcn_training.utils.data_utils import load_series_data
+from fme.fcn_training.inference import run_inference
 from fme.core.wandb import WandB
 from fme.fcn_training.train_config import TrainConfig
 
@@ -130,14 +132,23 @@ class Trainer:
         logging.info(
             "Number of trainable model parameters: {}".format(self.count_parameters())
         )
-        self.inference_n_forward_steps = config.inference_n_forward_steps
-        # TODO: refactor this into its own dataset configuration
-        self.inference_data = load_series_data(
-            idx=0,
-            n_steps=config.inference_n_forward_steps + 1,
-            ds=self.valid_dataset.ds,
-            names=data_requirements.names,
-        )
+        # copy dataclass from validation data
+        inference_data = dataclasses.replace(config.validation_data)
+        inference_data.n_samples = config.inference.n_samples
+        inference_data.batch_size = config.inference.batch_size
+        inference_data_requirements = dataclasses.replace(data_requirements)
+        inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
+
+        def get_inference_data_loader(window_time_slice: Optional[slice] = None):
+            return get_data_loader(
+                inference_data,
+                train=False,
+                requirements=inference_data_requirements,
+                window_time_slice=window_time_slice,
+                dist=NotDistributed(is_root=self.dist.is_root()),
+            )[0]
+
+        self._inference_data_loader_factory = get_inference_data_loader
 
     def switch_off_grad(self, model):
         for param in model.parameters():
@@ -207,17 +218,17 @@ class Trainer:
             # Before training, log the loss on the first batch.
             with torch.no_grad():
                 data = next(iter(self.train_data_loader))
-                batch_loss, _, _, _ = self.stepper.run_on_batch(
+                stepped = self.stepper.run_on_batch(
                     data, train=False, n_forward_steps=self.n_forward_steps
                 )
 
                 if self.config.log_train_every_n_batches > 0:
                     wandb.log(
-                        {"batch_loss": self.dist.reduce_mean(batch_loss)},
+                        {"batch_loss": self.dist.reduce_mean(stepped.loss)},
                         step=self.num_batches_seen,
                     )
         for data in self.train_data_loader:
-            batch_loss, _, _, _ = self.stepper.run_on_batch(
+            stepped = self.stepper.run_on_batch(
                 data,
                 train=True,
                 n_forward_steps=self.n_forward_steps,
@@ -228,7 +239,7 @@ class Trainer:
                 self.config.log_train_every_n_batches > 0
                 and self.num_batches_seen % self.config.log_train_every_n_batches == 0
             ):
-                reduced_batch_loss = self.dist.reduce_mean(batch_loss)
+                reduced_batch_loss = self.dist.reduce_mean(stepped.loss)
                 wandb.log(
                     {"batch_loss": reduced_batch_loss},
                     step=self.num_batches_seen,
@@ -260,23 +271,20 @@ class Trainer:
         # training, validation, and inference
         logging.info("Starting inference on validation set...")
 
-        valid_data = {
-            name: tensor[: self.config.inference_n_forward_steps + 1].unsqueeze(0)
-            for name, tensor in self.inference_data.items()
-        }
-        record_step_20 = self.config.inference_n_forward_steps >= 20
+        record_step_20 = self.config.inference.n_forward_steps >= 20
         aggregator = InferenceAggregator(
             self.train_dataset.area_weights.to(fme.get_device()),
             record_step_20=record_step_20,
             log_video=False,
+            n_timesteps=self.config.inference.n_forward_steps + 1,
         )
-        with torch.no_grad():
-            self.stepper.run_on_batch(
-                data=valid_data,
-                train=False,
-                n_forward_steps=self.config.inference_n_forward_steps,
-                aggregator=aggregator,
-            )
+        run_inference(
+            aggregator=aggregator,
+            stepper=self.stepper,
+            data_loader_factory=self._inference_data_loader_factory,
+            n_forward_steps=self.config.inference.n_forward_steps,
+            forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
+        )
         return aggregator.get_logs(label="inference")
 
     def save_checkpoint(self, checkpoint_path, model=None):

@@ -1,5 +1,5 @@
 from typing import List, Dict, Tuple, Optional, Union
-from fme.core.aggregator import OneStepAggregator, NullAggregator
+from fme.core.aggregator import OneStepAggregator, NullAggregator, InferenceAggregator
 from fme.core.distributed import Distributed
 from fme.fcn_training.utils.darcy_loss import LpLoss
 
@@ -86,6 +86,24 @@ class DummyWrapper(nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
+
+
+@dataclasses.dataclass
+class SteppedData:
+    loss: float
+    gen_data: Dict[str, torch.Tensor]
+    target_data: Dict[str, torch.Tensor]
+    gen_data_norm: Dict[str, torch.Tensor]
+    target_data_norm: Dict[str, torch.Tensor]
+
+    def remove_initial_condition(self) -> "SteppedData":
+        return SteppedData(
+            loss=self.loss,
+            gen_data={k: v[:, 1:] for k, v in self.gen_data.items()},
+            target_data={k: v[:, 1:] for k, v in self.target_data.items()},
+            gen_data_norm={k: v[:, 1:] for k, v in self.gen_data_norm.items()},
+            target_data_norm={k: v[:, 1:] for k, v in self.target_data_norm.items()},
+        )
 
 
 class SingleModuleStepper:
@@ -183,12 +201,7 @@ class SingleModuleStepper:
         train: bool,
         n_forward_steps: int = 1,
         aggregator: Optional[OneStepAggregator] = None,
-    ) -> Tuple[
-        float,
-        Dict[str, torch.Tensor],
-        Dict[str, torch.Tensor],
-        Dict[str, torch.Tensor],
-    ]:
+    ) -> SteppedData:
         """
         Step the model forward on a batch of data.
 
@@ -196,6 +209,7 @@ class SingleModuleStepper:
             data: The batch data of shape [n_sample, n_timesteps, n_channels, n_x, n_y].
             train: Whether to train the model.
             n_forward_steps: The number of timesteps to run the model for.
+            aggregator: The data aggregator.
 
         Returns:
             The loss, the generated data, the normalized generated data,
@@ -203,7 +217,7 @@ class SingleModuleStepper:
         """
         if aggregator is None:
             non_none_aggregator: Union[
-                OneStepAggregator, NullAggregator
+                OneStepAggregator, InferenceAggregator, NullAggregator
             ] = NullAggregator()
         else:
             non_none_aggregator = aggregator
@@ -299,14 +313,9 @@ def run_on_batch(
     optimization: Union[Optimization, NullOptimization],
     loss_obj: nn.Module,
     prescriber: Union[Prescriber, NullPrescriber],
-    aggregator: Union[OneStepAggregator, NullAggregator],
+    aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
     n_forward_steps: int = 1,
-) -> Tuple[
-    float,
-    Dict[str, torch.Tensor],
-    Dict[str, torch.Tensor],
-    Dict[str, torch.Tensor],
-]:
+) -> SteppedData:
     """
     Run the model on a batch of data.
 
@@ -325,7 +334,10 @@ def run_on_batch(
             then the model is not trained.
         loss_obj: The loss object.
         prescriber: Overwrite an output with target value in specified region.
+        aggregator: The data aggregator.
         n_forward_steps: The number of timesteps to run the model for.
+        i_time_start: The index of the first timestep of the data time window,
+            passed to the aggregator.
 
     Returns:
         The loss, the generated data, the normalized generated data,
@@ -395,4 +407,10 @@ def run_on_batch(
         target_data_norm=full_data_norm,
         gen_data_norm=gen_data_norm_timeseries,
     )
-    return loss, gen_data, gen_data_norm_timeseries, full_data_norm
+    return SteppedData(
+        loss=loss,
+        gen_data=gen_data,
+        target_data=data,
+        gen_data_norm=gen_data_norm_timeseries,
+        target_data_norm=full_data_norm,
+    )
