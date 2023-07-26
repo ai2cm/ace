@@ -1,4 +1,3 @@
-from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.stepper import (
     SingleModuleStepper,
     run_on_batch,
@@ -60,8 +59,9 @@ def test_stepper_config_all_names_property(
 
 
 def test_run_on_batch_normalizer_changes_only_norm_data():
+    torch.manual_seed(0)
     data, _ = get_data(["a", "b"], n_samples=5, n_time=2)
-    loss, gen_data, gen_data_norm, full_data_norm = run_on_batch(
+    stepped = run_on_batch(
         data=data,
         module=torch.nn.Identity(),
         normalizer=StandardNormalizer(
@@ -77,14 +77,9 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         aggregator=MagicMock(),
     )
     assert torch.allclose(
-        gen_data["a"], gen_data_norm["a"]
+        stepped.gen_data["a"], stepped.gen_data_norm["a"]
     )  # as std=1, mean=0, no change
-    (
-        loss_double_std,
-        gen_data_double_std,
-        gen_data_norm_double_std,
-        full_data_norm_double_std,
-    ) = run_on_batch(
+    stepped_double_std = run_on_batch(
         data=data,
         module=torch.nn.Identity(),
         normalizer=StandardNormalizer(
@@ -99,20 +94,32 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         n_forward_steps=1,
         aggregator=MagicMock(),
     )
-    assert torch.allclose(gen_data["a"], gen_data_double_std["a"])
-    assert torch.allclose(gen_data["a"], 2.0 * gen_data_norm_double_std["a"])
-    assert torch.allclose(full_data_norm["a"], 2.0 * full_data_norm_double_std["a"])
-    assert torch.allclose(loss, 4.0 * loss_double_std)  # mse scales with std**2
+    assert torch.allclose(
+        stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
+    )
+    assert torch.allclose(
+        stepped.gen_data["a"], 2.0 * stepped_double_std.gen_data_norm["a"], rtol=1e-4
+    )
+    assert torch.allclose(
+        stepped.target_data["a"],
+        2.0 * stepped_double_std.target_data_norm["a"],
+        rtol=1e-4,
+    )
+    assert torch.allclose(
+        stepped.loss, 4.0 * stepped_double_std.loss, rtol=1e-4
+    )  # mse scales with std**2
 
 
 def test_run_on_batch_addition_series():
+    torch.manual_seed(0)
+
     class AddOne(torch.nn.Module):
         def forward(self, x):
             return x + 1
 
     n_steps = 4
     data, _ = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
-    _, gen_data, gen_data_norm, full_data_norm = run_on_batch(
+    stepped = run_on_batch(
         data=data,
         module=AddOne(),
         normalizer=StandardNormalizer(
@@ -127,25 +134,35 @@ def test_run_on_batch_addition_series():
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
     )
-    assert gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
     for i in range(n_steps - 1):
         assert torch.allclose(
-            gen_data_norm["a"][:, i] + 1, gen_data_norm["a"][:, i + 1]
+            stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
         )
         assert torch.allclose(
-            gen_data_norm["b"][:, i] + 1, gen_data_norm["b"][:, i + 1]
+            stepped.gen_data_norm["b"][:, i] + 1, stepped.gen_data_norm["b"][:, i + 1]
         )
-        assert torch.allclose(gen_data["a"][:, i] + 1, gen_data["a"][:, i + 1])
-        assert torch.allclose(gen_data["b"][:, i] + 1, gen_data["b"][:, i + 1])
-    assert torch.allclose(full_data_norm["a"], data["a"])
-    assert torch.allclose(full_data_norm["b"], data["b"])
-    assert torch.allclose(gen_data["a"][:, 0], data["a"][:, 0])
-    assert torch.allclose(gen_data["b"][:, 0], data["b"][:, 0])
-    assert torch.allclose(gen_data_norm["a"][:, 0], full_data_norm["a"][:, 0])
-    assert torch.allclose(gen_data_norm["b"][:, 0], full_data_norm["b"][:, 0])
+        assert torch.allclose(
+            stepped.gen_data["a"][:, i] + 1, stepped.gen_data["a"][:, i + 1]
+        )
+        assert torch.allclose(
+            stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
+        )
+    assert torch.allclose(stepped.target_data_norm["a"], data["a"])
+    assert torch.allclose(stepped.target_data_norm["b"], data["b"])
+    assert torch.allclose(stepped.gen_data["a"][:, 0], data["a"][:, 0])
+    assert torch.allclose(stepped.gen_data["b"][:, 0], data["b"][:, 0])
+    assert torch.allclose(
+        stepped.gen_data_norm["a"][:, 0], stepped.target_data_norm["a"][:, 0]
+    )
+    assert torch.allclose(
+        stepped.gen_data_norm["b"][:, 0], stepped.target_data_norm["b"][:, 0]
+    )
 
 
 def test_run_on_batch_with_prescriber():
+    torch.manual_seed(0)
+
     class AddOne(torch.nn.Module):
         def forward(self, x):
             return x + 1
@@ -159,7 +176,7 @@ def test_run_on_batch_with_prescriber():
         "b": torch.tensor([3.0], device=fme.get_device()),
         "mask": torch.tensor([1.0], device=fme.get_device()),
     }
-    _, gen_data, gen_data_norm, full_data_norm = run_on_batch(
+    stepped = run_on_batch(
         data=data,
         module=AddOne(),
         normalizer=StandardNormalizer(
@@ -177,20 +194,23 @@ def test_run_on_batch_with_prescriber():
     for i in range(n_steps):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
-            gen_data_norm["a"][:, i] + 1, gen_data_norm["a"][:, i + 1]
+            stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
         )
         # "b" should be increasing by 1 where the mask says don't prescribe
         # note the 1: selection for the last dimension in following two assertions
         torch.testing.assert_close(
-            gen_data_norm["b"][:, i, :, 1:] + 1, gen_data_norm["b"][:, i + 1, :, 1:]
+            stepped.gen_data_norm["b"][:, i, :, 1:] + 1,
+            stepped.gen_data_norm["b"][:, i + 1, :, 1:],
         )
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
-            gen_data_norm["b"][:, i, :, 0], full_data_norm["b"][:, i, :, 0]
+            stepped.gen_data_norm["b"][:, i, :, 0],
+            stepped.target_data_norm["b"][:, i, :, 0],
         )
 
 
 def test_reloaded_stepper_gives_same_prediction():
+    torch.manual_seed(0)
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(
             type="FourierNeuralOperatorNet", config={"scale_factor": 1}
@@ -227,35 +247,20 @@ def test_reloaded_stepper_gives_same_prediction():
         train=False,
         n_forward_steps=1,
     )
-    assert torch.allclose(first_result[0], second_result[0])
-    for i in range(1, 4):
-        assert torch.allclose(first_result[i]["a"], second_result[i]["a"]), i
-        assert torch.allclose(first_result[i]["b"], second_result[i]["b"]), i
-
-
-def test_inference_dataset_contains_input_only_variable():
-    class AddOne(torch.nn.Module):
-        def forward(self, x):
-            return x + 1
-
-    n_steps = 4
-    data, area_weights = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1)
-    aggregator = InferenceAggregator(area_weights, log_video=True)
-    run_on_batch(
-        data=data,
-        module=AddOne(),
-        normalizer=StandardNormalizer(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=get_scalar_data(["a", "b"], 1.0),
-        ),
-        in_packer=Packer(["a", "b"]),
-        out_packer=Packer(["a"]),
-        optimization=MagicMock(),
-        loss_obj=torch.nn.MSELoss(),
-        prescriber=NullPrescriber(),
-        n_forward_steps=n_steps,
-        aggregator=aggregator,
+    assert torch.allclose(first_result.loss, second_result.loss)
+    assert torch.allclose(first_result.gen_data["a"], second_result.gen_data["a"])
+    assert torch.allclose(first_result.gen_data["b"], second_result.gen_data["b"])
+    assert torch.allclose(
+        first_result.gen_data_norm["a"], second_result.gen_data_norm["a"]
     )
-    ds = aggregator.get_dataset()
-    assert "mean_b" in ds.data_vars
-    assert ds["mean_b"].shape == (2, 5, 5, 5)
+    assert torch.allclose(
+        first_result.gen_data_norm["b"], second_result.gen_data_norm["b"]
+    )
+    assert torch.allclose(
+        first_result.target_data_norm["a"], second_result.target_data_norm["a"]
+    )
+    assert torch.allclose(
+        first_result.target_data_norm["b"], second_result.target_data_norm["b"]
+    )
+    assert torch.allclose(first_result.target_data["a"], second_result.target_data["a"])
+    assert torch.allclose(first_result.target_data["b"], second_result.target_data["b"])

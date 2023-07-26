@@ -63,6 +63,21 @@ class LoggingConfig:
 
 
 @dataclasses.dataclass
+class InlineInferenceConfig:
+    n_forward_steps: int = 2
+    forward_steps_in_memory: int = 2
+    n_samples: int = 1
+    batch_size: int = 1
+
+    def __post_init__(self):
+        if self.n_forward_steps % self.forward_steps_in_memory != 0:
+            raise ValueError(
+                "n_forward_steps must be divisible by steps_in_memory, "
+                f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
+            )
+
+
+@dataclasses.dataclass
 class TrainConfig:
     train_data: DataLoaderParams
     validation_data: DataLoaderParams
@@ -71,9 +86,8 @@ class TrainConfig:
     max_epochs: int
     save_checkpoint: bool
     experiment_dir: str
+    inference: InlineInferenceConfig
     log_train_every_n_batches: int = 100
-    # parameters only for inference
-    inference_n_forward_steps: int = 2
 
     def __post_init__(self):
         scheduler_type = self.stepper.optimization.scheduler.type

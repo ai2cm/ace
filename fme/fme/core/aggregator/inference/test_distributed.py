@@ -14,7 +14,7 @@ def test_mean_metrics_call_distributed():
     with mock_distributed(-1.0):
         data_a = torch.ones([2, 3, 4, 4], device=get_device())
         area_weights = torch.ones(1).to(get_device())
-        agg = MeanAggregator(area_weights, "denorm")
+        agg = MeanAggregator(area_weights, target="denorm", n_timesteps=3)
         sample_data = {"a": data_a}
         agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
