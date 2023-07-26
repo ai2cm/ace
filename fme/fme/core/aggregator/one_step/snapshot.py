@@ -12,6 +12,12 @@ class SnapshotAggregator:
     An aggregator that records the first sample of the last batch of data.
     """
 
+    _captions = {
+        "full-field": "{name} one step full field for last sample; (left) generated and (right) target.",  # noqa: E501
+        "residual": "{name} one step residual for last sample; (left) generated and (right) target.",  # noqa: E501
+        "error": "{name} one step error (generated - target) for last sample.",
+    }
+
     @torch.no_grad()
     def record_batch(
         self,
@@ -40,44 +46,28 @@ class SnapshotAggregator:
         target_time = 1
         image_logs = {}
         for name in self._gen_data.keys():
-            gen_for_image = self._gen_data_norm[name].select(
-                dim=time_dim, index=target_time
-            )[
-                0
-            ]  # first sample in batch
-            target_for_image = self._target_data_norm[name].select(
-                dim=time_dim, index=target_time
-            )[0]
-            input_for_image = self._target_data_norm[name].select(
-                dim=time_dim, index=input_time
-            )[0]
-            gap = torch.zeros((input_for_image.shape[-2], 4)).to(
-                get_device(), dtype=torch.float
-            )
-            image_error = gen_for_image - target_for_image
-            image_full_field = torch.cat((gen_for_image, gap, target_for_image), axis=1)
-            image_residual = torch.cat(
+            # use first sample in batch
+            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0]
+            target = self._target_data[name].select(dim=time_dim, index=target_time)[0]
+            input = self._target_data[name].select(dim=time_dim, index=input_time)[0]
+            gap_shape = (input.shape[-2], 4)
+            gap = torch.full(gap_shape, target.min()).to(get_device())
+            gap_res = torch.full(gap_shape, (target - input).min()).to(get_device())
+            images = {}
+            images["error"] = gen - target
+            images["full-field"] = torch.cat((gen, gap, target), axis=1)
+            images["residual"] = torch.cat(
                 (
-                    gen_for_image - input_for_image,
-                    gap,
-                    target_for_image - input_for_image,
+                    gen - input,
+                    gap_res,
+                    target - input,
                 ),
                 axis=1,
             )
-            caption = (
-                f"{name} one step full field for "
-                "last sample; (left) generated and (right) target."
-            )
-            wandb_image = wandb.Image(image_full_field, caption=caption)
-            image_logs[f"image-full-field/{name}"] = wandb_image
-            caption = (
-                f"{name} one step residual for "
-                "last sample; (left) generated and (right) target."
-            )
-            wandb_image = wandb.Image(image_residual, caption=caption)
-            image_logs[f"image-residual/{name}"] = wandb_image
-            caption = f"{name} one step error " "(generated - target) for last sample."
-            wandb_image = wandb.Image(image_error, caption=caption)
-            image_logs[f"image-error/{name}"] = wandb_image
+            for key, data in images.items():
+                caption = self._captions[key].format(name=name)
+                caption += f" vmin={data.min():.2f}, vmax={data.max():.2f}."
+                wandb_image = wandb.Image(data, caption=caption)
+                image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
         return image_logs
