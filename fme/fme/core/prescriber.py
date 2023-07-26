@@ -5,8 +5,14 @@ import torch
 
 @dataclasses.dataclass
 class PrescriberConfig:
-    """Configuration for overwriting the predictions of 'prescribed_name' by the target
-    values in the region where 'mask_name' == 'mask_value'.
+    """
+    Configuration for overwriting predictions of 'prescribed_name' by target values.
+
+    If interpolate is False, the data is overwritten in the region where
+    'mask_name' == 'mask_value' after values are cast to integer. If interpolate
+    is True, the data is interpolated between the predicted value at 0 and the
+    target value at 1 based on the mask variable, and it is assumed the mask variable
+    lies in the range from 0 to 1.
 
     Attributes:
         prescribed_name: Name of the variable to be overwritten.
