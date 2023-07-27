@@ -1,7 +1,7 @@
 import logging
 import os
 from collections import namedtuple
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Tuple
 
 import netCDF4
 import numpy as np
@@ -43,7 +43,7 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Opening data at {self.full_path}")
         self.ds = netCDF4.MFDataset(self.full_path)
         self.ds.set_auto_mask(False)
-        self.metadata = self._compute_metadata()  # Note: requires `self.ds`
+        self.metadata = self._compute_variable_metadata()  # Note: requires `self.ds`
         self._log_files_stats()
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
         if params.n_samples is not None:
@@ -73,6 +73,8 @@ class FV3GFSDataset(Dataset):
             )
 
         self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
+        ak, bk = self._get_sigma_coordinates()
+        self.sigma_coordinates = dict(ak=ak, bk=bk)
 
     def _log_files_stats(self):
         if "grid_xt" in self.ds.variables:
@@ -84,7 +86,7 @@ class FV3GFSDataset(Dataset):
         logging.info(f"Image shape is {img_shape_x} x {img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
-    def _compute_metadata(self) -> Mapping[str, VariableMetadata]:
+    def _compute_variable_metadata(self) -> Mapping[str, VariableMetadata]:
         result = {}
         for name in self.names:
             if hasattr(self.ds.variables[name], "units") and hasattr(
@@ -95,6 +97,27 @@ class FV3GFSDataset(Dataset):
                     long_name=self.ds.variables[name].long_name,
                 )
         return result
+
+    def _get_sigma_coordinates(self) -> Tuple[np.ndarray, np.ndarray]:
+        ak = sorted([v for v in self.ds.variables if v.startswith("ak")])
+        bk = sorted([v for v in self.ds.variables if v.startswith("bk")])
+
+        if len(ak) == 0 or len(bk) == 0:
+            raise ValueError("Dataset does not contain ak and bk sigma coordinates.")
+
+        if len(ak) != len(bk):
+            raise ValueError(
+                "Dataset contains different number of ak and bk coordinates."
+            )
+
+        if len(ak) > 10:
+            raise NotImplementedError(
+                "Sigma coordinate names must be parsed to support more than 10 levels."
+            )
+
+        ak = np.array([self.ds[k][:] for k in ak])
+        bk = np.array([self.ds[k][:] for k in bk])
+        return ak, bk
 
     def __len__(self):
         return self.n_samples_total

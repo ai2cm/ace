@@ -46,6 +46,7 @@
 
 import logging
 from typing import Optional
+import numpy as np
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
@@ -62,13 +63,13 @@ from pathlib import Path
 import torch.utils.data
 
 
-def _all_equal(iterable):
+def _all_same(iterable, cmp=lambda x, y: x == y):
     it = iter(iterable)
     try:
         first = next(it)
     except StopIteration:
         return True
-    return all(first == rest for rest in it)
+    return all(cmp(first, rest) for rest in it)
 
 
 def _get_ensemble_dataset(
@@ -81,7 +82,7 @@ def _get_ensemble_dataset(
     """
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
 
-    datasets, metadatas = [], []
+    datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
         params_curr_member = DataLoaderParams(
             path, params.data_type, params.batch_size, params.num_data_workers
@@ -92,13 +93,21 @@ def _get_ensemble_dataset(
 
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
+        sigma_coords.append(dataset.sigma_coordinates)
 
-    if not _all_equal(metadatas):
-        raise ValueError("Metadata for each ensemble member should be equal.")
+    if not _all_same(metadatas):
+        raise ValueError("Metadata for each ensemble member should be the same.")
+
+    ak, bk = list(zip(*[(s["ak"], s["bk"]) for s in sigma_coords]))
+    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
+        raise ValueError(
+            "Sigma coordinates for each ensemble member should be the same."
+        )
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = metadatas[0]  # type: ignore
-    ensemble.area_weights = datasets[0].area_weights
+    ensemble.area_weights = datasets[0].area_weights  # type: ignore
+    ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
     return ensemble
 
 
