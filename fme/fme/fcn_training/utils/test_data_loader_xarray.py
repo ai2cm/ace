@@ -7,6 +7,7 @@ from fme.fcn_training.utils.data_loader_xarray import (
     XarrayDataset,
 )
 import cftime
+from fme.fcn_training.utils.data_typing import SigmaCoordinates
 import numpy as np
 import xarray as xr
 import pytest
@@ -38,6 +39,9 @@ def _mock_netcdf_factory(tmpdir, start, end, file_freq, step_freq, calendar):
         )
         dim_sizes = {"time": len(times), "lat": 4, "lon": 8}
         data_vars = {}
+        for i in range(2):
+            data_vars[f"ak_{i}"] = float(i)
+            data_vars[f"bk_{i}"] = float(i + 1)
         for varname in ["foo", "bar"]:
             data = np.random.randn(*list(dim_sizes.values())).astype(np.float32)
             data_vars[varname] = xr.DataArray(data, dims=list(dim_sizes))
@@ -133,6 +137,7 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
             data = dataset[global_idx][varname].detach().numpy()
             assert data.shape[0] == 2
             assert np.all(data == target_data)
+    assert isinstance(dataset.sigma_coordinates, SigmaCoordinates)
 
 
 @pytest.fixture(scope="session")

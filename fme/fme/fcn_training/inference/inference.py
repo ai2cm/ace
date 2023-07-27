@@ -126,30 +126,30 @@ def main(
             window_time_slice=window_time_slice,
         )
 
-    valid_data_loader, valid_dataset = _get_data_loader()
+    validation = _get_data_loader()
 
     output_netcdf_filename = os.path.join(
         config.experiment_dir,
         "autoregressive_predictions.nc",
     )
     aggregator = InferenceAggregator(
-        valid_dataset.area_weights.to(fme.get_device()),
+        validation.area_weights.to(fme.get_device()),
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
         n_timesteps=config.n_forward_steps + 1,
     )
-    n_samples = get_n_samples(valid_data_loader)
+    n_samples = get_n_samples(validation.loader)
     if config.save_prediction_files:
         writer: Union[DataWriter, NullDataWriter] = DataWriter(
             filename=output_netcdf_filename,
             n_samples=n_samples,
-            metadata=valid_dataset.metadata,
+            metadata=validation.metadata,
         )
     else:
         writer = NullDataWriter()
 
     def data_loader_factory(window_time_slice: Optional[slice] = None):
-        return _get_data_loader(window_time_slice=window_time_slice)[0]
+        return _get_data_loader(window_time_slice=window_time_slice).loader
 
     run_inference(
         aggregator=aggregator,
