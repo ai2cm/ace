@@ -5,6 +5,7 @@ from typing import List
 from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 from fme.fcn_training.utils.data_requirements import DataRequirements
+from fme.fcn_training.utils.data_typing import SigmaCoordinates
 from fme.fcn_training.utils.data_utils import apply_slice
 import numpy as np
 import pathlib
@@ -71,9 +72,9 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
-    assert len(dataset) == samples_per_member * num_ensemble_members
-    assert "ak" in dataset.sigma_coordinates and "bk" in dataset.sigma_coordinates
+    data = get_data_loader(params, True, requirements)  # type: ignore
+    assert len(data.loader) == samples_per_member * num_ensemble_members
+    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
 def test_fv3gfs_loader(tmp_path):
@@ -82,8 +83,8 @@ def test_fv3gfs_loader(tmp_path):
     params = DataLoaderParams(tmp_path, "FV3GFS", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements([], [], [], window_timesteps)
-    _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
-    assert "ak" in dataset.sigma_coordinates and "bk" in dataset.sigma_coordinates
+    data = get_data_loader(params, True, requirements)  # type: ignore
+    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
 @pytest.mark.parametrize(

@@ -103,10 +103,10 @@ def test_metadata(metadata, data_type):
         requirements = DataRequirements(
             names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
         )
-        _, dataset, _ = get_data_loader(  # type: ignore
+        data = get_data_loader(  # type: ignore
             params=params, train=True, requirements=requirements
         )
         target_metadata = {
             name: metadata[name] for name in metadata if metadata[name] is not None
         }
-        assert dataset.metadata == target_metadata  # type: ignore
+        assert data.metadata == target_metadata  # type: ignore

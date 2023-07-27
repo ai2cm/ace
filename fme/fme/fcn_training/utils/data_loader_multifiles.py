@@ -52,11 +52,11 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-# import cv2
 from .data_loader_fv3gfs import FV3GFSDataset
 from .data_loader_xarray import XarrayDataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
+from .data_typing import GriddedData, Dataset
 
 from pathlib import Path
 
@@ -76,7 +76,7 @@ def _get_ensemble_dataset(
     params: DataLoaderParams,
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
-):
+) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
     """
@@ -98,7 +98,9 @@ def _get_ensemble_dataset(
     if not _all_same(metadatas):
         raise ValueError("Metadata for each ensemble member should be the same.")
 
-    ak, bk = list(zip(*[(s["ak"], s["bk"]) for s in sigma_coords]))
+    ak, bk = list(
+        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
+    )
     if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
         raise ValueError(
             "Sigma coordinates for each ensemble member should be the same."
@@ -117,7 +119,7 @@ def get_data_loader(
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
     dist: Optional[Distributed] = None,
-):
+) -> GriddedData:
     """
     Args:
         params: Parameters for the data loader.
@@ -136,7 +138,7 @@ def get_data_loader(
     if params.data_type == "ERA5":
         raise NotImplementedError("ERA5 data loader is not implemented. ")
     elif params.data_type == "FV3GFS":
-        dataset = FV3GFSDataset(
+        dataset: Dataset = FV3GFSDataset(
             params, requirements=requirements, window_time_slice=window_time_slice
         )
         if params.num_data_workers > 0:
@@ -177,7 +179,10 @@ def get_data_loader(
         pin_memory=using_gpu(),
     )
 
-    if train:
-        return dataloader, dataset, sampler
-    else:
-        return dataloader, dataset
+    return GriddedData(
+        loader=dataloader,
+        metadata=dataset.metadata,
+        area_weights=dataset.area_weights,
+        sampler=sampler,
+        sigma_coordinates=dataset.sigma_coordinates,
+    )
