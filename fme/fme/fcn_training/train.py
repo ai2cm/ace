@@ -96,16 +96,12 @@ class Trainer:
             n_forward_steps=self.n_forward_steps
         )
         logging.info("rank %d, begin data loader init" % self.dist.rank)
-        (
-            self.train_data_loader,
-            self.train_dataset,
-            self.train_sampler,
-        ) = get_data_loader(
+        self.train_data = get_data_loader(
             config.train_data,
             requirements=data_requirements,
             train=True,
         )
-        self.valid_data_loader, self.valid_dataset = get_data_loader(
+        self.valid_data = get_data_loader(
             config.validation_data,
             requirements=data_requirements,
             train=False,
@@ -118,7 +114,7 @@ class Trainer:
         self.epoch = self.startEpoch
         self.num_batches_seen = 0
 
-        for data in self.train_data_loader:
+        for data in self.train_data.loader:
             shapes = {k: v.shape for k, v in data.items()}
             break
         self.stepper = config.stepper.get_stepper(shapes, max_epochs=config.max_epochs)
@@ -146,7 +142,7 @@ class Trainer:
                 requirements=inference_data_requirements,
                 window_time_slice=window_time_slice,
                 dist=NotDistributed(is_root=self.dist.is_root()),
-            )[0]
+            ).loader
 
         self._inference_data_loader_factory = get_inference_data_loader
 
@@ -161,8 +157,8 @@ class Trainer:
         for epoch in range(self.startEpoch, self.config.max_epochs):
             self.epoch = epoch
             logging.info(f"Epoch: {epoch+1}")
-            if self.train_sampler is not None:
-                self.train_sampler.set_epoch(epoch)
+            if self.train_data.sampler is not None:
+                self.train_data.sampler.set_epoch(epoch)
 
             start_time = time.time()
             train_logs = self.train_one_epoch()
@@ -217,7 +213,7 @@ class Trainer:
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
             with torch.no_grad():
-                data = next(iter(self.train_data_loader))
+                data = next(iter(self.train_data.loader))
                 stepped = self.stepper.run_on_batch(
                     data, train=False, n_forward_steps=self.n_forward_steps
                 )
@@ -227,7 +223,7 @@ class Trainer:
                         {"batch_loss": self.dist.reduce_mean(stepped.loss)},
                         step=self.num_batches_seen,
                     )
-        for data in self.train_data_loader:
+        for data in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
                 data,
                 train=True,
@@ -249,11 +245,11 @@ class Trainer:
 
     def validate_one_epoch(self):
         aggregator = OneStepAggregator(
-            self.train_dataset.area_weights.to(fme.get_device())
+            self.train_data.area_weights.to(fme.get_device())
         )
 
         with torch.no_grad():
-            for i, data in enumerate(self.valid_data_loader, 0):
+            for data in self.valid_data.loader:
                 self.stepper.run_on_batch(
                     data,
                     train=False,
@@ -267,7 +263,7 @@ class Trainer:
 
         record_step_20 = self.config.inference.n_forward_steps >= 20
         aggregator = InferenceAggregator(
-            self.train_dataset.area_weights.to(fme.get_device()),
+            self.train_data.area_weights.to(fme.get_device()),
             record_step_20=record_step_20,
             log_video=False,
             n_timesteps=self.config.inference.n_forward_steps + 1,

@@ -1,19 +1,20 @@
 import logging
 import os
-from collections import namedtuple
-from typing import Mapping, Optional, Tuple
+from typing import Mapping, Optional
 
 import netCDF4
 import numpy as np
 from torch.utils.data import Dataset
+import torch
+import xarray as xr
 
 from fme.core import metrics
 
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 from .data_utils import load_series_data
-
-VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
+from .data_typing import SigmaCoordinates, VariableMetadata
+from fme.core.device import get_device
 
 
 class FV3GFSDataset(Dataset):
@@ -73,8 +74,7 @@ class FV3GFSDataset(Dataset):
             )
 
         self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
-        ak, bk = self._get_sigma_coordinates()
-        self.sigma_coordinates = dict(ak=ak, bk=bk)
+        self.sigma_coordinates = get_sigma_coordinates(self.ds)
 
     def _log_files_stats(self):
         if "grid_xt" in self.ds.variables:
@@ -98,27 +98,6 @@ class FV3GFSDataset(Dataset):
                 )
         return result
 
-    def _get_sigma_coordinates(self) -> Tuple[np.ndarray, np.ndarray]:
-        ak = sorted([v for v in self.ds.variables if v.startswith("ak")])
-        bk = sorted([v for v in self.ds.variables if v.startswith("bk")])
-
-        if len(ak) == 0 or len(bk) == 0:
-            raise ValueError("Dataset does not contain ak and bk sigma coordinates.")
-
-        if len(ak) != len(bk):
-            raise ValueError(
-                "Dataset contains different number of ak and bk coordinates."
-            )
-
-        if len(ak) > 10:
-            raise NotImplementedError(
-                "Sigma coordinate names must be parsed to support more than 10 levels."
-            )
-
-        ak = np.array([self.ds[k][:] for k in ak])
-        bk = np.array([self.ds[k][:] for k in bk])
-        return ak, bk
-
     def __len__(self):
         return self.n_samples_total
 
@@ -130,3 +109,53 @@ class FV3GFSDataset(Dataset):
             names=self.names,
             window_time_slice=self.window_time_slice,
         )
+
+
+def get_sigma_coordinates(ds) -> SigmaCoordinates:
+    """
+    Get sigma coordinates from a dataset.
+
+    Assumes that the dataset contains variables named `ak_N` and `bk_N` where
+    `N` is the level number. The returned tensors are sorted by level number.
+
+    Args:
+        ds: Dataset to get sigma coordinates from.
+    """
+    if isinstance(ds, xr.Dataset):
+        ak_mapping = {
+            int(v[3:]): torch.as_tensor(ds[v].values)
+            for v in ds.variables
+            if v.startswith("ak_")
+        }
+        bk_mapping = {
+            int(v[3:]): torch.as_tensor(ds[v].values)
+            for v in ds.variables
+            if v.startswith("bk_")
+        }
+    else:  # netCDF4 dataset
+        ak_mapping = {
+            int(v[3:]): torch.as_tensor(ds.variables[v][:])
+            for v in ds.variables
+            if v.startswith("ak_")
+        }
+        bk_mapping = {
+            int(v[3:]): torch.as_tensor(ds.variables[v][:])
+            for v in ds.variables
+            if v.startswith("bk_")
+        }
+    ak_list = [ak_mapping[k] for k in sorted(ak_mapping.keys())]
+    bk_list = [bk_mapping[k] for k in sorted(bk_mapping.keys())]
+
+    if len(ak_list) == 0 or len(bk_list) == 0:
+        raise ValueError("Dataset does not contain ak and bk sigma coordinates.")
+
+    if len(ak_list) != len(bk_list):
+        raise ValueError(
+            "Expected same number of ak and bk coordinates, "
+            f"got {len(ak_list)} and {len(bk_list)}."
+        )
+
+    return SigmaCoordinates(
+        ak=torch.as_tensor(ak_list, device=get_device()),
+        bk=torch.as_tensor(bk_list, device=get_device()),
+    )

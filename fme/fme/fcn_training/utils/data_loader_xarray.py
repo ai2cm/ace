@@ -1,13 +1,15 @@
 import os
+from fme.core import metrics
+import numpy as np
 import torch
 import logging
 import xarray as xr
 from glob import glob
 from typing import Mapping, Optional, Tuple
-from torch.utils.data import Dataset
+from .data_typing import Dataset, VariableMetadata
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-from .data_loader_fv3gfs import VariableMetadata
+from .data_loader_fv3gfs import get_sigma_coordinates
 from .data_utils import load_series_data
 
 DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
@@ -54,6 +56,27 @@ class XarrayDataset(Dataset):
         if params.n_samples is not None:
             self.n_samples_total = params.n_samples
         self.window_time_slice = window_time_slice
+        first_dataset = xr.open_dataset(
+            self.full_paths[0],
+            decode_times=False,
+        )
+        if (
+            "lat" not in first_dataset.variables
+            and "grid_yt" not in first_dataset.variables
+        ):
+            raise ValueError(
+                "Dataset must have either 'lat' or 'grid_yt' variable for latitude, "
+                f"but only has {list(first_dataset.variables)}"
+            )
+        try:
+            lats, lons = np.array(first_dataset["grid_yt"]), np.array(
+                first_dataset["grid_xt"]
+            )
+        except KeyError:
+            lats, lons = np.array(first_dataset["lat"]), np.array(first_dataset["lon"])
+
+        self._area_weights = metrics.spherical_area_weights(lats, len(lons))
+        self._sigma_coordinates = get_sigma_coordinates(first_dataset)
 
     def _get_metadata(self, ds):
         result = {}
@@ -85,21 +108,16 @@ class XarrayDataset(Dataset):
             logging.info(f"Following variables are available: {list(ds.variables)}.")
 
     @property
+    def area_weights(self) -> torch.Tensor:
+        return self._area_weights
+
+    @property
     def metadata(self) -> Mapping[str, VariableMetadata]:
         return self._metadata
 
     @property
     def sigma_coordinates(self):
-        raise NotImplementedError("Sigma coordinates not available for XarrayDataset.")
-
-    @property
-    def ds(self) -> xr.Dataset:
-        return xr.open_mfdataset(
-            self.full_paths,
-            data_vars="minimal",
-            coords="minimal",
-            decode_times=False,
-        )
+        return self._sigma_coordinates
 
     def __len__(self):
         return self.n_samples_total
