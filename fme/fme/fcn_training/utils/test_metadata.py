@@ -58,6 +58,11 @@ def _save_netcdf(
         )
         for dim_name, size in dim_sizes.items()
     }
+
+    for i in range(7):
+        data_vars[f"ak_{i}"] = float(i)
+        data_vars[f"bk_{i}"] = float(i + 1)
+
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 

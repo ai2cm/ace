@@ -89,6 +89,10 @@ class XarrayDataset(Dataset):
         return self._metadata
 
     @property
+    def sigma_coordinates(self):
+        raise NotImplementedError("Sigma coordinates not available for XarrayDataset.")
+
+    @property
     def ds(self) -> xr.Dataset:
         return xr.open_mfdataset(
             self.full_paths,

@@ -28,6 +28,11 @@ def _save_netcdf(filename, dim_sizes, variable_names):
         )
         for dim_name, size in dim_sizes.items()
     }
+
+    for i in range(7):
+        data_vars[f"ak_{i}"] = float(i)
+        data_vars[f"bk_{i}"] = float(i + 1)
+
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
@@ -68,6 +73,17 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
     _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
     assert len(dataset) == samples_per_member * num_ensemble_members
+    assert "ak" in dataset.sigma_coordinates and "bk" in dataset.sigma_coordinates
+
+
+def test_fv3gfs_loader(tmp_path):
+    """Checks that sigma coordinates are present."""
+    _create_dataset_on_disk(tmp_path)
+    params = DataLoaderParams(tmp_path, "FV3GFS", 1, 0, None)
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements([], [], [], window_timesteps)
+    _, dataset, _ = get_data_loader(params, True, requirements)  # type: ignore
+    assert "ak" in dataset.sigma_coordinates and "bk" in dataset.sigma_coordinates
 
 
 @pytest.mark.parametrize(
