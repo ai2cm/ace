@@ -76,6 +76,7 @@ def _get_ensemble_dataset(
     params: DataLoaderParams,
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
+    sub_dataset=FV3GFSDataset,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -87,7 +88,7 @@ def _get_ensemble_dataset(
         params_curr_member = DataLoaderParams(
             path, params.data_type, params.batch_size, params.num_data_workers
         )
-        dataset = FV3GFSDataset(
+        dataset = sub_dataset(
             params_curr_member, requirements, window_time_slice=window_time_slice
         )
 
@@ -159,6 +160,13 @@ def get_data_loader(
     elif params.data_type == "ensemble":
         dataset = _get_ensemble_dataset(
             params, requirements, window_time_slice=window_time_slice
+        )
+    elif params.data_type == "ensemble_xarray":
+        dataset = _get_ensemble_dataset(
+            params,
+            requirements,
+            window_time_slice=window_time_slice,
+            sub_dataset=XarrayDataset,
         )
     else:
         raise NotImplementedError(
