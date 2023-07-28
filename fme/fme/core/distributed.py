@@ -22,7 +22,8 @@ class Distributed:
 
     Attributes:
         world_size: The number of processes in the distributed training job.
-        rank: The rank of the current process.
+        rank: The global rank of the current process.
+        local_rank: The node-local rank of the current process.
     """
 
     @classmethod
@@ -52,13 +53,15 @@ class Distributed:
                     backend="gloo", init_method="env://"
                 )
             self.world_size = torch.distributed.get_world_size()
+            self.local_rank = int(os.environ["LOCAL_RANK"])
             self.rank = torch.distributed.get_rank()
             if using_gpu():
-                torch.cuda.set_device(self.rank)
+                torch.cuda.set_device(self.local_rank)
             distributed = True
         else:
             self.world_size = 1
             self.rank = 0
+            self.local_rank = 0
             distributed = False
         return distributed
 
