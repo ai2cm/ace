@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, Optional
+from typing import Literal, Optional, Tuple
 
 # this package is installed in models/FourCastNet
 from fourcastnet.networks.afnonet import AFNONetBuilder
@@ -29,8 +29,7 @@ class ModuleConfig(Protocol):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape_x: int,
-        img_shape_y: int,
+        img_shape: Tuple[int, int],
     ) -> nn.Module:
         """
         Build a nn.Module given information about the input and output channels
@@ -39,8 +38,8 @@ class ModuleConfig(Protocol):
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
-            img_shape_x: width of the input image
-            img_shape_y: height of the input image
+            img_shape: last two dimensions of data, corresponding to lat and
+                lon when using FourCastNet conventions
 
         Returns:
             a nn.Module
@@ -79,14 +78,13 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape_x: int,
-        img_shape_y: int,
+        img_shape: Tuple[int, int],
     ):
         sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
-            img_shape=(img_shape_x, img_shape_y),
+            img_shape=img_shape,
         )
 
         # Patch in the grid that our data lies on rather than the one which is
@@ -97,7 +95,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
 
         # [1] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py  # noqa: E501
         # [2] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L518  # noqa: E501
-        nlat, nlon = img_shape_y, img_shape_x
+        nlat, nlon = img_shape
         modes_lat = int(nlat * self.hard_thresholding_fraction)
         modes_lon = int((nlon // 2 + 1) * self.hard_thresholding_fraction)
         sht = harmonics.RealSHT(
@@ -148,8 +146,7 @@ class ModuleSelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape_x: int,
-        img_shape_y: int,
+        img_shape: Tuple[int, int],
     ) -> nn.Module:
         """
         Build a nn.Module given information about the input and output channels
@@ -158,8 +155,8 @@ class ModuleSelector:
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
-            img_shape_x: width of the input image
-            img_shape_y: height of the input image
+            img_shape: last two dimensions of data, corresponding to lat and
+                lon when using FourCastNet conventions
 
         Returns:
             a nn.Module
@@ -167,8 +164,7 @@ class ModuleSelector:
         return NET_REGISTRY[self.type](**self.config).build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            img_shape_x=img_shape_x,
-            img_shape_y=img_shape_y,
+            img_shape=img_shape,
         )
 
     def get_state(self) -> Mapping[str, Any]:

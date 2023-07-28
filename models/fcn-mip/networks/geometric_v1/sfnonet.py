@@ -1,5 +1,6 @@
 import dataclasses
 from functools import partial
+from typing import Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -234,12 +235,12 @@ class FourierNeuralOperatorBuilder:
     laplace_weighting: bool = False
     checkpointing: bool = False
 
-    def build(self, n_in_channels: int, n_out_channels: int, img_shape_x: int, img_shape_y: int):
+    def build(self, n_in_channels: int, n_out_channels: int, img_shape: Tuple[int, int]):
         return FourierNeuralOperatorNet(
             params=self,
             in_chans = n_in_channels,
             out_chans = n_out_channels,
-            img_size = (img_shape_x, img_shape_y),
+            img_size = img_shape,
         )
 
 

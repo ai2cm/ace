@@ -9,7 +9,7 @@ def test_sfno_builder():
 
     builder = registry.NET_REGISTRY["SphericalFourierNeuralOperatorNet"]()
 
-    sfno_net = builder.build(1, 1, 32, 16)
+    sfno_net = builder.build(1, 1, (16, 32))
 
     assert (
         sfno_net.trans_down.grid == "legendre-gauss"

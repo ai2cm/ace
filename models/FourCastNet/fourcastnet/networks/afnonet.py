@@ -6,6 +6,7 @@ from functools import partial
 from collections import OrderedDict
 from copy import Error, deepcopy
 from re import S
+from typing import Tuple
 from numpy.lib.arraypad import pad
 import numpy as np
 import torch
@@ -150,17 +151,16 @@ class Block(nn.Module):
         return x
 
 
-
 @dataclasses.dataclass
 class AFNONetBuilder:
     patch_size: int = 16
     embed_dim: int = 768
     num_blocks: int = 16
 
-    def build(self, n_in_channels: int, n_out_channels: int, img_shape_x: int, img_shape_y: int):
+    def build(self, n_in_channels: int, n_out_channels: int, img_shape: Tuple[int, int]):
         return AFNONet(
             params=self,
-            img_size=(img_shape_x, img_shape_y),
+            img_size=img_shape,
             in_chans=n_in_channels,
             out_chans=n_out_channels,
         )
