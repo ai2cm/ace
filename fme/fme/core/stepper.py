@@ -156,8 +156,8 @@ class SingleModuleStepper:
 
         if dist.is_distributed():
             if using_gpu():
-                device_ids = [dist.rank]
-                output_device = [dist.rank]
+                device_ids = [dist.local_rank]
+                output_device = [dist.local_rank]
             else:
                 device_ids = None
                 output_device = None
