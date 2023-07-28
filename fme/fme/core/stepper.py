@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Optional, Union
+from typing import List, Dict, Tuple, Optional, Union, cast
 from fme.core.aggregator import OneStepAggregator, NullAggregator, InferenceAggregator
 from fme.core.distributed import Distributed
 from fme.fcn_training.utils.darcy_loss import LpLoss
@@ -138,8 +138,7 @@ class SingleModuleStepper:
         self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            img_shape_x=data_shapes[example_name][-2],
-            img_shape_y=data_shapes[example_name][-1],
+            img_shape=cast(Tuple[int, int], tuple(data_shapes[example_name][-2:])),
         ).to(get_device())
         self.data_shapes = data_shapes
         self._config = config
