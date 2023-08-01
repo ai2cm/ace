@@ -5,9 +5,8 @@
 #SBATCH -C cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH -t 05:00:00
+#SBATCH -t 06:00:00
 #SBATCH --output=%x-%j.out
-#SBATCH --image=registry.services.nersc.gov/ai2cm/fv3net:latest
 
 while [[ "$#" -gt 0 ]]
 do case $1 in
@@ -25,7 +24,7 @@ done
 
 if [[ -z "${INPUT_DIR}" ]]
 then
-    echo "Option -i,--input-dir missing"
+    echo "Option -i, --input-dir missing"
     exit 1;
 elif [[ -z "${ZARR}" ]]
 then
@@ -47,56 +46,45 @@ mkdir -p $OUTPUT_DIR
 # TODO: align HDF5 chunks for Perlmutter's default 1MB stripe size
 stripe_small $OUTPUT_DIR
 
+# NOTE: assumes you've already created the fv3net conda env
+source activate fv3net
+
 set -xe
 
 # create the zarr from E3SMv2 nc files
-srun -u shifter \
-    bash -c "
-        python compute_dataset_e3smv2.py --n-split=100 --n-workers=32 \
-            -i ${INPUT_DIR} -o ${ZARR}
-    "
+python -u compute_dataset_e3smv2.py --sht-roundtrip \
+    --n-split=200 --n-workers=16 \
+    -i ${INPUT_DIR} -o ${ZARR}
 
-# save first 19 years of data to netCDFs (intended for training)
-srun -u shifter \
-    bash -c "
-        python convert_to_monthly_netcdf.py \
-            ${ZARR} \
-            ${OUTPUT_DIR}/traindata \
-            --start-date 0002-01-01 \
-            --end-date 0020-12-31 \
-            --nc-format NETCDF4
-    "
+# save first 30 years of data to netCDFs (intended for training)
+python -u convert_to_monthly_netcdf.py \
+    ${ZARR} \
+    ${OUTPUT_DIR}/traindata \
+    --start-date 0002-01-01 \
+    --end-date 0031-12-31 \
+    --nc-format NETCDF4
 
-# save final year of data to netCDFs (intended for validation)
-srun -u shifter \
-    bash -c "
-        python convert_to_monthly_netcdf.py \
-            ${ZARR} \
-            ${OUTPUT_DIR}/validdata \
-            --start-date 0021-01-01 \
-            --end-date 0021-12-31 \
-            --nc-format NETCDF4
-    "
+# save final 10 years of data to netCDFs (intended for validation)
+python -u convert_to_monthly_netcdf.py \
+    ${ZARR} \
+    ${OUTPUT_DIR}/validdata \
+    --start-date 0032-01-01 \
+    --end-date 0041-12-31 \
+    --nc-format NETCDF4
 
-# compute residual scaling stats
-srun -u shifter \
-    bash -c "
-        python get_stats.py \
-            ${ZARR} \
-            ${OUTPUT_DIR}/statsdata/residual \
-            --start-date 0002-01-01 \
-            --end-date 0020-12-31 \
-            --data-type E3SMV2
-    "
+# compute residual scaling stats on training data
+python -u get_stats.py \
+    ${ZARR} \
+    ${OUTPUT_DIR}/statsdata/residual \
+    --start-date 0002-01-01 \
+    --end-date 0031-12-31 \
+    --data-type E3SMV2
 
-# compute full field scaling stats
-srun -u shifter \
-    bash -c "
-        python get_stats.py \
-            ${ZARR} \
-            ${OUTPUT_DIR}/statsdata/full_field \
-            --start-date 0002-01-01 \
-            --end-date 0020-12-31 \
-            --data-type E3SMV2 \
-            --full-field
-    "
+# compute full field scaling stats on training data
+python -u get_stats.py \
+    ${ZARR} \
+    ${OUTPUT_DIR}/statsdata/full_field \
+    --start-date 0002-01-01 \
+    --end-date 0031-12-31 \
+    --data-type E3SMV2 \
+    --full-field

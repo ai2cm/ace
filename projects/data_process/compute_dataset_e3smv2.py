@@ -14,13 +14,13 @@ import time
 import click
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client
-from typing import Callable, List, MutableMapping, Tuple
+from typing import Callable, List, MutableMapping, Sequence, Tuple
 from glob import glob
 from itertools import chain
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
-
+from xtorch_harmonics import roundtrip
 
 from compute_dataset_fv3gfs import (
     assert_global_dry_air_mass_conservation,
@@ -312,6 +312,46 @@ def compute_pressure_thickness(
     return ds.assign({output_name: thickness})
 
 
+def compute_coarse_ak_bk(
+    ds: xr.Dataset,
+    interface_indices: Sequence[Tuple[int, int]] = VERTICAL_LEVEL_INTERFACES,
+    z_dim="ilev",
+    hybrid_level_coeffs: List[str] = HYBRID_LEVEL_COEFFS,
+    reference_pressure: float = REFERENCE_PRESSURE,
+):
+    """Return dataset with scalar ak and bk coordinates that define coarse
+    interfaces, which should match the conventions used in compute_dataset_fv3gfs.py.
+
+    Args:
+        ds: xr.Dataset with hybrid level coefficients named like hybrid_level_coeffs.
+        interface_indices: list of tuples of indices of the interfaces in the vertical.
+        z_dim: name of dimension along which ak and bk are defined.
+        hybrid_level_coeffs: Hybrid level coeff names in ds, ordered like ["ak", "bk"].
+
+    Returns:
+        xr.Dataset with ak and bk variables as scalars labeled as ak_0, bk_0, etc.
+
+    Note:
+        The ak and bk variables will have one more vertical level than the other 3D
+        variables since they represent the interfaces between levels.
+
+    """
+    data = {}
+    hyai, hybi = hybrid_level_coeffs
+    for i, (start, end) in enumerate(interface_indices):
+        data[f"ak_{i}"] = ds[hyai].isel({z_dim: start}) * reference_pressure
+        data[f"bk_{i}"] = ds[hybi].isel({z_dim: start})
+        if i == len(interface_indices) - 1:
+            data[f"ak_{i + 1}"] = ds[hyai].isel({z_dim: end}) * reference_pressure
+            data[f"bk_{i + 1}"] = ds[hybi].isel({z_dim: end})
+    for i in range(len(interface_indices) + 1):
+        data[f"ak_{i}"].attrs["units"] = "Pa"
+        data[f"bk_{i}"].attrs["units"] = ""  # unitless quantity
+        for name in ["ak", "bk"]:
+            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop(z_dim)
+    return xr.Dataset(data).compute()
+
+
 def compute_surface_precipitation_rate(
     ds: xr.Dataset,
     total_precip_rate_name: str = TOTAL_PRECIP_RATE,
@@ -350,13 +390,17 @@ def compute_rad_fluxes(
 
 
 def construct_lazy_dataset(
-    dataset_dirs: MutableMapping[str, str], vanilla: bool = False
+    dataset_dirs: MutableMapping[str, str],
+    vanilla: bool = False,
+    sht_roundtrip: bool = False,
 ) -> xr.Dataset:
     start = time.time()
     print(f"Opening dataset...")
     ds = open_dataset(dataset_dirs, vanilla=vanilla)
     print(f"Dataset opened in {time.time() - start:.2f} s total.")
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+    if sht_roundtrip:
+        ds = roundtrip(ds, lat_dim="lat", lon_dim="lon")
     if not vanilla:
         ds = compute_pressure_thickness(ds)
         ds = compute_rad_fluxes(ds)
@@ -386,13 +430,22 @@ def construct_lazy_dataset(
             PRECIP_RATE,
             LATENT_HEAT_OF_VAPORIZATION,
         )
+        ak_bk_ds = compute_coarse_ak_bk(ds, VERTICAL_LEVEL_INTERFACES)
+        ds = xr.merge([ds, ak_bk_ds])
         ds_dirs = list(dataset_dirs.values())
     else:
         ds_dirs = [dataset_dirs[INSTANT]]
     ds = ds.chunk(CHUNKS).astype(np.float32)
     ds.attrs["history"] = (
-        "Dataset computed by full-model/projects/e3smv2_data_process/compute_dataset_e3smv2.py"  # noqa: 501
-        f" script, inputs from the following directories : {ds_dirs}."
+        "Dataset computed by full-model/projects/e3smv2_data_process"
+        "/compute_dataset_e3smv2.py"
+        f" script, using inputs from the following directories: {ds_dirs}."
+    )
+    ds.attrs["vertical_coordinate"] = (
+        "The pressure at level interfaces can by computed as "
+        "p_i = ak_i + bk_i * PS, where PS is the surface pressure and the "
+        "p_i pressure corresponds to the interface at the top of the i'th finite "
+        "volume layer, counting down from the top of atmosphere."
     )
     return ds
 
@@ -407,6 +460,7 @@ def construct_lazy_dataset(
     is_flag=True,
     help="Create a dataset of 2D vars for checking the water budget.",
 )
+@click.option("--sht-roundtrip", is_flag=True, help="SHT roundtrip as a first step.")
 @click.option(
     "-i", "--input-dir", default=INPUT_DIR, help="Directory in which to find input ncs."
 )
@@ -417,6 +471,7 @@ def main(
     debug,
     subsample,
     vanilla,
+    sht_roundtrip,
     check_conservation,
     water_budget_dataset,
     input_dir,
@@ -431,7 +486,7 @@ def main(
         INSTANT: os.path.join(input_dir, INSTANT),
         MEAN: os.path.join(input_dir, MEAN),
     }
-    ds = construct_lazy_dataset(dataset_dirs, vanilla)
+    ds = construct_lazy_dataset(dataset_dirs, vanilla, sht_roundtrip)
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
