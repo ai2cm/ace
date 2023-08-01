@@ -6,7 +6,7 @@ from torch import nn
 from fme.core.device import get_device
 from fme.core import metrics
 from fme.core.distributed import Distributed
-from ..reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
+from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
