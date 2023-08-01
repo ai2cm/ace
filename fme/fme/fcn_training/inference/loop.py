@@ -9,9 +9,15 @@ from fme.core.device import get_device
 
 
 class EnsembleBatch:
-    def __init__(self, i_batch: int, writer: Union[DataWriter, NullDataWriter]):
+    def __init__(
+        self,
+        i_batch: int,
+        n_forward_steps: int,
+        writer: Union[DataWriter, NullDataWriter],
+    ):
         self.i_batch = i_batch
         self.i_time = 0
+        self.n_forward_steps = n_forward_steps
         self.writer = writer
         # tensors have shape [n_sample, n_lat, n_lon] with no time axis
         self._initial_condition: Optional[Mapping[str, torch.Tensor]] = None
@@ -36,10 +42,14 @@ class EnsembleBatch:
         )
         self.i_time += tensor_shape[1] - 1  # remove 1 because the last timestep is the
         # initial condition for the next segment
-        # store the end of the time window as initial condition for the next segment.
-        self._initial_condition = {key: value[:, -1] for key, value in data.items()}
-        for key, value in gen_data.items():
-            self._initial_condition[key] = value[:, -1]
+        if self.i_time < self.n_forward_steps:  # only store if needed
+            # store the end of the time window as
+            # initial condition for the next segment.
+            self._initial_condition = {key: value[:, -1] for key, value in data.items()}
+            for key, value in gen_data.items():
+                self._initial_condition[key] = value[:, -1]
+            for key, value in self._initial_condition.items():
+                self._initial_condition[key] = value.detach().cpu()
 
     def apply_initial_condition(self, data: Mapping[str, torch.Tensor]):
         """
@@ -52,9 +62,16 @@ class EnsembleBatch:
                 the time axis will be replaced with the last value from the
                 previous segment.
         """
+        if self.i_time >= self.n_forward_steps:
+            raise ValueError(
+                "Cannot apply initial condition after "
+                "the last segment has been appended, currently at "
+                f"time index {self.i_time} "
+                f"with {self.n_forward_steps} max forward steps."
+            )
         if self._initial_condition is not None:
             for key, value in data.items():
-                value[:, 0] = self._initial_condition[key]
+                value[:, 0] = self._initial_condition[key].to(value.device)
 
 
 class DataLoaderFactory(Protocol):
@@ -76,7 +93,7 @@ def run_inference(
         writer = NullDataWriter()
     example_valid_data_loader = data_loader_factory(window_time_slice=slice(0, 1))
     batch_managers = [
-        EnsembleBatch(i_batch, writer)
+        EnsembleBatch(i_batch=i_batch, n_forward_steps=n_forward_steps, writer=writer)
         for i_batch in range(len(example_valid_data_loader))
     ]
     if len(batch_managers) == 0:
