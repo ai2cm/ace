@@ -4,27 +4,9 @@ and aggregating them into a single metric value. The functions here mainly exist
 to turn metric functions that may have different APIs into a common API,
 so that they can be iterated over and called in the same way in a loop.
 """
-from typing import Protocol, Optional, Literal
+from typing import Protocol, Optional
 from fme.core.metrics import Dimension
 import torch
-
-
-class ReducedMetric(Protocol):
-    """Used to record a metric value on batches of data (potentially out-of-memory)
-    and then get the total metric at the end.
-    """
-
-    def record(self, target: torch.Tensor, gen: torch.Tensor):
-        """
-        Update metric for a batch of data.
-        """
-        ...
-
-    def get(self) -> torch.Tensor:
-        """
-        Get the total metric value, not divided by number of recorded batches.
-        """
-        ...
 
 
 class AreaWeightedFunction(Protocol):
@@ -43,41 +25,22 @@ class AreaWeightedFunction(Protocol):
         ...
 
 
-class AreaWeightedSingleTargetFunction(Protocol):
-    """
-    A function that computes a metric on a single value, weighted by area.
+class ReducedMetric(Protocol):
+    """Used to record a metric value on batches of data (potentially out-of-memory)
+    and then get the total metric at the end.
     """
 
-    def __call__(
-        self,
-        tensor: torch.Tensor,
-        weights: Optional[torch.Tensor] = None,
-        dim: Dimension = (),
-    ) -> torch.Tensor:
+    def record(self, target: torch.Tensor, gen: torch.Tensor):
+        """
+        Update metric for a batch of data.
+        """
         ...
 
-
-def compute_metric_on(
-    source: Literal["gen", "target"], metric: AreaWeightedSingleTargetFunction
-) -> AreaWeightedFunction:
-    """Turns a single-target metric function
-    (computed on only the generated or target data) into a function that takes in
-    both the generated and target data as arguments, as required for the APIs
-    which call generic metric functions.
-    """
-
-    def metric_wrapper(
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-        weights: Optional[torch.Tensor] = None,
-        dim: Dimension = (),
-    ) -> torch.Tensor:
-        if source == "gen":
-            return metric(predicted, weights=weights, dim=dim)
-        elif source == "target":
-            return metric(truth, weights=weights, dim=dim)
-
-    return metric_wrapper
+    def get(self) -> torch.Tensor:
+        """
+        Get the total metric value, not divided by number of recorded batches.
+        """
+        ...
 
 
 class AreaWeightedReducedMetric:
