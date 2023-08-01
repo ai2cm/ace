@@ -170,6 +170,8 @@ class Trainer:
 
             train_loss = train_logs["train/mean/loss"]
             valid_loss = valid_logs["val/mean/loss"]
+            # need to get the learning rate before stepping the scheduler
+            lr = self.stepper.optimization.optimizer.param_groups[0]["lr"]
 
             self.stepper.step_scheduler(valid_loss)
 
@@ -186,8 +188,6 @@ class Trainer:
             logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
 
             logging.info("Logging to wandb")
-            for pg in self.stepper.optimization.optimizer.param_groups:
-                lr = pg["lr"]
             all_logs = {
                 **train_logs,
                 **valid_logs,
