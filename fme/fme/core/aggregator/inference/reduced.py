@@ -6,7 +6,6 @@ import numpy as np
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from ..reduced_metrics import compute_metric_on
 from fme.core.wandb import WandB
 from fme.core.metrics import Dimension
 import xarray as xr
@@ -47,6 +46,43 @@ class AreaWeightedFunction(Protocol):
         dim: Dimension = (),
     ) -> torch.Tensor:
         ...
+
+
+class AreaWeightedSingleTargetFunction(Protocol):
+    """
+    A function that computes a metric on a single value, weighted by area.
+    """
+
+    def __call__(
+        self,
+        tensor: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        dim: Dimension = (),
+    ) -> torch.Tensor:
+        ...
+
+
+def compute_metric_on(
+    source: Literal["gen", "target"], metric: AreaWeightedSingleTargetFunction
+) -> AreaWeightedFunction:
+    """Turns a single-target metric function
+    (computed on only the generated or target data) into a function that takes in
+    both the generated and target data as arguments, as required for the APIs
+    which call generic metric functions.
+    """
+
+    def metric_wrapper(
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        weights: Optional[torch.Tensor] = None,
+        dim: Dimension = (),
+    ) -> torch.Tensor:
+        if source == "gen":
+            return metric(predicted, weights=weights, dim=dim)
+        elif source == "target":
+            return metric(truth, weights=weights, dim=dim)
+
+    return metric_wrapper
 
 
 class AreaWeightedReducedMetric:
