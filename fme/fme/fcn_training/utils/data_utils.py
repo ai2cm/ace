@@ -63,3 +63,18 @@ def apply_slice(outer_slice: slice, inner_slice: slice) -> slice:
     stop = min(stop_outer, stop_inner)
     start = min(start, stop)
     return slice(start, stop)
+
+
+def get_lons_and_lats(ds: Union[netCDF4.MFDataset, xr.Dataset]):
+    if "grid_xt" in ds.variables:
+        hdims = "grid_xt", "grid_yt"
+    elif "lon" in ds.variables:
+        hdims = "lon", "lat"
+    elif "longitude" in ds.variables:
+        hdims = "longitude", "latitude"
+    else:
+        raise ValueError("Could not identify dataset's horizontal dimensions.")
+    lons, lats = ds.variables[hdims[0]][:], ds.variables[hdims[1]][:]
+    if isinstance(ds, xr.Dataset):
+        lons, lats = lons.values, lats.values
+    return np.array(lons), np.array(lats)

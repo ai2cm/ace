@@ -3,7 +3,6 @@ import os
 from typing import Mapping, Optional
 
 import netCDF4
-import numpy as np
 from torch.utils.data import Dataset
 import torch
 import xarray as xr
@@ -12,12 +11,12 @@ from fme.core import metrics
 
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-from .data_utils import load_series_data
+from .data_utils import load_series_data, get_lons_and_lats
 from .data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.device import get_device
 
 
-class FV3GFSDataset(Dataset):
+class NetCDF4Dataset(Dataset):
     def __init__(
         self,
         params: DataLoaderParams,
@@ -45,7 +44,6 @@ class FV3GFSDataset(Dataset):
         self.ds = netCDF4.MFDataset(self.full_path)
         self.ds.set_auto_mask(False)
         self.metadata = self._compute_variable_metadata()  # Note: requires `self.ds`
-        self._log_files_stats()
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
         if params.n_samples is not None:
             if params.n_samples > self.n_samples_total:
@@ -56,33 +54,14 @@ class FV3GFSDataset(Dataset):
             self.n_samples_total = params.n_samples
         logging.info(f"Using {self.n_samples_total} samples.")
         self.window_time_slice = window_time_slice
-        self.lats, self.lons = np.array(self.ds["grid_yt"]), np.array(
-            self.ds["grid_xt"]
-        )
-        self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
-
-        try:
-            self.lats, self.lons = np.array(self.ds.variables["grid_yt"]), np.array(
-                self.ds.variables["grid_xt"]
-            )
-        except AttributeError:
-            raise ValueError(
-                (
-                    "Dataset does not contain grid_yt and"
-                    "grid_xt variables which define the spatial grid."
-                )
-            )
-
+        self.lons, self.lats = get_lons_and_lats(self.ds)
+        self._log_files_stats()
         self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
         self.sigma_coordinates = get_sigma_coordinates(self.ds)
 
     def _log_files_stats(self):
-        if "grid_xt" in self.ds.variables:
-            img_shape_y = len(self.ds.variables["grid_yt"][:])
-            img_shape_x = len(self.ds.variables["grid_xt"][:])
-        else:
-            img_shape_y = len(self.ds.variables["lat"][:])
-            img_shape_x = len(self.ds.variables["lon"][:])
+        img_shape_y = len(self.lats)
+        img_shape_x = len(self.lons)
         logging.info(f"Image shape is {img_shape_x} x {img_shape_y}.")
         logging.info(f"Following variables are available: {list(self.ds.variables)}.")
 
