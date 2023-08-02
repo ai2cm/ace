@@ -38,7 +38,12 @@ class MeanAggregator:
     metrics across batches and processors.
     """
 
-    def __init__(self, area_weights: torch.Tensor, target_time: int = 1):
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        target_time: int = 1,
+        dist: Optional[Distributed] = None,
+    ):
         self._area_weights = area_weights
         self._shape_x = None
         self._shape_y = None
@@ -46,6 +51,10 @@ class MeanAggregator:
         self._loss = torch.tensor(0.0, device=get_device())
         self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
         self._target_time = target_time
+        if dist is None:
+            self._dist = Distributed.get_instance()
+        else:
+            self._dist = dist
 
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
@@ -124,9 +133,8 @@ class MeanAggregator:
                 logs[f"{label}/{metric}/{key}"] = (
                     self._variable_metrics[metric][key].get() / self._n_batches
                 )
-        dist = Distributed.get_instance()
         for key in sorted(logs.keys()):
-            logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
+            logs[key] = float(self._dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
 
     @torch.no_grad()
