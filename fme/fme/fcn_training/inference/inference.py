@@ -19,9 +19,7 @@ from fme.fcn_training.train_config import LoggingConfig
 from fme.core import SingleModuleStepper
 from fme.core.wandb import WandB
 from fme.fcn_training.inference.data_writer import DataWriter, NullDataWriter
-from fme.fcn_training.inference.loop import run_inference
-
-wandb = WandB.get_instance()
+from fme.fcn_training.inference.loop import run_inference, run_dataset_inference
 
 
 def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
@@ -35,13 +33,18 @@ def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
 @dataclasses.dataclass
 class InferenceConfig:
     """
+    Configuration for running inference.
+
     Attributes:
         experiment_dir: Directory to save results to.
         n_forward_steps: Number of steps to run the model forward for. Must be divisble
             by forward_steps_in_memory.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
-        validation_data: configuration for validation data.
+        validation_data: Configuration for validation data.
+        prediction_data: Configuration for prediction data to evaluate. If given,
+            model evaluation will not run, and instead predictions will be evaluated.
+            Model checkpoint will still be used to determine inputs and outputs.
         log_video: Whether to log videos of the predictions.
         save_prediction_files: Whether to save the predictions as a netcdf file.
         forward_steps_in_memory: Number of forward steps to complete in memory
@@ -53,6 +56,7 @@ class InferenceConfig:
     checkpoint_path: str
     logging: LoggingConfig
     validation_data: DataLoaderParams
+    prediction_data: Optional[DataLoaderParams] = None
     log_video: bool = True
     save_prediction_files: bool = True
     forward_steps_in_memory: int = 1
@@ -151,18 +155,39 @@ def main(
     def data_loader_factory(window_time_slice: Optional[slice] = None):
         return _get_data_loader(window_time_slice=window_time_slice).loader
 
-    run_inference(
-        aggregator=aggregator,
-        writer=writer,
-        stepper=stepper,
-        data_loader_factory=data_loader_factory,
-        n_forward_steps=config.n_forward_steps,
-        forward_steps_in_memory=config.forward_steps_in_memory,
-    )
+    if config.prediction_data is not None:
+        # define data loader factory for prediction data
+        def prediction_data_loader_factory(window_time_slice: Optional[slice] = None):
+            return get_data_loader(
+                config.prediction_data,
+                requirements=data_requirements,
+                train=False,
+                window_time_slice=window_time_slice,
+            ).loader
+
+        run_dataset_inference(
+            aggregator=aggregator,
+            normalizer=stepper.normalizer,
+            prediction_data_loader_factory=prediction_data_loader_factory,
+            target_data_loader_factory=data_loader_factory,
+            n_forward_steps=config.n_forward_steps,
+            forward_steps_in_memory=config.forward_steps_in_memory,
+            writer=writer,
+        )
+    else:
+        run_inference(
+            aggregator=aggregator,
+            writer=writer,
+            stepper=stepper,
+            data_loader_factory=data_loader_factory,
+            n_forward_steps=config.n_forward_steps,
+            forward_steps_in_memory=config.forward_steps_in_memory,
+        )
 
     step_logs = aggregator.get_inference_logs(label="inference")
-    for log in step_logs:
-        wandb.log(log)
+    wandb = WandB.get_instance()
+    for i, log in enumerate(step_logs):
+        wandb.log(log, step=i)
         # wandb.log cannot be called more than "a few times per second"
         time.sleep(0.3)
     return step_logs
