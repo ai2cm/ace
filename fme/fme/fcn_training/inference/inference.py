@@ -130,7 +130,8 @@ def main(
             window_time_slice=window_time_slice,
         )
 
-    validation = _get_data_loader()
+    # use window_time_slice to avoid loading a large number of timesteps
+    validation = _get_data_loader(window_time_slice=slice(0, 1))
 
     output_netcdf_filename = os.path.join(
         config.experiment_dir,
@@ -142,8 +143,8 @@ def main(
         log_video=config.log_video,
         n_timesteps=config.n_forward_steps + 1,
     )
-    n_samples = get_n_samples(validation.loader)
     if config.save_prediction_files:
+        n_samples = get_n_samples(validation.loader)
         writer: Union[DataWriter, NullDataWriter] = DataWriter(
             filename=output_netcdf_filename,
             n_samples=n_samples,

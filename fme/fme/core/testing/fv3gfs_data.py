@@ -135,7 +135,7 @@ class FV3GFSData:
     def data_loader_params(self) -> DataLoaderParams:
         return DataLoaderParams(
             str(self._data_path),
-            data_type="FV3GFS",
+            data_type="netCDF4",
             batch_size=1,
             num_data_workers=0,
         )

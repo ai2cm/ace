@@ -65,7 +65,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(tmp_path, "ensemble", 1, 0, None)
+    params = DataLoaderParams(tmp_path, "ensemble_netCDF4", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements([], [], [], window_timesteps)
 
@@ -80,7 +80,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 def test_fv3gfs_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
-    params = DataLoaderParams(tmp_path, "FV3GFS", 1, 0, None)
+    params = DataLoaderParams(tmp_path, "netCDF4", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements([], [], [], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore

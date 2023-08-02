@@ -30,12 +30,12 @@ def _get_test_yaml_files(
     train_string = f"""
 train_data:
   data_path: '{train_data_path}'
-  data_type: "FV3GFS"
+  data_type: "netCDF4"
   batch_size: 2
   num_data_workers: 1
 validation_data:
   data_path: '{valid_data_path}'
-  data_type: "FV3GFS"
+  data_type: "netCDF4"
   batch_size: 2
   num_data_workers: 1
 stepper:
@@ -89,7 +89,7 @@ logging:
   entity: ai2cm
 validation_data:
   data_path: '{valid_data_path}'
-  data_type: "FV3GFS"
+  data_type: "netCDF4"
   batch_size: 1
   num_data_workers: 1
   n_samples: 3
