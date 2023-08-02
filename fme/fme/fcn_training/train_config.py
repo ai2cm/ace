@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Any, Mapping
+from typing import Any, Mapping, Optional
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 
@@ -78,6 +78,24 @@ class InlineInferenceConfig:
 
 @dataclasses.dataclass
 class TrainConfig:
+    """
+    Configuration for training a model.
+
+    Attributes:
+        train_data: configuration for the training data loader
+        validation_data: configuration for the validation data loader
+        stepper: configuration for the stepper
+        logging: configuration for logging
+        max_epochs: total number of epochs to train for
+        save_checkpoint: whether to save checkpoints
+        experiment_dir: directory where checkpoints and logs are saved
+        inference: configuration for inline inference
+        checkpoint_every_n_epochs: how often to save epoch-based checkpoints,
+            if save_checkpoint is True. If None, checkpoints are only saved
+            for the most recent epoch and the best epoch.
+        log_train_every_n_batches: how often to log batch_loss during training
+    """
+
     train_data: DataLoaderParams
     validation_data: DataLoaderParams
     stepper: SingleModuleStepperConfig
@@ -86,6 +104,7 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig
+    checkpoint_every_n_epochs: Optional[int] = None
     log_train_every_n_batches: int = 100
 
     def __post_init__(self):
@@ -104,16 +123,24 @@ class TrainConfig:
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
     @property
-    def checkpoint_path(self) -> str:
+    def latest_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "ckpt.tar")
 
     @property
     def best_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "best_ckpt.tar")
 
+    def epoch_checkpoint_path(self, epoch: int) -> str:
+        return os.path.join(self.checkpoint_dir, "ckpt_{epoch:04d}.tar")
+
+    def epoch_checkpoint_enabled(self, epoch: int) -> bool:
+        if self.checkpoint_every_n_epochs is None:
+            return False
+        return epoch % self.checkpoint_every_n_epochs == 0
+
     @property
     def resuming(self) -> bool:
-        checkpoint_file_exists = os.path.isfile(self.checkpoint_path)  # type: ignore
+        checkpoint_file_exists = os.path.isfile(self.latest_checkpoint_path)
         resuming = True if checkpoint_file_exists else False
         return resuming
 

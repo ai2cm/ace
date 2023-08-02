@@ -120,8 +120,8 @@ class Trainer:
         self.stepper = config.stepper.get_stepper(shapes, max_epochs=config.max_epochs)
 
         if config.resuming:
-            logging.info("Loading checkpoint %s" % config.checkpoint_path)
-            self.restore_checkpoint(config.checkpoint_path)
+            logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)
+            self.restore_checkpoint(config.latest_checkpoint_path)
 
         wandb.watch(self.stepper.modules)
 
@@ -178,7 +178,9 @@ class Trainer:
             if self.dist.is_root():
                 if self.config.save_checkpoint:
                     # checkpoint at the end of every epoch
-                    self.save_checkpoint(self.config.checkpoint_path)
+                    self.save_checkpoint(self.config.latest_checkpoint_path)
+                    if self.config.epoch_checkpoint_enabled(epoch):
+                        self.save_checkpoint(self.config.epoch_checkpoint_path(epoch))
                     if valid_loss <= best_valid_loss:
                         self.save_checkpoint(self.config.best_checkpoint_path)
                         best_valid_loss = valid_loss
