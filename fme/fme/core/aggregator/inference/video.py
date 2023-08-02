@@ -5,7 +5,6 @@ import numpy as np
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
-from fme.core.device import get_device
 
 wandb = WandB.get_instance()
 
@@ -24,9 +23,7 @@ class _VideoData:
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._n_timesteps = n_timesteps
-        self._n_batches = torch.zeros(
-            [n_timesteps], dtype=torch.int32, device=get_device()
-        )
+        self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
 
     @torch.no_grad()
     def record_batch(
@@ -55,9 +52,9 @@ class _VideoData:
         window_steps = next(iter(target_data.values())).shape[1]
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, tensor in target_data.items():
-            self._target_data[name][:, time_slice, ...] += tensor
+            self._target_data[name][:, time_slice, ...] += tensor.cpu()
         for name, tensor in gen_data.items():
-            self._gen_data[name][:, time_slice, ...] += tensor
+            self._gen_data[name][:, time_slice, ...] += tensor.cpu()
 
         self._n_batches[time_slice] += 1
 
@@ -90,7 +87,7 @@ def initialize_zeros_video_from_batch(
     for name, value in batch.items():
         shape = list(value.shape)
         shape[1] = n_timesteps
-        video[name] = torch.zeros(shape, dtype=value.dtype, device=value.device)
+        video[name] = torch.zeros(shape, dtype=value.dtype).cpu()
     return video
 
 
