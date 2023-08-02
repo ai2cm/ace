@@ -52,7 +52,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from .data_loader_fv3gfs import FV3GFSDataset
+from .data_loader_netcdf4 import NetCDF4Dataset
 from .data_loader_xarray import XarrayDataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
@@ -76,7 +76,7 @@ def _get_ensemble_dataset(
     params: DataLoaderParams,
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
-    sub_dataset=FV3GFSDataset,
+    sub_dataset=NetCDF4Dataset,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -133,13 +133,8 @@ def get_data_loader(
     """
     if dist is None:
         dist = Distributed.get_instance()
-    # TODO: move this default to the DataLoaderParams init
-    if params.data_type is None:
-        params.data_type = "ERA5"
-    if params.data_type == "ERA5":
-        raise NotImplementedError("ERA5 data loader is not implemented. ")
-    elif params.data_type == "FV3GFS":
-        dataset: Dataset = FV3GFSDataset(
+    if params.data_type == "netCDF4":
+        dataset: Dataset = NetCDF4Dataset(
             params, requirements=requirements, window_time_slice=window_time_slice
         )
         if params.num_data_workers > 0:
@@ -153,11 +148,11 @@ def get_data_loader(
                 f"{params.num_data_workers}, but it is being set to 0."
             )
             params.num_data_workers = 0
-    elif params.data_type == "E3SMV2":
+    elif params.data_type == "xarray":
         dataset = XarrayDataset(
             params, requirements=requirements, window_time_slice=window_time_slice
         )
-    elif params.data_type == "ensemble":
+    elif params.data_type == "ensemble_netCDF4":
         dataset = _get_ensemble_dataset(
             params, requirements, window_time_slice=window_time_slice
         )

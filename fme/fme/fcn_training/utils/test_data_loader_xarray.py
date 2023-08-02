@@ -6,6 +6,7 @@ from fme.fcn_training.utils.data_loader_xarray import (
     get_file_local_index,
     XarrayDataset,
 )
+from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 import cftime
 from fme.fcn_training.utils.data_typing import SigmaCoordinates
 import numpy as np
@@ -119,7 +120,7 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
     tmpdir, obs_times, _ = mock_monthly_netcdfs
     params = DataLoaderParams(
         data_path=tmpdir,
-        data_type="E3SMV2",
+        data_type="xarray",
         batch_size=1,
         num_data_workers=0,
     )
@@ -138,6 +139,29 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
             assert data.shape[0] == 2
             assert np.all(data == target_data)
     assert isinstance(dataset.sigma_coordinates, SigmaCoordinates)
+
+
+def test_XarrayDataset_monthly_time_window_sample_length(mock_monthly_netcdfs):
+    tmpdir, _, _ = mock_monthly_netcdfs
+    params = DataLoaderParams(
+        data_path=tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+    )
+    varnames = ["foo", "bar"]
+    requirements = DataRequirements(
+        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=120
+    )
+    data = get_data_loader(
+        params=params,
+        train=False,
+        requirements=requirements,
+        window_time_slice=slice(80, 120),
+    )
+    batch = data.loader.dataset[129]
+    assert batch["foo"].shape[0] == 40  # time window should be length 40
+    assert batch["bar"].shape[0] == 40
 
 
 @pytest.fixture(scope="session")
@@ -192,7 +216,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     tmpdir, obs_times, _ = mock_yearly_netcdfs
     params = DataLoaderParams(
         data_path=tmpdir,
-        data_type="E3SMV2",
+        data_type="xarray",
         batch_size=1,
         num_data_workers=0,
     )

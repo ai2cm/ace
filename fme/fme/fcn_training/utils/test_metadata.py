@@ -1,4 +1,4 @@
-from fme.fcn_training.utils.data_loader_fv3gfs import VariableMetadata
+from fme.fcn_training.utils.data_loader_netcdf4 import VariableMetadata
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 from fme.fcn_training.utils.data_requirements import DataRequirements
 from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
@@ -79,18 +79,18 @@ def _save_netcdf_ensemble(
         _save_netcdf(member_path / "data.nc", metadata)
 
 
-def _create_data(path, metadata, data_type: Literal["FV3GFS", "ensemble"]):
+def _create_data(path, metadata, data_type: Literal["netCDF4", "ensemble_netCDF4"]):
     """Looks up function to create toy data for the given data type and runs it."""
     thunks = dict(
-        FV3GFS=lambda: _save_netcdf(path / "data.nc", metadata),
-        ensemble=lambda: _save_netcdf_ensemble(path, metadata, num_members=2),
+        netCDF4=lambda: _save_netcdf(path / "data.nc", metadata),
+        ensemble_netCDF4=lambda: _save_netcdf_ensemble(path, metadata, num_members=2),
     )
     create_data_fn = thunks[data_type]
     create_data_fn()
 
 
 @pytest.mark.parametrize("metadata", METADATA)
-@pytest.mark.parametrize("data_type", ["FV3GFS", "ensemble"])
+@pytest.mark.parametrize("data_type", ["netCDF4", "ensemble_netCDF4"])
 def test_metadata(metadata, data_type):
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)

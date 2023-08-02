@@ -1,6 +1,5 @@
 import os
 from fme.core import metrics
-import numpy as np
 import torch
 import logging
 import xarray as xr
@@ -9,10 +8,8 @@ from typing import Mapping, Optional, Tuple
 from .data_typing import Dataset, VariableMetadata
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-from .data_loader_fv3gfs import get_sigma_coordinates
-from .data_utils import load_series_data
-
-DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+from .data_loader_netcdf4 import get_sigma_coordinates
+from .data_utils import apply_slice, load_series_data, get_lons_and_lats
 
 
 def get_file_local_index(
@@ -21,9 +18,9 @@ def get_file_local_index(
     file_start_times: xr.CFTimeIndex,
 ) -> Tuple[int, int]:
     """Takes a global_idx which identifies the position of an observation in the
-    time-ordered union of all observations across some number of monthly files.
-    Returns a tuple where the first element gives the index of the file where
-    the observation is found (assuming files are time ordered), and the second
+    time-ordered union of all observations across some number of files. Returns
+    a tuple where the first element gives the index of the file where the
+    observation is found (assuming files are time ordered), and the second
     element gives the file-local index of the observation in that file.
 
     """
@@ -48,33 +45,18 @@ class XarrayDataset(Dataset):
         self.n_in_channels = len(self.in_names)
         self.n_out_channels = len(self.out_names)
         self.path = params.data_path
+        self.n_workers = params.num_data_workers
+        self.engine = "netcdf4" if params.engine is None else params.engine
         # assume that filenames include time ordering
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
-        self.datasets = [None for _ in range(len(self.full_paths))]
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
-        if params.n_samples is not None:
-            self.n_samples_total = params.n_samples
         self.window_time_slice = window_time_slice
         first_dataset = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
         )
-        if (
-            "lat" not in first_dataset.variables
-            and "grid_yt" not in first_dataset.variables
-        ):
-            raise ValueError(
-                "Dataset must have either 'lat' or 'grid_yt' variable for latitude, "
-                f"but only has {list(first_dataset.variables)}"
-            )
-        try:
-            lats, lons = np.array(first_dataset["grid_yt"]), np.array(
-                first_dataset["grid_xt"]
-            )
-        except KeyError:
-            lats, lons = np.array(first_dataset["lat"]), np.array(first_dataset["lon"])
-
+        lons, lats = get_lons_and_lats(first_dataset)
         self._area_weights = metrics.spherical_area_weights(lats, len(lons))
         self._sigma_coordinates = get_sigma_coordinates(first_dataset)
 
@@ -101,6 +83,13 @@ class XarrayDataset(Dataset):
             self.observation_times = ds.get_index("time")
             # minus (n_steps - 1) since don't have outputs for those steps
             self.n_samples_total = len(self.observation_times) - self.n_steps + 1
+            if self.params.n_samples is not None:
+                if self.params.n_samples > self.n_samples_total:
+                    raise ValueError(
+                        f"Requested {self.params.n_samples} samples, but only "
+                        f"{self.n_samples_total} are available."
+                    )
+                self.n_samples_total = self.params.n_samples
             self._get_metadata(ds)
             img_shape = ds[self.names[0]].shape[1:]
             logging.info(f"Found {self.n_samples_total} samples.")
@@ -123,13 +112,13 @@ class XarrayDataset(Dataset):
         return self.n_samples_total
 
     def _open_file(self, idx):
-        if self.datasets[idx] is None:
-            self.datasets[idx] = xr.open_dataset(
-                self.full_paths[idx],
-                decode_times=False,
-                cache=False,
-                mask_and_scale=False,
-            )
+        return xr.open_dataset(
+            self.full_paths[idx],
+            engine=self.engine,
+            decode_times=False,
+            cache=False,
+            mask_and_scale=False,
+        )
 
     def __getitem__(self, idx):
         """Open a time-ordered subset of the files which contain the input with
@@ -139,29 +128,35 @@ class XarrayDataset(Dataset):
         to output_local_idx (inclusive).
 
         """
+        if self.window_time_slice is not None:
+            time_slice = apply_slice(
+                outer_slice=slice(idx, idx + self.n_steps),
+                inner_slice=self.window_time_slice,
+            )
+        else:
+            time_slice = slice(idx, idx + self.n_steps)
+
         input_file_idx, input_local_idx = get_file_local_index(
-            idx, self.observation_times, self.file_start_times
+            time_slice.start, self.observation_times, self.file_start_times
         )
         output_file_idx, output_local_idx = get_file_local_index(
-            idx + self.n_steps - 1, self.observation_times, self.file_start_times
+            time_slice.stop - 1,
+            self.observation_times,
+            self.file_start_times,
         )
-
-        # open the subset of files
-        for file_idx in range(input_file_idx, output_file_idx + 1):
-            self._open_file(file_idx)
 
         # get the sequence of observations
         arrays = {}
-        datasets = self.datasets[input_file_idx : output_file_idx + 1]
-        for i, ds in enumerate(datasets):
+        idxs = range(input_file_idx, output_file_idx + 1)
+        for i, file_idx in enumerate(idxs):
+            ds = self._open_file(file_idx)
             start = input_local_idx if i == 0 else 0
-            stop = output_local_idx if i == len(datasets) - 1 else len(ds["time"]) - 1
+            stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
-            tensor_dict = load_series_data(
-                start, n_steps, ds, self.names, window_time_slice=self.window_time_slice
-            )
+            tensor_dict = load_series_data(start, n_steps, ds, self.names)
             for n in self.names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
+            del ds
         for n, tensor_list in arrays.items():
             arrays[n] = torch.cat(tensor_list)
         return arrays
