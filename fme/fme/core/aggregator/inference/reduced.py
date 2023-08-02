@@ -136,6 +136,7 @@ class MeanAggregator:
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"],
         n_timesteps: int,
+        dist: Optional[Distributed] = None,
     ):
         self._area_weights = area_weights
         self._variable_metrics: Optional[Dict[str, Dict[str, MeanMetric]]] = None
@@ -143,6 +144,10 @@ class MeanAggregator:
         self._shape_y = None
         self._target = target
         self._n_timesteps = n_timesteps
+        if dist is None:
+            self._dist = Distributed.get_instance()
+        else:
+            self._dist = dist
 
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
@@ -228,11 +233,10 @@ class MeanAggregator:
                 series_tensors[f"{metric}/{key}"] = self._variable_metrics[metric][
                     key
                 ].get()
-        dist = Distributed.get_instance()
         series_arrays: Dict[str, np.ndarray] = {}
         for key in sorted(series_tensors.keys()):
             series_arrays[key] = (
-                dist.reduce_mean(series_tensors[key].detach()).cpu().numpy()
+                self._dist.reduce_mean(series_tensors[key].detach()).cpu().numpy()
             )
         return series_arrays
 

@@ -261,23 +261,27 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        logging.info("Starting inference on validation set...")
-
-        record_step_20 = self.config.inference.n_forward_steps >= 20
-        aggregator = InferenceAggregator(
-            self.train_data.area_weights.to(fme.get_device()),
-            record_step_20=record_step_20,
-            log_video=False,
-            n_timesteps=self.config.inference.n_forward_steps + 1,
-        )
-        run_inference(
-            aggregator=aggregator,
-            stepper=self.stepper,
-            data_loader_factory=self._inference_data_loader_factory,
-            n_forward_steps=self.config.inference.n_forward_steps,
-            forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
-        )
-        return aggregator.get_logs(label="inference")
+        if self.dist.is_root():
+            logging.info("Starting inference on validation set...")
+            record_step_20 = self.config.inference.n_forward_steps >= 20
+            aggregator = InferenceAggregator(
+                self.train_data.area_weights.to(fme.get_device()),
+                record_step_20=record_step_20,
+                log_video=False,
+                n_timesteps=self.config.inference.n_forward_steps + 1,
+                dist=NotDistributed(is_root=True),
+            )
+            run_inference(
+                aggregator=aggregator,
+                stepper=self.stepper,
+                data_loader_factory=self._inference_data_loader_factory,
+                n_forward_steps=self.config.inference.n_forward_steps,
+                forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
+            )
+            logs = aggregator.get_logs(label="inference")
+        else:
+            logs = {}
+        return logs
 
     def save_checkpoint(self, checkpoint_path, model=None):
         """We intentionally require a checkpoint_dir to be passed
