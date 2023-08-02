@@ -12,8 +12,6 @@ import dataclasses
 from fme.core import SingleModuleStepperConfig
 from fme.core.wandb import WandB
 
-wandb = WandB.get_instance()
-
 
 @dataclasses.dataclass
 class LoggingConfig:
@@ -52,6 +50,7 @@ class LoggingConfig:
 
     def configure_wandb(self, config: Mapping[str, Any], resume: bool):
         # must ensure wandb.configure is called before wandb.init
+        wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
         wandb.init(
             config=config,

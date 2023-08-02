@@ -1,4 +1,6 @@
-from typing import Optional, Protocol, Union, Mapping
+from typing import Dict, Optional, Protocol, Union, Mapping
+from fme.core.normalizer import StandardNormalizer
+import numpy as np
 
 import torch
 
@@ -143,5 +145,88 @@ def run_inference(
                     gen_data=stepped.gen_data,
                     target_data_norm=stepped.target_data_norm,
                     gen_data_norm=stepped.gen_data_norm,
+                    i_time_start=i_time_aggregator,
+                )
+
+
+def remove_initial_condition(
+    data: Mapping[str, torch.Tensor]
+) -> Dict[str, torch.Tensor]:
+    return {key: value[:, 1:] for key, value in data.items()}
+
+
+def run_dataset_inference(
+    aggregator: InferenceAggregator,
+    normalizer: StandardNormalizer,
+    prediction_data_loader_factory: DataLoaderFactory,
+    target_data_loader_factory: DataLoaderFactory,
+    n_forward_steps: int,
+    forward_steps_in_memory: int,
+    writer: Optional[Union[DataWriter, NullDataWriter]] = None,
+):
+    if writer is None:
+        writer = NullDataWriter()
+    example_valid_data_loader = target_data_loader_factory(
+        window_time_slice=slice(0, 1)
+    )
+    batch_managers = [
+        EnsembleBatch(i_batch, n_forward_steps, writer)
+        for i_batch in range(len(example_valid_data_loader))
+    ]
+    if len(batch_managers) == 0:
+        raise ValueError("Data loader must have at least one batch")
+
+    device = get_device()
+    with torch.no_grad():
+        # We have data batches with long windows, where all data for a
+        # given batch does not fit into memory at once, so we window it in time
+        # and run the model on each window in turn.
+        #
+        # All batches for a given time also may not fit in memory.
+        #
+        # For each time window, we process it for each batch, and keep track of the
+        # final state of each batch. We then use this as the initial condition
+        # for the next time window.
+        for i_time in range(0, n_forward_steps, forward_steps_in_memory):
+            # data loader is a sequence of batches, so we need a new one for each
+            # time window
+            valid_data_loader = target_data_loader_factory(
+                # need one more timestep for initial condition
+                window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
+            )
+            predicted_data_loader = prediction_data_loader_factory(
+                # need one more timestep for initial condition
+                window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
+            )
+            for valid_data, predicted_data, batch_manager in zip(
+                valid_data_loader, predicted_data_loader, batch_managers
+            ):
+                valid_data = {
+                    key: value.to(device) for key, value in valid_data.items()
+                }
+                predicted_data = {
+                    key: value.to(device) for key, value in predicted_data.items()
+                }
+                # record raw data for the batch, and store the final state
+                # for the next segment
+                batch_manager.append(valid_data, predicted_data)
+                valid_data_norm = normalizer.normalize(valid_data)
+                predicted_data_norm = normalizer.normalize(predicted_data)
+                # for non-initial windows, we want to record only the new data
+                # and discard the initial sample of the window
+                if i_time > 0:
+                    valid_data = remove_initial_condition(valid_data)
+                    predicted_data = remove_initial_condition(predicted_data)
+                    valid_data_norm = remove_initial_condition(valid_data_norm)
+                    predicted_data_norm = remove_initial_condition(predicted_data_norm)
+                    i_time_aggregator = i_time + 1
+                else:
+                    i_time_aggregator = i_time
+                aggregator.record_batch(
+                    loss=np.nan,
+                    target_data=valid_data,
+                    gen_data=predicted_data,
+                    target_data_norm=valid_data_norm,
+                    gen_data_norm=predicted_data_norm,
                     i_time_start=i_time_aggregator,
                 )
