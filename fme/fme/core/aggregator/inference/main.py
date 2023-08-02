@@ -1,4 +1,6 @@
-from typing import Dict, List, Mapping, Protocol, Union
+from typing import Dict, List, Mapping, Optional, Protocol, Union
+
+from fme.core.distributed import Distributed
 from .time_mean import TimeMeanAggregator
 from .reduced import MeanAggregator
 from .video import VideoAggregator
@@ -42,28 +44,39 @@ class InferenceAggregator:
         n_timesteps: int,
         record_step_20: bool = False,
         log_video: bool = False,
+        dist: Optional[Distributed] = None,
     ):
         """
         Args:
             area_weights: Area weights for each grid cell.
+            n_timesteps: Number of timesteps of inference that will be run.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
+            dist: Distributed object to use for metric aggregation.
         """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(
-                area_weights, target="denorm", n_timesteps=n_timesteps
+                area_weights,
+                target="denorm",
+                n_timesteps=n_timesteps,
+                dist=dist,
             ),
             "mean_norm": MeanAggregator(
-                area_weights, target="norm", n_timesteps=n_timesteps
+                area_weights,
+                target="norm",
+                n_timesteps=n_timesteps,
+                dist=dist,
             ),
-            "time_mean": TimeMeanAggregator(area_weights),
+            "time_mean": TimeMeanAggregator(area_weights, dist=dist),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
-                area_weights, target_time=20
+                area_weights, target_time=20, dist=dist
             )
         if log_video:
-            self._aggregators["video"] = VideoAggregator(n_timesteps=n_timesteps)
+            self._aggregators["video"] = VideoAggregator(
+                n_timesteps=n_timesteps, dist=dist
+            )
 
     @torch.no_grad()
     def record_batch(

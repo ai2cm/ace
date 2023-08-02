@@ -19,11 +19,14 @@ class _VideoData:
     Record batches of video data and compute the mean.
     """
 
-    def __init__(self, n_timesteps: int):
+    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
+        if dist is None:
+            dist = Distributed.get_instance()
+        self._dist = dist
 
     @torch.no_grad()
     def record_batch(
@@ -64,15 +67,14 @@ class _VideoData:
             raise RuntimeError("No data recorded")
         target_data = {}
         gen_data = {}
-        dist = Distributed.get_instance()
         for name, tensor in self._target_data.items():
             target_data[name] = (tensor / self._n_batches[None, :, None, None]).mean(
                 dim=0
             )
-            target_data[name] = dist.reduce_mean(target_data[name])
+            target_data[name] = self._dist.reduce_mean(target_data[name])
         for name, tensor in self._gen_data.items():
             gen_data[name] = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
-            gen_data[name] = dist.reduce_mean(gen_data[name])
+            gen_data[name] = self._dist.reduce_mean(gen_data[name])
         return gen_data, target_data
 
 
@@ -94,11 +96,11 @@ def initialize_zeros_video_from_batch(
 class VideoAggregator:
     """Videos of state evolution."""
 
-    def __init__(self, n_timesteps: int):
+    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
         # This class exists instead of directly using VideoData
         # because we may want to record different kinds
         # of videos, e.g. for the best/worst series and for the mean.
-        self._data = _VideoData(n_timesteps=n_timesteps)
+        self._data = _VideoData(n_timesteps=n_timesteps, dist=dist)
 
     @torch.no_grad()
     def record_batch(
