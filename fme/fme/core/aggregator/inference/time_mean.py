@@ -19,13 +19,17 @@ class TimeMeanAggregator:
     statistics on that time-mean state when logs are retrieved.
     """
 
-    def __init__(self, area_weights: torch.Tensor):
+    def __init__(self, area_weights: torch.Tensor, dist: Optional[Distributed] = None):
         self._area_weights = area_weights
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._target_data_norm = None
         self._gen_data_norm = None
         self._n_batches = 0
+        if dist is None:
+            self._dist = Distributed.get_instance()
+        else:
+            self._dist = dist
 
     @torch.no_grad()
     def record_batch(
@@ -72,10 +76,9 @@ class TimeMeanAggregator:
         if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
         logs = {}
-        dist = Distributed.get_instance()
         for name in self._gen_data.keys():
-            gen = dist.reduce_mean(self._gen_data[name] / self._n_batches)
-            target = dist.reduce_mean(self._target_data[name] / self._n_batches)
+            gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
+            target = self._dist.reduce_mean(self._target_data[name] / self._n_batches)
             logs[f"rmse/{name}"] = float(
                 metrics.root_mean_squared_error(
                     predicted=gen, truth=target, weights=self._area_weights
