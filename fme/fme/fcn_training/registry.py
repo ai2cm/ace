@@ -111,10 +111,30 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         return sfno_net
 
 
+@dataclasses.dataclass
+class PreBuiltBuilder(ModuleConfig):
+    """
+    A simple module configuration which returns a pre-defined module.
+
+    Used mainly for testing.
+    """
+
+    module: nn.Module
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        img_shape: Tuple[int, int],
+    ) -> nn.Module:
+        return self.module
+
+
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
     "afno": AFNONetBuilder,  # using short acronym for backwards compatibility
     "FourierNeuralOperatorNet": FourierNeuralOperatorBuilder,
     "SphericalFourierNeuralOperatorNet": SphericalFourierNeuralOperatorBuilder,  # type: ignore  # noqa: E501
+    "prebuilt": PreBuiltBuilder,
 }
 
 
@@ -138,7 +158,10 @@ class ModuleSelector:
     """
 
     type: Literal[
-        "afno", "FourierNeuralOperatorNet", "SphericalFourierNeuralOperatorNet"
+        "afno",
+        "FourierNeuralOperatorNet",
+        "SphericalFourierNeuralOperatorNet",
+        "prebuilt",
     ]
     config: Mapping[str, Any]
 
