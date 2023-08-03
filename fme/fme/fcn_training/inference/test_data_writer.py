@@ -47,7 +47,10 @@ class TestDataWriter:
         filename = tmp_path / "test.nc"
         n_samples = 4
         writer = DataWriter(
-            str(filename), n_samples=n_samples, metadata=sample_metadata
+            str(filename),
+            n_samples=n_samples,
+            metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
@@ -65,7 +68,7 @@ class TestDataWriter:
         # Open the file again and check the data
         dataset = Dataset(filename, "r")
         assert set(dataset.variables.keys()) == set(sample_target_data.keys()).union(
-            {"source"}
+            {"source", "lat", "lon"}
         )
         assert (
             dataset.variables["source"][:] == np.array(["target", "prediction"])
@@ -100,7 +103,10 @@ class TestDataWriter:
         filename = tmp_path / "test.nc"
         n_samples = 4
         writer = DataWriter(
-            str(filename), n_samples=n_samples, metadata=sample_metadata
+            str(filename),
+            n_samples=n_samples,
+            metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
