@@ -5,7 +5,7 @@ import logging
 import xarray as xr
 from glob import glob
 from typing import Mapping, Optional, Tuple
-from .data_typing import Dataset, VariableMetadata
+from .data_typing import Dataset, HorizontalCoordinates, VariableMetadata
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 from .data_loader_netcdf4 import get_sigma_coordinates
@@ -59,6 +59,11 @@ class XarrayDataset(Dataset):
         lons, lats = get_lons_and_lats(first_dataset)
         self._area_weights = metrics.spherical_area_weights(lats, len(lons))
         self._sigma_coordinates = get_sigma_coordinates(first_dataset)
+        self._horizontal_coordinates = HorizontalCoordinates(lat=lats, lon=lons)
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._horizontal_coordinates
 
     def _get_metadata(self, ds):
         result = {}

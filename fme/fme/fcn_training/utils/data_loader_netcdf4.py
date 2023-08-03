@@ -3,7 +3,6 @@ import os
 from typing import Mapping, Optional
 
 import netCDF4
-from torch.utils.data import Dataset
 import torch
 import xarray as xr
 
@@ -12,7 +11,12 @@ from fme.core import metrics
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
 from .data_utils import load_series_data, get_lons_and_lats
-from .data_typing import SigmaCoordinates, VariableMetadata
+from .data_typing import (
+    SigmaCoordinates,
+    HorizontalCoordinates,
+    VariableMetadata,
+    Dataset,
+)
 from fme.core.device import get_device
 
 
@@ -43,7 +47,7 @@ class NetCDF4Dataset(Dataset):
         logging.info(f"Opening data at {self.full_path}")
         self.ds = netCDF4.MFDataset(self.full_path)
         self.ds.set_auto_mask(False)
-        self.metadata = self._compute_variable_metadata()  # Note: requires `self.ds`
+        self._metadata = self._compute_variable_metadata()  # Note: requires `self.ds`
         self.n_samples_total = len(self.ds.variables["time"][:]) - self.n_steps + 1
         if params.n_samples is not None:
             if params.n_samples > self.n_samples_total:
@@ -56,8 +60,29 @@ class NetCDF4Dataset(Dataset):
         self.window_time_slice = window_time_slice
         self.lons, self.lats = get_lons_and_lats(self.ds)
         self._log_files_stats()
-        self.area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
-        self.sigma_coordinates = get_sigma_coordinates(self.ds)
+
+        self._area_weights = metrics.spherical_area_weights(self.lats, len(self.lons))
+        self._sigma_coordinates = get_sigma_coordinates(self.ds)
+        self._horizontal_coordinates = HorizontalCoordinates(
+            lat=torch.as_tensor(self.lats, device=get_device()),
+            lon=torch.as_tensor(self.lons, device=get_device()),
+        )
+
+    @property
+    def area_weights(self):
+        return self._area_weights
+
+    @property
+    def sigma_coordinates(self):
+        return self._sigma_coordinates
+
+    @property
+    def horizontal_coordinates(self):
+        return self._horizontal_coordinates
+
+    @property
+    def metadata(self):
+        return self._metadata
 
     def _log_files_stats(self):
         img_shape_y = len(self.lats)

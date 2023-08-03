@@ -149,6 +149,7 @@ def main(
             filename=output_netcdf_filename,
             n_samples=n_samples,
             metadata=validation.metadata,
+            coords=validation.coords,
         )
     else:
         writer = NullDataWriter()
