@@ -13,16 +13,22 @@ class DataWriter:
     VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
     def __init__(
-        self, filename: str, n_samples: int, metadata: Mapping[str, VariableMetadata]
+        self,
+        filename: str,
+        n_samples: int,
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
     ):
         """
         Args:
             filename: Path to the netCDF file to write to.
             n_samples: Number of samples to write to the file.
             metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
         """
         self.filename = filename
         self.metadata = metadata
+        self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
         self.dataset.createDimension("source", 2)
         self.dataset.createDimension("timestep", None)  # unlimited dimension
@@ -50,12 +56,18 @@ class DataWriter:
         """
         if self._n_lat is None:
             self._n_lat = target[next(iter(target.keys()))].shape[-2]
-            self.dataset.createDimension("n_lat", self._n_lat)
+            self.dataset.createDimension("lat", self._n_lat)
+            if "lat" in self.coords:
+                self.dataset.createVariable("lat", "f4", ("lat",))
+                self.dataset.variables["lat"][:] = self.coords["lat"]
         if self._n_lon is None:
             self._n_lon = target[next(iter(target.keys()))].shape[-1]
-            self.dataset.createDimension("n_lon", self._n_lon)
+            self.dataset.createDimension("lon", self._n_lon)
+            if "lon" in self.coords:
+                self.dataset.createVariable("lon", "f4", ("lon",))
+                self.dataset.variables["lon"][:] = self.coords["lon"]
 
-        dims = ("source", "sample", "timestep", "n_lat", "n_lon")
+        dims = ("source", "sample", "timestep", "lat", "lon")
         for variable_name in set(target.keys()).union(prediction.keys()):
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:

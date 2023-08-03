@@ -111,6 +111,7 @@ def _get_ensemble_dataset(
     ensemble.metadata = metadatas[0]  # type: ignore
     ensemble.area_weights = datasets[0].area_weights  # type: ignore
     ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
+    ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
     return ensemble
 
 
@@ -188,4 +189,5 @@ def get_data_loader(
         area_weights=dataset.area_weights,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
+        horizontal_coordinates=dataset.horizontal_coordinates,
     )

@@ -3,6 +3,7 @@ from collections import namedtuple
 from typing import Mapping, Optional
 import dataclasses
 
+import numpy as np
 import torch
 
 
@@ -24,6 +25,28 @@ class SigmaCoordinates:
 
     ak: torch.Tensor
     bk: torch.Tensor
+
+    @property
+    def coords(self) -> Mapping[str, np.ndarray]:
+        return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
+
+
+@dataclasses.dataclass
+class HorizontalCoordinates:
+    """
+    Defines a (latitude, longitude) grid.
+
+    Attributes:
+        lat: 1-dimensional tensor of latitudes
+        lon: 1-dimensional tensor of longitudes
+    """
+
+    lat: torch.Tensor
+    lon: torch.Tensor
+
+    @property
+    def coords(self) -> Mapping[str, np.ndarray]:
+        return {"lat": self.lat.cpu().numpy(), "lon": self.lon.cpu().numpy()}
 
 
 @dataclasses.dataclass
@@ -52,7 +75,15 @@ class GriddedData:
     metadata: Mapping[str, VariableMetadata]
     area_weights: torch.Tensor
     sigma_coordinates: SigmaCoordinates
+    horizontal_coordinates: HorizontalCoordinates
     sampler: Optional[torch.utils.data.Sampler] = None
+
+    @property
+    def coords(self) -> Mapping[str, np.ndarray]:
+        return {
+            **self.horizontal_coordinates.coords,
+            **self.sigma_coordinates.coords,
+        }
 
 
 class Dataset(torch.utils.data.Dataset, abc.ABC):
@@ -62,6 +93,10 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
 
     @abc.abstractproperty
     def area_weights(self) -> torch.Tensor:
+        ...
+
+    @abc.abstractproperty
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
         ...
 
     @abc.abstractproperty

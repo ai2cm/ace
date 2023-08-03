@@ -117,3 +117,5 @@ def test_inference_plus_one_model(tmp_path: pathlib.Path, use_prediction_data: b
             prediction_ds["x"].isel(timestep=i).values + 1,
             prediction_ds["x"].isel(timestep=i + 1).values,
         )
+    assert "lat" in prediction_ds.coords
+    assert "lon" in prediction_ds.coords
