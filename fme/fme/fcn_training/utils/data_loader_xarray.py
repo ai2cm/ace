@@ -5,6 +5,7 @@ import logging
 import xarray as xr
 from glob import glob
 from typing import Mapping, Optional, Tuple
+import fme
 from .data_typing import Dataset, HorizontalCoordinates, VariableMetadata
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
@@ -59,7 +60,10 @@ class XarrayDataset(Dataset):
         lons, lats = get_lons_and_lats(first_dataset)
         self._area_weights = metrics.spherical_area_weights(lats, len(lons))
         self._sigma_coordinates = get_sigma_coordinates(first_dataset)
-        self._horizontal_coordinates = HorizontalCoordinates(lat=lats, lon=lons)
+        self._horizontal_coordinates = HorizontalCoordinates(
+            lat=torch.as_tensor(lats, device=fme.get_device()),
+            lon=torch.as_tensor(lons, device=fme.get_device()),
+        )
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
