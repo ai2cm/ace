@@ -24,7 +24,7 @@ FULL_STATE = "full_state"
 TENDENCIES_3D = "tendencies_3d"
 SURFACE_FRACTIONS = "surface_fractions"
 
-OUTPUT_URL = "gs://vcm-ml-intermediate/2023-07-18-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr"  # noqa: 501
+OUTPUT_URL = "gs://vcm-ml-intermediate/2023-08-08-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr"  # noqa: 501
 
 # constants are defined as in FV3GFS model
 # https://github.com/ai2cm/fv3gfs-fortran/blob/master/FMS/constants/constants.F90
@@ -75,9 +75,13 @@ INPUT_VARIABLE_NAMES = {
         "USWRFsfc",
         "USWRFtoa",
         PRECIPITABLE_WATER_PATH,
+        "GRAUPELsfc",
+        "ICEsfc",
+        "SNOWsfc",
     ],
     FOURCASTNET_VANILLA: [
         "PRESsfc",
+        "HGTsfc",
     ],
     FULL_STATE: [
         "surface_temperature",
@@ -91,6 +95,7 @@ INPUT_VARIABLE_NAMES = {
         "northward_wind",
         "eastward_wind",
         PRESSURE_THICKNESS,
+        "soil_moisture",
     ],
     SURFACE_FRACTIONS: [
         "land_fraction",
@@ -155,13 +160,10 @@ def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray
 
 
 def open_datasets(
-    dataset_urls: MutableMapping[str, str], ic: int
+    dataset_urls: MutableMapping[str, str]
 ) -> MutableMapping[str, xr.Dataset]:
     """Open datasets from zarr urls."""
-    return {
-        category: xr.open_zarr(url.format(ic=ic))
-        for category, url in dataset_urls.items()
-    }
+    return {category: xr.open_zarr(url) for category, url in dataset_urls.items()}
 
 
 def get_coarse_ak_bk(
@@ -361,7 +363,8 @@ def assert_global_moisture_conservation(
 
 
 def construct_lazy_dataset(ic: int) -> xr.Dataset:
-    datasets_dict = open_datasets(DATASET_URLS, ic)
+    dataset_urls_for_ic = {k: v.format(ic=ic) for k, v in DATASET_URLS.items()}
+    datasets_dict = open_datasets(dataset_urls_for_ic)
     ds = merge_inputs(INPUT_VARIABLE_NAMES, datasets_dict)
     for var in ds:
         del ds[var].encoding["chunks"]
@@ -382,7 +385,7 @@ def construct_lazy_dataset(ic: int) -> xr.Dataset:
     ds.attrs["history"] = (
         "Dataset computed by full-model/projects/data_process"
         "/compute_dataset_fv3gfs.py"
-        f" script, using following input zarrs: {DATASET_URLS}."
+        f" script, using following input zarrs: {dataset_urls_for_ic}."
     )
     ds.attrs["vertical_coordinate"] = (
         "The pressure at level interfaces can by computed as "
@@ -397,7 +400,12 @@ def construct_lazy_dataset(ic: int) -> xr.Dataset:
 @click.option("--debug", is_flag=True, help="Print metadata instead of writing output.")
 @click.option("--subsample", is_flag=True, help="Subsample the data before writing.")
 @click.option("--check-conservation", is_flag=True, help="Check conservation.")
-@click.option("-o", "--output", default=OUTPUT_URL, help="URL to write output to.")
+@click.option(
+    "-o",
+    "--output",
+    default=OUTPUT_URL,
+    help="URL to write to. Must contain '{ic}' which will be replaced by ic arg.",
+)
 @click.option("--n-split", default=65, help="Number of steps to split job over.")
 @click.option("--ic", default=1, help="Initial condition index (can be 1 through 11).")
 def main(debug, subsample, check_conservation, output, n_split, ic):
