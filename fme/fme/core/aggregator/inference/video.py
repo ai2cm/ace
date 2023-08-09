@@ -162,7 +162,7 @@ def make_video(
     video_data = 255 * (video_data - data_min) / (data_max - data_min)
     video_data = np.minimum(video_data, 255)
     video_data = np.maximum(video_data, 0)
-    caption += f"; vmin={data_min:.2f}, vmax={data_max:.2f}"
+    caption += f"; vmin={data_min:.4g}, vmax={data_max:.4g}"
     return wandb.Video(
         video_data,
         caption=caption,

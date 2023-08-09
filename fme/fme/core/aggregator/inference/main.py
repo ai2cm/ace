@@ -2,6 +2,7 @@ from typing import Dict, List, Mapping, Optional, Protocol, Union
 
 from fme.core.distributed import Distributed
 from .time_mean import TimeMeanAggregator
+from .zonal_mean import ZonalMeanAggregator
 from .reduced import MeanAggregator
 from .video import VideoAggregator
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
@@ -68,6 +69,7 @@ class InferenceAggregator:
                 dist=dist,
             ),
             "time_mean": TimeMeanAggregator(area_weights, dist=dist),
+            "zonal_mean": ZonalMeanAggregator(n_timesteps=n_timesteps, dist=dist),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
