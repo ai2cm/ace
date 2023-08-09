@@ -1,6 +1,8 @@
 import dataclasses
 from typing import Literal, Optional
 
+from fme.core.distributed import Distributed
+
 
 @dataclasses.dataclass
 class DataLoaderParams:
@@ -38,3 +40,9 @@ class DataLoaderParams:
                     "Did you mean to use data_type "
                     '"xarray" or "ensemble_xarray"?'
                 )
+        dist = Distributed.get_instance()
+        if self.batch_size % dist.world_size != 0:
+            raise ValueError(
+                "batch_size must be divisible by the number of parallel "
+                f"workers, got {self.batch_size} and {dist.world_size}"
+            )

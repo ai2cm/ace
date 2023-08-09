@@ -136,12 +136,16 @@ class Trainer:
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
         def get_inference_data_loader(window_time_slice: Optional[slice] = None):
+            if self.config.inference.parallel:
+                dist = self.dist
+            else:
+                dist = NotDistributed(is_root=self.dist.is_root())
             return get_data_loader(
                 inference_data,
                 train=False,
                 requirements=inference_data_requirements,
                 window_time_slice=window_time_slice,
-                dist=NotDistributed(is_root=self.dist.is_root()),
+                dist=dist,
             ).loader
 
         self._inference_data_loader_factory = get_inference_data_loader
@@ -262,7 +266,11 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        if self.dist.is_root():
+        if self.config.inference.parallel:
+            dist = self.dist
+        else:
+            dist = NotDistributed(is_root=self.dist.is_root())
+        if self.config.inference.parallel or self.dist.is_root():
             logging.info("Starting inference on validation set...")
             record_step_20 = self.config.inference.n_forward_steps >= 20
             aggregator = InferenceAggregator(
@@ -270,7 +278,7 @@ class Trainer:
                 record_step_20=record_step_20,
                 log_video=False,
                 n_timesteps=self.config.inference.n_forward_steps + 1,
-                dist=NotDistributed(is_root=True),
+                dist=dist,
             )
             run_inference(
                 aggregator=aggregator,
