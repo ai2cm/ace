@@ -5,6 +5,9 @@ import xarray as xr
 
 from fme.core import metrics
 from fme.core.distributed import Distributed
+from fme.core.wandb import WandB
+
+wandb = WandB.get_instance()
 
 
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
@@ -13,11 +16,16 @@ def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
 
 
 class TimeMeanAggregator:
-    """Statistics on the time-mean state.
+    """Statistics and images on the time-mean state.
 
     This aggregator keeps track of the time-mean state, then computes
-    statistics on that time-mean state when logs are retrieved.
+    statistics and images on that time-mean state when logs are retrieved.
     """
+
+    _image_captions = {
+        "bias_map": "{name} time-mean bias (generated - target)",
+        "gen_map": "{name} time-mean generated",
+    }
 
     def __init__(self, area_weights: torch.Tensor, dist: Optional[Distributed] = None):
         self._area_weights = area_weights
@@ -31,6 +39,22 @@ class TimeMeanAggregator:
         else:
             self._dist = dist
 
+    @staticmethod
+    def _add_or_initialize_time_mean(
+        maybe_dict: Optional[MutableMapping[str, torch.Tensor]],
+        new_data: Mapping[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        time_dim = 1
+        if maybe_dict is None:
+            d: Dict[str, torch.Tensor] = {
+                name: tensor.mean(dim=time_dim) for name, tensor in new_data.items()
+            }
+        else:
+            d = dict(maybe_dict)
+            for name, tensor in new_data.items():
+                d[name] += tensor.mean(dim=time_dim)
+        return d
+
     @torch.no_grad()
     def record_batch(
         self,
@@ -41,24 +65,10 @@ class TimeMeanAggregator:
         gen_data_norm: Mapping[str, torch.Tensor],
         i_time_start: int = 0,
     ):
-        time_dim = 1
-
-        def add_or_initialize_time_mean(
-            maybe_dict: Optional[MutableMapping[str, torch.Tensor]],
-            new_data: Mapping[str, torch.Tensor],
-        ) -> Dict[str, torch.Tensor]:
-            if maybe_dict is None:
-                d: Dict[str, torch.Tensor] = {
-                    name: tensor.mean(dim=time_dim) for name, tensor in new_data.items()
-                }
-            else:
-                d = dict(maybe_dict)
-                for name, tensor in new_data.items():
-                    d[name] += tensor.mean(dim=time_dim)
-            return d
-
-        self._target_data = add_or_initialize_time_mean(self._target_data, target_data)
-        self._gen_data = add_or_initialize_time_mean(self._gen_data, gen_data)
+        self._target_data = self._add_or_initialize_time_mean(
+            self._target_data, target_data
+        )
+        self._gen_data = self._add_or_initialize_time_mean(self._gen_data, gen_data)
 
         # we can ignore time slicing and just treat segments as though they're
         # different batches, because we can assume all time segments have the
@@ -75,10 +85,20 @@ class TimeMeanAggregator:
         """
         if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
+        sample_dim = 0
         logs = {}
         for name in self._gen_data.keys():
             gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
             target = self._dist.reduce_mean(self._target_data[name] / self._n_batches)
+            images = {
+                "bias_map": (gen - target).mean(dim=sample_dim).cpu(),
+                "gen_map": (gen).mean(dim=sample_dim).cpu(),
+            }
+            for key, data in images.items():
+                caption = self._image_captions[key].format(name=name)
+                caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                wandb_image = wandb.Image(data, caption=caption)
+                logs[f"{key}/{name}"] = wandb_image
             logs[f"rmse/{name}"] = float(
                 metrics.root_mean_squared_error(
                     predicted=gen, truth=target, weights=self._area_weights
