@@ -78,13 +78,6 @@ class ZonalMeanAggregator:
             error = self._gen_data[name] - self._target_data[name]
             zonal_means["error"] = error.mean(dim=sample_dim).cpu()
             for key, data in zonal_means.items():
-                # Currently we need to "un-flip" latitude to get it to plot
-                # increasing to the right on the x axis (unlike on the y axis).
-                # If latitude flipping is removed from data loader, then
-                # we need to remove this!
-                lat_dim = -1
-                data = data.flip(dims=[lat_dim])
-                # end part to remove
                 caption = self._captions[key].format(name=name)
                 caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
                 wandb_image = wandb.Image(data, caption=caption)

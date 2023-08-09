@@ -132,9 +132,7 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
     assert len(dataset) == len(obs_times) - 1
     with xr.open_mfdataset(tmpdir.glob("*.nc"), use_cftime=True) as ds:
         for varname in varnames:
-            target_data = np.flip(
-                ds[varname][global_idx : global_idx + 2, :, :].values, axis=-2
-            )
+            target_data = ds[varname][global_idx : global_idx + 2, :, :].values
             data = dataset[global_idx][varname].detach().numpy()
             assert data.shape[0] == 2
             assert np.all(data == target_data)
@@ -232,9 +230,9 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
             dataset = XarrayDataset(params=params, requirements=requirements)
             assert len(dataset) == len(obs_times) - n_steps + 1
             for varname in varnames:
-                target_data = np.flip(
-                    ds[varname][global_idx : global_idx + n_steps, :, :].values, axis=-2
-                )
+                target_data = ds[varname][
+                    global_idx : global_idx + n_steps, :, :
+                ].values
                 data = dataset[global_idx][varname].detach().numpy()
                 assert data.shape[0] == n_steps
                 assert np.all(data == target_data)

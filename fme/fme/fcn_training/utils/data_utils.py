@@ -33,9 +33,8 @@ def load_series_data(
     with dask.config.set(scheduler="synchronous"):
         arrays = {}
         for n in names:
-            # flip the lat dimension so that it is increasing
-            arr = np.flip(ds.variables[n][time_slice, :, :], axis=-2)
-            arr = arr.values.copy() if isinstance(ds, xr.Dataset) else arr.copy()
+            arr = ds.variables[n][time_slice, :, :]
+            arr = arr.values if isinstance(ds, xr.Dataset) else arr
             arrays[n] = torch.as_tensor(arr)
         return arrays
 

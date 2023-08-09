@@ -164,7 +164,7 @@ def make_video(
     video_data = np.maximum(video_data, 0)
     caption += f"; vmin={data_min:.4g}, vmax={data_max:.4g}"
     return wandb.Video(
-        video_data,
+        np.flip(video_data, axis=-2),
         caption=caption,
         fps=4,
     )
