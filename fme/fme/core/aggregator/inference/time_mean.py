@@ -43,16 +43,22 @@ class TimeMeanAggregator:
     def _add_or_initialize_time_mean(
         maybe_dict: Optional[MutableMapping[str, torch.Tensor]],
         new_data: Mapping[str, torch.Tensor],
+        ignore_initial: bool = False,
     ) -> Dict[str, torch.Tensor]:
         time_dim = 1
+        if ignore_initial:
+            time_slice = slice(1, None)
+        else:
+            time_slice = slice(0, None)
         if maybe_dict is None:
             d: Dict[str, torch.Tensor] = {
-                name: tensor.mean(dim=time_dim) for name, tensor in new_data.items()
+                name: tensor[:, time_slice].mean(dim=time_dim)
+                for name, tensor in new_data.items()
             }
         else:
             d = dict(maybe_dict)
             for name, tensor in new_data.items():
-                d[name] += tensor.mean(dim=time_dim)
+                d[name] += tensor[:, time_slice].mean(dim=time_dim)
         return d
 
     @torch.no_grad()
@@ -65,10 +71,13 @@ class TimeMeanAggregator:
         gen_data_norm: Mapping[str, torch.Tensor],
         i_time_start: int = 0,
     ):
+        ignore_initial = i_time_start == 0
         self._target_data = self._add_or_initialize_time_mean(
-            self._target_data, target_data
+            self._target_data, target_data, ignore_initial
         )
-        self._gen_data = self._add_or_initialize_time_mean(self._gen_data, gen_data)
+        self._gen_data = self._add_or_initialize_time_mean(
+            self._gen_data, gen_data, ignore_initial
+        )
 
         # we can ignore time slicing and just treat segments as though they're
         # different batches, because we can assume all time segments have the
