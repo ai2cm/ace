@@ -247,7 +247,8 @@ class Trainer:
 
     def validate_one_epoch(self):
         aggregator = OneStepAggregator(
-            self.train_data.area_weights.to(fme.get_device())
+            self.train_data.area_weights.to(fme.get_device()),
+            self.train_data.sigma_coordinates,
         )
 
         with torch.no_grad():
