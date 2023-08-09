@@ -63,10 +63,23 @@ class LoggingConfig:
 
 @dataclasses.dataclass
 class InlineInferenceConfig:
+    """
+    Attributes:
+        n_forward_steps: number of forward steps to take
+        forward_steps_in_memory: number of forward steps to take before
+            re-reading data from disk
+        n_samples: number of sample windows to take from the validation data
+        batch_size: batch size for the data loader, must be a multiple of
+            the number of parallel workers if parallel is True
+        parallel: whether to run inference in parallel across workers,
+            by default runs only on the root rank
+    """
+
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
     n_samples: int = 1
     batch_size: int = 1
+    parallel: bool = False
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -74,6 +87,13 @@ class InlineInferenceConfig:
                 "n_forward_steps must be divisible by steps_in_memory, "
                 f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
             )
+        if self.parallel:
+            dist = Distributed.get_instance()
+            if self.batch_size % dist.world_size != 0:
+                raise ValueError(
+                    "batch_size must be divisible by the number of parallel "
+                    f"workers, got {self.batch_size} and {dist.world_size}"
+                )
 
 
 @dataclasses.dataclass
