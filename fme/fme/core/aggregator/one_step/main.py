@@ -1,9 +1,29 @@
-from typing import Mapping
+from typing import Mapping, Protocol
 
 import torch
 
+from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
+from fme.fcn_training.utils.data_typing import (
+    SigmaCoordinates,
+)
+
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
+
+
+class _Aggregator(Protocol):
+    def get_logs(self, label: str) -> Mapping[str, torch.Tensor]:
+        ...
+
+    def record_batch(
+        self,
+        loss: float,
+        target_data: Mapping[str, torch.Tensor],
+        gen_data: Mapping[str, torch.Tensor],
+        target_data_norm: Mapping[str, torch.Tensor],
+        gen_data_norm: Mapping[str, torch.Tensor],
+    ) -> None:
+        ...
 
 
 class OneStepAggregator:
@@ -14,9 +34,19 @@ class OneStepAggregator:
     `get_logs` to get a dictionary of statistics when you're done.
     """
 
-    def __init__(self, area_weights: torch.Tensor):
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+    ):
         self._snapshot = SnapshotAggregator()
         self._mean = MeanAggregator(area_weights)
+        self._derived = DerivedMetricsAggregator(area_weights, sigma_coordinates)
+        self._aggregators: Mapping[str, _Aggregator] = {
+            "snapshot": self._snapshot,
+            "mean": self._mean,
+            "derived": self._derived,
+        }
 
     @torch.no_grad()
     def record_batch(
@@ -31,11 +61,9 @@ class OneStepAggregator:
             raise ValueError("No data in target_data")
         if len(gen_data) == 0:
             raise ValueError("No data in gen_data")
-        for aggregator in (
-            self._snapshot,
-            self._mean,
-        ):
-            aggregator.record_batch(  # type: ignore
+
+        for agg in self._aggregators.values():
+            agg.record_batch(
                 loss=loss,
                 target_data=target_data,
                 gen_data=gen_data,
@@ -51,7 +79,8 @@ class OneStepAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        logs = self._mean.get_logs(label="mean")
-        logs.update(self._snapshot.get_logs(label="snapshot"))
-        logs = {f"{label}/{key}": val for key, val in logs.items()}
+        logs = {}
+        for agg_label in self._aggregators:
+            for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
+                logs[f"{label}/{k}"] = v
         return logs
