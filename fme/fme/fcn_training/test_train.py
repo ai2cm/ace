@@ -1,3 +1,4 @@
+import datetime
 from typing import Dict
 import numpy as np
 import pathlib
@@ -30,12 +31,12 @@ def _get_test_yaml_files(
     train_string = f"""
 train_data:
   data_path: '{train_data_path}'
-  data_type: "netCDF4"
+  data_type: "xarray"
   batch_size: 2
   num_data_workers: 1
 validation_data:
   data_path: '{valid_data_path}'
-  data_type: "netCDF4"
+  data_type: "xarray"
   batch_size: 2
   num_data_workers: 1
 stepper:
@@ -145,6 +146,10 @@ def _setup(path, nettype):
     all_variable_names = list(set(in_variable_names + out_variable_names))
     data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
     grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
+    time = [
+        datetime.datetime(2000, 1, 1) + datetime.timedelta(days=i)
+        for i in range(data_dim_sizes["time"])
+    ]
     stats_dim_sizes = {}
 
     data_dir = path / "data"
@@ -157,7 +162,7 @@ def _setup(path, nettype):
         data_dir / "data.nc",
         data_dim_sizes,
         all_variable_names + [mask_name],
-        coords_override={"grid_yt": grid_yt},
+        coords_override={"grid_yt": grid_yt, "time": time},
     )
     _save_netcdf(
         stats_dir / "stats-mean.nc",
