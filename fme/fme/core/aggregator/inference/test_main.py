@@ -39,6 +39,10 @@ def test_logs_labels_exist():
     ]
     assert "test/time_mean/rmse/a" in logs
     assert "test/time_mean/bias/a" in logs
+    assert "test/time_mean/bias_map/a" in logs
+    assert "test/time_mean/gen_map/a" in logs
+    assert "test/zonal_mean/error/a" in logs
+    assert "test/zonal_mean/gen/a" in logs
     assert "test/video/a" in logs
 
 
