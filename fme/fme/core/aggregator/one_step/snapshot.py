@@ -1,5 +1,6 @@
 from typing import Mapping
 
+import numpy as np
 import torch
 from fme.core.device import get_device
 from fme.core.wandb import WandB
@@ -67,6 +68,7 @@ class SnapshotAggregator:
             for key, data in images.items():
                 caption = self._captions[key].format(name=name)
                 caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                data = np.flip(data.cpu().numpy(), axis=-2)
                 wandb_image = wandb.Image(data, caption=caption)
                 image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
