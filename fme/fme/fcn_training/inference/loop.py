@@ -42,8 +42,7 @@ class EnsembleBatch:
             start_timestep=self.i_time,
             start_sample=self.i_batch * batch_size,
         )
-        self.i_time += tensor_shape[1] - 1  # remove 1 because the last timestep is the
-        # initial condition for the next segment
+        self.i_time += tensor_shape[1]
         if self.i_time < self.n_forward_steps:  # only store if needed
             # store the end of the time window as
             # initial condition for the next segment.
@@ -112,6 +111,7 @@ def run_inference(
         # final state of each batch. We then use this as the initial condition
         # for the next time window.
         device = get_device()
+
         for i_time in range(0, n_forward_steps, forward_steps_in_memory):
             # data loader is a sequence of batches, so we need a new one for each
             # time window
@@ -121,17 +121,14 @@ def run_inference(
             )
             for data, batch_manager in zip(valid_data_loader, batch_managers):
                 data = {key: value.to(device) for key, value in data.items()}
-                # overwrite the first timestep with the last timestep from the
-                # previous segment
+                # overwrite the first timestep with the last generated timestep
+                # from the previous segment
                 batch_manager.apply_initial_condition(data)
                 stepped = stepper.run_on_batch(
                     data,
                     train=False,
                     n_forward_steps=forward_steps_in_memory,
                 )
-                # record raw data for the batch, and store the final state
-                # for the next segment
-                batch_manager.append(data, stepped.gen_data)
                 # for non-initial windows, we want to record only the new data
                 # and discard the initial sample of the window
                 if i_time > 0:
@@ -139,6 +136,10 @@ def run_inference(
                     i_time_aggregator = i_time + 1
                 else:
                     i_time_aggregator = i_time
+                # record raw data for the batch, and store the final state
+                # for the next segment
+                batch_manager.append(stepped.target_data, stepped.gen_data)
+                # record metrics
                 aggregator.record_batch(
                     loss=stepped.loss,
                     target_data=stepped.target_data,
