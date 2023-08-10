@@ -151,7 +151,7 @@ class TrainConfig:
         return os.path.join(self.checkpoint_dir, "best_ckpt.tar")
 
     def epoch_checkpoint_path(self, epoch: int) -> str:
-        return os.path.join(self.checkpoint_dir, "ckpt_{epoch:04d}.tar")
+        return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
 
     def epoch_checkpoint_enabled(self, epoch: int) -> bool:
         if self.checkpoint_every_n_epochs is None:
