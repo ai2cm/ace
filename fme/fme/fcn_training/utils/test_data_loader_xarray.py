@@ -39,6 +39,7 @@ def _mock_netcdf_factory(tmpdir, start, end, file_freq, step_freq, calendar):
             first, last, freq=step_freq, calendar=calendar, closed="left"
         )
         dim_sizes = {"time": len(times), "lat": 4, "lon": 8}
+        horizontal_dim_sizes = {key: dim_sizes[key] for key in ["lat", "lon"]}
         data_vars = {}
         for i in range(2):
             data_vars[f"ak_{i}"] = float(i)
@@ -46,6 +47,8 @@ def _mock_netcdf_factory(tmpdir, start, end, file_freq, step_freq, calendar):
         for varname in ["foo", "bar"]:
             data = np.random.randn(*list(dim_sizes.values())).astype(np.float32)
             data_vars[varname] = xr.DataArray(data, dims=list(dim_sizes))
+        data = np.random.randn(*list(horizontal_dim_sizes.values())).astype(np.float32)
+        data_vars["constant_var"] = xr.DataArray(data, dims=list(horizontal_dim_sizes))
         coords = {
             "time": xr.DataArray(times, dims=("time",)),
             "lat": xr.DataArray(
@@ -236,3 +239,20 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
                 data = dataset[global_idx][varname].detach().numpy()
                 assert data.shape[0] == n_steps
                 assert np.all(data == target_data)
+
+
+def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
+    tmpdir, _, _ = mock_monthly_netcdfs
+    params = DataLoaderParams(
+        data_path=tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+    )
+    varnames = ["foo", "bar", "constant_var"]
+    requirements = DataRequirements(
+        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=15
+    )
+    data = get_data_loader(params=params, train=False, requirements=requirements)
+    batch = data.loader.dataset[0]
+    assert batch["constant_var"].shape[0] == 15
