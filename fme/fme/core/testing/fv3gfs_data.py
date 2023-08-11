@@ -1,3 +1,4 @@
+import datetime
 import dataclasses
 import pathlib
 from typing import List, Dict, Optional, Tuple
@@ -5,6 +6,17 @@ from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 
 import numpy as np
 import xarray as xr
+
+
+def _coord_value(name, size):
+    # xarray data loader requires time to be a datetime or cftime.datetime object
+    if name == "time":
+        return [
+            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
+            for i in range(size)
+        ]
+    else:
+        return np.arange(size, dtype=np.float32)
 
 
 @dataclasses.dataclass
@@ -26,7 +38,7 @@ class DimSizes:
     def coords_2d(self) -> Dict[str, xr.DataArray]:
         return {
             name: xr.DataArray(
-                np.arange(shape, dtype=np.float32),
+                _coord_value(name, shape),
                 dims=(name,),
             )
             for name, shape in zip(self.dims_2d, self.shape_2d)
@@ -135,7 +147,7 @@ class FV3GFSData:
     def data_loader_params(self) -> DataLoaderParams:
         return DataLoaderParams(
             str(self._data_path),
-            data_type="netCDF4",
+            data_type="xarray",
             batch_size=1,
             num_data_workers=0,
         )

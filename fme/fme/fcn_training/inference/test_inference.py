@@ -204,7 +204,7 @@ def test_inference_writer_boundaries(
     # initial condition
     np.testing.assert_allclose(
         prediction_ds["x"].isel(timestep=0).sel(source="target").values,
-        ds["x"].sel(time=0).values,
+        ds["x"].isel(time=0).values,
     )
     for i in range(0, n_forward_steps + 1):
         log = inference_logs[i]
@@ -231,7 +231,7 @@ def test_inference_writer_boundaries(
         # the target obs should be the same as the validation data obs
         np.testing.assert_allclose(
             prediction_ds["x"].isel(timestep=i).sel(source="target").values,
-            ds["x"].sel(time=i).values,
+            ds["x"].isel(time=i).values,
         )
         if i > 0:
             timestep_da = prediction_ds["x"].isel(timestep=i)

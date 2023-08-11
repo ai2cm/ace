@@ -6,11 +6,53 @@ import xarray as xr
 from glob import glob
 from typing import List, Mapping, Optional, Tuple
 import fme
-from .data_typing import Dataset, HorizontalCoordinates, VariableMetadata
+from .data_typing import (
+    Dataset,
+    HorizontalCoordinates,
+    SigmaCoordinates,
+    VariableMetadata,
+)
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
-from .data_loader_netcdf4 import get_sigma_coordinates
 from .data_utils import apply_slice, load_series_data, get_lons_and_lats
+
+
+def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
+    """
+    Get sigma coordinates from a dataset.
+
+    Assumes that the dataset contains variables named `ak_N` and `bk_N` where
+    `N` is the level number. The returned tensors are sorted by level number.
+
+    Args:
+        ds: Dataset to get sigma coordinates from.
+    """
+    ak_mapping = {
+        int(v[3:]): torch.as_tensor(ds[v].values)
+        for v in ds.variables
+        if v.startswith("ak_")
+    }
+    bk_mapping = {
+        int(v[3:]): torch.as_tensor(ds[v].values)
+        for v in ds.variables
+        if v.startswith("bk_")
+    }
+    ak_list = [ak_mapping[k] for k in sorted(ak_mapping.keys())]
+    bk_list = [bk_mapping[k] for k in sorted(bk_mapping.keys())]
+
+    if len(ak_list) == 0 or len(bk_list) == 0:
+        raise ValueError("Dataset does not contain ak and bk sigma coordinates.")
+
+    if len(ak_list) != len(bk_list):
+        raise ValueError(
+            "Expected same number of ak and bk coordinates, "
+            f"got {len(ak_list)} and {len(bk_list)}."
+        )
+
+    return SigmaCoordinates(
+        ak=torch.as_tensor(ak_list, device=fme.get_device()),
+        bk=torch.as_tensor(bk_list, device=fme.get_device()),
+    )
 
 
 def get_file_local_index(
@@ -76,12 +118,10 @@ class XarrayDataset(Dataset):
     def _get_metadata(self, ds):
         result = {}
         for name in self.names:
-            if hasattr(ds.variables[name], "units") and hasattr(
-                ds.variables[name], "long_name"
-            ):
+            if hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
-                    units=ds.variables[name].units,
-                    long_name=ds.variables[name].long_name,
+                    units=ds[name].units,
+                    long_name=ds[name].long_name,
                 )
         self._metadata = result
 
