@@ -1,16 +1,15 @@
 import dask
 import torch
-import netCDF4
 import numpy as np
 import xarray as xr
 
-from typing import List, Union, Optional
+from typing import List, Optional, Tuple
 
 
 def load_series_data(
     idx: int,
     n_steps: int,
-    ds: Union[netCDF4.MFDataset, xr.Dataset],
+    ds: xr.Dataset,
     names: List[str],
     window_time_slice: Optional[slice] = None,
 ):
@@ -29,13 +28,12 @@ def load_series_data(
         )
     else:
         time_slice = outer_slice
-    # disable dask threading to avoid warnings in the xr.Dataset case
+    # disable dask threading to avoid warnings
     with dask.config.set(scheduler="synchronous"):
         arrays = {}
         for n in names:
             arr = ds.variables[n][time_slice, :, :]
-            arr = arr.values if isinstance(ds, xr.Dataset) else arr
-            arrays[n] = torch.as_tensor(arr)
+            arrays[n] = torch.as_tensor(arr.values)
         return arrays
 
 
@@ -64,7 +62,7 @@ def apply_slice(outer_slice: slice, inner_slice: slice) -> slice:
     return slice(start, stop)
 
 
-def get_lons_and_lats(ds: Union[netCDF4.MFDataset, xr.Dataset]):
+def get_lons_and_lats(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
     if "grid_xt" in ds.variables:
         hdims = "grid_xt", "grid_yt"
     elif "lon" in ds.variables:
@@ -73,7 +71,5 @@ def get_lons_and_lats(ds: Union[netCDF4.MFDataset, xr.Dataset]):
         hdims = "longitude", "latitude"
     else:
         raise ValueError("Could not identify dataset's horizontal dimensions.")
-    lons, lats = ds.variables[hdims[0]][:], ds.variables[hdims[1]][:]
-    if isinstance(ds, xr.Dataset):
-        lons, lats = lons.values, lats.values
+    lons, lats = ds[hdims[0]].values, ds[hdims[1]].values
     return np.array(lons), np.array(lats)

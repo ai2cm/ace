@@ -20,7 +20,7 @@ class DataLoaderParams:
     """
 
     data_path: str
-    data_type: Literal["netCDF4", "xarray", "ensemble_netCDF4", "ensemble_xarray"]
+    data_type: Literal["xarray", "ensemble_xarray"]
     batch_size: int
     num_data_workers: int
     n_samples: Optional[int] = None

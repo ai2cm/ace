@@ -44,7 +44,6 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
-import logging
 from typing import Optional
 import numpy as np
 from torch.utils.data import DataLoader
@@ -52,7 +51,6 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from .data_loader_netcdf4 import NetCDF4Dataset
 from .data_loader_xarray import XarrayDataset
 from .data_loader_params import DataLoaderParams
 from .data_requirements import DataRequirements
@@ -76,7 +74,6 @@ def _get_ensemble_dataset(
     params: DataLoaderParams,
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
-    sub_dataset=NetCDF4Dataset,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -88,7 +85,7 @@ def _get_ensemble_dataset(
         params_curr_member = DataLoaderParams(
             path, params.data_type, params.batch_size, params.num_data_workers
         )
-        dataset = sub_dataset(
+        dataset = XarrayDataset(
             params_curr_member, requirements, window_time_slice=window_time_slice
         )
 
@@ -134,35 +131,13 @@ def get_data_loader(
     """
     if dist is None:
         dist = Distributed.get_instance()
-    if params.data_type == "netCDF4":
-        dataset: Dataset = NetCDF4Dataset(
-            params, requirements=requirements, window_time_slice=window_time_slice
-        )
-        if params.num_data_workers > 0:
-            # netCDF4 __getitem__ fails with
-            # "RuntimeError: Resource temporarily unavailable"
-            # if num_data_workers > 0
-            # TODO: move this logic to the DataLoaderParams initialization
-            logging.warning(
-                f"If data_type=={params.data_type}, must use num_data_workers=0. "
-                "Got num_data_workers="
-                f"{params.num_data_workers}, but it is being set to 0."
-            )
-            params.num_data_workers = 0
-    elif params.data_type == "xarray":
+    if params.data_type == "xarray":
         dataset = XarrayDataset(
             params, requirements=requirements, window_time_slice=window_time_slice
         )
-    elif params.data_type == "ensemble_netCDF4":
-        dataset = _get_ensemble_dataset(
-            params, requirements, window_time_slice=window_time_slice
-        )
     elif params.data_type == "ensemble_xarray":
         dataset = _get_ensemble_dataset(
-            params,
-            requirements,
-            window_time_slice=window_time_slice,
-            sub_dataset=XarrayDataset,
+            params, requirements, window_time_slice=window_time_slice
         )
     else:
         raise NotImplementedError(
