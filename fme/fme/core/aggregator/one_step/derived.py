@@ -104,10 +104,13 @@ class DryAirMass(DerivedMetric):
         """Checks that the data contains the required atmospheric fields."""
         try:
             data.specific_total_water
-            data.surface_pressure
-            return True
         except ValueError:
             return False
+        try:
+            data.surface_pressure
+        except KeyError:
+            return False
+        return True
 
     def record(self, target: ClimateData, gen: ClimateData) -> None:
         if not self._validate_data(target) or not self._validate_data(gen):
