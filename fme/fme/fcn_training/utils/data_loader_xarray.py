@@ -4,7 +4,7 @@ import torch
 import logging
 import xarray as xr
 from glob import glob
-from typing import Mapping, Optional, Tuple
+from typing import List, Mapping, Optional, Tuple
 import fme
 from .data_typing import Dataset, HorizontalCoordinates, VariableMetadata
 from .data_loader_params import DataLoaderParams
@@ -52,6 +52,10 @@ class XarrayDataset(Dataset):
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
+        (
+            self.time_dependent_names,
+            self.time_invariant_names,
+        ) = self._get_time_names()
         self.window_time_slice = window_time_slice
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -105,6 +109,18 @@ class XarrayDataset(Dataset):
             logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
             logging.info(f"Following variables are available: {list(ds.variables)}.")
 
+    def _get_time_names(self) -> Tuple[List[str], List[str]]:
+        time_dependent_names = []
+        # Don't use open_mfdataset here, because it will give time-invariant fields
+        # a time dimension. We are assuming that time-invariant fields which exist
+        # in all individual datasets are invariant across those datasets.
+        with xr.open_dataset(self.full_paths[0]) as ds:
+            for name in self.names:
+                if "time" in ds[name].dims:
+                    time_dependent_names.append(name)
+        time_invariant_names = list(set(self.names) - set(time_dependent_names))
+        return time_dependent_names, time_invariant_names
+
     @property
     def area_weights(self) -> torch.Tensor:
         return self._area_weights
@@ -157,15 +173,26 @@ class XarrayDataset(Dataset):
         # get the sequence of observations
         arrays = {}
         idxs = range(input_file_idx, output_file_idx + 1)
+        total_steps = 0
         for i, file_idx in enumerate(idxs):
             ds = self._open_file(file_idx)
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
-            tensor_dict = load_series_data(start, n_steps, ds, self.names)
-            for n in self.names:
+            total_steps += n_steps
+            tensor_dict = load_series_data(
+                start, n_steps, ds, self.time_dependent_names
+            )
+            for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
             del ds
         for n, tensor_list in arrays.items():
             arrays[n] = torch.cat(tensor_list)
+
+        # load time-invariant variables from first dataset
+        ds = self._open_file(idxs[0])
+        for name in self.time_invariant_names:
+            tensor = torch.as_tensor(ds[name].values)
+            arrays[name] = tensor.repeat((total_steps, 1, 1))
+
         return arrays
