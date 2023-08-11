@@ -95,6 +95,7 @@ class TimeMeanAggregator:
         if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
         sample_dim = 0
+        lat_dim = -2
         logs = {}
         for name in self._gen_data.keys():
             gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
@@ -106,6 +107,7 @@ class TimeMeanAggregator:
             for key, data in images.items():
                 caption = self._image_captions[key].format(name=name)
                 caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                data = data.flip(dims=[lat_dim])
                 wandb_image = wandb.Image(data, caption=caption)
                 logs[f"{key}/{name}"] = wandb_image
             logs[f"rmse/{name}"] = float(
