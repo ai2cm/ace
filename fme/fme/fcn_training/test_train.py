@@ -90,7 +90,7 @@ logging:
   entity: ai2cm
 validation_data:
   data_path: '{valid_data_path}'
-  data_type: "netCDF4"
+  data_type: "xarray"
   batch_size: 1
   num_data_workers: 1
   n_samples: 3

@@ -1,6 +1,7 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
+import datetime
 from typing import List
 from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
@@ -11,6 +12,17 @@ import numpy as np
 import pathlib
 import xarray as xr
 import pytest
+
+
+def _coord_value(name, size):
+    # xarray data loader requires time to be a datetime or cftime.datetime object
+    if name == "time":
+        return [
+            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
+            for i in range(size)
+        ]
+    else:
+        return np.arange(size, dtype=np.float32)
 
 
 def _save_netcdf(filename, dim_sizes, variable_names):
@@ -24,7 +36,7 @@ def _save_netcdf(filename, dim_sizes, variable_names):
         )
     coords = {
         dim_name: xr.DataArray(
-            np.arange(size, dtype=np.float32),
+            _coord_value(dim_name, size),
             dims=(dim_name,),
         )
         for dim_name, size in dim_sizes.items()
@@ -65,9 +77,9 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(tmp_path, "ensemble_netCDF4", 1, 0, None)
+    params = DataLoaderParams(tmp_path, "ensemble_xarray", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
-    requirements = DataRequirements([], [], [], window_timesteps)
+    requirements = DataRequirements(["foo"], [], [], window_timesteps)
 
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
@@ -77,12 +89,12 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
-def test_fv3gfs_loader(tmp_path):
+def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
-    params = DataLoaderParams(tmp_path, "netCDF4", 1, 0, None)
+    params = DataLoaderParams(tmp_path, "xarray", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
-    requirements = DataRequirements([], [], [], window_timesteps)
+    requirements = DataRequirements(["foo"], [], [], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 

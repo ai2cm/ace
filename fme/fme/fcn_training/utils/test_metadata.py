@@ -1,4 +1,5 @@
-from fme.fcn_training.utils.data_loader_netcdf4 import VariableMetadata
+import datetime
+from fme.fcn_training.utils.data_typing import VariableMetadata
 from fme.fcn_training.utils.data_loader_params import DataLoaderParams
 from fme.fcn_training.utils.data_requirements import DataRequirements
 from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
@@ -33,6 +34,17 @@ METADATA = [
 ]
 
 
+def _coord_value(name, size):
+    # xarray data loader requires time to be a datetime or cftime.datetime object
+    if name == "time":
+        return [
+            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
+            for i in range(size)
+        ]
+    else:
+        return np.arange(size, dtype=np.float32)
+
+
 def _save_netcdf(
     filename, metadata: Mapping[str, Optional[VariableMetadata]], num_members=1
 ):
@@ -53,7 +65,7 @@ def _save_netcdf(
         data_vars[name] = xr.DataArray(data, dims=list(dim_sizes), attrs=attrs)
     coords = {
         dim_name: xr.DataArray(
-            np.arange(size, dtype=np.float32),
+            _coord_value(dim_name, size),
             dims=(dim_name,),
         )
         for dim_name, size in dim_sizes.items()
@@ -79,18 +91,18 @@ def _save_netcdf_ensemble(
         _save_netcdf(member_path / "data.nc", metadata)
 
 
-def _create_data(path, metadata, data_type: Literal["netCDF4", "ensemble_netCDF4"]):
+def _create_data(path, metadata, data_type: Literal["xarray", "ensemble_xarray"]):
     """Looks up function to create toy data for the given data type and runs it."""
     thunks = dict(
-        netCDF4=lambda: _save_netcdf(path / "data.nc", metadata),
-        ensemble_netCDF4=lambda: _save_netcdf_ensemble(path, metadata, num_members=2),
+        xarray=lambda: _save_netcdf(path / "data.nc", metadata),
+        ensemble_xarray=lambda: _save_netcdf_ensemble(path, metadata, num_members=2),
     )
     create_data_fn = thunks[data_type]
     create_data_fn()
 
 
 @pytest.mark.parametrize("metadata", METADATA)
-@pytest.mark.parametrize("data_type", ["netCDF4", "ensemble_netCDF4"])
+@pytest.mark.parametrize("data_type", ["xarray", "ensemble_xarray"])
 def test_metadata(metadata, data_type):
     with tempfile.TemporaryDirectory() as tmpdir:
         path = Path(tmpdir)
