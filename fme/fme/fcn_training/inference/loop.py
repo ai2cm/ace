@@ -63,7 +63,7 @@ class EnsembleBatch:
                 the time axis will be replaced with the last value from the
                 previous segment.
         """
-        if self.i_time >= self.n_forward_steps:
+        if self.i_time > self.n_forward_steps:
             raise ValueError(
                 "Cannot apply initial condition after "
                 "the last segment has been appended, currently at "
@@ -208,9 +208,6 @@ def run_dataset_inference(
                 predicted_data = {
                     key: value.to(device) for key, value in predicted_data.items()
                 }
-                # record raw data for the batch, and store the final state
-                # for the next segment
-                batch_manager.append(valid_data, predicted_data)
                 valid_data_norm = normalizer.normalize(valid_data)
                 predicted_data_norm = normalizer.normalize(predicted_data)
                 # for non-initial windows, we want to record only the new data
@@ -223,6 +220,10 @@ def run_dataset_inference(
                     i_time_aggregator = i_time + 1
                 else:
                     i_time_aggregator = i_time
+                # record raw data for the batch, and store the final state
+                # for the next segment
+                batch_manager.append(valid_data, predicted_data)
+                # record metrics
                 aggregator.record_batch(
                     loss=np.nan,
                     target_data=valid_data,
