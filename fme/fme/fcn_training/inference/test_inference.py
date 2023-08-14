@@ -51,8 +51,13 @@ def save_plus_one_stepper(
     torch.save({"stepper": stepper.get_state()}, path)
 
 
-@pytest.mark.parametrize("use_prediction_data", [True, False])
-def test_inference_plus_one_model(tmp_path: pathlib.Path, use_prediction_data: bool):
+@pytest.mark.parametrize(
+    "use_prediction_data, n_forward_steps",
+    [(True, 2), (True, 1), (False, 2), (False, 1)],
+)
+def test_inference_plus_one_model(
+    tmp_path: pathlib.Path, use_prediction_data: bool, n_forward_steps: int
+):
     in_names = ["x"]
     out_names = ["x"]
     all_names = list(set(in_names).union(out_names))
@@ -84,7 +89,7 @@ def test_inference_plus_one_model(tmp_path: pathlib.Path, use_prediction_data: b
         prediction_data = None
     config = InferenceConfig(
         experiment_dir=str(tmp_path),
-        n_forward_steps=1,
+        n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
         logging=LoggingConfig(
             log_to_screen=True,
