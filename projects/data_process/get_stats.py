@@ -13,11 +13,7 @@ import os
 # or outputs to the ML model, so we don't need normalization constants for them.
 DROP_VARIABLES = (
     [
-        "OCNFRAC",
         "land_sea_mask",
-        "land_fraction",
-        "ocean_fraction",
-        "sea_ice_fraction",
         "pressure_thickness_of_atmospheric_layer_0",
         "pressure_thickness_of_atmospheric_layer_1",
         "pressure_thickness_of_atmospheric_layer_2",
@@ -30,6 +26,15 @@ DROP_VARIABLES = (
     + [f"ak_{i}" for i in range(9)]
     + [f"bk_{i}" for i in range(9)]
 )
+
+# these variables either have no time dimension, or we expect them to vary
+# only slightly in time (e.g. ocean_fraction and sea_ice_fraction). So we
+# specify them here to indicate that their standard deviations should always be
+# computed using the "full-field" approach.
+TIME_INVARIANT_VARIABLES = {
+    "FV3GFS": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
+    "E3SMV2": ("PHIS", "OCNFRAC"),
+}
 
 DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
@@ -103,13 +108,21 @@ def main(
     ds = ds.sel(time=slice(start_date, end_date))
 
     dims = DIMS[data_type]
+    time_invariant_variables = TIME_INVARIANT_VARIABLES[data_type]
 
     centering = ds.mean(dim=dims)
     scaling = ds.std(dim=dims)
     time_means = ds.mean(dim="time")
 
     if not full_field:
-        scaling = compute_residual_scaling(ds, centering, scaling, dims)
+        ds_time_varying = ds.drop_vars(time_invariant_variables)
+        centering_time_varying = centering.drop_vars(time_invariant_variables)
+        scaling_time_varying = scaling.drop_vars(time_invariant_variables)
+        residual_scaling = compute_residual_scaling(
+            ds_time_varying, centering_time_varying, scaling_time_varying, dims
+        )
+        for name in residual_scaling:
+            scaling[name] = residual_scaling[name]
 
     for dataset in [centering, scaling, time_means]:
         add_history_attr(dataset, input_zarr, start_date, end_date, full_field)
