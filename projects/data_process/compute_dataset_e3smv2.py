@@ -13,7 +13,7 @@ import os
 import time
 from glob import glob
 from itertools import chain
-from typing import Callable, List, MutableMapping, Sequence, Tuple
+from typing import Callable, List, MutableMapping, Optional, Sequence, Tuple
 
 import click
 import numpy as np
@@ -33,12 +33,14 @@ from dask.diagnostics import ProgressBar
 from dask.distributed import Client
 from xtorch_harmonics import roundtrip
 
-INSTANT = "6hourly_instant/1yr"
-MEAN = "6hourly/1yr"
-
 # default paths for input/output; can be changed when calling this script
 INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: 501
+TIME_INVARIANT_INPUT_DIR = "/global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant"
 OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/e3smv2-1deg-gaussian-20yr-fme.zarr"
+
+# these are subdirs of INPUT_DIR
+INSTANT = "6hourly_instant/1yr"
+MEAN = "6hourly/1yr"
 
 REFERENCE_PRESSURE = 1e5  # Pa
 LIQUID_PRECIP_DENSITY = 1e3  # kg/m**3
@@ -126,7 +128,9 @@ INPUT_VARIABLE_NAMES = {
         "PRECSL",
         "QFLX",
     ],
+    "time_invariant": ["PHIS"],
 }
+
 
 WATER_SPECIES_NAMES = [
     "Q",
@@ -178,6 +182,7 @@ DROP_VARIABLE_NAMES = {
         "lon_bnds",
         "area",
         "gw",
+        "elevation",
     ],
     "3D": [  # variables to drop when opening 3D vars
         "P0",
@@ -238,16 +243,22 @@ def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str
     return names
 
 
-def get_nc_paths(base_dir: str, var_names: List[str]) -> MutableMapping[str, List[str]]:
-    paths = {
-        var_name: sorted(list(glob(os.path.join(base_dir, f"{var_name}_*.nc"))))
-        for var_name in var_names
-    }
+def get_nc_paths(
+    base_dir: str, var_names: Optional[List[str]] = None
+) -> MutableMapping[str, List[str]]:
+    if var_names is None:
+        paths = {"time_invariant": list(glob(os.path.join(base_dir, f"*.nc")))}
+    else:
+        paths = {
+            var_name: sorted(list(glob(os.path.join(base_dir, f"{var_name}_*.nc"))))
+            for var_name in var_names
+        }
     return paths
 
 
 def open_dataset(
     dataset_dirs: MutableMapping[str, str],
+    time_invariant_dir: str,
     input_variable_names: MutableMapping[str, List[str]] = INPUT_VARIABLE_NAMES,
     varnames_3d: List[str] = VARNAMES_3D,
     drop_variable_names: MutableMapping[str, List[str]] = DROP_VARIABLE_NAMES,
@@ -262,12 +273,22 @@ def open_dataset(
         var_paths = {}
         for key in dataset_dirs.keys():
             var_paths.update(get_nc_paths(dataset_dirs[key], input_variable_names[key]))
+        var_paths.update(get_nc_paths(time_invariant_dir))
     print(
         f"Opening {len(list(chain.from_iterable(var_paths.values())))} files with "
         f"{len(var_paths.keys())} vars..."
     )
     datasets = {}
     start = time.time()
+    if "time_invariant" in var_paths:
+        for path in var_paths["time_invariant"]:
+            ds = xr.open_dataset(path).drop(drop_variable_names["2D"], errors="ignore")
+            if "time" in ds.coords:
+                ds = ds.isel(time=0, drop=True)
+            for varname in input_variable_names["time_invariant"]:
+                if varname not in datasets and varname in ds.variables:
+                    datasets[varname] = ds
+        del var_paths["time_invariant"]
     for varname, paths in var_paths.items():
         var_start = time.time()
         if varname in varnames_3d:
@@ -390,12 +411,13 @@ def compute_rad_fluxes(
 
 def construct_lazy_dataset(
     dataset_dirs: MutableMapping[str, str],
+    time_invariant_dir: str,
     vanilla: bool = False,
     sht_roundtrip: bool = False,
 ) -> xr.Dataset:
     start = time.time()
     print(f"Opening dataset...")
-    ds = open_dataset(dataset_dirs, vanilla=vanilla)
+    ds = open_dataset(dataset_dirs, time_invariant_dir, vanilla=vanilla)
     print(f"Dataset opened in {time.time() - start:.2f} s total.")
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
     if sht_roundtrip:
@@ -461,7 +483,16 @@ def construct_lazy_dataset(
 )
 @click.option("--sht-roundtrip", is_flag=True, help="SHT roundtrip as a first step.")
 @click.option(
-    "-i", "--input-dir", default=INPUT_DIR, help="Directory in which to find input ncs."
+    "-i",
+    "--input-dir",
+    default=INPUT_DIR,
+    help="Directory in which to find time-varying input ncs.",
+)
+@click.option(
+    "-t",
+    "--time-invariant-input-dir",
+    default=TIME_INVARIANT_INPUT_DIR,
+    help="Directory in which to find time-invariant input ncs.",
 )
 @click.option("-o", "--output", default=OUTPUT_URL, help="URL to write output to.")
 @click.option("--n-split", default=100, help="Number of steps to split job over.")
@@ -474,6 +505,7 @@ def main(
     check_conservation,
     water_budget_dataset,
     input_dir,
+    time_invariant_input_dir,
     output,
     n_split,
     n_workers,
@@ -485,7 +517,9 @@ def main(
         INSTANT: os.path.join(input_dir, INSTANT),
         MEAN: os.path.join(input_dir, MEAN),
     }
-    ds = construct_lazy_dataset(dataset_dirs, vanilla, sht_roundtrip)
+    ds = construct_lazy_dataset(
+        dataset_dirs, time_invariant_input_dir, vanilla, sht_roundtrip
+    )
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:

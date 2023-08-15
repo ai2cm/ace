@@ -12,6 +12,8 @@ while [[ "$#" -gt 0 ]]
 do case $1 in
     -i|--input-dir) INPUT_DIR="$2"
     shift;;
+    -t|--time-invariant-input-dir) TIME_INVARIANT_DIR="$2"
+    shift;;
     -z|--zarr) ZARR="$2"
     shift;;
     -o|--output-dir) OUTPUT_DIR="$2"
@@ -25,6 +27,10 @@ done
 if [[ -z "${INPUT_DIR}" ]]
 then
     echo "Option -i, --input-dir missing"
+    exit 1;
+elif [[ -z "${TIME_INVARIANT_DIR}" ]]
+then
+    echo "Option -t, --time-invariant-input-dir missing"
     exit 1;
 elif [[ -z "${ZARR}" ]]
 then
@@ -54,13 +60,21 @@ set -xe
 # create the zarr from E3SMv2 nc files
 python -u compute_dataset_e3smv2.py --sht-roundtrip \
     --n-split=200 --n-workers=16 \
-    -i ${INPUT_DIR} -o ${ZARR}
+    -i ${INPUT_DIR} -t ${TIME_INVARIANT_DIR} -o ${ZARR}
 
 # save first 30 years of data to netCDFs (intended for training)
 python -u convert_to_monthly_netcdf.py \
     ${ZARR} \
     ${OUTPUT_DIR}/traindata \
     --start-date 0002-01-01 \
+    --end-date 0031-12-31 \
+    --nc-format NETCDF4
+
+# save years 0022--0031 to netCDFs (intended for prediction_data baseline)
+python -u convert_to_monthly_netcdf.py \
+    ${ZARR} \
+    ${OUTPUT_DIR}/predictiondata \
+    --start-date 0022-01-01 \
     --end-date 0031-12-31 \
     --nc-format NETCDF4
 
