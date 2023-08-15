@@ -2,6 +2,7 @@ from typing import Mapping
 
 import numpy as np
 import torch
+
 from fme.core.device import get_device
 from fme.core.wandb import WandB
 

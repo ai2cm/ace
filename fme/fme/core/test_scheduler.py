@@ -1,5 +1,6 @@
-from fme.core.scheduler import SchedulerConfig
 import torch.optim.lr_scheduler
+
+from fme.core.scheduler import SchedulerConfig
 
 
 def test_default_gives_none():

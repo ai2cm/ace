@@ -1,7 +1,9 @@
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from typing import Dict
-import torch
+
 import pytest
+import torch
+
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 
 
 def test_normalize_depends_on_mean():

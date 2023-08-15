@@ -1,12 +1,13 @@
 import contextlib
+import dataclasses
 from typing import Any, Literal, Mapping, Optional
-from fme.core.scheduler import SchedulerConfig
 
+import torch
 import torch.cuda.amp as amp
 from apex import optimizers
-import dataclasses
 from torch import nn
-import torch
+
+from fme.core.scheduler import SchedulerConfig
 
 
 class Optimization:

@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def to_flat_dict(d: Dict[str, Any]) -> Dict[str, Any]:

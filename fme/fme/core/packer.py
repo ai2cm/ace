@@ -1,5 +1,6 @@
-import torch
 from typing import Dict, List
+
+import torch
 import torch.jit
 
 

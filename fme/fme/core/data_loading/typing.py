@@ -1,11 +1,10 @@
 import abc
+import dataclasses
 from collections import namedtuple
 from typing import Mapping, Optional
-import dataclasses
 
 import numpy as np
 import torch
-
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 

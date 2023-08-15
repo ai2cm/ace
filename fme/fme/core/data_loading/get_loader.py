@@ -1,18 +1,18 @@
+from pathlib import Path
 from typing import Optional
+
 import numpy as np
+import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from .xarray import XarrayDataset
 from .params import DataLoaderParams
 from .requirements import DataRequirements
-from .typing import GriddedData, Dataset
-
-from pathlib import Path
-
-import torch.utils.data
+from .typing import Dataset, GriddedData
+from .xarray import XarrayDataset
 
 
 def _all_same(iterable, cmp=lambda x, y: x == y):

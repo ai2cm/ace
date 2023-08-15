@@ -4,9 +4,11 @@ and aggregating them into a single metric value. The functions here mainly exist
 to turn metric functions that may have different APIs into a common API,
 so that they can be iterated over and called in the same way in a loop.
 """
-from typing import Protocol, Optional
-from fme.core.metrics import Dimension
+from typing import Optional, Protocol
+
 import torch
+
+from fme.core.metrics import Dimension
 
 
 class AreaWeightedFunction(Protocol):

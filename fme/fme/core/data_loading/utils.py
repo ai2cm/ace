@@ -1,9 +1,9 @@
-import dask
-import torch
-import numpy as np
-import xarray as xr
-
 from typing import List, Optional, Tuple
+
+import dask
+import numpy as np
+import torch
+import xarray as xr
 
 
 def load_series_data(

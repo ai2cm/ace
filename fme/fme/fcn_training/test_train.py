@@ -1,15 +1,17 @@
 import datetime
-from typing import Dict
-import numpy as np
 import pathlib
-import pytest
 import subprocess
 import tempfile
-from fme.fcn_training.train import main as train_main
-from fme.fcn_training.train import _restore_checkpoint
-from fme.fcn_training.inference.inference import main as inference_main
 import unittest.mock
+from typing import Dict
+
+import numpy as np
+import pytest
 import xarray as xr
+
+from fme.fcn_training.inference.inference import main as inference_main
+from fme.fcn_training.train import _restore_checkpoint
+from fme.fcn_training.train import main as train_main
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
