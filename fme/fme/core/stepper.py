@@ -1,24 +1,26 @@
-from typing import List, Dict, Tuple, Optional, Union, cast
-from fme.core.aggregator import OneStepAggregator, NullAggregator, InferenceAggregator
-from fme.core.distributed import Distributed
-from fme.fcn_training.utils.darcy_loss import LpLoss
+import dataclasses
+from typing import Dict, List, Optional, Tuple, Union, cast
 
-from fme.fcn_training.utils.data_requirements import DataRequirements
+import dacite
+import torch
+from torch import nn
 from torch.nn.parallel import DistributedDataParallel
-from fme.core.packer import Packer
+
+from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggregator
+from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
+from fme.core.distributed import Distributed
 from fme.core.normalizer import (
+    FromStateNormalizer,
     NormalizationConfig,
     StandardNormalizer,
-    FromStateNormalizer,
 )
-from fme.core.prescriber import PrescriberConfig, Prescriber, NullPrescriber
-import dataclasses
+from fme.core.packer import Packer
+from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
-from torch import nn
-import torch
-from .optimization import Optimization, OptimizationConfig, NullOptimization
-import dacite
+from fme.fcn_training.utils.darcy_loss import LpLoss
+
+from .optimization import NullOptimization, Optimization, OptimizationConfig
 
 
 @dataclasses.dataclass
