@@ -1,13 +1,18 @@
-from typing import Dict, Optional, Protocol, Union, Mapping
-from fme.core.normalizer import StandardNormalizer
-import numpy as np
+import logging
+from typing import Dict, Mapping, Optional, Protocol, Union
 
+import numpy as np
 import torch
 
+from fme.core import SingleModuleStepper, metrics
 from fme.core.aggregator.inference.main import InferenceAggregator
-from .data_writer import DataWriter, NullDataWriter
-from fme.core import SingleModuleStepper
+from fme.core.aggregator.climate_data import ClimateData
 from fme.core.device import get_device
+from fme.core.normalizer import StandardNormalizer
+from fme.core.stepper import SteppedData
+from fme.fcn_training.utils.data_typing import GriddedData, SigmaCoordinates
+
+from .data_writer import DataWriter, NullDataWriter
 
 
 class EnsembleBatch:
@@ -76,10 +81,60 @@ class EnsembleBatch:
 
 
 class DataLoaderFactory(Protocol):
-    def __call__(
-        self, window_time_slice: Optional[slice] = None
-    ) -> torch.utils.data.DataLoader:
+    def __call__(self, window_time_slice: Optional[slice] = None) -> GriddedData:
         ...
+
+
+def _compute_dry_air_mass(
+    stepped: SteppedData,
+    area_weights: torch.Tensor,
+    sigma_coordinates: SigmaCoordinates,
+) -> SteppedData:
+    gen = ClimateData(stepped.gen_data)
+    target = ClimateData(stepped.target_data)
+    ak, bk = sigma_coordinates.ak, sigma_coordinates.bk
+    try:
+        # check that the required fields are present
+        gen.specific_total_water
+        gen.surface_pressure
+        target.specific_total_water
+        target.surface_pressure
+    except ValueError:
+        logging.warning(
+            "Could not compute dry air mass due to missing atmospheric fields"
+        )
+        return stepped
+
+    gen_dry_air_mass = metrics.compute_dry_air_mass(
+        gen.specific_total_water,
+        gen.surface_pressure,
+        ak,
+        bk,
+        area_weights,
+    )
+
+    target_dry_air_mass = metrics.compute_dry_air_mass(
+        target.specific_total_water,
+        target.surface_pressure,
+        ak,
+        bk,
+        area_weights,
+    )
+
+    label = "dry_air_mass"
+    new_stepped = stepped.copy()
+    new_stepped.gen_data[label] = gen_dry_air_mass
+    new_stepped.target_data[label] = target_dry_air_mass
+    return new_stepped
+
+
+def compute_derived_quantities(
+    stepped: SteppedData,
+    area_weights: torch.Tensor,
+    sigma_coordinates: SigmaCoordinates,
+) -> SteppedData:
+    stepped = _compute_dry_air_mass(stepped, area_weights, sigma_coordinates)
+    return stepped
 
 
 def run_inference(
@@ -95,7 +150,7 @@ def run_inference(
     example_valid_data_loader = data_loader_factory(window_time_slice=slice(0, 1))
     batch_managers = [
         EnsembleBatch(i_batch=i_batch, n_forward_steps=n_forward_steps, writer=writer)
-        for i_batch in range(len(example_valid_data_loader))
+        for i_batch in range(len(example_valid_data_loader.loader))
     ]
     if len(batch_managers) == 0:
         raise ValueError("Data loader must have at least one batch")
@@ -119,7 +174,7 @@ def run_inference(
                 # need one more timestep for initial condition
                 window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
             )
-            for data, batch_manager in zip(valid_data_loader, batch_managers):
+            for data, batch_manager in zip(valid_data_loader.loader, batch_managers):
                 data = {key: value.to(device) for key, value in data.items()}
                 # overwrite the first timestep with the last generated timestep
                 # from the previous segment
@@ -129,6 +184,13 @@ def run_inference(
                     train=False,
                     n_forward_steps=forward_steps_in_memory,
                 )
+
+                area_weights = valid_data_loader.area_weights.to(device)
+                sigma_coords = valid_data_loader.sigma_coordinates
+                stepped = compute_derived_quantities(
+                    stepped, area_weights, sigma_coords
+                )
+
                 # for non-initial windows, we want to record only the new data
                 # and discard the initial sample of the window
                 if i_time > 0:
@@ -172,7 +234,7 @@ def run_dataset_inference(
     )
     batch_managers = [
         EnsembleBatch(i_batch, n_forward_steps, writer)
-        for i_batch in range(len(example_valid_data_loader))
+        for i_batch in range(len(example_valid_data_loader.loader))
     ]
     if len(batch_managers) == 0:
         raise ValueError("Data loader must have at least one batch")
@@ -200,7 +262,7 @@ def run_dataset_inference(
                 window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
             )
             for valid_data, predicted_data, batch_manager in zip(
-                valid_data_loader, predicted_data_loader, batch_managers
+                valid_data_loader.loader, predicted_data_loader.loader, batch_managers
             ):
                 valid_data = {
                     key: value.to(device) for key, value in valid_data.items()
