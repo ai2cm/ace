@@ -2,16 +2,18 @@
 data (e.g. netCDF files)."""
 
 import datetime
-from typing import List
-from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
-from fme.fcn_training.utils.data_loader_params import DataLoaderParams
-from fme.fcn_training.utils.data_requirements import DataRequirements
-from fme.fcn_training.utils.data_typing import SigmaCoordinates
-from fme.fcn_training.utils.data_utils import apply_slice
-import numpy as np
 import pathlib
-import xarray as xr
+from typing import List
+
+import numpy as np
 import pytest
+import xarray as xr
+
+from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.utils import apply_slice
 
 
 def _coord_value(name, size):
@@ -84,7 +86,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_data_loader(params, True, requirements)  # type: ignore
+    data = get_data_loader(params, True, requirements)
     assert len(data.loader) == samples_per_member * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 

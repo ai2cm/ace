@@ -5,12 +5,12 @@ import numpy as np
 import torch
 
 from fme.core import SingleModuleStepper, metrics
-from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.aggregator.climate_data import ClimateData
+from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import SteppedData
-from fme.fcn_training.utils.data_typing import GriddedData, SigmaCoordinates
 
 from .data_writer import DataWriter, NullDataWriter
 

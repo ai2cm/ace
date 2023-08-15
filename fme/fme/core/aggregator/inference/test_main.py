@@ -1,10 +1,10 @@
-from fme.fcn_training.utils.data_typing import SigmaCoordinates
-import torch
-import pytest
 import numpy as np
+import pytest
+import torch
 
 import fme
 from fme.core.aggregator.inference import InferenceAggregator
+from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
 
 

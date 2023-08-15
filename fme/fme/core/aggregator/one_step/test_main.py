@@ -1,9 +1,9 @@
-from fme.core.aggregator.one_step import OneStepAggregator
-from fme.core.device import get_device
-from fme.fcn_training.utils.data_typing import SigmaCoordinates
-
-import torch
 import pytest
+import torch
+
+from fme.core.aggregator.one_step import OneStepAggregator
+from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.device import get_device
 
 
 def test_labels_exist():

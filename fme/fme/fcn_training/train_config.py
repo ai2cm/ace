@@ -1,15 +1,12 @@
+import dataclasses
 import logging
 import os
 from typing import Any, Mapping, Optional
+
+from fme.core import SingleModuleStepperConfig
+from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
-
-from fme.fcn_training.utils.data_loader_multifiles import (
-    DataLoaderParams,
-)
-
-import dataclasses
-from fme.core import SingleModuleStepperConfig
 from fme.core.wandb import WandB
 
 

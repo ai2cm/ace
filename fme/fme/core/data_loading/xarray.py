@@ -6,15 +6,15 @@ import xarray as xr
 from glob import glob
 from typing import List, Mapping, Optional, Tuple
 import fme
-from .data_typing import (
+from .typing import (
     Dataset,
     HorizontalCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
-from .data_loader_params import DataLoaderParams
-from .data_requirements import DataRequirements
-from .data_utils import apply_slice, load_series_data, get_lons_and_lats
+from .params import DataLoaderParams
+from .requirements import DataRequirements
+from .utils import apply_slice, load_series_data, get_lons_and_lats
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
