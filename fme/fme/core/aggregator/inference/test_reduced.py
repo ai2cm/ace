@@ -1,6 +1,7 @@
-from fme.core.aggregator.inference.reduced import AreaWeightedReducedMetric
-import torch
 import numpy as np
+import torch
+
+from fme.core.aggregator.inference.reduced import AreaWeightedReducedMetric
 from fme.core.device import get_device
 
 

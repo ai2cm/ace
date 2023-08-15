@@ -1,8 +1,8 @@
 from typing import Iterable, Optional, Union
-from typing_extensions import TypeAlias
-import numpy as np
 
+import numpy as np
 import torch
+from typing_extensions import TypeAlias
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]

@@ -1,5 +1,6 @@
-from typing import Optional, Mapping, Any
 import dataclasses
+from typing import Any, Mapping, Optional
+
 import torch.optim.lr_scheduler
 
 

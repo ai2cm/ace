@@ -1,6 +1,7 @@
-from fme.core.prescriber import Prescriber, PrescriberConfig
 import pytest
 import torch
+
+from fme.core.prescriber import Prescriber, PrescriberConfig
 
 
 def test_prescriber_config_build_raises_value_error():

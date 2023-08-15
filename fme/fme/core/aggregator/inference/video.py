@@ -1,7 +1,7 @@
 from typing import Dict, Mapping, Optional, Tuple
 
-import torch
 import numpy as np
+import torch
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB

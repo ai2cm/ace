@@ -1,8 +1,9 @@
+import torch
+
 from fme.core.aggregator.inference.reduced import MeanAggregator
 from fme.core.aggregator.inference.time_mean import TimeMeanAggregator
-from fme.core.testing import mock_distributed
 from fme.core.device import get_device
-import torch
+from fme.core.testing import mock_distributed
 
 
 def test_mean_metrics_call_distributed():

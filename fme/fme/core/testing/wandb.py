@@ -1,9 +1,11 @@
 import collections
-from typing import Any, Mapping, Dict
-from fme.core.distributed import Distributed
 import contextlib
+from typing import Any, Dict, Mapping
+
 import wandb as upstream_wandb
+
 from fme.core import wandb
+from fme.core.distributed import Distributed
 
 
 class MockWandB:
