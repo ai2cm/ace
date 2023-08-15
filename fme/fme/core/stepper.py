@@ -105,6 +105,16 @@ class SteppedData:
             target_data_norm={k: v[:, 1:] for k, v in self.target_data_norm.items()},
         )
 
+    def copy(self) -> "SteppedData":
+        """Creates new dictionaries for the data but with the same tensors."""
+        return SteppedData(
+            loss=self.loss,
+            gen_data={k: v for k, v in self.gen_data.items()},
+            target_data={k: v for k, v in self.target_data.items()},
+            gen_data_norm={k: v for k, v in self.gen_data_norm.items()},
+            target_data_norm={k: v for k, v in self.target_data_norm.items()},
+        )
+
 
 class SingleModuleStepper:
     """
