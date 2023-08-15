@@ -139,6 +139,7 @@ def main(
     )
     aggregator = InferenceAggregator(
         validation.area_weights.to(fme.get_device()),
+        sigma_coordinates=validation.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
         n_timesteps=config.n_forward_steps + 1,
@@ -155,7 +156,7 @@ def main(
         writer = NullDataWriter()
 
     def data_loader_factory(window_time_slice: Optional[slice] = None):
-        return _get_data_loader(window_time_slice=window_time_slice).loader
+        return _get_data_loader(window_time_slice=window_time_slice)
 
     if config.prediction_data is not None:
         # define data loader factory for prediction data
@@ -165,7 +166,7 @@ def main(
                 requirements=data_requirements,
                 train=False,
                 window_time_slice=window_time_slice,
-            ).loader
+            )
 
         run_dataset_inference(
             aggregator=aggregator,

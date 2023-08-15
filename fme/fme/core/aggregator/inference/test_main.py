@@ -1,3 +1,4 @@
+from fme.fcn_training.utils.data_typing import SigmaCoordinates
 import torch
 import pytest
 import numpy as np
@@ -12,10 +13,17 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
+    nz = 3
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
+    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+
     agg = InferenceAggregator(
-        area_weights, record_step_20=True, log_video=True, n_timesteps=n_time
+        area_weights,
+        sigma_coordinates,
+        record_step_20=True,
+        log_video=True,
+        n_timesteps=n_time,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -51,10 +59,16 @@ def test_inference_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
+    nz = 3
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
+    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
-        area_weights, record_step_20=True, log_video=True, n_timesteps=n_time
+        area_weights,
+        sigma_coordinates,
+        record_step_20=True,
+        log_video=True,
+        n_timesteps=n_time,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -91,8 +105,12 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     # the data from the correct timestep is piped into the aggregator.
     overlap = 1  # tested code assumes windows have one overlapping point
     area_weights = torch.ones(4).to(fme.get_device())
+    nz = 3
+    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
-        area_weights, n_timesteps=(window_len - overlap) * n_windows + 1
+        area_weights,
+        sigma_coordinates,
+        n_timesteps=(window_len - overlap) * n_windows + 1,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
     i_start = 0
@@ -132,8 +150,12 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     possibly-overlapping windows.
     """
     area_weights = torch.ones(4).to(fme.get_device())
+    nz = 3
+    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
-        area_weights, n_timesteps=(window_len - overlap) * n_windows + overlap
+        area_weights,
+        sigma_coordinates,
+        n_timesteps=(window_len - overlap) * n_windows + overlap,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
     i_start = 0

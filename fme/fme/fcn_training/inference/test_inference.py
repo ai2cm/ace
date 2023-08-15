@@ -1,20 +1,23 @@
+import dataclasses
 import pathlib
 from typing import List, Tuple
+from fme.core.device import get_device
+from fme.fcn_training.utils.data_typing import SigmaCoordinates
+
 import numpy as np
 import pytest
-import yaml
-import dataclasses
-from fme.core import metrics
-from fme.core.normalizer import FromStateNormalizer
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.testing import FV3GFSData, DimSizes, mock_wandb
-
-from fme.fcn_training.inference.inference import InferenceConfig, main
-from fme.fcn_training.registry import ModuleSelector
-
-from fme.fcn_training.train_config import LoggingConfig
 import torch
 import xarray as xr
+import yaml
+
+from fme.core import metrics
+from fme.core.normalizer import FromStateNormalizer
+from fme.core.stepper import SingleModuleStepperConfig, SteppedData
+from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
+from fme.fcn_training.inference import loop
+from fme.fcn_training.inference.inference import InferenceConfig, main
+from fme.fcn_training.registry import ModuleSelector
+from fme.fcn_training.train_config import LoggingConfig
 
 
 class PlusOne(torch.nn.Module):
@@ -252,3 +255,112 @@ def test_inference_writer_boundaries(
                 timestep_da.sel(source="prediction").values,
                 timestep_da.sel(source="target").values,
             )
+
+
+@pytest.mark.parametrize("has_required_fields", [True, False])
+def test_compute_derived_quantities(has_required_fields):
+    """Checks that tensors are added to the data dictionary appropriately."""
+    n_sample, n_time, nx, ny, nz = 2, 3, 4, 5, 6
+
+    def _make_data():
+        vars = ["a"]
+        if has_required_fields:
+            additional_fields = [
+                "specific_total_water_{}".format(i) for i in range(nz)
+            ] + ["PRESsfc"]
+            vars += additional_fields
+        return {
+            var: torch.randn(n_sample, n_time, nx, ny, device=get_device())
+            for var in vars
+        }
+
+    loss = 42.0
+    fake_data = {
+        k: _make_data()
+        for k in ("gen_data", "target_data", "gen_data_norm", "target_data_norm")
+    }
+    stepped = SteppedData(
+        loss,
+        fake_data["gen_data"],
+        fake_data["target_data"],
+        fake_data["gen_data_norm"],
+        fake_data["target_data_norm"],
+    )
+
+    area_weights = torch.ones(ny, device=get_device()) / ny
+    sigma_coords = SigmaCoordinates(
+        ak=torch.linspace(0, 1, nz + 1, device=get_device()),
+        bk=torch.linspace(0, 1, nz + 1, device=get_device()),
+    )
+    derived_stepped = loop.compute_derived_quantities(
+        stepped,
+        area_weights,
+        sigma_coords,
+    )
+
+    existence_check = ("dry_air_mass" in derived_stepped.gen_data) and (
+        "dry_air_mass" in derived_stepped.target_data
+    )
+
+    if has_required_fields:
+        assert existence_check
+        fields = (
+            derived_stepped.gen_data["dry_air_mass"],
+            derived_stepped.target_data["dry_air_mass"],
+            derived_stepped.gen_data["a"],
+            derived_stepped.target_data["a"],
+        )
+        for f in fields:
+            assert f.shape == (n_sample, n_time, nx, ny)
+    else:
+        assert not existence_check
+
+
+def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
+    """Checks that derived metrics are computed during inferece without errors."""
+
+    n_forward_steps = 2
+
+    in_names = ["x", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
+    out_names = ["x", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        n_lat=16,
+        n_lon=32,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+    )
+    time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+        time_varying_values=time_varying_values,
+    )
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        validation_data=data.data_loader_params,
+        prediction_data=None,
+        log_video=True,
+        save_prediction_files=True,
+        forward_steps_in_memory=1,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+
+    with mock_wandb() as _:
+        _ = main(
+            yaml_config=str(config_filename),
+        )

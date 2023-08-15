@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Tuple, Union
+from typing import Iterable, Optional, Union
 from typing_extensions import TypeAlias
 import numpy as np
 
@@ -180,15 +180,14 @@ def time_and_global_mean_bias(
     return result
 
 
-def global_dry_air_mass(
+def compute_dry_air_mass(
     specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
     sigma_grid_offsets_ak: torch.Tensor,
     sigma_grid_offsets_bk: torch.Tensor,
     area: torch.Tensor,
-    spatial_dims: Optional[Tuple[int, int]] = (0, 1),
 ) -> torch.Tensor:
-    """Computes the global dry air mass in kg/m/s^2.
+    """Computes the global dry air mass in kg.
 
     Args:
         specific_total_water (lat, lon, vertical_level), (kg/kg)
@@ -227,4 +226,4 @@ def global_dry_air_mass(
 
     gravity = 9.80665  # m / s^2, valued used by FV3GFS
     dry_air_mass = 1 / gravity * (surface_pressure - water_path)  # kg / m^2
-    return (dry_air_mass * area).sum(axis=spatial_dims)
+    return dry_air_mass * area
