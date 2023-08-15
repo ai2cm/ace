@@ -1,9 +1,11 @@
-from fme.fcn_training.inference.data_writer import DataWriter
+from typing import NamedTuple
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
-from typing import NamedTuple
 from netCDF4 import Dataset
+
+from fme.fcn_training.inference.data_writer import DataWriter
 
 
 class TestDataWriter:

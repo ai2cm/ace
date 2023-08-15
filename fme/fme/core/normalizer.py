@@ -1,10 +1,12 @@
-from typing import List, Dict, Mapping, Optional
-import torch
+import dataclasses
+from typing import Dict, List, Mapping, Optional
+
 import netCDF4
 import numpy as np
-from fme.core.device import get_device
+import torch
 import torch.jit
-import dataclasses
+
+from fme.core.device import get_device
 
 
 @dataclasses.dataclass

@@ -1,5 +1,5 @@
-import os
 import logging
+import os
 
 
 def log_versions():

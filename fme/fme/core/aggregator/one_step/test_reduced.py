@@ -1,9 +1,10 @@
-from fme.core.aggregator.one_step.reduced import MeanAggregator
-from fme.core.testing import mock_distributed
-from fme.core.device import get_device
-import torch
 import numpy as np
 import pytest
+import torch
+
+from fme.core.aggregator.one_step.reduced import MeanAggregator
+from fme.core.device import get_device
+from fme.core.testing import mock_distributed
 
 
 def test_mean_metrics_call_distributed():

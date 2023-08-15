@@ -1,8 +1,9 @@
 from typing import Mapping
 
+import torch
+
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-import torch
 
 
 class TrainAggregator:

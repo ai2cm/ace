@@ -20,12 +20,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import torch
+import h5py
 import numpy as np
 import scipy.io
-import h5py
+import torch
 import torch.nn as nn
-
 
 #################################################
 #

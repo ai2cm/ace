@@ -1,19 +1,15 @@
 import dataclasses
-from typing import Literal, Optional, Tuple
+from typing import Any, Literal, Mapping, Optional, Protocol, Tuple, Type
+
+import torch_harmonics as harmonics
 
 # this package is installed in models/FourCastNet
 from fourcastnet.networks.afnonet import AFNONetBuilder
-from torch import nn
-from typing import Mapping, Protocol, Any, Type
-
-# this package is installed in models/fcn-mip
-from networks.geometric_v1.sfnonet import (
-    FourierNeuralOperatorBuilder,
-)
-
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 
-import torch_harmonics as harmonics
+# this package is installed in models/fcn-mip
+from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
+from torch import nn
 
 
 class ModuleConfig(Protocol):
