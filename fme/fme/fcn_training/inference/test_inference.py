@@ -1,8 +1,6 @@
 import dataclasses
 import pathlib
 from typing import List, Tuple
-from fme.core.device import get_device
-from fme.fcn_training.utils.data_typing import SigmaCoordinates
 
 import numpy as np
 import pytest
@@ -11,6 +9,8 @@ import xarray as xr
 import yaml
 
 from fme.core import metrics
+from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, mock_wandb

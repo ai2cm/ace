@@ -44,27 +44,25 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import argparse
 import dataclasses
+import logging
 import os
 import time
 from typing import Optional
-from fme.core.aggregator import OneStepAggregator, InferenceAggregator, TrainAggregator
+
 import dacite
-from fme.core.distributed import Distributed, NotDistributed
-import argparse
 import torch
-import logging
-from fme.fcn_training.utils import logging_utils
 import yaml
 
-from fme.fcn_training.utils.data_loader_multifiles import (
-    get_data_loader,
-)
-from fme.fcn_training.inference import run_inference
-from fme.core.wandb import WandB
-from fme.fcn_training.train_config import TrainConfig
-
 import fme
+from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
+from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.distributed import Distributed, NotDistributed
+from fme.core.wandb import WandB
+from fme.fcn_training.inference import run_inference
+from fme.fcn_training.train_config import TrainConfig
+from fme.fcn_training.utils import logging_utils
 
 wandb = WandB.get_instance()
 

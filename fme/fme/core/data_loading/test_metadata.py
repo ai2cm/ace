@@ -1,15 +1,16 @@
 import datetime
-from fme.fcn_training.utils.data_typing import VariableMetadata
-from fme.fcn_training.utils.data_loader_params import DataLoaderParams
-from fme.fcn_training.utils.data_requirements import DataRequirements
-from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
-import numpy as np
-import xarray as xr
-from typing import Literal, Mapping, Optional
 import tempfile
 from pathlib import Path
-import pytest
+from typing import Literal, Mapping, Optional
 
+import numpy as np
+import pytest
+import xarray as xr
+
+from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.typing import VariableMetadata
 
 METADATA = [
     pytest.param(
@@ -115,9 +116,7 @@ def test_metadata(metadata, data_type):
         requirements = DataRequirements(
             names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
         )
-        data = get_data_loader(  # type: ignore
-            params=params, train=True, requirements=requirements
-        )
+        data = get_data_loader(params=params, train=True, requirements=requirements)
         target_metadata = {
             name: metadata[name] for name in metadata if metadata[name] is not None
         }

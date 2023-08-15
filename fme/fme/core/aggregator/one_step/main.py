@@ -3,9 +3,7 @@ from typing import Mapping, Protocol
 import torch
 
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
-from fme.fcn_training.utils.data_typing import (
-    SigmaCoordinates,
-)
+from fme.core.data_loading.typing import SigmaCoordinates
 
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator

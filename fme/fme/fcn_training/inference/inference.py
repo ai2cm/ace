@@ -1,25 +1,25 @@
+import argparse
 import dataclasses
+import logging
 import os
 import time
 from typing import Optional, Union
-import argparse
 
-import torch
-import logging
 import dacite
+import torch
 import yaml
 
 import fme
-from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.dicts import to_flat_dict
-from fme.fcn_training.utils import logging_utils
-from fme.fcn_training.utils.data_loader_multifiles import get_data_loader
-from fme.fcn_training.utils.data_loader_params import DataLoaderParams
-from fme.fcn_training.train_config import LoggingConfig
 from fme.core import SingleModuleStepper
+from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.params import DataLoaderParams
+from fme.core.dicts import to_flat_dict
 from fme.core.wandb import WandB
 from fme.fcn_training.inference.data_writer import DataWriter, NullDataWriter
-from fme.fcn_training.inference.loop import run_inference, run_dataset_inference
+from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
+from fme.fcn_training.train_config import LoggingConfig
+from fme.fcn_training.utils import logging_utils
 
 
 def load_stepper(checkpoint_file: str) -> SingleModuleStepper:

@@ -3,15 +3,13 @@ variable, e.g. dry air mass."""
 
 import logging
 from typing import Dict, Mapping, Optional, Protocol, Tuple
-from fme.core.aggregator.climate_data import CLIMATE_FIELD_NAME_PREFIXES, ClimateData
 
 import torch
 
 from fme.core import metrics
+from fme.core.aggregator.climate_data import CLIMATE_FIELD_NAME_PREFIXES, ClimateData
+from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.fcn_training.utils.data_typing import (
-    SigmaCoordinates,
-)
 
 
 class DerivedMetric(Protocol):
