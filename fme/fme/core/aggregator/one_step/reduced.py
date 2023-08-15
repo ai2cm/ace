@@ -1,11 +1,13 @@
-from typing import Mapping, Optional, Dict
+from typing import Dict, Mapping, Optional
 
-import xarray as xr
 import torch
+import xarray as xr
 from torch import nn
-from fme.core.device import get_device
+
 from fme.core import metrics
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
+
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 

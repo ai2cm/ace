@@ -1,17 +1,19 @@
+from unittest.mock import MagicMock
+
+import pytest
+import torch
+
+import fme
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.optimization import OptimizationConfig
+from fme.core.packer import Packer
+from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.core.stepper import (
     SingleModuleStepper,
-    run_on_batch,
     SingleModuleStepperConfig,
+    run_on_batch,
 )
 from fme.fcn_training.registry import ModuleSelector
-import torch
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
-from fme.core.packer import Packer
-from fme.core.optimization import OptimizationConfig
-from fme.core.prescriber import PrescriberConfig, Prescriber, NullPrescriber
-import fme
-from unittest.mock import MagicMock
-import pytest
 
 
 def get_data(names, n_samples, n_time):

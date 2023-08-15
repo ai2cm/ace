@@ -1,6 +1,8 @@
-from typing import Optional
 import os
+from typing import Optional
+
 import torch.distributed
+
 from fme.core.device import using_gpu
 
 singleton: Optional["Distributed"] = None

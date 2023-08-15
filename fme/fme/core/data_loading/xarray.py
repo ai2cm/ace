@@ -1,20 +1,18 @@
-import os
-from fme.core import metrics
-import torch
 import logging
-import xarray as xr
+import os
 from glob import glob
 from typing import List, Mapping, Optional, Tuple
+
+import torch
+import xarray as xr
+
 import fme
-from .typing import (
-    Dataset,
-    HorizontalCoordinates,
-    SigmaCoordinates,
-    VariableMetadata,
-)
+from fme.core import metrics
+
 from .params import DataLoaderParams
 from .requirements import DataRequirements
-from .utils import apply_slice, load_series_data, get_lons_and_lats
+from .typing import Dataset, HorizontalCoordinates, SigmaCoordinates, VariableMetadata
+from .utils import apply_slice, get_lons_and_lats, load_series_data
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:

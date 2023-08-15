@@ -1,7 +1,8 @@
 from typing import Optional, Sequence
+
 import click
 import xarray
-from utils import Grid, validate_file_path, roundtrip
+from utils import Grid, roundtrip, validate_file_path
 
 
 # fmt: off

@@ -11,28 +11,27 @@
 
 import os
 import time
-import click
-from dask.diagnostics import ProgressBar
-from dask.distributed import Client
-from typing import Callable, List, MutableMapping, Sequence, Tuple
 from glob import glob
 from itertools import chain
+from typing import Callable, List, MutableMapping, Sequence, Tuple
+
+import click
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
-from xtorch_harmonics import roundtrip
-
 from compute_dataset_fv3gfs import (
+    assert_column_integral_of_moisture_is_conserved,
     assert_global_dry_air_mass_conservation,
     assert_global_moisture_conservation,
-    assert_column_integral_of_moisture_is_conserved,
-    compute_specific_total_water,
-    compute_vertical_coarsening,
-    compute_tendencies,
     compute_column_advective_moisture_tendency,
     compute_column_moisture_integral,
+    compute_specific_total_water,
+    compute_tendencies,
+    compute_vertical_coarsening,
 )
-
+from dask.diagnostics import ProgressBar
+from dask.distributed import Client
+from xtorch_harmonics import roundtrip
 
 INSTANT = "6hourly_instant/1yr"
 MEAN = "6hourly/1yr"

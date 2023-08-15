@@ -1,5 +1,7 @@
-import torch
 import contextlib
+
+import torch
+
 from fme.core import distributed
 
 

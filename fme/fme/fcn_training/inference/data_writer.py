@@ -1,8 +1,9 @@
-from typing import Mapping, Optional, Dict
 from collections import namedtuple
+from typing import Dict, Mapping, Optional
+
+import numpy as np
 import torch
 from netCDF4 import Dataset
-import numpy as np
 
 
 class DataWriter:

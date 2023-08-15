@@ -2,11 +2,11 @@
 # which can be installed using fv3net's Makefile. See
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
-import click
-from dask.diagnostics import ProgressBar
-import xarray as xr
 import os
 
+import click
+import xarray as xr
+from dask.diagnostics import ProgressBar
 
 # these are auxiliary variables that exist in dataset for convenience, e.g. to do
 # masking or to more easily compute vertical integrals. But they are not inputs

@@ -1,14 +1,14 @@
-from typing import Mapping, Optional, Dict, Literal, Protocol
+from typing import Dict, Literal, Mapping, Optional, Protocol
 
-import torch
 import numpy as np
+import torch
+import xarray as xr
 
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.wandb import WandB
 from fme.core.metrics import Dimension
-import xarray as xr
+from fme.core.wandb import WandB
 
 wandb = WandB.get_instance()
 

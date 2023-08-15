@@ -1,5 +1,6 @@
-from fme.core.packer import Packer
 import torch
+
+from fme.core.packer import Packer
 
 
 def test_pack_singleton_channels():

@@ -1,6 +1,6 @@
 from enum import Enum
-import torch
 
+import torch
 import torch_harmonics as harmonics
 
 

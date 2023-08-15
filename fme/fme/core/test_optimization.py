@@ -1,13 +1,15 @@
-from fme.core.optimization import Optimization
-from fme.core.scheduler import SchedulerConfig
-import pytest
+import copy
 from typing import Literal, Optional
+
+import pytest
 import torch
 import torch.nn as nn
-import copy
 import torch.random
 import yaml
+
 import fme
+from fme.core.optimization import Optimization
+from fme.core.scheduler import SchedulerConfig
 
 
 @pytest.mark.parametrize("scheduler", [None, "CosineAnnealingLR"])

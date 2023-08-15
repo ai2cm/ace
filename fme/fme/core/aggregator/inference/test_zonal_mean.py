@@ -1,6 +1,6 @@
-from fme.core.aggregator.inference.zonal_mean import ZonalMeanAggregator
-
 import torch
+
+from fme.core.aggregator.inference.zonal_mean import ZonalMeanAggregator
 
 n_sample, n_time, ny, nx = 2, 5, 10, 20
 loss = 1.0

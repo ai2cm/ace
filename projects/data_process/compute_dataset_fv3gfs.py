@@ -10,13 +10,14 @@
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
 # it on our GKE cluster.
 
-import click
-from dask.diagnostics import ProgressBar
-import fsspec
 from typing import List, MutableMapping, Sequence, Tuple
+
+import click
+import fsspec
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
+from dask.diagnostics import ProgressBar
 
 FLUXES_2D = "fluxes_2d"
 FOURCASTNET_VANILLA = "fourcastnet_vanilla"
