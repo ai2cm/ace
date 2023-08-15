@@ -3,9 +3,9 @@ from typing import Dict, List, Mapping, Optional, Protocol, Union
 import torch
 from wandb import Table
 
+from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
-from fme.fcn_training.utils.data_typing import SigmaCoordinates
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .reduced import MeanAggregator

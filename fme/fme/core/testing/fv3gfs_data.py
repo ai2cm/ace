@@ -1,11 +1,12 @@
-import datetime
 import dataclasses
+import datetime
 import pathlib
-from typing import List, Dict, Optional, Tuple
-from fme.fcn_training.utils.data_loader_params import DataLoaderParams
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import xarray as xr
+
+from fme.core.data_loading.params import DataLoaderParams
 
 
 def _coord_value(name, size):
