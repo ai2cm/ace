@@ -1,15 +1,17 @@
 from typing import Dict, List, Mapping, Optional, Protocol, Union
 
-from fme.core.distributed import Distributed
-from .time_mean import TimeMeanAggregator
-from .zonal_mean import ZonalMeanAggregator
-from .reduced import MeanAggregator
-from .video import VideoAggregator
-from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from fme.core.wandb import WandB
+import torch
 from wandb import Table
 
-import torch
+from fme.core.distributed import Distributed
+from fme.core.wandb import WandB
+from fme.fcn_training.utils.data_typing import SigmaCoordinates
+
+from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
+from .reduced import MeanAggregator
+from .time_mean import TimeMeanAggregator
+from .video import VideoAggregator
+from .zonal_mean import ZonalMeanAggregator
 
 wandb = WandB.get_instance()
 
@@ -42,6 +44,7 @@ class InferenceAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
         n_timesteps: int,
         record_step_20: bool = False,
         log_video: bool = False,

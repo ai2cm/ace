@@ -146,7 +146,7 @@ class Trainer:
                 requirements=inference_data_requirements,
                 window_time_slice=window_time_slice,
                 dist=dist,
-            ).loader
+            )
 
         self._inference_data_loader_factory = get_inference_data_loader
 
@@ -275,6 +275,7 @@ class Trainer:
             record_step_20 = self.config.inference.n_forward_steps >= 20
             aggregator = InferenceAggregator(
                 self.train_data.area_weights.to(fme.get_device()),
+                self.train_data.sigma_coordinates,
                 record_step_20=record_step_20,
                 log_video=False,
                 n_timesteps=self.config.inference.n_forward_steps + 1,
