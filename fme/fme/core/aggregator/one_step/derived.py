@@ -1,7 +1,6 @@
 """Derived metrics take the global state as input and usually output a new
 variable, e.g. dry air mass."""
 
-import logging
 from dataclasses import dataclass
 from typing import Dict, Mapping, Optional, Protocol, Tuple
 
@@ -51,35 +50,17 @@ class DryAir(DerivedMetric):
         self._device = device
         self._spatial_dims: Tuple[int, int] = spatial_dims
 
-    def _validate_data(self, data: ClimateData) -> bool:
-        """Checks that the data contains the required atmospheric fields."""
-        try:
-            data.specific_total_water
-        except ValueError:
-            return False
-        try:
-            data.surface_pressure
-        except KeyError:
-            return False
-        return True
-
     def record(self, target: ClimateData, gen: ClimateData) -> None:
-        if not self._validate_data(target) or not self._validate_data(gen):
-            self._dry_air_target_total = torch.tensor(torch.nan)
-            self._dry_air_gen_total = torch.tensor(torch.nan)
-            logging.warning(
-                f"Could not compute dry air mass due to missing atmospheric fields."
-            )
-            return
-
-        def _helper(climate_data: ClimateData):
+        def _compute_dry_air_helper(climate_data: ClimateData) -> torch.Tensor:
+            water = climate_data.specific_total_water
+            pressure = climate_data.surface_pressure
+            if water is None or pressure is None:
+                return torch.tensor(torch.nan)
             return (
                 metrics.weighted_mean(
                     metrics.surface_pressure_due_to_dry_air(
-                        climate_data.specific_total_water[
-                            :, 0:2, ...
-                        ],  # (sample, time, y, x, level)
-                        climate_data.surface_pressure[:, 0:2, ...],
+                        water[:, 0:2, ...],  # (sample, time, y, x, level)
+                        pressure[:, 0:2, ...],
                         self._sigma_coordinates.ak,
                         self._sigma_coordinates.bk,
                     ),
@@ -91,9 +72,10 @@ class DryAir(DerivedMetric):
                 .mean()
             )
 
-        dry_air_target = _helper(target)
-        dry_air_gen = _helper(gen)
+        dry_air_target = _compute_dry_air_helper(target)
+        dry_air_gen = _compute_dry_air_helper(gen)
 
+        # initialize
         if self._dry_air_target_total is None:
             self._dry_air_target_total = torch.zeros_like(
                 dry_air_target, device=self._device

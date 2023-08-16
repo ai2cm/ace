@@ -92,13 +92,12 @@ def _compute_dry_air(
     gen = ClimateData(stepped.gen_data)
     target = ClimateData(stepped.target_data)
     ak, bk = sigma_coordinates.ak, sigma_coordinates.bk
-    try:
-        # check that the required fields are present
-        gen.specific_total_water
-        gen.surface_pressure
-        target.specific_total_water
-        target.surface_pressure
-    except ValueError:
+    if (
+        gen.specific_total_water is None
+        or gen.surface_pressure is None
+        or target.specific_total_water is None
+        or target.surface_pressure is None
+    ):
         logging.warning(
             "Could not compute dry air mass due to missing atmospheric fields"
         )

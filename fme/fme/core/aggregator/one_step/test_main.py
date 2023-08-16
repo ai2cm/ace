@@ -116,8 +116,10 @@ def test_derived():
     target = logs["/derived/surface_pressure_due_to_dry_air/target"]
     gen = logs["/derived/surface_pressure_due_to_dry_air/gen"]
 
-    assert target.shape == () and not torch.isnan(target).all()
-    assert gen.shape == () and not torch.isnan(target).all()
+    assert target.shape == ()
+    assert not torch.isnan(target).any()
+    assert gen.shape == ()
+    assert not torch.isnan(target).any()
 
 
 def test_derived_missing_surface_pressure():
