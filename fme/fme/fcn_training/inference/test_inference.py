@@ -298,15 +298,16 @@ def test_compute_derived_quantities(has_required_fields):
         sigma_coords,
     )
 
-    existence_check = ("dry_air_mass" in derived_stepped.gen_data) and (
-        "dry_air_mass" in derived_stepped.target_data
+    dry_air_name = "surface_pressure_due_to_dry_air"
+    existence_check = (dry_air_name in derived_stepped.gen_data) and (
+        dry_air_name in derived_stepped.target_data
     )
 
     if has_required_fields:
         assert existence_check
         fields = (
-            derived_stepped.gen_data["dry_air_mass"],
-            derived_stepped.target_data["dry_air_mass"],
+            derived_stepped.gen_data[dry_air_name],
+            derived_stepped.target_data[dry_air_name],
             derived_stepped.gen_data["a"],
             derived_stepped.target_data["a"],
         )
