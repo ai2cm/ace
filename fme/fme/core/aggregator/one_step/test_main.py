@@ -113,8 +113,8 @@ def test_derived():
     agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
 
     logs = agg.get_logs("")
-    target = logs["/derived/dry_air_mass/target"]
-    gen = logs["/derived/dry_air_mass/gen"]
+    target = logs["/derived/surface_pressure_due_to_dry_air/target"]
+    gen = logs["/derived/surface_pressure_due_to_dry_air/gen"]
 
     assert target.shape == () and not torch.isnan(target).all()
     assert gen.shape == () and not torch.isnan(target).all()
@@ -146,8 +146,8 @@ def test_derived_missing_surface_pressure():
     agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
 
     logs = agg.get_logs("")
-    target = logs["/derived/dry_air_mass/target"]
-    gen = logs["/derived/dry_air_mass/gen"]
+    target = logs["/derived/surface_pressure_due_to_dry_air/target"]
+    gen = logs["/derived/surface_pressure_due_to_dry_air/gen"]
 
     assert target.shape == () and torch.isnan(target).all()
     assert gen.shape == () and torch.isnan(target).all()
