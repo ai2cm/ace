@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 
 from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.data_loading.xarray import XarrayDataset, get_file_local_index
@@ -138,6 +138,77 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
             assert data.shape[0] == 2
             assert np.all(data == target_data)
     assert isinstance(dataset.sigma_coordinates, SigmaCoordinates)
+
+
+def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs):
+    """Test that increasing n_timesteps decreases the number of samples."""
+    tmpdir, obs_times, _ = mock_monthly_netcdfs
+    params = DataLoaderParams(
+        data_path=tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+    )
+    varnames = ["foo", "bar"]
+    n_forward_steps = 4
+    requirements = DataRequirements(
+        names=varnames,
+        in_names=varnames,
+        out_names=varnames,
+        n_timesteps=n_forward_steps + 1,
+    )
+    dataset = XarrayDataset(params=params, requirements=requirements)
+    assert len(dataset) == len(obs_times) - n_forward_steps
+
+
+def test_XarrayDataset_monthly_start_slice(mock_monthly_netcdfs):
+    """
+    When initial conditions are only taken from a certain start point, there should
+    be fewer samples.
+    """
+    tmpdir, obs_times, _ = mock_monthly_netcdfs
+    params = DataLoaderParams(
+        data_path=tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+        window_starts=Slice(5, None),
+    )
+    varnames = ["foo", "bar"]
+    requirements = DataRequirements(
+        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
+    )
+    dataset = XarrayDataset(params=params, requirements=requirements)
+    assert len(dataset) == len(obs_times) - 1 - 5
+
+
+@pytest.mark.parametrize(
+    "n_forward_steps",
+    [1, 2, 5],
+)
+def test_XarrayDataset_monthly_step_slice(mock_monthly_netcdfs, n_forward_steps):
+    """
+    When we subsample initial conditions every N steps, there should be fewer samples.
+    """
+    tmpdir, obs_times, _ = mock_monthly_netcdfs
+    params = DataLoaderParams(
+        data_path=tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+        window_starts=Slice(None, None, 2),
+    )
+    varnames = ["foo", "bar"]
+    requirements = DataRequirements(
+        names=varnames,
+        in_names=varnames,
+        out_names=varnames,
+        n_timesteps=n_forward_steps + 1,
+    )
+    dataset = XarrayDataset(params=params, requirements=requirements)
+    n_all_samples = len(obs_times) - n_forward_steps
+    # +1 because if the number of samples is odd, we include the first and last sample
+    assert len(dataset) == int((n_all_samples + 1) / 2)
 
 
 def test_XarrayDataset_monthly_time_window_sample_length(mock_monthly_netcdfs):
