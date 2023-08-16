@@ -5,6 +5,23 @@ from fme.core.distributed import Distributed
 
 
 @dataclasses.dataclass
+class Slice:
+    """
+    Configuration of a python `slice` built-in.
+
+    Required because `slice` cannot be initialized directly by dacite.
+    """
+
+    start: Optional[int] = None
+    stop: Optional[int] = None
+    step: Optional[int] = None
+
+    @property
+    def slice(self) -> slice:
+        return slice(self.start, self.stop, self.step)
+
+
+@dataclasses.dataclass
 class DataLoaderParams:
     """
     Attributes:
@@ -14,6 +31,9 @@ class DataLoaderParams:
         num_data_workers: Number of parallel data workers.
         n_samples: Number of samples to load, starting at the beginning of the data.
             If None, load all samples.
+        window_starts: Slice indicating the set of indices to consider for initial
+            conditions of windows of data. Values following the initial condition will
+            still come from the full dataset. By default load all initial conditions.
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
@@ -24,6 +44,7 @@ class DataLoaderParams:
     batch_size: int
     num_data_workers: int
     n_samples: Optional[int] = None
+    window_starts: Slice = dataclasses.field(default_factory=Slice)
     engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
 
     def __post_init__(self):
