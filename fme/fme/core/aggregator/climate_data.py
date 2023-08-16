@@ -1,5 +1,6 @@
+import logging
 from types import MappingProxyType
-from typing import Mapping
+from typing import Mapping, Optional
 
 import torch
 
@@ -32,13 +33,14 @@ class ClimateData:
         self._data = climate_data
         self._prefixes = climate_field_name_prefixes
 
-    def _extract_levels(self, prefix) -> torch.Tensor:
+    def _extract_levels(self, prefix) -> Optional[torch.Tensor]:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
         ]
 
         if not names:
-            raise ValueError(f'No fields with prefix "{prefix}" found.')
+            logging.warning(f'No fields with prefix "{prefix}" found.')
+            return None
 
         if len(names) > 10:
             raise NotImplementedError("No support for > 10 vertical levels.")
@@ -46,12 +48,16 @@ class ClimateData:
         return torch.stack([self._data[name] for name in names], dim=-1)
 
     @property
-    def specific_total_water(self) -> torch.Tensor:
+    def specific_total_water(self) -> Optional[torch.Tensor]:
         """Returns all vertical levels of specific total water, e.g. a tensor of
         shape `(..., vertical_level)`."""
         prefix = self._prefixes["specific_total_water"]
         return self._extract_levels(prefix)
 
     @property
-    def surface_pressure(self) -> torch.Tensor:
-        return self._data[self._prefixes["surface_pressure"]]
+    def surface_pressure(self) -> Optional[torch.Tensor]:
+        try:
+            return self._data[self._prefixes["surface_pressure"]]
+        except KeyError:
+            logging.warning("No fields for surface pressure found.")
+            return None
