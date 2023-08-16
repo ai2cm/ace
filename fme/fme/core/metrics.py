@@ -180,26 +180,22 @@ def time_and_global_mean_bias(
     return result
 
 
-def compute_dry_air_mass(
+def surface_pressure_due_to_dry_air(
     specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
     sigma_grid_offsets_ak: torch.Tensor,
     sigma_grid_offsets_bk: torch.Tensor,
-    area: torch.Tensor,
 ) -> torch.Tensor:
-    """Computes the global dry air mass in kg.
+    """Computes the dry air (Pa).
 
     Args:
         specific_total_water (lat, lon, vertical_level), (kg/kg)
         surface_pressure: (lat, lon), (Pa)
         sigma_grid_offsets_ak: Sorted sigma grid offsets ak, (vertical_level + 1,)
         sigma_grid_offsets_bk: Sorted sigma grid offsets bk, (vertical_level + 1,)
-        area: Area weights of each grid cell (m^2), (lat, lon)
-        spatial_dims: Tuple indicating the spatial (lat, lon) dimensions of the
-            input tensors.
 
     Returns:
-        Integrated global dry air mass (1,), (kg)
+        Vertically integrated dry air (lat, lon) (Pa)
     """
 
     num_levels = len(sigma_grid_offsets_ak) - 1
@@ -220,10 +216,12 @@ def compute_dry_air_mass(
     pressure_thickness = ((ak + (surface_pressure.unsqueeze(-1) * bk))).diff(
         dim=-1
     )  # Pa
+    # Note that generally, vertical integrals are multiplied by a (1 /
+    # gravity)-term. Omitted here since this only needs to be undone to get the
+    # water path back in units of Pa to compare to the surface pressure.
     water_path = torch.sum(
         pressure_thickness * specific_total_water, axis=-1
     )  # Pa * kg / kg = Pa  # type: ignore
 
-    gravity = 9.80665  # m / s^2, valued used by FV3GFS
-    dry_air_mass = 1 / gravity * (surface_pressure - water_path)  # kg / m^2
-    return dry_air_mass * area
+    dry_air = surface_pressure - water_path
+    return dry_air
