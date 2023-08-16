@@ -1,7 +1,7 @@
 import logging
 import os
 from glob import glob
-from typing import List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
 import xarray as xr
@@ -133,17 +133,22 @@ class XarrayDataset(Dataset):
         with xr.open_mfdataset(self.full_paths, use_cftime=True) as ds:
             self.observation_times = ds.get_index("time")
             # minus (n_steps - 1) since don't have outputs for those steps
-            self.n_samples_total = len(self.observation_times) - self.n_steps + 1
+            n_candidate_ics = len(self.observation_times) - self.n_steps + 1
+            self._initial_conditions = list(range(n_candidate_ics))[
+                self.params.window_starts.slice
+            ]
+            self._n_initial_conditions = len(self._initial_conditions)
             if self.params.n_samples is not None:
-                if self.params.n_samples > self.n_samples_total:
+                if self.params.n_samples > self._n_initial_conditions:
                     raise ValueError(
                         f"Requested {self.params.n_samples} samples, but only "
-                        f"{self.n_samples_total} are available."
+                        f"{self._n_initial_conditions} initial conditions "
+                        "are available."
                     )
-                self.n_samples_total = self.params.n_samples
+                self._n_initial_conditions = self.params.n_samples
             self._get_metadata(ds)
             img_shape = ds[self.names[0]].shape[1:]
-            logging.info(f"Found {self.n_samples_total} samples.")
+            logging.info(f"Found {self._n_initial_conditions} samples.")
             logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
             logging.info(f"Following variables are available: {list(ds.variables)}.")
 
@@ -172,7 +177,7 @@ class XarrayDataset(Dataset):
         return self._sigma_coordinates
 
     def __len__(self):
-        return self.n_samples_total
+        return self._n_initial_conditions
 
     def _open_file(self, idx):
         return xr.open_dataset(
@@ -183,7 +188,7 @@ class XarrayDataset(Dataset):
             mask_and_scale=False,
         )
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int):
         """Open a time-ordered subset of the files which contain the input with
         global index idx and its outputs. Get a starting index in the first file
         (input_local_idx) and a final index in the last file (output_local_idx),
@@ -191,6 +196,8 @@ class XarrayDataset(Dataset):
         to output_local_idx (inclusive).
 
         """
+        # transform sample index to timestep index
+        idx = self._initial_conditions[idx]
         if self.window_time_slice is not None:
             time_slice = apply_slice(
                 outer_slice=slice(idx, idx + self.n_steps),
@@ -209,7 +216,7 @@ class XarrayDataset(Dataset):
         )
 
         # get the sequence of observations
-        arrays = {}
+        arrays: Dict[str, torch.Tensor] = {}
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):
