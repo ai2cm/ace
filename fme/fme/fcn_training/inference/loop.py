@@ -85,9 +85,8 @@ class DataLoaderFactory(Protocol):
         ...
 
 
-def _compute_dry_air_mass(
+def _compute_dry_air(
     stepped: SteppedData,
-    area_weights: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
 ) -> SteppedData:
     gen = ClimateData(stepped.gen_data)
@@ -105,26 +104,24 @@ def _compute_dry_air_mass(
         )
         return stepped
 
-    gen_dry_air_mass = metrics.compute_dry_air_mass(
+    gen_dry_air = metrics.surface_pressure_due_to_dry_air(
         gen.specific_total_water,
         gen.surface_pressure,
         ak,
         bk,
-        area_weights,
     )
 
-    target_dry_air_mass = metrics.compute_dry_air_mass(
+    target_dry_air = metrics.surface_pressure_due_to_dry_air(
         target.specific_total_water,
         target.surface_pressure,
         ak,
         bk,
-        area_weights,
     )
 
-    label = "dry_air_mass"
+    label = "surface_pressure_due_to_dry_air"
     new_stepped = stepped.copy()
-    new_stepped.gen_data[label] = gen_dry_air_mass
-    new_stepped.target_data[label] = target_dry_air_mass
+    new_stepped.gen_data[label] = gen_dry_air
+    new_stepped.target_data[label] = target_dry_air
     return new_stepped
 
 
@@ -133,7 +130,7 @@ def compute_derived_quantities(
     area_weights: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
 ) -> SteppedData:
-    stepped = _compute_dry_air_mass(stepped, area_weights, sigma_coordinates)
+    stepped = _compute_dry_air(stepped, sigma_coordinates)
     return stepped
 
 
