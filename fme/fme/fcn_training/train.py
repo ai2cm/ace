@@ -62,7 +62,7 @@ from fme.core.distributed import Distributed, NotDistributed
 from fme.core.wandb import WandB
 from fme.fcn_training.inference import run_inference
 from fme.fcn_training.train_config import TrainConfig
-from fme.fcn_training.utils import logging_utils
+from fme.fcn_training.utils import gcs_utils, logging_utils
 
 wandb = WandB.get_instance()
 
@@ -345,6 +345,7 @@ def main(
         os.makedirs(train_config.experiment_dir)
     train_config.configure_logging(log_filename="out.log")
     train_config.configure_wandb(resume=True)
+    gcs_utils.authenticate()
     logging_utils.log_versions()
     logging_utils.log_beaker_url()
     trainer = Trainer(train_config)
