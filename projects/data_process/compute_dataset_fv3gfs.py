@@ -25,7 +25,7 @@ FULL_STATE = "full_state"
 TENDENCIES_3D = "tendencies_3d"
 SURFACE_FRACTIONS = "surface_fractions"
 
-OUTPUT_URL = "gs://vcm-ml-intermediate/2023-08-08-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr"  # noqa: 501
+OUTPUT_URL = "gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr"  # noqa: 501
 
 # constants are defined as in FV3GFS model
 # https://github.com/ai2cm/fv3gfs-fortran/blob/master/FMS/constants/constants.F90
@@ -255,8 +255,8 @@ def compute_vertical_coarsening(
 def compute_tendencies(
     ds: xr.Dataset, time_derivative_names: Sequence[str], dim: str = TIME_DIM
 ) -> xr.Dataset:
-    """Compute backward difference over time dimension. This will result
-    in the output dataset having one fewer time steps than the input dataset."""
+    """Compute backward difference over time dimension. The tendency variables
+    will be NaNs for the first timestep in the output dataset."""
     # this code does not assume that all time steps are equally spaced
     timestep_seconds = (ds[dim].diff(dim) / np.timedelta64(1, "s")).astype("float32")
     tendencies = {}
@@ -265,8 +265,7 @@ def compute_tendencies(
         tendency.attrs["units"] = f"{ds[name].units}/s"
         tendency.attrs["long_name"] = f"time derivative of {ds[name].long_name}"
         tendencies[f"tendency_of_{name}"] = tendency
-    # drop the first time step since it has no time derivative
-    return ds.isel({dim: slice(1, None)}).assign(tendencies)
+    return ds.assign(tendencies)
 
 
 def compute_column_advective_moisture_tendency(
