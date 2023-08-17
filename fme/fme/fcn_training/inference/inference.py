@@ -19,7 +19,7 @@ from fme.core.wandb import WandB
 from fme.fcn_training.inference.data_writer import DataWriter, NullDataWriter
 from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
 from fme.fcn_training.train_config import LoggingConfig
-from fme.fcn_training.utils import logging_utils
+from fme.fcn_training.utils import gcs_utils, logging_utils
 
 
 def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
@@ -76,6 +76,9 @@ class InferenceConfig:
             config=to_flat_dict(dataclasses.asdict(self)), resume=False
         )
 
+    def configure_gcs(self):
+        self.logging.configure_gcs()
+
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper(self.checkpoint_path)
@@ -105,6 +108,7 @@ def main(
         os.makedirs(config.experiment_dir)
     config.configure_logging(log_filename="inference_out.log")
     config.configure_wandb()
+    gcs_utils.authenticate()
 
     torch.backends.cudnn.benchmark = True
 
