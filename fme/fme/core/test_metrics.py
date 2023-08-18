@@ -2,6 +2,7 @@ import pytest
 import torch
 
 import fme
+from fme.core.metrics import surface_pressure_due_to_dry_air, vertical_integral
 
 
 def _get_lats(num_lat: int):
@@ -212,3 +213,22 @@ def test_gradient_magnitude_percent_diff():
         monotonic, constant, dim=(-2, -1)
     )
     torch.testing.assert_close(percent_diff, -100 * torch.ones((5, 2)))
+
+
+def test_vertical_integral_shape():
+    nlat, nlon, nz = 4, 8, 3
+    water = torch.rand(nlat, nlon, nz)
+    pressure = torch.rand(nlat, nlon)
+    ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
+    water_path = vertical_integral(water, pressure, ak, bk)
+    assert water_path.shape == (nlat, nlon)
+
+
+def test_dry_air_shapes():
+    nlat, nlon, nz = 4, 8, 3
+    water = torch.rand(nlat, nlon, nz)
+    pressure = torch.rand(nlat, nlon)
+    ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
+
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    assert dry_air.shape == (nlat, nlon)
