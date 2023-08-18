@@ -7,6 +7,8 @@ from typing_extensions import TypeAlias
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
 
+GRAVITY = 9.80665  # m/s^2
+
 
 def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
     """Computes area weights given the latitudes of a regular lat-lon grid.
@@ -180,6 +182,38 @@ def time_and_global_mean_bias(
     return result
 
 
+def vertical_integral(
+    integrand: torch.Tensor,
+    surface_pressure: torch.Tensor,
+    sigma_grid_offsets_ak: torch.Tensor,
+    sigma_grid_offsets_bk: torch.Tensor,
+) -> torch.Tensor:
+    """Computes a vertical integral, namely:
+
+    (1 / g) * ∫ x dp
+
+    where
+    - g = acceleration due to gravity
+    - x = integrad
+    - p = pressure level
+
+    Args:
+        integrand (lat, lon, vertical_level), (kg/kg)
+        surface_pressure: (lat, lon), (Pa)
+        sigma_grid_offsets_ak: Sorted sigma grid offsets ak, (vertical_level + 1,)
+        sigma_grid_offsets_bk: Sorted sigma grid offsets bk, (vertical_level + 1,)
+
+    Returns:
+        Vertical integral of the integrand (lat, lon).
+    """
+    ak, bk = sigma_grid_offsets_ak, sigma_grid_offsets_bk
+    pressure_thickness = ((ak + (surface_pressure.unsqueeze(-1) * bk))).diff(
+        dim=-1
+    )  # Pa
+    integral = torch.sum(pressure_thickness * integrand, axis=-1)  # type: ignore
+    return 1 / GRAVITY * integral
+
+
 def surface_pressure_due_to_dry_air(
     specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
@@ -211,17 +245,11 @@ def surface_pressure_due_to_dry_air(
             )
         )
 
-    ak, bk = sigma_grid_offsets_ak, sigma_grid_offsets_bk
-
-    pressure_thickness = ((ak + (surface_pressure.unsqueeze(-1) * bk))).diff(
-        dim=-1
-    )  # Pa
-    # Note that generally, vertical integrals are multiplied by a (1 /
-    # gravity)-term. Omitted here since this only needs to be undone to get the
-    # water path back in units of Pa to compare to the surface pressure.
-    water_path = torch.sum(
-        pressure_thickness * specific_total_water, axis=-1
-    )  # Pa * kg / kg = Pa  # type: ignore
-
-    dry_air = surface_pressure - water_path
+    total_water_path = vertical_integral(
+        specific_total_water,
+        surface_pressure,
+        sigma_grid_offsets_ak,
+        sigma_grid_offsets_bk,
+    )
+    dry_air = surface_pressure - GRAVITY * total_water_path
     return dry_air
