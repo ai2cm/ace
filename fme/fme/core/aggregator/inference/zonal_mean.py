@@ -2,6 +2,7 @@ from typing import Dict, Mapping, Optional
 
 import torch
 
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -13,6 +14,7 @@ class ZonalMeanAggregator:
 
     This aggregator keeps track of the generated and target zonal-mean state,
     then generates zonal-mean (Hovmoller) images when logs are retrieved.
+    The zonal-mean images are averaged across the sample dimension.
     """
 
     _captions = {
@@ -34,6 +36,11 @@ class ZonalMeanAggregator:
         self._n_timesteps = n_timesteps
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
+        self._n_batches = torch.zeros(
+            n_timesteps, dtype=torch.int32, device=get_device()
+        )[
+            None, :, None
+        ]  # sample, time, lat
         if dist is None:
             self._dist = Distributed.get_instance()
         else:
@@ -62,9 +69,10 @@ class ZonalMeanAggregator:
         time_slice = slice(i_time_start, i_time_start + window_steps)
         # we can average along longitude without area weighting
         for name, tensor in target_data.items():
-            self._target_data[name][:, time_slice, :] = tensor.mean(dim=lon_dim)
+            self._target_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
         for name, tensor in gen_data.items():
-            self._gen_data[name][:, time_slice, :] = tensor.mean(dim=lon_dim)
+            self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+        self._n_batches[:, time_slice, :] += 1
 
     def get_logs(self, label: str) -> Dict[str, torch.Tensor]:
         if self._gen_data is None or self._target_data is None:
@@ -73,9 +81,11 @@ class ZonalMeanAggregator:
         logs = {}
         for name in self._gen_data.keys():
             zonal_means = {}
-            gen = self._gen_data[name]
+            gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
             zonal_means["gen"] = gen.mean(dim=sample_dim).cpu()
-            error = self._gen_data[name] - self._target_data[name]
+            error = self._dist.reduce_mean(
+                (self._gen_data[name] - self._target_data[name]) / self._n_batches
+            )
             zonal_means["error"] = error.mean(dim=sample_dim).cpu()
             for key, data in zonal_means.items():
                 caption = self._captions[key].format(name=name)
