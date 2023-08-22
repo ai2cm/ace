@@ -18,11 +18,12 @@ class Optimization:
         lr: float,
         scheduler: SchedulerConfig,
         enable_automatic_mixed_precision: bool,
+        kwargs: Mapping[str, Any],
     ):
         if optimizer_type == "FusedAdam":
-            self.optimizer = optimizers.FusedAdam(parameters, lr=lr)
+            self.optimizer = optimizers.FusedAdam(parameters, lr=lr, **kwargs)
         elif optimizer_type == "Adam":
-            self.optimizer = torch.optim.Adam(parameters, lr=lr)
+            self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
         else:
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
@@ -103,6 +104,7 @@ class OptimizationConfig:
     Attributes:
         optimizer_type: The type of optimizer to use.
         lr: The learning rate.
+        kwargs: Additional keyword arguments to pass to the optimizer.
         enable_automatic_mixed_precision: Whether to use automatic mixed
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
@@ -111,6 +113,7 @@ class OptimizationConfig:
 
     optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
     lr: float = 0.001
+    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = True
     scheduler: SchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
@@ -123,6 +126,7 @@ class OptimizationConfig:
             lr=self.lr,
             scheduler=self.scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
+            kwargs=self.kwargs,
         )
 
     def get_state(self) -> Mapping[str, Any]:

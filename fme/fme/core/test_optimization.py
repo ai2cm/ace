@@ -45,6 +45,7 @@ def test_optimization_reload(
         lr=lr,
         scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
+        kwargs={},
     )
     # train the model
     optimization.set_mode(model)
@@ -71,6 +72,7 @@ def test_optimization_reload(
         lr=lr,
         scheduler=scheduler_config,
         enable_automatic_mixed_precision=enable_amp,
+        kwargs={},
     )
     optimization.load_state(yaml.load(intermediate_state, Loader=yaml.CLoader))
     # train the model again
