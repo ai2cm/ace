@@ -276,6 +276,7 @@ class Trainer:
                 self.train_data.sigma_coordinates,
                 record_step_20=record_step_20,
                 log_video=False,
+                log_zonal_mean_images=True,
                 n_timesteps=self.config.inference.n_forward_steps + 1,
                 dist=dist,
             )
