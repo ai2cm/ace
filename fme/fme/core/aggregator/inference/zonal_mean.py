@@ -20,11 +20,11 @@ class ZonalMeanAggregator:
     _captions = {
         "error": (
             "{name} zonal-mean error (generated - target), "
-            "x-axis is latitude increasing to right, y-axis is time increasing down"
+            "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
         "gen": (
             "{name} zonal-mean generated, "
-            "x-axis is latitude increasing to right, y-axis is time increasing down"
+            "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
     }
 
@@ -90,6 +90,11 @@ class ZonalMeanAggregator:
             for key, data in zonal_means.items():
                 caption = self._captions[key].format(name=name)
                 caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                # images are y, x from upper left corner
+                # data is time, lat
+                # we want lat on y-axis (increasing upward) and time on x-axis
+                # so transpose and flip along lat axis
+                data = data.t().flip(dims=[0])
                 wandb_image = wandb.Image(data, caption=caption)
                 logs[f"{label}/{key}/{name}"] = wandb_image
         return logs

@@ -23,6 +23,7 @@ def test_logs_labels_exist():
         sigma_coordinates,
         record_step_20=True,
         log_video=True,
+        log_zonal_mean_images=True,
         n_timesteps=n_time,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}

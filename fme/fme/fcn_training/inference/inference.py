@@ -45,7 +45,9 @@ class InferenceConfig:
         prediction_data: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
-        log_video: Whether to log videos of the predictions.
+        log_video: Whether to log videos of the state evolution.
+        log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
+            time dimension.
         save_prediction_files: Whether to save the predictions as a netcdf file.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
@@ -58,6 +60,7 @@ class InferenceConfig:
     validation_data: DataLoaderParams
     prediction_data: Optional[DataLoaderParams] = None
     log_video: bool = True
+    log_zonal_mean_images: bool = True
     save_prediction_files: bool = True
     forward_steps_in_memory: int = 1
 
@@ -146,6 +149,7 @@ def main(
         sigma_coordinates=validation.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
+        log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
     )
     if config.save_prediction_files:
