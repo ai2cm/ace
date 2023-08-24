@@ -105,6 +105,12 @@ class Trainer:
             train=False,
         )
         logging.info("rank %d, data loader initialized" % self.dist.rank)
+        for gridded_data, name in zip(
+            (self.train_data, self.valid_data), ("train", "valid")
+        ):
+            n_samples = len(gridded_data.loader.dataset)
+            n_batches = len(gridded_data.loader)
+            logging.info(f"{name} data: {n_samples} samples, {n_batches} batches")
 
         self.num_batches_seen = 0
         self.startEpoch = 0
@@ -115,6 +121,8 @@ class Trainer:
         for data in self.train_data.loader:
             shapes = {k: v.shape for k, v in data.items()}
             break
+
+        logging.info("Starting model initialization")
         self.stepper = config.stepper.get_stepper(shapes, max_epochs=config.max_epochs)
 
         if config.resuming:
@@ -208,10 +216,8 @@ class Trainer:
             wandb.log(all_logs, step=self.num_batches_seen)
 
     def train_one_epoch(self):
-        """Train for one epoch and log batch losses to wandb. Returns the final
-        batch loss for the current epoch."""
-        # TODO: clean up and merge train_one_epoch and validate_one_epoch
-        # deduplicate code through helper routines or if conditionals
+        """Train for one epoch and return logs from TrainAggregator."""
+        logging.info(f"Starting training step on epoch {self.epoch + 1}")
 
         aggregator = TrainAggregator()
         if self.num_batches_seen == 0:
@@ -248,6 +254,7 @@ class Trainer:
         return aggregator.get_logs(label="train")
 
     def validate_one_epoch(self):
+        logging.info(f"Starting validation step on epoch {self.epoch + 1}")
         aggregator = OneStepAggregator(
             self.train_data.area_weights.to(fme.get_device()),
             self.train_data.sigma_coordinates,
@@ -264,12 +271,12 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
+        logging.info(f"Starting inference step on epoch {self.epoch + 1}")
         if self.config.inference.parallel:
             dist = self.dist
         else:
             dist = NotDistributed(is_root=self.dist.is_root())
         if self.config.inference.parallel or self.dist.is_root():
-            logging.info("Starting inference on validation set...")
             record_step_20 = self.config.inference.n_forward_steps >= 20
             aggregator = InferenceAggregator(
                 self.train_data.area_weights.to(fme.get_device()),
