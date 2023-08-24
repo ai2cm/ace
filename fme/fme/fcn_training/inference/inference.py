@@ -166,6 +166,7 @@ def main(
     def data_loader_factory(window_time_slice: Optional[slice] = None):
         return _get_data_loader(window_time_slice=window_time_slice)
 
+    logging.info("Starting inference")
     if config.prediction_data is not None:
         # define data loader factory for prediction data
         def prediction_data_loader_factory(window_time_slice: Optional[slice] = None):
@@ -195,6 +196,7 @@ def main(
             forward_steps_in_memory=config.forward_steps_in_memory,
         )
 
+    logging.info("Starting logging of metrics to wandb")
     step_logs = aggregator.get_inference_logs(label="inference")
     wandb = WandB.get_instance()
     for i, log in enumerate(step_logs):
