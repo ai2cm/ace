@@ -24,7 +24,7 @@ import torch
 
 
 # loss function with rel/abs Lp loss
-class LpLoss(object):
+class LpLoss(torch.nn.Module):
     def __init__(self, d=2, p=2, size_average=True, reduction=True):
         super(LpLoss, self).__init__()
 

@@ -121,9 +121,10 @@ class Trainer:
         for data in self.train_data.loader:
             shapes = {k: v.shape for k, v in data.items()}
             break
-
         logging.info("Starting model initialization")
-        self.stepper = config.stepper.get_stepper(shapes, max_epochs=config.max_epochs)
+        self.stepper = config.stepper.get_stepper(
+            shapes, max_epochs=config.max_epochs, area=self.train_data.area_weights
+        )
 
         if config.resuming:
             logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)

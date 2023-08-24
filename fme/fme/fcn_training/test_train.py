@@ -55,6 +55,8 @@ stepper:
   normalization:
     global_means_path: '{global_means_path}'
     global_stds_path: '{global_stds_path}'
+  loss:
+    global_mean_type: "LpLoss"
   builder:
     type: {nettype}
     config:
