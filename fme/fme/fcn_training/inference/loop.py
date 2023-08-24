@@ -164,12 +164,15 @@ def run_inference(
         device = get_device()
 
         for i_time in range(0, n_forward_steps, forward_steps_in_memory):
+            # need one more timestep for initial condition
+            time_slice = slice(i_time, i_time + forward_steps_in_memory + 1)
+            logging.info(
+                f"Inference: starting window spanning {time_slice.start}"
+                f" to {time_slice.stop} steps, out of total {n_forward_steps}."
+            )
             # data loader is a sequence of batches, so we need a new one for each
             # time window
-            valid_data_loader = data_loader_factory(
-                # need one more timestep for initial condition
-                window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
-            )
+            valid_data_loader = data_loader_factory(window_time_slice=time_slice)
             for data, batch_manager in zip(valid_data_loader.loader, batch_managers):
                 data = {key: value.to(device) for key, value in data.items()}
                 # overwrite the first timestep with the last generated timestep
@@ -247,15 +250,17 @@ def run_dataset_inference(
         # final state of each batch. We then use this as the initial condition
         # for the next time window.
         for i_time in range(0, n_forward_steps, forward_steps_in_memory):
+            # need one more timestep for initial condition
+            time_slice = slice(i_time, i_time + forward_steps_in_memory + 1)
+            logging.info(
+                f"Inference: starting window spanning {time_slice.start}"
+                f" to {time_slice.stop} steps, out of total {n_forward_steps}."
+            )
             # data loader is a sequence of batches, so we need a new one for each
             # time window
-            valid_data_loader = target_data_loader_factory(
-                # need one more timestep for initial condition
-                window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
-            )
+            valid_data_loader = target_data_loader_factory(window_time_slice=time_slice)
             predicted_data_loader = prediction_data_loader_factory(
-                # need one more timestep for initial condition
-                window_time_slice=slice(i_time, i_time + forward_steps_in_memory + 1),
+                window_time_slice=time_slice
             )
             for valid_data, predicted_data, batch_manager in zip(
                 valid_data_loader.loader, predicted_data_loader.loader, batch_managers
