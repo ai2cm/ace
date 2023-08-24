@@ -133,6 +133,41 @@ def compute_derived_quantities(
     return stepped
 
 
+def _inference_internal_loop(
+    stepped: SteppedData,
+    i_time: int,
+    area_weights: torch.Tensor,
+    sigma_coords: SigmaCoordinates,
+    aggregator: InferenceAggregator,
+    batch_manager: EnsembleBatch,
+):
+    """Do operations that need to be done on each time step of the inference loop.
+
+    This function exists to de-duplicate code between run_inference and
+    run_data_inference."""
+    stepped = compute_derived_quantities(stepped, area_weights, sigma_coords)
+
+    # for non-initial windows, we want to record only the new data
+    # and discard the initial sample of the window
+    if i_time > 0:
+        stepped = stepped.remove_initial_condition()
+        i_time_aggregator = i_time + 1
+    else:
+        i_time_aggregator = i_time
+    # record raw data for the batch, and store the final state
+    # for the next segment
+    batch_manager.append(stepped.target_data, stepped.gen_data)
+    # record metrics
+    aggregator.record_batch(
+        loss=stepped.loss,
+        target_data=stepped.target_data,
+        gen_data=stepped.gen_data,
+        target_data_norm=stepped.target_data_norm,
+        gen_data_norm=stepped.gen_data_norm,
+        i_time_start=i_time_aggregator,
+    )
+
+
 def run_inference(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
@@ -173,6 +208,8 @@ def run_inference(
             # data loader is a sequence of batches, so we need a new one for each
             # time window
             valid_data_loader = data_loader_factory(window_time_slice=time_slice)
+            area_weights = valid_data_loader.area_weights.to(device)
+            sigma_coords = valid_data_loader.sigma_coordinates
             for data, batch_manager in zip(valid_data_loader.loader, batch_managers):
                 data = {key: value.to(device) for key, value in data.items()}
                 # overwrite the first timestep with the last generated timestep
@@ -183,31 +220,13 @@ def run_inference(
                     train=False,
                     n_forward_steps=forward_steps_in_memory,
                 )
-
-                area_weights = valid_data_loader.area_weights.to(device)
-                sigma_coords = valid_data_loader.sigma_coordinates
-                stepped = compute_derived_quantities(
-                    stepped, area_weights, sigma_coords
-                )
-
-                # for non-initial windows, we want to record only the new data
-                # and discard the initial sample of the window
-                if i_time > 0:
-                    stepped = stepped.remove_initial_condition()
-                    i_time_aggregator = i_time + 1
-                else:
-                    i_time_aggregator = i_time
-                # record raw data for the batch, and store the final state
-                # for the next segment
-                batch_manager.append(stepped.target_data, stepped.gen_data)
-                # record metrics
-                aggregator.record_batch(
-                    loss=stepped.loss,
-                    target_data=stepped.target_data,
-                    gen_data=stepped.gen_data,
-                    target_data_norm=stepped.target_data_norm,
-                    gen_data_norm=stepped.gen_data_norm,
-                    i_time_start=i_time_aggregator,
+                _inference_internal_loop(
+                    stepped,
+                    i_time,
+                    area_weights,
+                    sigma_coords,
+                    aggregator,
+                    batch_manager,
                 )
 
 
@@ -262,6 +281,8 @@ def run_dataset_inference(
             predicted_data_loader = prediction_data_loader_factory(
                 window_time_slice=time_slice
             )
+            area_weights = valid_data_loader.area_weights.to(device)
+            sigma_coords = valid_data_loader.sigma_coordinates
             for valid_data, predicted_data, batch_manager in zip(
                 valid_data_loader.loader, predicted_data_loader.loader, batch_managers
             ):
@@ -271,27 +292,18 @@ def run_dataset_inference(
                 predicted_data = {
                     key: value.to(device) for key, value in predicted_data.items()
                 }
-                valid_data_norm = normalizer.normalize(valid_data)
-                predicted_data_norm = normalizer.normalize(predicted_data)
-                # for non-initial windows, we want to record only the new data
-                # and discard the initial sample of the window
-                if i_time > 0:
-                    valid_data = remove_initial_condition(valid_data)
-                    predicted_data = remove_initial_condition(predicted_data)
-                    valid_data_norm = remove_initial_condition(valid_data_norm)
-                    predicted_data_norm = remove_initial_condition(predicted_data_norm)
-                    i_time_aggregator = i_time + 1
-                else:
-                    i_time_aggregator = i_time
-                # record raw data for the batch, and store the final state
-                # for the next segment
-                batch_manager.append(valid_data, predicted_data)
-                # record metrics
-                aggregator.record_batch(
-                    loss=np.nan,
-                    target_data=valid_data,
-                    gen_data=predicted_data,
-                    target_data_norm=valid_data_norm,
-                    gen_data_norm=predicted_data_norm,
-                    i_time_start=i_time_aggregator,
+                stepped = SteppedData(
+                    np.nan,
+                    predicted_data,
+                    valid_data,
+                    normalizer.normalize(predicted_data),
+                    normalizer.normalize(valid_data),
+                )
+                _inference_internal_loop(
+                    stepped,
+                    i_time,
+                    area_weights,
+                    sigma_coords,
+                    aggregator,
+                    batch_manager,
                 )
