@@ -236,8 +236,10 @@ def test_reloaded_stepper_gives_same_prediction():
     stepper = config.get_stepper(
         shapes=shapes,
         max_epochs=1,
+        area=None,  # not actually used in this test
     )
-    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
+    area = torch.ones((5, 5), device=fme.get_device())
+    new_stepper = SingleModuleStepper.from_state(stepper.get_state(), area=area)
     data, _ = get_data(["a", "b"], n_samples=5, n_time=2)
     first_result = stepper.run_on_batch(
         data=data,

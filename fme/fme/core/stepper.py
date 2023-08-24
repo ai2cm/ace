@@ -10,6 +10,7 @@ from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggr
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
+from fme.core.loss import LossConfig
 from fme.core.normalizer import (
     FromStateNormalizer,
     NormalizationConfig,
@@ -18,7 +19,6 @@ from fme.core.normalizer import (
 from fme.core.packer import Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
-from fme.fcn_training.utils.darcy_loss import LpLoss
 
 from .optimization import NullOptimization, Optimization, OptimizationConfig
 
@@ -31,6 +31,7 @@ class SingleModuleStepperConfig:
     normalization: Union[NormalizationConfig, FromStateNormalizer]
     optimization: Optional[OptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
+    loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -44,11 +45,13 @@ class SingleModuleStepperConfig:
         self,
         shapes: Dict[str, Tuple[int, ...]],
         max_epochs: int,
+        area: torch.Tensor,
     ):
         return SingleModuleStepper(
             config=self,
             data_shapes=shapes,
             max_epochs=max_epochs,
+            area=area,
         )
 
     def get_state(self):
@@ -128,6 +131,7 @@ class SingleModuleStepper:
         config: SingleModuleStepperConfig,
         data_shapes: Dict[str, Tuple[int, ...]],
         max_epochs: int,
+        area: torch.Tensor,
     ):
         """
         Args:
@@ -135,6 +139,8 @@ class SingleModuleStepper:
             data_shapes: The shapes of the data.
             max_epochs: The maximum number of epochs. Used when constructing
                 certain learning rate schedulers, if applicable.
+            area: (n_lat, n_lon) array containing relative gridcell area,
+                in any units including unitless.
         """
         dist = Distributed.get_instance()
         n_in_channels = len(config.in_names)
@@ -183,7 +189,7 @@ class SingleModuleStepper:
             self.module = DummyWrapper(self.module)
         self._is_distributed = dist.is_distributed()
 
-        self.loss_obj = LpLoss()
+        self.loss_obj = config.loss.build(area)
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
@@ -293,7 +299,9 @@ class SingleModuleStepper:
         self.prescriber.load_state(state["prescriber"])
 
     @classmethod
-    def from_state(cls, state, load_optimizer: bool = True) -> "SingleModuleStepper":
+    def from_state(
+        cls, state, area: torch.Tensor, load_optimizer: bool = True
+    ) -> "SingleModuleStepper":
         """
         Load the state of the stepper.
 
@@ -310,6 +318,7 @@ class SingleModuleStepper:
             config=SingleModuleStepperConfig.from_state(config),
             data_shapes=state["data_shapes"],
             max_epochs=state["max_epochs"],
+            area=area,
         )
         stepper.load_state(state, load_optimizer=load_optimizer)
         return stepper
