@@ -15,6 +15,7 @@ from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
+from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
 from fme.fcn_training.inference.data_writer import DataWriter, NullDataWriter
 from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
@@ -22,10 +23,15 @@ from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
 
 
-def load_stepper(checkpoint_file: str) -> SingleModuleStepper:
+def _load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
+    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
+    return SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+
+
+def _load_stepper(checkpoint_file: str, area: torch.Tensor) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
     stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"], load_optimizer=False
+        checkpoint["stepper"], area=area, load_optimizer=False
     )
     return stepper
 
@@ -82,9 +88,18 @@ class InferenceConfig:
     def configure_gcs(self):
         self.logging.configure_gcs()
 
-    def load_stepper(self) -> SingleModuleStepper:
+    def load_stepper(self, area: torch.Tensor) -> SingleModuleStepper:
+        """
+        Args:
+            area: A tensor of shape (n_lat, n_lon) containing the area of
+                each grid cell.
+        """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper(self.checkpoint_path)
+        return _load_stepper(self.checkpoint_path, area)
+
+    def load_stepper_config(self) -> SingleModuleStepperConfig:
+        logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
+        return _load_stepper_config(self.checkpoint_path)
 
 
 def get_n_samples(data_loader):
@@ -118,9 +133,9 @@ def main(
     logging_utils.log_versions()
     logging_utils.log_beaker_url()
 
-    stepper = config.load_stepper()
+    stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
-    data_requirements = stepper.get_data_requirements(
+    data_requirements = stepper_config.get_data_requirements(
         n_forward_steps=config.n_forward_steps
     )
 
@@ -139,6 +154,8 @@ def main(
 
     # use window_time_slice to avoid loading a large number of timesteps
     validation = _get_data_loader(window_time_slice=slice(0, 1))
+
+    stepper = config.load_stepper(validation.area_weights.to(fme.get_device()))
 
     output_netcdf_filename = os.path.join(
         config.experiment_dir,

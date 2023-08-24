@@ -50,6 +50,7 @@ def save_plus_one_stepper(
             name: data_shape for name in names
         },  # this data is unused for this test
         max_epochs=0,
+        area=None,  # not actually used in this test
     )
     torch.save({"stepper": stepper.get_state()}, path)
 
