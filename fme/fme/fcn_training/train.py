@@ -164,7 +164,7 @@ class Trainer:
     def train(self):
         logging.info("Starting Training Loop...")
 
-        best_valid_loss = 1.0e6
+        best_valid_loss = torch.inf
         for epoch in range(self.startEpoch, self.config.max_epochs):
             self.epoch = epoch
             logging.info(f"Epoch: {epoch+1}")
