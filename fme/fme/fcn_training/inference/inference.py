@@ -184,6 +184,7 @@ def main(
         enable_extended_videos=config.log_extended_video,
         log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
+        metadata=validation.metadata,
     )
     writer = config.get_data_writer(validation)
 
