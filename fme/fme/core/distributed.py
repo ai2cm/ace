@@ -99,6 +99,26 @@ class Distributed:
             torch.distributed.all_reduce(tensor)
         return tensor
 
+    def reduce_min(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Reduce a tensor representing a min across all processes.
+
+        Modifies the input tensor in-place as a side effect.
+        """
+        if self._distributed:
+            torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MIN)
+        return tensor
+
+    def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Reduce a tensor representing a max across all processes.
+
+        Modifies the input tensor in-place as a side effect.
+        """
+        if self._distributed:
+            torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
+        return tensor
+
     def is_root(self) -> bool:
         """
         Returns True if this process is the root process.

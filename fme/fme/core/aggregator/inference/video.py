@@ -1,7 +1,9 @@
+import dataclasses
 from typing import Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
@@ -9,12 +11,100 @@ from fme.core.wandb import WandB
 wandb = WandB.get_instance()
 
 
-def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def _get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
     for name in gen_data:
         return gen_data[name].shape
+    raise ValueError("No data in gen_data")
 
 
-class _VideoData:
+@dataclasses.dataclass
+class _ErrorData:
+    rmse: Dict[str, torch.Tensor]
+    min_err: Dict[str, torch.Tensor]
+    max_err: Dict[str, torch.Tensor]
+
+
+class _ErrorVideoData:
+    """
+    Record batches of video data and compute statistics on the error.
+    """
+
+    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
+        self._mse_data: Optional[Dict[str, torch.Tensor]] = None
+        self._min_err_data: Optional[Dict[str, torch.Tensor]] = None
+        self._max_err_data: Optional[Dict[str, torch.Tensor]] = None
+        self._n_timesteps = n_timesteps
+        self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
+        if dist is None:
+            dist = Distributed.get_instance()
+        self._dist = dist
+
+    @torch.no_grad()
+    def record_batch(
+        self,
+        target_data: Mapping[str, torch.Tensor],
+        gen_data: Mapping[str, torch.Tensor],
+        i_time_start: int,
+    ):
+        """
+        Record a batch of data.
+
+        Args:
+            target_data: Dict of tensors of shape (n_samples, n_timesteps, ...)
+            gen_data: Dict of tensors of shape (n_samples, n_timesteps, ...)
+            i_time_start: Index of the first timestep in the batch.
+        """
+        if self._mse_data is None:
+            self._mse_data = _initialize_video_from_batch(gen_data, self._n_timesteps)
+        if self._min_err_data is None:
+            self._min_err_data = _initialize_video_from_batch(
+                gen_data, self._n_timesteps, fill_value=np.inf
+            )
+        if self._max_err_data is None:
+            self._max_err_data = _initialize_video_from_batch(
+                gen_data, self._n_timesteps, fill_value=-np.inf
+            )
+
+        window_steps = next(iter(target_data.values())).shape[1]
+        time_slice = slice(i_time_start, i_time_start + window_steps)
+        for name, gen_tensor in gen_data.items():
+            target_tensor = target_data[name]
+            error_tensor = (gen_tensor - target_tensor).cpu()
+            self._mse_data[name][time_slice, ...] += torch.var(error_tensor, dim=0)
+            self._min_err_data[name][time_slice, ...] = torch.minimum(
+                self._min_err_data[name][time_slice, ...], error_tensor.min(dim=0)[0]
+            )
+            self._max_err_data[name][time_slice, ...] = torch.maximum(
+                self._max_err_data[name][time_slice, ...], error_tensor.max(dim=0)[0]
+            )
+
+        self._n_batches[time_slice] += 1
+
+    @torch.no_grad()
+    def get(
+        self,
+    ) -> _ErrorData:
+        if (
+            self._mse_data is None
+            or self._min_err_data is None
+            or self._max_err_data is None
+        ):
+            raise RuntimeError("No data recorded")
+        rmse_data = {}
+        min_err_data = {}
+        max_err_data = {}
+        for name, tensor in self._mse_data.items():
+            mse = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
+            mse = self._dist.reduce_mean(mse)
+            rmse_data[name] = torch.sqrt(mse)
+        for name, tensor in self._min_err_data.items():
+            min_err_data[name] = self._dist.reduce_min(tensor)
+        for name, tensor in self._max_err_data.items():
+            max_err_data[name] = self._dist.reduce_max(tensor)
+        return _ErrorData(rmse_data, min_err_data, max_err_data)
+
+
+class _MeanVideoData:
     """
     Record batches of video data and compute the mean.
     """
@@ -44,20 +134,18 @@ class _VideoData:
             i_time_start: Index of the first timestep in the batch.
         """
         if self._target_data is None:
-            self._target_data = initialize_zeros_video_from_batch(
+            self._target_data = _initialize_video_from_batch(
                 target_data, self._n_timesteps
             )
         if self._gen_data is None:
-            self._gen_data = initialize_zeros_video_from_batch(
-                gen_data, self._n_timesteps
-            )
+            self._gen_data = _initialize_video_from_batch(gen_data, self._n_timesteps)
 
         window_steps = next(iter(target_data.values())).shape[1]
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, tensor in target_data.items():
-            self._target_data[name][:, time_slice, ...] += tensor.cpu()
+            self._target_data[name][time_slice, ...] += tensor.mean(dim=0).cpu()
         for name, tensor in gen_data.items():
-            self._gen_data[name][:, time_slice, ...] += tensor.cpu()
+            self._gen_data[name][time_slice, ...] += tensor.mean(dim=0).cpu()
 
         self._n_batches[time_slice] += 1
 
@@ -68,39 +156,159 @@ class _VideoData:
         target_data = {}
         gen_data = {}
         for name, tensor in self._target_data.items():
-            target_data[name] = (tensor / self._n_batches[None, :, None, None]).mean(
-                dim=0
-            )
+            target_data[name] = tensor / self._n_batches[:, None, None]
             target_data[name] = self._dist.reduce_mean(target_data[name])
         for name, tensor in self._gen_data.items():
-            gen_data[name] = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
+            gen_data[name] = tensor / self._n_batches[:, None, None]
             gen_data[name] = self._dist.reduce_mean(gen_data[name])
         return gen_data, target_data
 
 
-def initialize_zeros_video_from_batch(
-    batch: Mapping[str, torch.Tensor], n_timesteps: int
+class _VarianceVideoData:
+    """
+    Record batches of video data and compute the variance.
+    """
+
+    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
+        self._target_means: Optional[Dict[str, torch.Tensor]] = None
+        self._gen_means: Optional[Dict[str, torch.Tensor]] = None
+        self._target_squares: Optional[Dict[str, torch.Tensor]] = None
+        self._gen_squares: Optional[Dict[str, torch.Tensor]] = None
+        self._n_timesteps = n_timesteps
+        self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
+        if dist is None:
+            dist = Distributed.get_instance()
+        self._dist = dist
+
+    @torch.no_grad()
+    def record_batch(
+        self,
+        target_data: Mapping[str, torch.Tensor],
+        gen_data: Mapping[str, torch.Tensor],
+        i_time_start: int,
+    ):
+        """
+        Record a batch of data.
+
+        Args:
+            target_data: Dict of tensors of shape (n_samples, n_timesteps, ...)
+            gen_data: Dict of tensors of shape (n_samples, n_timesteps, ...)
+            i_time_start: Index of the first timestep in the batch.
+        """
+        if self._target_means is None:
+            self._target_means = _initialize_video_from_batch(
+                target_data, self._n_timesteps
+            )
+        if self._gen_means is None:
+            self._gen_means = _initialize_video_from_batch(gen_data, self._n_timesteps)
+        if self._target_squares is None:
+            self._target_squares = _initialize_video_from_batch(
+                target_data, self._n_timesteps
+            )
+
+        if self._gen_squares is None:
+            self._gen_squares = _initialize_video_from_batch(
+                gen_data, self._n_timesteps
+            )
+
+        window_steps = next(iter(target_data.values())).shape[1]
+        time_slice = slice(i_time_start, i_time_start + window_steps)
+        for name, tensor in target_data.items():
+            self._target_means[name][time_slice, ...] += tensor.mean(dim=0).cpu()
+            self._target_squares[name][time_slice, ...] += (
+                (tensor**2).mean(dim=0).cpu()
+            )
+        for name, tensor in gen_data.items():
+            self._gen_means[name][time_slice, ...] += tensor.mean(dim=0).cpu()
+            self._gen_squares[name][time_slice, ...] += (tensor**2).mean(dim=0).cpu()
+        self._n_batches[time_slice] += 1
+
+    @torch.no_grad()
+    def get(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+        if (
+            self._gen_means is None
+            or self._target_means is None
+            or self._gen_squares is None
+            or self._target_squares is None
+        ):
+            raise RuntimeError("No data recorded")
+        target_data = {}
+        gen_data = {}
+        # calculate variance as E[X^2] - E[X]^2
+        for name, tensor in self._target_means.items():
+            mean = tensor / self._n_batches[:, None, None]
+            mean = self._dist.reduce_mean(mean)
+            square = self._target_squares[name] / self._n_batches[:, None, None]
+            square = self._dist.reduce_mean(square)
+            target_data[name] = square - mean**2
+        for name, tensor in self._gen_means.items():
+            mean = tensor / self._n_batches[:, None, None]
+            mean = self._dist.reduce_mean(mean)
+            square = self._gen_squares[name] / self._n_batches[:, None, None]
+            square = self._dist.reduce_mean(square)
+            gen_data[name] = square - mean**2
+        return gen_data, target_data
+
+
+def _initialize_video_from_batch(
+    batch: Mapping[str, torch.Tensor], n_timesteps: int, fill_value: float = 0.0
 ):
     """
-    Initialize a video of the same shape as the batch, but with all zeros and
-    with n_timesteps timesteps.
+    Initialize a video of the same shape as the batch, but with all valeus equal
+    to fill_value and with n_timesteps timesteps.
     """
     video = {}
     for name, value in batch.items():
-        shape = list(value.shape)
-        shape[1] = n_timesteps
-        video[name] = torch.zeros(shape, dtype=value.dtype).cpu()
+        shape = list(value.shape[1:])
+        shape[0] = n_timesteps
+        video[name] = torch.zeros(shape, dtype=torch.double).cpu()
+        video[name][:, ...] = fill_value
     return video
+
+
+@dataclasses.dataclass
+class _MaybePairedVideoData:
+    caption: str
+    gen: torch.Tensor
+    target: Optional[torch.Tensor] = None
+
+    def make_video(self):
+        return _make_video(
+            caption=self.caption,
+            gen=self.gen,
+            target=self.target,
+        )
 
 
 class VideoAggregator:
     """Videos of state evolution."""
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
-        # This class exists instead of directly using VideoData
-        # because we may want to record different kinds
-        # of videos, e.g. for the best/worst series and for the mean.
-        self._data = _VideoData(n_timesteps=n_timesteps, dist=dist)
+    def __init__(
+        self,
+        n_timesteps: int,
+        enable_extended_videos: bool,
+        dist: Optional[Distributed] = None,
+    ):
+        """
+        Args:
+            n_timesteps: Number of timesteps of inference that will be run.
+            enable_extended_videos: Whether to log videos of statistical
+                metrics of state evolution
+            dist: Distributed object to use for metric aggregation.
+        """
+        self._mean_data = _MeanVideoData(n_timesteps=n_timesteps, dist=dist)
+        if enable_extended_videos:
+            self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
+                n_timesteps=n_timesteps, dist=dist
+            )
+            self._variance_data: Optional[_VarianceVideoData] = _VarianceVideoData(
+                n_timesteps=n_timesteps, dist=dist
+            )
+            self._enable_extended_videos = True
+        else:
+            self._error_data = None
+            self._variance_data = None
+            self._enable_extended_videos = False
 
     @torch.no_grad()
     def record_batch(
@@ -108,15 +316,28 @@ class VideoAggregator:
         loss: float,
         target_data: Mapping[str, torch.Tensor],
         gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
+        gen_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
         i_time_start: int = 0,
     ):
-        self._data.record_batch(
+        del target_data_norm, gen_data_norm  # intentionally unused
+        self._mean_data.record_batch(
             target_data=target_data,
             gen_data=gen_data,
             i_time_start=i_time_start,
         )
+        if self._error_data is not None:
+            self._error_data.record_batch(
+                target_data=target_data,
+                gen_data=gen_data,
+                i_time_start=i_time_start,
+            )
+        if self._variance_data is not None:
+            self._variance_data.record_batch(
+                target_data=target_data,
+                gen_data=gen_data,
+                i_time_start=i_time_start,
+            )
 
     @torch.no_grad()
     def get_logs(self, label: str):
@@ -126,20 +347,90 @@ class VideoAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        gen_data, target_data = self._data.get()
+        data = self._get_data(label=label)
         videos = {}
+        for label, d in data.items():
+            videos[label] = d.make_video()
+        return videos
+
+    @torch.no_grad()
+    def _get_data(self, label: str) -> Mapping[str, _MaybePairedVideoData]:
+        """
+        Returns video data as can be reported to WandB.
+
+        Args:
+            label: Label to prepend to all log keys.
+        """
+        gen_data, target_data = self._mean_data.get()
+        video_data = {}
         for name in gen_data:
-            videos[f"{label}/{name}"] = make_video(
+            video_data[f"{label}/{name}"] = _MaybePairedVideoData(
                 caption=(
-                    f"Autoregressive (left) prediction and (right) target for {name}"
+                    f"Mean autoregressive (left) prediction and "
+                    f"(right) target for {name}"
                 ),
                 gen=gen_data[name],
                 target=target_data[name],
             )
-        return videos
+            if self._enable_extended_videos:
+                video_data[f"{label}/bias/{name}"] = _MaybePairedVideoData(
+                    caption=(f"prediction - target for {name}"),
+                    gen=gen_data[name] - target_data[name],
+                )
+        if self._error_data is not None:
+            data = self._error_data.get()
+            for name in data.rmse:
+                video_data[f"{label}/rmse/{name}"] = _MaybePairedVideoData(
+                    caption=f"RMSE over ensemble for {name}",
+                    gen=data.rmse[name],
+                )
+            for name in data.min_err:
+                video_data[f"{label}/min_err/{name}"] = _MaybePairedVideoData(
+                    caption=f"Min across ensemble members of min error for {name}",
+                    gen=data.min_err[name],
+                )
+            for name in data.max_err:
+                video_data[f"{label}/max_err/{name}"] = _MaybePairedVideoData(
+                    caption=f"Max across ensemble members of max error for {name}",
+                    gen=data.max_err[name],
+                )
+        if self._variance_data is not None:
+            gen_data, target_data = self._variance_data.get()
+            for name in gen_data:
+                video_data[f"{label}/gen_var/{name}"] = _MaybePairedVideoData(
+                    caption=(
+                        f"Variance of gen data for {name} "
+                        "as fraction of target variance"
+                    ),
+                    gen=gen_data[name] / target_data[name],
+                )
+        return video_data
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Return video data as an xarray Dataset.
+        """
+        data = self._get_data(label="")
+        video_data = {}
+        for label, d in data.items():
+            label = label.strip("/").replace("/", "_")  # remove leading slash
+            if d.target is not None:
+                video_data[label] = xr.DataArray(
+                    data=np.concatenate(
+                        [d.gen.cpu().numpy()[None, :], d.target.cpu().numpy()[None, :]],
+                        axis=0,
+                    ),
+                    dims=("source", "timestep", "lat", "lon"),
+                )
+            else:
+                video_data[label] = xr.DataArray(
+                    data=d.gen.cpu().numpy(), dims=("timestep", "lat", "lon")
+                )
+        return xr.Dataset(video_data)
 
 
-def make_video(
+def _make_video(
     caption: str,
     gen: torch.Tensor,
     target: Optional[torch.Tensor] = None,
@@ -152,16 +443,17 @@ def make_video(
         gap = np.zeros([gen.shape[0], 1, gen.shape[2], 10])
         video_data = np.concatenate([gen, gap, target], axis=-1)
     if target is None:
-        data_min = video_data.min()
-        data_max = video_data.max()
+        data_min = np.nanmin(video_data)
+        data_max = np.nanmax(video_data)
     else:
         # use target data to set the color scale
-        data_min = target.min()
-        data_max = target.max()
+        data_min = np.nanmin(target)
+        data_max = np.nanmax(target)
     # video data is brightness values on a 0-255 scale
     video_data = 255 * (video_data - data_min) / (data_max - data_min)
     video_data = np.minimum(video_data, 255)
     video_data = np.maximum(video_data, 0)
+    video_data[np.isnan(video_data)] = 0
     caption += f"; vmin={data_min:.4g}, vmax={data_max:.4g}"
     return wandb.Video(
         np.flip(video_data, axis=-2),

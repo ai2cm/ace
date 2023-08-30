@@ -1,33 +1,111 @@
-from collections import namedtuple
-from typing import Dict, Mapping, Optional
+from pathlib import Path
+from typing import Dict, List, Mapping, Optional, Union
 
 import numpy as np
 import torch
 from netCDF4 import Dataset
 
+from fme.core.aggregator.inference.video import VideoAggregator
+from fme.core.data_loading.typing import VariableMetadata
+
 
 class DataWriter:
-    """
-    Write data to a netCDF file.
-    """
+    def __init__(
+        self,
+        path: str,
+        n_samples: int,
+        n_timesteps: int,
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        enable_prediction_netcdfs: bool,
+        enable_video_netcdfs: bool,
+    ):
+        """
+        Args:
+            path: Path to write netCDF file(s).
+            n_samples: Number of samples to write to the file.
+            n_timesteps: Number of timesteps to write to the file.
+            metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
+            enable_prediction_netcdfs: Whether to enable writing of netCDF files
+                containing the predictions.
+            enable_video_netcdfs: Whether to enable writing of netCDF files
+                containing video metrics.
+        """
+        self._writers: List[Union[_PredictionDataWriter, _VideoDataWriter]] = []
+        if enable_prediction_netcdfs:
+            self._writers.append(
+                _PredictionDataWriter(
+                    path=path,
+                    n_samples=n_samples,
+                    metadata=metadata,
+                    coords=coords,
+                )
+            )
+        if enable_video_netcdfs:
+            self._writers.append(
+                _VideoDataWriter(
+                    path=path,
+                    n_timesteps=n_timesteps,
+                    metadata=metadata,
+                    coords=coords,
+                )
+            )
 
-    VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
+    def append_batch(
+        self,
+        target: Dict[str, torch.Tensor],
+        prediction: Dict[str, torch.Tensor],
+        start_timestep: int,
+        start_sample: int,
+    ):
+        """
+        Append a batch of data to the file.
+
+        Args:
+            target: Target data.
+            prediction: Prediction data.
+            start_timestep: Timestep at which to start writing.
+            start_sample: Sample at which to start writing.
+        """
+        for writer in self._writers:
+            writer.append_batch(
+                target=target,
+                prediction=prediction,
+                start_timestep=start_timestep,
+                start_sample=start_sample,
+            )
+
+    def flush(self):
+        """
+        Flush the data to disk.
+        """
+        for writer in self._writers:
+            writer.flush()
+
+
+class _PredictionDataWriter:
+    """
+    Write raw prediction data to a netCDF file.
+    """
 
     def __init__(
         self,
-        filename: str,
+        path: str,
         n_samples: int,
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
         Args:
-            filename: Path to the netCDF file to write to.
+            filename: Path to write netCDF file(s).
             n_samples: Number of samples to write to the file.
+            n_timesteps: Number of timesteps to write to the file.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
-        self.filename = filename
+        self.path = path
+        filename = str(Path(path) / "autoregressive_predictions.nc")
         self.metadata = metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
@@ -126,13 +204,84 @@ class DataWriter:
 
         self.dataset.sync()  # Flush the data to disk
 
+    def flush(self):
+        """
+        Flush the data to disk.
+        """
+        self.dataset.sync()
+
+
+class _VideoDataWriter:
+    """
+    Write [time, lat, lon] metric data to a netCDF file.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        n_timesteps: int,
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ):
+        """
+        Args:
+            filename: Path to write netCDF file(s).
+            n_samples: Number of samples to write to the file.
+            n_timesteps: Number of timesteps to write to the file.
+            metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
+        """
+        self.path = path
+        self._metrics_filename = str(
+            Path(path) / "reduced_autoregressive_predictions.nc"
+        )
+        self.metadata = metadata
+        self.coords = coords
+        self._video = VideoAggregator(
+            n_timesteps=n_timesteps, enable_extended_videos=True
+        )
+
+    def append_batch(
+        self,
+        target: Dict[str, torch.Tensor],
+        prediction: Dict[str, torch.Tensor],
+        start_timestep: int,
+        start_sample: int,
+    ):
+        """
+        Append a batch of data to the file.
+
+        Args:
+            target: Target data.
+            prediction: Prediction data.
+            start_timestep: Timestep at which to start writing.
+            start_sample: Sample at which to start writing.
+        """
+        self._video.record_batch(
+            loss=np.nan,
+            target_data=target,
+            gen_data=prediction,
+            i_time_start=start_timestep,
+        )
+
+    def flush(self):
+        """
+        Flush the data to disk.
+        """
+        metric_dataset = self._video.get_dataset()
+        coords = {}
+        if "lat" in self.coords:
+            coords["lat"] = self.coords["lat"]
+        if "lon" in self.coords:
+            coords["lon"] = self.coords["lon"]
+        metric_dataset = metric_dataset.assign_coords(coords)
+        metric_dataset.to_netcdf(self._metrics_filename)
+
 
 class NullDataWriter:
     """
     Null pattern for DataWriter, which does nothing.
     """
-
-    VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
     def __init__(self):
         pass
