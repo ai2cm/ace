@@ -1,9 +1,9 @@
-from typing import Mapping, Protocol
+from typing import Mapping, Optional, Protocol
 
 import torch
 
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.typing import SigmaCoordinates, VariableMetadata
 
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
@@ -36,8 +36,9 @@ class OneStepAggregator:
         self,
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
-        self._snapshot = SnapshotAggregator()
+        self._snapshot = SnapshotAggregator(metadata)
         self._mean = MeanAggregator(area_weights)
         self._derived = DerivedMetricsAggregator(area_weights, sigma_coordinates)
         self._aggregators: Mapping[str, _Aggregator] = {
