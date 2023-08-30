@@ -3,7 +3,7 @@ import dataclasses
 import logging
 import os
 import time
-from typing import Optional, Union
+from typing import Optional
 
 import dacite
 import torch
@@ -14,10 +14,11 @@ from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.typing import GriddedData
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
-from fme.fcn_training.inference.data_writer import DataWriter, NullDataWriter
+from fme.fcn_training.inference.data_writer import DataWriter
 from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
@@ -52,6 +53,10 @@ class InferenceConfig:
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
         log_video: Whether to log videos of the state evolution.
+        log_extended_video: Whether to log wandb videos of the predictions with
+            statistical metrics, only done if log_video is True.
+        log_extended_video_netcdfs: Whether to log videos of the predictions with
+            statistical metrics as netcdf files.
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
             time dimension.
         save_prediction_files: Whether to save the predictions as a netcdf file.
@@ -66,6 +71,8 @@ class InferenceConfig:
     validation_data: DataLoaderParams
     prediction_data: Optional[DataLoaderParams] = None
     log_video: bool = True
+    log_extended_video: bool = False
+    log_extended_video_netcdfs: bool = False
     log_zonal_mean_images: bool = True
     save_prediction_files: bool = True
     forward_steps_in_memory: int = 1
@@ -100,6 +107,18 @@ class InferenceConfig:
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return _load_stepper_config(self.checkpoint_path)
+
+    def get_data_writer(self, validation_data: GriddedData) -> DataWriter:
+        n_samples = get_n_samples(validation_data.loader)
+        return DataWriter(
+            path=self.experiment_dir,
+            n_samples=n_samples,
+            n_timesteps=self.n_forward_steps + 1,
+            metadata=validation_data.metadata,
+            coords=validation_data.coords,
+            enable_prediction_netcdfs=self.save_prediction_files,
+            enable_video_netcdfs=self.log_extended_video_netcdfs,
+        )
 
 
 def get_n_samples(data_loader):
@@ -157,28 +176,16 @@ def main(
 
     stepper = config.load_stepper(validation.area_weights.to(fme.get_device()))
 
-    output_netcdf_filename = os.path.join(
-        config.experiment_dir,
-        "autoregressive_predictions.nc",
-    )
     aggregator = InferenceAggregator(
         validation.area_weights.to(fme.get_device()),
         sigma_coordinates=validation.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
+        enable_extended_videos=config.log_extended_video,
         log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
     )
-    if config.save_prediction_files:
-        n_samples = get_n_samples(validation.loader)
-        writer: Union[DataWriter, NullDataWriter] = DataWriter(
-            filename=output_netcdf_filename,
-            n_samples=n_samples,
-            metadata=validation.metadata,
-            coords=validation.coords,
-        )
-    else:
-        writer = NullDataWriter()
+    writer = config.get_data_writer(validation)
 
     def data_loader_factory(window_time_slice: Optional[slice] = None):
         return _get_data_loader(window_time_slice=window_time_slice)
@@ -220,6 +227,7 @@ def main(
         wandb.log(log, step=i)
         # wandb.log cannot be called more than "a few times per second"
         time.sleep(0.3)
+    writer.flush()
     return step_logs
 
 

@@ -46,13 +46,15 @@ class TestDataWriter:
     def test_append_batch(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
-        filename = tmp_path / "test.nc"
         n_samples = 4
         writer = DataWriter(
-            str(filename),
+            str(tmp_path),
             n_samples=n_samples,
+            n_timesteps=3,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
+            enable_prediction_netcdfs=True,
+            enable_video_netcdfs=False,
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
@@ -68,7 +70,7 @@ class TestDataWriter:
         )
 
         # Open the file again and check the data
-        dataset = Dataset(filename, "r")
+        dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         assert set(dataset.variables.keys()) == set(sample_target_data.keys()).union(
             {"source", "lat", "lon"}
         )
@@ -102,13 +104,15 @@ class TestDataWriter:
     def test_append_batch_past_end_of_samples(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
-        filename = tmp_path / "test.nc"
         n_samples = 4
         writer = DataWriter(
-            str(filename),
+            str(tmp_path),
             n_samples=n_samples,
+            n_timesteps=3,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
+            enable_prediction_netcdfs=True,
+            enable_video_netcdfs=False,
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
