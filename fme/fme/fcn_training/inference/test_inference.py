@@ -104,6 +104,7 @@ def test_inference_plus_one_model(
         prediction_data=prediction_data,
         log_video=True,
         save_prediction_files=True,
+        log_extended_video_netcdfs=True,
         forward_steps_in_memory=1,
     )
     config_filename = tmp_path / "config.yaml"
@@ -130,6 +131,10 @@ def test_inference_plus_one_model(
         )
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
+    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    assert "rmse_x" in metric_ds.data_vars
+    assert "lat" in metric_ds.coords
+    assert "lon" in metric_ds.coords
 
 
 @pytest.mark.parametrize("n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10)])

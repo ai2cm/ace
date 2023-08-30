@@ -286,6 +286,7 @@ class Trainer:
                 log_video=False,
                 log_zonal_mean_images=True,
                 n_timesteps=self.config.inference.n_forward_steps + 1,
+                enable_extended_videos=False,
                 dist=dist,
             )
             run_inference(
