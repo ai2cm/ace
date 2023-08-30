@@ -4,6 +4,7 @@ import torch
 import xarray as xr
 
 from fme.core import metrics
+from fme.core.data_loading.typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -23,21 +24,38 @@ class TimeMeanAggregator:
     """
 
     _image_captions = {
-        "bias_map": "{name} time-mean bias (generated - target)",
-        "gen_map": "{name} time-mean generated",
+        "bias_map": "{name} time-mean bias (generated - target) [{units}]",
+        "gen_map": "{name} time-mean generated [{units}]",
     }
 
-    def __init__(self, area_weights: torch.Tensor, dist: Optional[Distributed] = None):
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        dist: Optional[Distributed] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ):
+        """
+        Args:
+            area_weights: Area weights for each grid cell.
+            dist: Distributed object to use for communication.
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
+        """
         self._area_weights = area_weights
+        if dist is None:
+            self._dist = Distributed.get_instance()
+        else:
+            self._dist = dist
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
+
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._target_data_norm = None
         self._gen_data_norm = None
         self._n_batches = 0
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
 
     @staticmethod
     def _add_or_initialize_time_mean(
@@ -94,22 +112,13 @@ class TimeMeanAggregator:
         """
         if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
-        sample_dim = 0
-        lat_dim = -2
         logs = {}
         for name in self._gen_data.keys():
             gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
             target = self._dist.reduce_mean(self._target_data[name] / self._n_batches)
-            images = {
-                "bias_map": (gen - target).mean(dim=sample_dim).cpu(),
-                "gen_map": (gen).mean(dim=sample_dim).cpu(),
-            }
+            images = {"bias_map": gen - target, "gen_map": gen}
             for key, data in images.items():
-                caption = self._image_captions[key].format(name=name)
-                caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
-                data = data.flip(dims=[lat_dim])
-                wandb_image = wandb.Image(data, caption=caption)
-                logs[f"{key}/{name}"] = wandb_image
+                logs[f"{key}/{name}"] = self._get_image(key, name, data)
             logs[f"rmse/{name}"] = float(
                 metrics.root_mean_squared_error(
                     predicted=gen, truth=target, weights=self._area_weights
@@ -125,6 +134,23 @@ class TimeMeanAggregator:
                 .numpy()
             )
         return {f"{label}/{key}": logs[key] for key in logs}
+
+    def _get_image(self, key: str, name: str, data: torch.Tensor):
+        sample_dim = 0
+        lat_dim = -2
+        data = data.mean(dim=sample_dim).flip(dims=[lat_dim]).cpu()
+        caption = self._get_caption(key, name, data)
+        return wandb.Image(data, caption=caption)
+
+    def _get_caption(self, key: str, name: str, data: torch.Tensor) -> str:
+        if name in self._metadata:
+            caption_name = self._metadata[name].long_name
+            units = self._metadata[name].units
+        else:
+            caption_name, units = name, "unknown_units"
+        caption = self._image_captions[key].format(name=caption_name, units=units)
+        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        return caption
 
     @torch.no_grad()
     def get_dataset(self, label: str) -> xr.Dataset:

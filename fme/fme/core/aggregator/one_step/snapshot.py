@@ -1,8 +1,9 @@
-from typing import Mapping
+from typing import Mapping, Optional
 
 import numpy as np
 import torch
 
+from fme.core.data_loading.typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.wandb import WandB
 
@@ -15,10 +16,30 @@ class SnapshotAggregator:
     """
 
     _captions = {
-        "full-field": "{name} one step full field for last sample; (left) generated and (right) target.",  # noqa: E501
-        "residual": "{name} one step residual for last sample; (left) generated and (right) target.",  # noqa: E501
-        "error": "{name} one step error (generated - target) for last sample.",
+        "full-field": (
+            "{name} one step full field for last sample; "
+            "(left) generated and (right) target [{units}]"
+        ),
+        "residual": (
+            "{name} one step residual (prediction - previous time) for last sample; "
+            "(left) generated and (right) target [{units}]"
+        ),
+        "error": (
+            "{name} one step full field error (generated - target) "
+            "for last sample [{units}]"
+        ),
     }
+
+    def __init__(self, metadata: Optional[Mapping[str, VariableMetadata]] = None):
+        """
+        Args:
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
+        """
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
 
     @torch.no_grad()
     def record_batch(
@@ -67,10 +88,19 @@ class SnapshotAggregator:
                 axis=1,
             )
             for key, data in images.items():
-                caption = self._captions[key].format(name=name)
-                caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                caption = self._get_caption(key, name, data)
                 data = np.flip(data.cpu().numpy(), axis=-2)
                 wandb_image = wandb.Image(data, caption=caption)
                 image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
         return image_logs
+
+    def _get_caption(self, caption_key: str, name: str, data: torch.Tensor) -> str:
+        if name in self._metadata:
+            caption_name = self._metadata[name].long_name
+            units = self._metadata[name].units
+        else:
+            caption_name, units = name, "unknown_units"
+        caption = self._captions[caption_key].format(name=caption_name, units=units)
+        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        return caption

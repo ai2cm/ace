@@ -3,7 +3,7 @@ from typing import Dict, List, Mapping, Optional, Protocol, Union
 import torch
 from wandb import Table
 
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.typing import SigmaCoordinates, VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -51,10 +51,12 @@ class InferenceAggregator:
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
         dist: Optional[Distributed] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
             area_weights: Area weights for each grid cell.
+            sigma_coordinates: Data sigma coordinates
             n_timesteps: Number of timesteps of inference that will be run.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
@@ -63,6 +65,8 @@ class InferenceAggregator:
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
             dist: Distributed object to use for metric aggregation.
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
         """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(
@@ -77,7 +81,7 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 dist=dist,
             ),
-            "time_mean": TimeMeanAggregator(area_weights, dist=dist),
+            "time_mean": TimeMeanAggregator(area_weights, dist=dist, metadata=metadata),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
@@ -88,10 +92,11 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 enable_extended_videos=enable_extended_videos,
                 dist=dist,
+                metadata=metadata,
             )
         if log_zonal_mean_images:
             self._aggregators["zonal_mean"] = ZonalMeanAggregator(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps, dist=dist, metadata=metadata
             )
 
     @torch.no_grad()

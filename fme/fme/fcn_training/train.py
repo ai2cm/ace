@@ -259,6 +259,7 @@ class Trainer:
         aggregator = OneStepAggregator(
             self.train_data.area_weights.to(fme.get_device()),
             self.train_data.sigma_coordinates,
+            self.train_data.metadata,
         )
 
         with torch.no_grad():
@@ -288,6 +289,7 @@ class Trainer:
                 n_timesteps=self.config.inference.n_forward_steps + 1,
                 enable_extended_videos=False,
                 dist=dist,
+                metadata=self.train_data.metadata,
             )
             run_inference(
                 aggregator=aggregator,
