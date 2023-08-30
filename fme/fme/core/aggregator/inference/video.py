@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.data_loading.typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
@@ -288,6 +289,7 @@ class VideoAggregator:
         n_timesteps: int,
         enable_extended_videos: bool,
         dist: Optional[Distributed] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
@@ -295,6 +297,8 @@ class VideoAggregator:
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
             dist: Distributed object to use for metric aggregation.
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged video captions.
         """
         self._mean_data = _MeanVideoData(n_timesteps=n_timesteps, dist=dist)
         if enable_extended_videos:
@@ -309,6 +313,10 @@ class VideoAggregator:
             self._error_data = None
             self._variance_data = None
             self._enable_extended_videos = False
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
 
     @torch.no_grad()
     def record_batch(
@@ -365,10 +373,7 @@ class VideoAggregator:
         video_data = {}
         for name in gen_data:
             video_data[f"{label}/{name}"] = _MaybePairedVideoData(
-                caption=(
-                    f"Mean autoregressive (left) prediction and "
-                    f"(right) target for {name}"
-                ),
+                caption=self._get_caption(name),
                 gen=gen_data[name],
                 target=target_data[name],
             )
@@ -428,6 +433,17 @@ class VideoAggregator:
                     data=d.gen.cpu().numpy(), dims=("timestep", "lat", "lon")
                 )
         return xr.Dataset(video_data)
+
+    def _get_caption(self, name: str) -> str:
+        caption = (
+            "Autoregressive (left) prediction and (right) target for {name} [{units}]"
+        )
+        if name in self._metadata:
+            caption_name = self._metadata[name].long_name
+            units = self._metadata[name].units
+        else:
+            caption_name, units = name, "unknown units"
+        return caption.format(name=caption_name, units=units)
 
 
 def _make_video(

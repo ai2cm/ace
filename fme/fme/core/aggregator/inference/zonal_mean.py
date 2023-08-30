@@ -2,6 +2,7 @@ from typing import Dict, Mapping, Optional
 
 import torch
 
+from fme.core.data_loading.typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
@@ -19,11 +20,11 @@ class ZonalMeanAggregator:
 
     _captions = {
         "error": (
-            "{name} zonal-mean error (generated - target), "
+            "{name} zonal-mean error (generated - target) [{units}], "
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
         "gen": (
-            "{name} zonal-mean generated, "
+            "{name} zonal-mean generated [{units}], "
             "x-axis is time increasing to right, y-axis is latitude increasing upward"
         ),
     }
@@ -32,8 +33,25 @@ class ZonalMeanAggregator:
         self,
         n_timesteps: int,
         dist: Optional[Distributed] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
+        """
+        Args:
+            n_timesteps: Number of timesteps of inference that will be run.
+            dist: Distributed object to use for communication.
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
+        """
         self._n_timesteps = n_timesteps
+        if dist is None:
+            self._dist = Distributed.get_instance()
+        else:
+            self._dist = dist
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
+
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._n_batches = torch.zeros(
@@ -41,10 +59,6 @@ class ZonalMeanAggregator:
         )[
             None, :, None
         ]  # sample, time, lat
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
 
     def record_batch(
         self,
@@ -88,8 +102,7 @@ class ZonalMeanAggregator:
             )
             zonal_means["error"] = error.mean(dim=sample_dim).cpu()
             for key, data in zonal_means.items():
-                caption = self._captions[key].format(name=name)
-                caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+                caption = self._get_caption(key, name, data)
                 # images are y, x from upper left corner
                 # data is time, lat
                 # we want lat on y-axis (increasing upward) and time on x-axis
@@ -98,6 +111,16 @@ class ZonalMeanAggregator:
                 wandb_image = wandb.Image(data, caption=caption)
                 logs[f"{label}/{key}/{name}"] = wandb_image
         return logs
+
+    def _get_caption(self, caption_key: str, varname: str, data: torch.Tensor) -> str:
+        if varname in self._metadata:
+            caption_name = self._metadata[varname].long_name
+            units = self._metadata[varname].units
+        else:
+            caption_name, units = varname, "unknown_units"
+        caption = self._captions[caption_key].format(name=caption_name, units=units)
+        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        return caption
 
     @staticmethod
     def _initialize_zeros_zonal_mean_from_batch(
