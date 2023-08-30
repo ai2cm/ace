@@ -48,6 +48,7 @@ class InferenceAggregator:
         n_timesteps: int,
         record_step_20: bool = False,
         log_video: bool = False,
+        enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
         dist: Optional[Distributed] = None,
     ):
@@ -57,6 +58,8 @@ class InferenceAggregator:
             n_timesteps: Number of timesteps of inference that will be run.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
+            enable_extended_videos: Whether to log videos of statistical
+                metrics of state evolution
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
             dist: Distributed object to use for metric aggregation.
@@ -82,7 +85,9 @@ class InferenceAggregator:
             )
         if log_video:
             self._aggregators["video"] = VideoAggregator(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps,
+                enable_extended_videos=enable_extended_videos,
+                dist=dist,
             )
         if log_zonal_mean_images:
             self._aggregators["zonal_mean"] = ZonalMeanAggregator(
