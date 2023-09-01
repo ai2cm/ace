@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Mapping, Optional
+from typing import Any, MutableMapping, Optional
 
 import torch.optim.lr_scheduler
 
@@ -16,14 +16,21 @@ class SchedulerConfig:
     """
 
     type: Optional[str] = None
-    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    kwargs: MutableMapping[str, Any] = dataclasses.field(default_factory=dict)
 
-    def build(self, optimizer) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
+    def build(
+        self, optimizer, max_epochs
+    ) -> Optional[torch.optim.lr_scheduler._LRScheduler]:
         """
         Build the scheduler.
         """
         if self.type is None:
             return None
-        else:
-            scheduler_class = getattr(torch.optim.lr_scheduler, self.type)
-            return scheduler_class(optimizer=optimizer, **self.kwargs)
+
+        # work-around so we don't need to specify T_max
+        # in the yaml file for this scheduler
+        if self.type == "CosineAnnealingLR" and "T_max" not in self.kwargs:
+            self.kwargs["T_max"] = max_epochs
+
+        scheduler_class = getattr(torch.optim.lr_scheduler, self.type)
+        return scheduler_class(optimizer=optimizer, **self.kwargs)

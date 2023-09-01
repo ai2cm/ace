@@ -20,7 +20,7 @@ from fme.core.packer import Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
-from .optimization import NullOptimization, Optimization, OptimizationConfig
+from .optimization import NullOptimization, Optimization
 
 
 @dataclasses.dataclass
@@ -29,7 +29,6 @@ class SingleModuleStepperConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: Union[NormalizationConfig, FromStateNormalizer]
-    optimization: Optional[OptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
 
@@ -41,21 +40,19 @@ class SingleModuleStepperConfig:
             n_timesteps=n_forward_steps + 1,
         )
 
+    def get_state(self):
+        return dataclasses.asdict(self)
+
     def get_stepper(
         self,
         shapes: Dict[str, Tuple[int, ...]],
-        max_epochs: int,
-        area: torch.Tensor,
+        area: Optional[torch.Tensor],
     ):
         return SingleModuleStepper(
             config=self,
             data_shapes=shapes,
-            max_epochs=max_epochs,
             area=area,
         )
-
-    def get_state(self):
-        return dataclasses.asdict(self)
 
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepperConfig":
@@ -130,15 +127,12 @@ class SingleModuleStepper:
         self,
         config: SingleModuleStepperConfig,
         data_shapes: Dict[str, Tuple[int, ...]],
-        max_epochs: int,
         area: torch.Tensor,
     ):
         """
         Args:
             config: The configuration.
             data_shapes: The shapes of the data.
-            max_epochs: The maximum number of epochs. Used when constructing
-                certain learning rate schedulers, if applicable.
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
         """
@@ -160,16 +154,6 @@ class SingleModuleStepper:
         ).to(get_device())
         self.data_shapes = data_shapes
         self._config = config
-        self._max_epochs = max_epochs
-        if config.optimization is not None:
-            self.optimization: Union[
-                Optimization, NullOptimization
-            ] = config.optimization.build(
-                parameters=self.module.parameters(), max_epochs=max_epochs
-            )
-        else:
-            self.optimization = NullOptimization()
-
         self._no_optimization = NullOptimization()
 
         if dist.is_distributed():
@@ -202,20 +186,10 @@ class SingleModuleStepper:
         """
         return [self.module]
 
-    def step_scheduler(self, valid_loss: float):
-        """
-        Step the scheduler.
-
-        Args:
-            valid_loss: The validation loss. Used in schedulers which change the
-                learning rate based on whether the validation loss is decreasing.
-        """
-        self.optimization.step_scheduler(valid_loss)
-
     def run_on_batch(
         self,
         data: Dict[str, torch.Tensor],
-        train: bool,
+        optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
         aggregator: Optional[OneStepAggregator] = None,
     ) -> SteppedData:
@@ -224,7 +198,8 @@ class SingleModuleStepper:
 
         Args:
             data: The batch data of shape [n_sample, n_timesteps, n_channels, n_x, n_y].
-            train: Whether to train the model.
+            optimization: The optimization class to use for updating the module.
+                Use `NullOptimization` to disable training.
             n_forward_steps: The number of timesteps to run the model for.
             aggregator: The data aggregator.
 
@@ -238,15 +213,6 @@ class SingleModuleStepper:
             ] = NullAggregator()
         else:
             non_none_aggregator = aggregator
-        if train:
-            if self.optimization is None:
-                raise ValueError(
-                    "Cannot train without an optimizer, "
-                    "should be passed at initialization."
-                )
-            optimization: Union[Optimization, NullOptimization] = self.optimization
-        else:
-            optimization = self._no_optimization
 
         device = get_device()
         device_data = {
@@ -272,42 +238,36 @@ class SingleModuleStepper:
         """
         return {
             "module": self.module.state_dict(),
-            "optimization": self.optimization.get_state(),
             "normalizer": self.normalizer.get_state(),
             "in_packer": self.in_packer.get_state(),
             "out_packer": self.out_packer.get_state(),
             "data_shapes": self.data_shapes,
-            "max_epochs": self._max_epochs,
             "config": self._config.get_state(),
             "prescriber": self.prescriber.get_state(),
         }
 
-    def load_state(self, state, load_optimizer: bool = True):
+    def load_state(self, state):
         """
         Load the state of the stepper.
 
         Args:
             state: The state to load.
-            load_optimizer: Whether to load the optimizer state.
         """
         if "module" in state:
             self.module.load_state_dict(state["module"])
-        if load_optimizer and "optimization" in state:
-            self.optimization.load_state(state["optimization"])
         self.in_packer = Packer.from_state(state["in_packer"])
         self.out_packer = Packer.from_state(state["out_packer"])
         self.prescriber.load_state(state["prescriber"])
 
     @classmethod
-    def from_state(
-        cls, state, area: torch.Tensor, load_optimizer: bool = True
-    ) -> "SingleModuleStepper":
+    def from_state(cls, state, area: torch.Tensor) -> "SingleModuleStepper":
         """
         Load the state of the stepper.
 
         Args:
             state: The state to load.
-            load_optimizer: Whether to load the optimizer state.
+            area: (n_lat, n_lon) array containing relative gridcell area, in any
+                units including unitless.
 
         Returns:
             The stepper.
@@ -317,10 +277,9 @@ class SingleModuleStepper:
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
             data_shapes=state["data_shapes"],
-            max_epochs=state["max_epochs"],
             area=area,
         )
-        stepper.load_state(state, load_optimizer=load_optimizer)
+        stepper.load_state(state)
         return stepper
 
 

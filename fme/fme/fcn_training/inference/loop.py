@@ -10,6 +10,7 @@ from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
+from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 
 from .data_writer import DataWriter, NullDataWriter
@@ -217,7 +218,7 @@ def run_inference(
                 batch_manager.apply_initial_condition(data)
                 stepped = stepper.run_on_batch(
                     data,
-                    train=False,
+                    NullOptimization(),
                     n_forward_steps=forward_steps_in_memory,
                 )
                 _inference_internal_loop(
