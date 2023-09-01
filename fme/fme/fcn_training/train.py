@@ -59,6 +59,7 @@ import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.distributed import Distributed, NotDistributed
+from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.fcn_training.inference import run_inference
 from fme.fcn_training.train_config import TrainConfig
@@ -123,8 +124,13 @@ class Trainer:
             break
         logging.info("Starting model initialization")
         self.stepper = config.stepper.get_stepper(
-            shapes, max_epochs=config.max_epochs, area=self.train_data.area_weights
+            shapes,
+            area=self.train_data.area_weights,
         )
+        self.optimization = config.optimization.build(
+            self.stepper.module.parameters(), config.max_epochs
+        )
+        self._no_optimization = NullOptimization()
 
         if config.resuming:
             logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)
@@ -182,9 +188,8 @@ class Trainer:
             train_loss = train_logs["train/mean/loss"]
             valid_loss = valid_logs["val/mean/loss"]
             # need to get the learning rate before stepping the scheduler
-            lr = self.stepper.optimization.optimizer.param_groups[0]["lr"]
-
-            self.stepper.step_scheduler(valid_loss)
+            lr = self.optimization.learning_rate
+            self.optimization.step_scheduler(valid_loss)
 
             if self.dist.is_root():
                 if self.config.save_checkpoint:
@@ -226,7 +231,7 @@ class Trainer:
             with torch.no_grad():
                 data = next(iter(self.train_data.loader))
                 stepped = self.stepper.run_on_batch(
-                    data, train=False, n_forward_steps=self.n_forward_steps
+                    data, self._no_optimization, n_forward_steps=self.n_forward_steps
                 )
 
                 if self.config.log_train_every_n_batches > 0:
@@ -237,7 +242,7 @@ class Trainer:
         for data in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
                 data,
-                train=True,
+                self.optimization,
                 n_forward_steps=self.n_forward_steps,
                 aggregator=aggregator,
             )
@@ -266,7 +271,7 @@ class Trainer:
             for data in self.valid_data.loader:
                 self.stepper.run_on_batch(
                     data,
-                    train=False,
+                    self._no_optimization,
                     n_forward_steps=self.n_forward_steps,
                     aggregator=aggregator,
                 )
@@ -315,6 +320,7 @@ class Trainer:
                 "num_batches_seen": self.num_batches_seen,
                 "epoch": self.epoch,
                 "stepper": self.stepper.get_state(),
+                "optimization": self.optimization.get_state(),
             },
             checkpoint_path,
         )
@@ -331,8 +337,8 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     # restore checkpoint is used for finetuning as well as resuming.
     # If finetuning (i.e., not resuming), restore checkpoint
     # does not load optimizer state, instead uses config specified lr.
-    load_optimizer = trainer.config.resuming
-    trainer.stepper.load_state(checkpoint["stepper"], load_optimizer=load_optimizer)
+    trainer.stepper.load_state(checkpoint["stepper"])
+    trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["epoch"]
 

@@ -41,17 +41,17 @@ validation_data:
   data_type: "xarray"
   batch_size: 2
   num_data_workers: 1
+optimization:
+  optimizer_type: "Adam"
+  lr: 0.001
+  enable_automatic_mixed_precision: true
+  scheduler:
+      type: CosineAnnealingLR
+      kwargs:
+        T_max: 1
 stepper:
   in_names: {in_variable_names}
   out_names: {out_variable_names}
-  optimization:
-    optimizer_type: "Adam"
-    lr: 0.001
-    enable_automatic_mixed_precision: true
-    scheduler:
-        type: CosineAnnealingLR
-        kwargs:
-          T_max: 1
   normalization:
     global_means_path: '{global_means_path}'
     global_stds_path: '{global_stds_path}'

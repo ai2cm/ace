@@ -7,6 +7,7 @@ from fme.core import SingleModuleStepperConfig
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.optimization import OptimizationConfig
 from fme.core.wandb import WandB
 
 
@@ -102,6 +103,7 @@ class TrainConfig:
         train_data: configuration for the training data loader
         validation_data: configuration for the validation data loader
         stepper: configuration for the stepper
+        optimization: configuration for the optimization
         logging: configuration for logging
         max_epochs: total number of epochs to train for
         save_checkpoint: whether to save checkpoints
@@ -116,6 +118,7 @@ class TrainConfig:
     train_data: DataLoaderParams
     validation_data: DataLoaderParams
     stepper: SingleModuleStepperConfig
+    optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
     save_checkpoint: bool
@@ -123,14 +126,6 @@ class TrainConfig:
     inference: InlineInferenceConfig
     checkpoint_every_n_epochs: Optional[int] = None
     log_train_every_n_batches: int = 100
-
-    def __post_init__(self):
-        scheduler_type = self.stepper.optimization.scheduler.type
-        scheduler_kwargs = self.stepper.optimization.scheduler.kwargs
-        # work-around so we don't need to specify T_max
-        # in the yaml file for this scheduler
-        if scheduler_type == "CosineAnnealingLR" and "T_max" not in scheduler_kwargs:
-            self.stepper.optimization.scheduler.kwargs["T_max"] = self.max_epochs
 
     @property
     def checkpoint_dir(self) -> str:
