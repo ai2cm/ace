@@ -16,6 +16,7 @@ class Optimization:
         parameters,
         optimizer_type: Literal["Adam", "FusedAdam"],
         lr: float,
+        max_epochs: int,
         scheduler: SchedulerConfig,
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
@@ -31,12 +32,16 @@ class Optimization:
             self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
         else:
             self.gscaler = None
-        self.scheduler = scheduler.build(self.optimizer)
+        self.scheduler = scheduler.build(self.optimizer, max_epochs)
 
     @contextlib.contextmanager
     def autocast(self):
         with amp.autocast(enabled=self.gscaler is not None):
             yield
+
+    @property
+    def learning_rate(self) -> float:
+        return self.optimizer.param_groups[0]["lr"]
 
     def set_mode(self, module: nn.Module):
         """
@@ -124,6 +129,7 @@ class OptimizationConfig:
             parameters=parameters,
             optimizer_type=self.optimizer_type,
             lr=self.lr,
+            max_epochs=max_epochs,
             scheduler=self.scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
             kwargs=self.kwargs,
@@ -141,6 +147,10 @@ class NullOptimization:
     @contextlib.contextmanager
     def autocast(self):
         yield
+
+    @property
+    def learning_rate(self) -> float:
+        return float("nan")
 
     def step_scheduler(self, valid_loss: float):
         return

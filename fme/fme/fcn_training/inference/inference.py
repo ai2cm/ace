@@ -31,9 +31,7 @@ def _load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
 
 def _load_stepper(checkpoint_file: str, area: torch.Tensor) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"], area=area, load_optimizer=False
-    )
+    stepper = SingleModuleStepper.from_state(checkpoint["stepper"], area=area)
     return stepper
 
 
