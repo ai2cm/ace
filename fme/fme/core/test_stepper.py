@@ -5,7 +5,7 @@ import torch
 
 import fme
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
-from fme.core.optimization import OptimizationConfig
+from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.core.stepper import (
@@ -51,7 +51,6 @@ def test_stepper_config_all_names_property(
         in_names=in_names,
         out_names=out_names,
         normalization=MagicMock(),
-        optimization=MagicMock(),
         prescriber=prescriber_config,
     )
     # check there are no duplications
@@ -219,11 +218,6 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         in_names=["a", "b"],
         out_names=["a", "b"],
-        optimization=OptimizationConfig(
-            optimizer_type="Adam",
-            lr=0.001,
-            enable_automatic_mixed_precision=False,
-        ),
         normalization=NormalizationConfig(
             means={"a": 0.0, "b": 0.0},
             stds={"a": 1.0, "b": 1.0},
@@ -235,7 +229,6 @@ def test_reloaded_stepper_gives_same_prediction():
     }
     stepper = config.get_stepper(
         shapes=shapes,
-        max_epochs=1,
         area=None,  # not actually used in this test
     )
     area = torch.ones((5, 5), device=fme.get_device())
@@ -243,12 +236,12 @@ def test_reloaded_stepper_gives_same_prediction():
     data, _ = get_data(["a", "b"], n_samples=5, n_time=2)
     first_result = stepper.run_on_batch(
         data=data,
-        train=False,
+        optimization=NullOptimization(),
         n_forward_steps=1,
     )
     second_result = new_stepper.run_on_batch(
         data=data,
-        train=False,
+        optimization=NullOptimization(),
         n_forward_steps=1,
     )
     assert torch.allclose(first_result.loss, second_result.loss)
