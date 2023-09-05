@@ -124,6 +124,7 @@ class TrainConfig:
     save_checkpoint: bool
     experiment_dir: str
     inference: InlineInferenceConfig
+    n_forward_steps: int
     checkpoint_every_n_epochs: Optional[int] = None
     log_train_every_n_batches: int = 100
 
