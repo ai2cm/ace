@@ -28,6 +28,7 @@ def _get_test_yaml_files(
     in_variable_names,
     out_variable_names,
     mask_name,
+    n_forward_steps=2,
     nettype="afno",
 ):
     train_string = f"""
@@ -69,6 +70,7 @@ stepper:
 inference:
     n_forward_steps: 2
     forward_steps_in_memory: 2
+n_forward_steps: {n_forward_steps}
 max_epochs: 1
 save_checkpoint: true
 logging:
