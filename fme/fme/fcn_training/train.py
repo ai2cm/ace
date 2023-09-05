@@ -86,13 +86,8 @@ class Trainer:
                 os.makedirs(config.checkpoint_dir)
         self.config = config
 
-        self.n_forward_steps = 1
-        if self.n_forward_steps != 1:
-            raise NotImplementedError(
-                "diagnostics code not updated for n_forward_steps != 1"
-            )
         data_requirements = config.stepper.get_data_requirements(
-            n_forward_steps=self.n_forward_steps
+            n_forward_steps=self.config.n_forward_steps
         )
         logging.info("rank %d, begin data loader init" % self.dist.rank)
         self.train_data = get_data_loader(
@@ -231,7 +226,9 @@ class Trainer:
             with torch.no_grad():
                 data = next(iter(self.train_data.loader))
                 stepped = self.stepper.run_on_batch(
-                    data, self._no_optimization, n_forward_steps=self.n_forward_steps
+                    data,
+                    optimization=self._no_optimization,
+                    n_forward_steps=self.config.n_forward_steps,
                 )
 
                 if self.config.log_train_every_n_batches > 0:
@@ -243,7 +240,7 @@ class Trainer:
             stepped = self.stepper.run_on_batch(
                 data,
                 self.optimization,
-                n_forward_steps=self.n_forward_steps,
+                n_forward_steps=self.config.n_forward_steps,
                 aggregator=aggregator,
             )
             self.num_batches_seen += 1
@@ -271,8 +268,8 @@ class Trainer:
             for data in self.valid_data.loader:
                 self.stepper.run_on_batch(
                     data,
-                    self._no_optimization,
-                    n_forward_steps=self.n_forward_steps,
+                    optimization=NullOptimization(),
+                    n_forward_steps=self.config.n_forward_steps,
                     aggregator=aggregator,
                 )
         return aggregator.get_logs(label="val")
