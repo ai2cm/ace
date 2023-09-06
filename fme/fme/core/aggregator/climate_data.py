@@ -33,6 +33,13 @@ class ClimateData:
         self._data = climate_data
         self._prefixes = climate_field_name_prefixes
 
+    def __getattr__(self, name):
+        """Return variable with given name, without renaming or handling vertical."""
+        try:
+            return self._data[name]
+        except KeyError:
+            raise AttributeError(f"{name} is not an available variable.")
+
     def _extract_levels(self, prefix) -> Optional[torch.Tensor]:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
