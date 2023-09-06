@@ -43,3 +43,21 @@ def test_missing_specific_total_water(has_water_variable):
         )
     else:
         assert climate_data.specific_total_water is None
+
+
+def test_climate_data_attr():
+    climate_data = ClimateData(
+        {"x": torch.tensor([1.0]), "ps": torch.tensor([2.0])},
+        climate_field_name_prefixes={"surface_pressure": "ps"},
+    )
+    assert climate_data.x == torch.tensor([1.0])
+    assert climate_data.ps == torch.tensor([2.0])
+    assert climate_data.surface_pressure == torch.tensor([2.0])
+
+
+def test_climate_data_raises_attribute_error():
+    climate_data = ClimateData(
+        {"x": torch.tensor([1.0])}, climate_field_name_prefixes={}
+    )
+    with pytest.raises(AttributeError):
+        climate_data.y
