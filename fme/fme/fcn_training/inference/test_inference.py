@@ -14,7 +14,7 @@ from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
-from fme.fcn_training.inference import loop
+from fme.fcn_training.inference.derived_variables import compute_derived_quantities
 from fme.fcn_training.inference.inference import InferenceConfig, main
 from fme.fcn_training.registry import ModuleSelector
 from fme.fcn_training.train_config import LoggingConfig
@@ -292,20 +292,19 @@ def test_compute_derived_quantities(has_required_fields):
         fake_data["target_data_norm"],
     )
 
-    area_weights = torch.ones(ny, device=get_device()) / ny
     sigma_coords = SigmaCoordinates(
         ak=torch.linspace(0, 1, nz + 1, device=get_device()),
         bk=torch.linspace(0, 1, nz + 1, device=get_device()),
     )
-    derived_stepped = loop.compute_derived_quantities(
-        stepped,
-        area_weights,
-        sigma_coords,
-    )
+    derived_stepped = compute_derived_quantities(stepped, sigma_coords)
 
     dry_air_name = "surface_pressure_due_to_dry_air"
-    existence_check = (dry_air_name in derived_stepped.gen_data) and (
-        dry_air_name in derived_stepped.target_data
+    water_path_name = "total_water_path"
+    existence_check = (
+        dry_air_name in derived_stepped.gen_data
+        and dry_air_name in derived_stepped.target_data
+        and water_path_name in derived_stepped.gen_data
+        and water_path_name in derived_stepped.target_data
     )
 
     if has_required_fields:

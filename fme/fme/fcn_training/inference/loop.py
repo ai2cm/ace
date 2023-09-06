@@ -4,8 +4,7 @@ from typing import Dict, Mapping, Optional, Protocol, Union
 import numpy as np
 import torch
 
-from fme.core import SingleModuleStepper, metrics
-from fme.core.aggregator.climate_data import ClimateData
+from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
 from fme.core.device import get_device
@@ -14,6 +13,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 
 from .data_writer import DataWriter, NullDataWriter
+from .derived_variables import compute_derived_quantities
 
 
 class EnsembleBatch:
@@ -86,58 +86,9 @@ class DataLoaderFactory(Protocol):
         ...
 
 
-def _compute_dry_air(
-    stepped: SteppedData,
-    sigma_coordinates: SigmaCoordinates,
-) -> SteppedData:
-    gen = ClimateData(stepped.gen_data)
-    target = ClimateData(stepped.target_data)
-    ak, bk = sigma_coordinates.ak, sigma_coordinates.bk
-    if (
-        gen.specific_total_water is None
-        or gen.surface_pressure is None
-        or target.specific_total_water is None
-        or target.surface_pressure is None
-    ):
-        logging.warning(
-            "Could not compute dry air mass due to missing atmospheric fields"
-        )
-        return stepped
-
-    gen_dry_air = metrics.surface_pressure_due_to_dry_air(
-        gen.specific_total_water,
-        gen.surface_pressure,
-        ak,
-        bk,
-    )
-
-    target_dry_air = metrics.surface_pressure_due_to_dry_air(
-        target.specific_total_water,
-        target.surface_pressure,
-        ak,
-        bk,
-    )
-
-    label = "surface_pressure_due_to_dry_air"
-    new_stepped = stepped.copy()
-    new_stepped.gen_data[label] = gen_dry_air
-    new_stepped.target_data[label] = target_dry_air
-    return new_stepped
-
-
-def compute_derived_quantities(
-    stepped: SteppedData,
-    area_weights: torch.Tensor,
-    sigma_coordinates: SigmaCoordinates,
-) -> SteppedData:
-    stepped = _compute_dry_air(stepped, sigma_coordinates)
-    return stepped
-
-
 def _inference_internal_loop(
     stepped: SteppedData,
     i_time: int,
-    area_weights: torch.Tensor,
     sigma_coords: SigmaCoordinates,
     aggregator: InferenceAggregator,
     batch_manager: EnsembleBatch,
@@ -146,7 +97,7 @@ def _inference_internal_loop(
 
     This function exists to de-duplicate code between run_inference and
     run_data_inference."""
-    stepped = compute_derived_quantities(stepped, area_weights, sigma_coords)
+    stepped = compute_derived_quantities(stepped, sigma_coords)
 
     # for non-initial windows, we want to record only the new data
     # and discard the initial sample of the window
@@ -209,7 +160,6 @@ def run_inference(
             # data loader is a sequence of batches, so we need a new one for each
             # time window
             valid_data_loader = data_loader_factory(window_time_slice=time_slice)
-            area_weights = valid_data_loader.area_weights.to(device)
             sigma_coords = valid_data_loader.sigma_coordinates
             for data, batch_manager in zip(valid_data_loader.loader, batch_managers):
                 data = {key: value.to(device) for key, value in data.items()}
@@ -224,7 +174,6 @@ def run_inference(
                 _inference_internal_loop(
                     stepped,
                     i_time,
-                    area_weights,
                     sigma_coords,
                     aggregator,
                     batch_manager,
@@ -282,7 +231,6 @@ def run_dataset_inference(
             predicted_data_loader = prediction_data_loader_factory(
                 window_time_slice=time_slice
             )
-            area_weights = valid_data_loader.area_weights.to(device)
             sigma_coords = valid_data_loader.sigma_coordinates
             for valid_data, predicted_data, batch_manager in zip(
                 valid_data_loader.loader, predicted_data_loader.loader, batch_managers
@@ -303,7 +251,6 @@ def run_dataset_inference(
                 _inference_internal_loop(
                     stepped,
                     i_time,
-                    area_weights,
                     sigma_coords,
                     aggregator,
                     batch_manager,
