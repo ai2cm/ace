@@ -3,7 +3,6 @@
 # install all packages that are defined within this repo using --no-deps flag
 
 LOCAL_PACKAGES="models/FourCastNet \
-    models/fcn-mip \
     fme"
 
 for PACKAGE in $LOCAL_PACKAGES; do

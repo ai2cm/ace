@@ -1,4 +1,0 @@
-land_sea_mask.npy filter=lfs diff=lfs merge=lfs -text
-ExtendedBestTrack_combined.txt filter=lfs diff=lfs merge=lfs -text
-*.nc filter=lfs diff=lfs merge=lfs -text
-*.png filter=lfs diff=lfs merge=lfs -text
