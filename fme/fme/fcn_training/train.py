@@ -45,6 +45,7 @@
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
 import argparse
+import contextlib
 import dataclasses
 import logging
 import os
@@ -158,6 +159,8 @@ class Trainer:
 
         self._inference_data_loader_factory = get_inference_data_loader
 
+        self._ema = self.config.ema.build(self.stepper.modules)
+
     def switch_off_grad(self, model):
         for param in model.parameters():
             param.requires_grad = False
@@ -195,6 +198,8 @@ class Trainer:
                     if valid_loss <= best_valid_loss:
                         self.save_checkpoint(self.config.best_checkpoint_path)
                         best_valid_loss = valid_loss
+                    with self._ema_context():
+                        self.save_checkpoint(self.config.ema_checkpoint_path)
 
             time_elapsed = time.time() - start_time
             logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
@@ -243,6 +248,7 @@ class Trainer:
                 n_forward_steps=self.config.n_forward_steps,
                 aggregator=aggregator,
             )
+            self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
             if (
                 self.config.log_train_every_n_batches > 0
@@ -256,6 +262,32 @@ class Trainer:
 
         return aggregator.get_logs(label="train")
 
+    @contextlib.contextmanager
+    def _validation_context(self):
+        """
+        The context for running validation.
+
+        In this context, the stepper uses the EMA model if
+        `self.config.validate_using_ema` is True.
+        """
+        if self.config.validate_using_ema:
+            with self._ema_context():
+                yield
+        else:
+            yield
+
+    @contextlib.contextmanager
+    def _ema_context(self):
+        """
+        A context where the stepper uses the EMA model.
+        """
+        self._ema.store(parameters=self.stepper.modules.parameters())
+        self._ema.copy_to(model=self.stepper.modules)
+        try:
+            yield
+        finally:
+            self._ema.restore(parameters=self.stepper.modules.parameters())
+
     def validate_one_epoch(self):
         logging.info(f"Starting validation step on epoch {self.epoch + 1}")
         aggregator = OneStepAggregator(
@@ -264,7 +296,7 @@ class Trainer:
             self.train_data.metadata,
         )
 
-        with torch.no_grad():
+        with torch.no_grad(), self._validation_context():
             for data in self.valid_data.loader:
                 self.stepper.run_on_batch(
                     data,
@@ -293,24 +325,24 @@ class Trainer:
                 dist=dist,
                 metadata=self.train_data.metadata,
             )
-            run_inference(
-                aggregator=aggregator,
-                stepper=self.stepper,
-                data_loader_factory=self._inference_data_loader_factory,
-                n_forward_steps=self.config.inference.n_forward_steps,
-                forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
-            )
+            with torch.no_grad(), self._validation_context():
+                run_inference(
+                    aggregator=aggregator,
+                    stepper=self.stepper,
+                    data_loader_factory=self._inference_data_loader_factory,
+                    n_forward_steps=self.config.inference.n_forward_steps,
+                    forward_steps_in_memory=(
+                        self.config.inference.forward_steps_in_memory
+                    ),
+                )
             logs = aggregator.get_logs(label="inference")
         else:
             logs = {}
         return logs
 
-    def save_checkpoint(self, checkpoint_path, model=None):
+    def save_checkpoint(self, checkpoint_path):
         """We intentionally require a checkpoint_dir to be passed
         in order to allow Ray Tune to use this function"""
-
-        if not model:
-            model = self.stepper.module
 
         torch.save(
             {
