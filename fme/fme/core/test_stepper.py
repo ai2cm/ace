@@ -214,7 +214,7 @@ def test_reloaded_stepper_gives_same_prediction():
     torch.manual_seed(0)
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(
-            type="FourierNeuralOperatorNet", config={"scale_factor": 1}
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
         in_names=["a", "b"],
         out_names=["a", "b"],

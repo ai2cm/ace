@@ -211,9 +211,7 @@ def _setup(path, nettype):
     return train_config_filename, inference_config_filename
 
 
-@pytest.mark.parametrize(
-    "nettype", ["SphericalFourierNeuralOperatorNet", "FourierNeuralOperatorNet", "afno"]
-)
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet", "afno"])
 def test_train_and_inference_inline(tmp_path, nettype):
     """Make sure that training and inference run without errors
 
