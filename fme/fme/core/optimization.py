@@ -106,16 +106,15 @@ class DisabledOptimizationConfig:
     """
     Configuration for optimization, kept only for backwards compatibility when
     loading configuration. Cannot be used to build, will raise an exception.
-
-    Attributes:
-        optimizer_type: The type of optimizer to use.
-        lr: The learning rate.
-        kwargs: Additional keyword arguments to pass to the optimizer.
-        enable_automatic_mixed_precision: Whether to use automatic mixed
-            precision.
-        scheduler: The type of scheduler to use. If none is given, no scheduler
-            will be used.
     """
+
+    optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
+    lr: float = 0.001
+    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+    enable_automatic_mixed_precision: bool = True
+    scheduler: SchedulerConfig = dataclasses.field(
+        default_factory=lambda: SchedulerConfig()
+    )
 
     def build(self, parameters, max_epochs: int) -> Optimization:
         raise RuntimeError("Cannot build DisabledOptimizationConfig")
