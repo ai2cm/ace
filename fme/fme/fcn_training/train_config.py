@@ -1,13 +1,14 @@
 import dataclasses
 import logging
 import os
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.optimization import OptimizationConfig
+from fme.core.stepper import ExistingStepperConfig
 from fme.core.wandb import WandB
 
 
@@ -117,7 +118,7 @@ class TrainConfig:
 
     train_data: DataLoaderParams
     validation_data: DataLoaderParams
-    stepper: SingleModuleStepperConfig
+    stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig]
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int

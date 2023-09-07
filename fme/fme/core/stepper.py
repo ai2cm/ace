@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union, cast
 
 import dacite
 import torch
@@ -73,6 +73,23 @@ class SingleModuleStepperConfig:
     @property
     def normalize_names(self):
         return list(set(self.in_names).union(self.out_names))
+
+
+@dataclasses.dataclass
+class ExistingStepperConfig:
+    checkpoint_path: str
+
+    def _load_checkpoint(self) -> Mapping[str, Any]:
+        return torch.load(self.checkpoint_path, map_location=get_device())
+
+    def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
+        return SingleModuleStepperConfig.from_state(
+            self._load_checkpoint()["stepper"]["config"]
+        ).get_data_requirements(n_forward_steps)
+
+    def get_stepper(self, shapes, area):
+        del shapes  # unused
+        return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"], area)
 
 
 class DummyWrapper(nn.Module):

@@ -8,6 +8,7 @@ from typing import Dict
 import numpy as np
 import pytest
 import xarray as xr
+import yaml
 
 from fme.fcn_training.inference.inference import main as inference_main
 from fme.fcn_training.train import _restore_checkpoint
@@ -30,7 +31,35 @@ def _get_test_yaml_files(
     mask_name,
     n_forward_steps=2,
     nettype="afno",
+    stepper_checkpoint_file=None,
 ):
+    new_stepper_config = f"""
+  in_names: {in_variable_names}
+  out_names: {out_variable_names}
+  normalization:
+    global_means_path: '{global_means_path}'
+    global_stds_path: '{global_stds_path}'
+  loss:
+    global_mean_type: "LpLoss"
+  builder:
+    type: {nettype}
+    config:
+      num_blocks: 2
+      embed_dim: 12
+  prescriber:
+    prescribed_name: {in_variable_names[0]}
+    mask_name: {mask_name}
+    mask_value: 0
+"""
+    existing_stepper_config = f"""
+  checkpoint_file: {stepper_checkpoint_file}
+"""
+
+    if stepper_checkpoint_file:
+        stepper_config = existing_stepper_config
+    else:
+        stepper_config = new_stepper_config
+
     train_string = f"""
 train_data:
   data_path: '{train_data_path}'
@@ -51,22 +80,7 @@ optimization:
       kwargs:
         T_max: 1
 stepper:
-  in_names: {in_variable_names}
-  out_names: {out_variable_names}
-  normalization:
-    global_means_path: '{global_means_path}'
-    global_stds_path: '{global_stds_path}'
-  loss:
-    global_mean_type: "LpLoss"
-  builder:
-    type: {nettype}
-    config:
-      num_blocks: 2
-      embed_dim: 12
-  prescriber:
-    prescribed_name: {in_variable_names[0]}
-    mask_name: {mask_name}
-    mask_value: 0
+{stepper_config}
 inference:
     n_forward_steps: 2
     forward_steps_in_memory: 2
@@ -290,3 +304,33 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool):
     initial_process.check_returncode()
     resume_process = subprocess.run(subprocess_args)
     resume_process.check_returncode()
+
+
+def _create_fine_tuning_config(path_to_train_config_yaml: str, path_to_checkpoint: str):
+    # TODO(gideond) rename to "overwrite" or something of that nature
+    with open(path_to_train_config_yaml, "r") as config_file:
+        config_data = yaml.safe_load(config_file)
+        config_data["stepper"] = {"checkpoint_path": path_to_checkpoint}
+        with tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".yaml"
+        ) as new_config_file:
+            new_config_file.write(yaml.dump(config_data))
+
+    return new_config_file.name
+
+
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+def test_fine_tuning(tmp_path, nettype):
+    """Check that fine tuning config runs without errors."""
+    train_config, _ = _setup(tmp_path, nettype)
+
+    train_main(
+        yaml_config=train_config,
+    )
+
+    results_dir = tmp_path / "output"
+    ckpt = f"{results_dir}/training_checkpoints/best_ckpt.tar"
+
+    fine_tuning_config = _create_fine_tuning_config(train_config, ckpt)
+
+    train_main(yaml_config=fine_tuning_config)
