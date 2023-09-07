@@ -6,9 +6,6 @@ import torch_harmonics as harmonics
 # this package is installed in models/FourCastNet
 from fourcastnet.networks.afnonet import AFNONetBuilder
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
-
-# this package is installed in models/fcn-mip
-from networks.geometric_v1.sfnonet import FourierNeuralOperatorBuilder
 from torch import nn
 
 
@@ -128,7 +125,6 @@ class PreBuiltBuilder(ModuleConfig):
 
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
     "afno": AFNONetBuilder,  # using short acronym for backwards compatibility
-    "FourierNeuralOperatorNet": FourierNeuralOperatorBuilder,
     "SphericalFourierNeuralOperatorNet": SphericalFourierNeuralOperatorBuilder,  # type: ignore  # noqa: E501
     "prebuilt": PreBuiltBuilder,
 }
@@ -155,7 +151,6 @@ class ModuleSelector:
 
     type: Literal[
         "afno",
-        "FourierNeuralOperatorNet",
         "SphericalFourierNeuralOperatorNet",
         "prebuilt",
     ]
