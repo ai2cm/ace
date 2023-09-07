@@ -197,12 +197,12 @@ class SingleModuleStepper:
         return self._config.get_data_requirements(n_forward_steps)
 
     @property
-    def modules(self) -> List[nn.Module]:
+    def modules(self) -> nn.ModuleList:
         """
         Returns:
             A list of modules being trained.
         """
-        return [self.module]
+        return nn.ModuleList([self.module])
 
     def run_on_batch(
         self,
