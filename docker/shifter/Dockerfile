@@ -16,7 +16,6 @@ RUN python3 -m pip install --no-deps -r /tmp/requirements_no_deps.txt
 
 # copy local code
 COPY models/FourCastNet ${FME_DIR}/models/FourCastNet
-COPY models/fcn-mip ${FME_DIR}/models/fcn-mip
 
 # install packages in full-model repo, except for fme
-RUN cd $FME_DIR && python3 -m pip install --no-deps -e models/FourCastNet models/fcn-mip
+RUN cd $FME_DIR && python3 -m pip install --no-deps -e models/FourCastNet
