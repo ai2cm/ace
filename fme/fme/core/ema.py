@@ -43,7 +43,8 @@ class EMATracker:
     """
     Exponential Moving Average (EMA) tracker.
 
-    This tracks the moving average of the parameters of a model.
+    This tracks the moving average of the parameters of a model, and has methods
+    that can be used to temporarily replace the parameters of the model with its EMA.
     """
 
     def __init__(
@@ -64,25 +65,27 @@ class EMATracker:
         if decay < 0.0 or decay > 1.0:
             raise ValueError("Decay must be between 0 and 1")
 
-        self._module_name_to_shadow_name = {}
+        self._module_name_to_ema_name = {}
         self.decay = torch.tensor(decay, dtype=torch.float32)
         self._faster_decay_at_start = faster_decay_at_start
         self.num_updates = torch.tensor(0, dtype=torch.int)
 
-        self._shadow_params = {}
+        self._ema_params = {}
 
         for name, p in model.named_parameters():
             if p.requires_grad:
                 # remove as '.'-character is not allowed in buffers
-                shadow_name = name.replace(".", "")
-                self._module_name_to_shadow_name.update({name: shadow_name})
-                self._shadow_params[shadow_name] = p.clone().detach().data
+                ema_name = name.replace(".", "")
+                self._module_name_to_ema_name.update({name: ema_name})
+                self._ema_params[ema_name] = p.clone().detach().data
 
         self._stored_params: List[nn.Parameter] = []
 
     def __call__(self, model: HasNamedParameters):
         """
         Update the moving average of the parameters.
+
+        Does not mutate the input, only updates the moving average.
 
         Args:
             model: The model whose parameters should be updated. Should be a model
@@ -100,15 +103,15 @@ class EMATracker:
 
             for key in module_parameters:
                 if module_parameters[key].requires_grad:
-                    shadow_name = self._module_name_to_shadow_name[key]
-                    self._shadow_params[shadow_name] = self._shadow_params[
-                        shadow_name
-                    ].type_as(module_parameters[key])
-                    self._shadow_params[shadow_name].sub_(
-                        (1.0 - decay)
-                        * (self._shadow_params[shadow_name] - module_parameters[key])
+                    ema_name = self._module_name_to_ema_name[key]
+                    self._ema_params[ema_name] = self._ema_params[ema_name].type_as(
+                        module_parameters[key]
                     )
-                elif key in self._module_name_to_shadow_name:
+                    self._ema_params[ema_name].sub_(
+                        (1.0 - decay)
+                        * (self._ema_params[ema_name] - module_parameters[key])
+                    )
+                elif key in self._module_name_to_ema_name:
                     raise ValueError(
                         f"Expected model parameter {key} to require gradient, "
                         "but it does not"
@@ -122,10 +125,10 @@ class EMATracker:
         for key in m_param:
             if m_param[key].requires_grad:
                 m_param[key].data.copy_(
-                    self._shadow_params[self._module_name_to_shadow_name[key]].data
+                    self._ema_params[self._module_name_to_ema_name[key]].data
                 )
             else:
-                assert key not in self._module_name_to_shadow_name
+                assert key not in self._module_name_to_ema_name
 
     def store(self, parameters: Iterable[nn.Parameter]):
         """
