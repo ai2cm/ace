@@ -20,7 +20,7 @@ from fme.core.packer import Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
-from .optimization import NullOptimization, Optimization
+from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
 
 
 @dataclasses.dataclass
@@ -29,6 +29,7 @@ class SingleModuleStepperConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: Union[NormalizationConfig, FromStateNormalizer]
+    optimization: Optional[DisabledOptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
 
