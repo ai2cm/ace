@@ -102,6 +102,33 @@ class Optimization:
 
 
 @dataclasses.dataclass
+class DisabledOptimizationConfig:
+    """
+    Configuration for optimization, kept only for backwards compatibility when
+    loading configuration. Cannot be used to build, will raise an exception.
+
+    Attributes:
+        optimizer_type: The type of optimizer to use.
+        lr: The learning rate.
+        kwargs: Additional keyword arguments to pass to the optimizer.
+        enable_automatic_mixed_precision: Whether to use automatic mixed
+            precision.
+        scheduler: The type of scheduler to use. If none is given, no scheduler
+            will be used.
+    """
+
+    def build(self, parameters, max_epochs: int) -> Optimization:
+        raise RuntimeError("Cannot build DisabledOptimizationConfig")
+
+    def get_state(self) -> Mapping[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DisabledOptimizationConfig":
+        return cls(**state)
+
+
+@dataclasses.dataclass
 class OptimizationConfig:
     """
     Configuration for optimization.

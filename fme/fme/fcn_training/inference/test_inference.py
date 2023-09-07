@@ -19,6 +19,8 @@ from fme.fcn_training.inference.inference import InferenceConfig, main
 from fme.fcn_training.registry import ModuleSelector
 from fme.fcn_training.train_config import LoggingConfig
 
+DIR = pathlib.Path(__file__).parent
+
 
 class PlusOne(torch.nn.Module):
     def forward(self, x):
@@ -54,6 +56,45 @@ def save_plus_one_stepper(
     torch.save({"stepper": stepper.get_state()}, path)
 
 
+def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
+    """
+    Inference test using a serialized model from an earlier commit, to ensure
+    earlier models can be used with the updated inference code.
+    """
+    in_names = ["x"]
+    out_names = ["x"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = DIR / "stepper_test_data"
+    dim_sizes = DimSizes(
+        n_time=8,
+        n_lat=4,
+        n_lon=8,
+        nz_interface=2,
+    )
+    std = 1.0
+    if not stepper_path.exists():
+        # this helps us to re-generate data if the stepper changes
+        # to re-generate, just delete the data and run the test (it will fail)
+        save_plus_one_stepper(
+            stepper_path,
+            names=all_names,
+            mean=0.0,
+            std=std,
+            data_shape=dim_sizes.shape_2d,
+        )
+        assert False, "stepper_test_data did not exist, it has been created"
+    use_prediction_data = False
+    n_forward_steps = 2
+    inference_helper(
+        tmp_path,
+        all_names,
+        use_prediction_data,
+        dim_sizes,
+        n_forward_steps,
+        stepper_path,
+    )
+
+
 @pytest.mark.parametrize(
     "use_prediction_data, n_forward_steps",
     [(True, 2), (True, 1), (False, 2), (False, 1)],
@@ -79,6 +120,19 @@ def test_inference_plus_one_model(
     save_plus_one_stepper(
         stepper_path, names=all_names, mean=0.0, std=std, data_shape=dim_sizes.shape_2d
     )
+    inference_helper(
+        tmp_path,
+        all_names,
+        use_prediction_data,
+        dim_sizes,
+        n_forward_steps,
+        stepper_path,
+    )
+
+
+def inference_helper(
+    tmp_path, all_names, use_prediction_data, dim_sizes, n_forward_steps, stepper_path
+):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     data = FV3GFSData(
         path=tmp_path,
