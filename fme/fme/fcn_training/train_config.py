@@ -7,6 +7,7 @@ from fme.core import SingleModuleStepperConfig
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.ema import EMATracker
 from fme.core.optimization import OptimizationConfig
 from fme.core.stepper import ExistingStepperConfig
 from fme.core.wandb import WandB
@@ -96,6 +97,21 @@ class InlineInferenceConfig:
 
 
 @dataclasses.dataclass
+class EMAConfig:
+    """
+    Configuration for exponential moving average of model weights.
+
+    Attributes:
+        decay: decay rate for the moving average
+    """
+
+    decay: float = 0.9999
+
+    def build(self, model):
+        return EMATracker(model, decay=self.decay, faster_decay_at_start=True)
+
+
+@dataclasses.dataclass
 class TrainConfig:
     """
     Configuration for training a model.
@@ -126,6 +142,8 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
+    ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
+    validate_using_ema: bool = False
     checkpoint_every_n_epochs: Optional[int] = None
     log_train_every_n_batches: int = 100
 
@@ -143,6 +161,10 @@ class TrainConfig:
     @property
     def best_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "best_ckpt.tar")
+
+    @property
+    def ema_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "ema_ckpt.tar")
 
     def epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
