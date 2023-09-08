@@ -4,7 +4,33 @@ from typing import Any, List, Literal, Mapping, Optional
 import torch
 
 from fme.core.device import get_device
-from fme.fcn_training.utils.darcy_loss import LpLoss
+
+
+class LpLoss(torch.nn.Module):
+    def __init__(self, p=2):
+        """
+        Args:
+            p: Lp-norm type. For example, p=1 for L1-norm, p=2 for L2-norm.
+        """
+        super(LpLoss, self).__init__()
+
+        if p <= 0:
+            raise ValueError("Lp-norm type should be positive")
+
+        self.p = p
+
+    def rel(self, x, y):
+        num_examples = x.size()[0]
+
+        diff_norms = torch.norm(
+            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), self.p, 1
+        )
+        y_norms = torch.norm(y.reshape(num_examples, -1), self.p, 1)
+
+        return torch.mean(diff_norms / y_norms)
+
+    def __call__(self, x, y):
+        return self.rel(x, y)
 
 
 class WeightedSum(torch.nn.Module):
