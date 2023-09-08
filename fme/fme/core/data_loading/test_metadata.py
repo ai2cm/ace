@@ -112,9 +112,9 @@ def test_metadata(metadata, data_type):
         params = DataLoaderParams(
             data_path=str(path), data_type=data_type, batch_size=1, num_data_workers=0
         )
-        varnames = list(metadata.keys())
+        var_names = list(metadata.keys())
         requirements = DataRequirements(
-            names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
+            names=var_names, in_names=var_names, out_names=var_names, n_timesteps=2
         )
         data = get_data_loader(params=params, train=True, requirements=requirements)
         target_metadata = {

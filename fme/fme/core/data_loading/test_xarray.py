@@ -125,14 +125,14 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
         batch_size=1,
         num_data_workers=0,
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     requirements = DataRequirements(
-        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
+        names=var_names, in_names=var_names, out_names=var_names, n_timesteps=2
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
     assert len(dataset) == len(obs_times) - 1
     with xr.open_mfdataset(tmpdir.glob("*.nc"), use_cftime=True) as ds:
-        for varname in varnames:
+        for varname in var_names:
             target_data = ds[varname][global_idx : global_idx + 2, :, :].values
             data = dataset[global_idx][varname].detach().numpy()
             assert data.shape[0] == 2
@@ -149,12 +149,12 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs):
         batch_size=1,
         num_data_workers=0,
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     n_forward_steps = 4
     requirements = DataRequirements(
-        names=varnames,
-        in_names=varnames,
-        out_names=varnames,
+        names=var_names,
+        in_names=var_names,
+        out_names=var_names,
         n_timesteps=n_forward_steps + 1,
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
@@ -174,9 +174,9 @@ def test_XarrayDataset_monthly_start_slice(mock_monthly_netcdfs):
         num_data_workers=0,
         window_starts=Slice(5, None),
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     requirements = DataRequirements(
-        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=2
+        names=var_names, in_names=var_names, out_names=var_names, n_timesteps=2
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
     assert len(dataset) == len(obs_times) - 1 - 5
@@ -198,11 +198,11 @@ def test_XarrayDataset_monthly_step_slice(mock_monthly_netcdfs, n_forward_steps)
         num_data_workers=0,
         window_starts=Slice(None, None, 2),
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     requirements = DataRequirements(
-        names=varnames,
-        in_names=varnames,
-        out_names=varnames,
+        names=var_names,
+        in_names=var_names,
+        out_names=var_names,
         n_timesteps=n_forward_steps + 1,
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
@@ -219,9 +219,9 @@ def test_XarrayDataset_monthly_time_window_sample_length(mock_monthly_netcdfs):
         batch_size=1,
         num_data_workers=0,
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     requirements = DataRequirements(
-        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=120
+        names=var_names, in_names=var_names, out_names=var_names, n_timesteps=120
     )
     data = get_data_loader(
         params=params,
@@ -290,18 +290,18 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
         batch_size=1,
         num_data_workers=0,
     )
-    varnames = ["foo", "bar"]
+    var_names = ["foo", "bar"]
     with xr.open_mfdataset(tmpdir.glob("*.nc"), use_cftime=True) as ds:
         for n_steps in [3, 2 * 365]:
             requirements = DataRequirements(
-                names=varnames,
-                in_names=varnames,
-                out_names=varnames,
+                names=var_names,
+                in_names=var_names,
+                out_names=var_names,
                 n_timesteps=n_steps,
             )
             dataset = XarrayDataset(params=params, requirements=requirements)
             assert len(dataset) == len(obs_times) - n_steps + 1
-            for varname in varnames:
+            for varname in var_names:
                 target_data = ds[varname][
                     global_idx : global_idx + n_steps, :, :
                 ].values
@@ -318,9 +318,9 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
         batch_size=1,
         num_data_workers=0,
     )
-    varnames = ["foo", "bar", "constant_var"]
+    var_names = ["foo", "bar", "constant_var"]
     requirements = DataRequirements(
-        names=varnames, in_names=varnames, out_names=varnames, n_timesteps=15
+        names=var_names, in_names=var_names, out_names=var_names, n_timesteps=15
     )
     data = get_data_loader(params=params, train=False, requirements=requirements)
     batch = data.loader.dataset[0]
