@@ -169,11 +169,11 @@ class Trainer:
         logging.info("Starting Training Loop...")
 
         best_valid_loss = torch.inf
-        for epoch in range(self.startEpoch, self.config.max_epochs):
-            self.epoch = epoch
-            logging.info(f"Epoch: {epoch+1}")
+        self.epoch = self.startEpoch
+        for _ in range(self.startEpoch, self.config.max_epochs):
+            logging.info(f"Epoch: {self.epoch+1}")
             if self.train_data.sampler is not None:
-                self.train_data.sampler.set_epoch(epoch)
+                self.train_data.sampler.set_epoch(self.epoch)
 
             start_time = time.time()
             train_logs = self.train_one_epoch()
@@ -193,8 +193,10 @@ class Trainer:
                 if self.config.save_checkpoint:
                     # checkpoint at the end of every epoch
                     self.save_checkpoint(self.config.latest_checkpoint_path)
-                    if self.config.epoch_checkpoint_enabled(epoch):
-                        self.save_checkpoint(self.config.epoch_checkpoint_path(epoch))
+                    if self.config.epoch_checkpoint_enabled(self.epoch):
+                        self.save_checkpoint(
+                            self.config.epoch_checkpoint_path(self.epoch)
+                        )
                     if valid_loss <= best_valid_loss:
                         self.save_checkpoint(self.config.best_checkpoint_path)
                         best_valid_loss = valid_loss
@@ -202,7 +204,7 @@ class Trainer:
                         self.save_checkpoint(self.config.ema_checkpoint_path)
 
             time_elapsed = time.time() - start_time
-            logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
+            logging.info(f"Time taken for epoch {self.epoch + 1} is {time_elapsed} sec")
             logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
 
             logging.info("Logging to wandb")
@@ -220,6 +222,7 @@ class Trainer:
                 },
             }
             wandb.log(all_logs, step=self.num_batches_seen)
+            self.epoch += 1
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
