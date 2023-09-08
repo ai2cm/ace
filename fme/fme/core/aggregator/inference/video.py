@@ -71,7 +71,9 @@ class _ErrorVideoData:
         for name, gen_tensor in gen_data.items():
             target_tensor = target_data[name]
             error_tensor = (gen_tensor - target_tensor).cpu()
-            self._mse_data[name][time_slice, ...] += torch.var(error_tensor, dim=0)
+            self._mse_data[name][time_slice, ...] += torch.mean(
+                torch.square(error_tensor), dim=0
+            )
             self._min_err_data[name][time_slice, ...] = torch.minimum(
                 self._min_err_data[name][time_slice, ...], error_tensor.min(dim=0)[0]
             )
