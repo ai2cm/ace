@@ -174,11 +174,13 @@ def test_video_data_values_on_random_inputs(n_batches: int):
             )
     data = aggregator._get_data("video")
     assert data["video/bias/a"].target is None
+    assert data["video/rmse/a"].target is None
     assert data["video/min_err/a"].target is None
     assert data["video/max_err/a"].target is None
     assert data["video/a"].gen.shape[0] == len(offsets)
     assert data["video/a"].target.shape[0] == len(offsets)
     assert data["video/bias/a"].gen.shape[0] == len(offsets)
+    assert data["video/rmse/a"].gen.shape[0] == len(offsets)
     assert data["video/min_err/a"].gen.shape[0] == len(offsets)
     assert data["video/max_err/a"].gen.shape[0] == len(offsets)
     np.testing.assert_allclose(
@@ -190,6 +192,10 @@ def test_video_data_values_on_random_inputs(n_batches: int):
     np.testing.assert_allclose(
         data["video/bias/a"].gen.cpu().numpy(),
         (gen["a"] - target["a"]).mean(dim=0).cpu().numpy(),
+    )
+    np.testing.assert_allclose(
+        data["video/rmse/a"].gen.cpu().numpy(),
+        ((gen["a"] - target["a"]) ** 2).mean(dim=0).sqrt().cpu().numpy(),
     )
     np.testing.assert_allclose(
         data["video/min_err/a"].gen.cpu().numpy(),
