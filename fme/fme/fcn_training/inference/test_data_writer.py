@@ -29,6 +29,7 @@ class TestDataWriter:
             "pressure": torch.rand(
                 (2, 3, 4, 5)
             ),  # Extra variable for which there's no metadata
+            "precipitation": torch.rand((2, 3, 4, 5)),  # optionally saved
         }
         return data
 
@@ -40,11 +41,24 @@ class TestDataWriter:
             "pressure": torch.rand(
                 (2, 3, 4, 5)
             ),  # Extra variable for which there's no metadata
+            "precipitation": torch.rand((2, 3, 4, 5)),  # optionally saved
         }
         return data
 
+    @pytest.mark.parametrize(
+        ["save_names"],
+        [
+            pytest.param(None, id="None"),
+            pytest.param(["temp", "humidity", "pressure"], id="subset"),
+        ],
+    )
     def test_append_batch(
-        self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
+        self,
+        sample_metadata,
+        sample_target_data,
+        sample_prediction_data,
+        tmp_path,
+        save_names,
     ):
         n_samples = 4
         writer = DataWriter(
@@ -55,6 +69,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            save_names=save_names,
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
@@ -71,14 +86,19 @@ class TestDataWriter:
 
         # Open the file again and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
-        assert set(dataset.variables.keys()) == set(sample_target_data.keys()).union(
+        expected_variables = (
+            set(save_names)
+            if save_names is not None
+            else set(sample_target_data.keys())
+        )
+        assert set(dataset.variables.keys()) == expected_variables.union(
             {"source", "lat", "lon"}
         )
         assert (
             dataset.variables["source"][:] == np.array(["target", "prediction"])
         ).all()
 
-        for var_name in sample_target_data.keys():
+        for var_name in expected_variables:
             var_data = dataset.variables[var_name][:]
             assert var_data.shape == (2, 4, 5, 4, 5)  # source, sample, time, lat, lon
             assert not np.isnan(var_data[0, :]).any(), "unexpected NaNs in target data"
@@ -113,6 +133,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            save_names=None,
         )
         writer.append_batch(
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
