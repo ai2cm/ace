@@ -3,7 +3,7 @@ import dataclasses
 import logging
 import os
 import time
-from typing import Optional
+from typing import Optional, Sequence
 
 import dacite
 import torch
@@ -58,6 +58,8 @@ class InferenceConfig:
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
             time dimension.
         save_prediction_files: Whether to save the predictions as a netcdf file.
+        save_raw_prediction_names: Names of variables to save in the predictions
+             netcdf file. Ignored if save_prediction_files is False.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
     """
@@ -73,6 +75,7 @@ class InferenceConfig:
     log_extended_video_netcdfs: bool = False
     log_zonal_mean_images: bool = True
     save_prediction_files: bool = True
+    save_raw_prediction_names: Optional[Sequence[str]] = None
     forward_steps_in_memory: int = 1
 
     def __post_init__(self):
@@ -115,6 +118,7 @@ class InferenceConfig:
             metadata=validation_data.metadata,
             coords=validation_data.coords,
             enable_prediction_netcdfs=self.save_prediction_files,
+            save_names=self.save_raw_prediction_names,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
         )
 
