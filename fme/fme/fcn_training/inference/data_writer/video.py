@@ -35,7 +35,7 @@ class VideoDataWriter:
         self.metadata = metadata
         self.coords = coords
         self._video = VideoAggregator(
-            n_timesteps=n_timesteps, enable_extended_videos=True
+            n_timesteps=n_timesteps, enable_extended_videos=True, metadata=metadata
         )
 
     def append_batch(

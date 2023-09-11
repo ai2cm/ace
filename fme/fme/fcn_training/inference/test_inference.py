@@ -185,7 +185,27 @@ def inference_helper(
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    assert "x" in metric_ds.data_vars
+    assert metric_ds.data_vars["x"].attrs["units"] == "m"
+    assert metric_ds.data_vars["x"].attrs["long_name"] == "ensemble mean of x"
     assert "rmse_x" in metric_ds.data_vars
+    assert metric_ds.data_vars["rmse_x"].attrs["units"] == "m"
+    assert (
+        metric_ds.data_vars["rmse_x"].attrs["long_name"]
+        == "root mean squared error of x"
+    )
+    assert "bias_x" in metric_ds.data_vars
+    assert metric_ds.data_vars["bias_x"].attrs["units"] == "m"
+    assert "min_err_x" in metric_ds.data_vars
+    assert metric_ds.data_vars["min_err_x"].attrs["units"] == "m"
+    assert "max_err_x" in metric_ds.data_vars
+    assert metric_ds.data_vars["max_err_x"].attrs["units"] == "m"
+    assert "gen_var_x" in metric_ds.data_vars
+    assert metric_ds.data_vars["gen_var_x"].attrs["units"] == ""
+    assert (
+        metric_ds.data_vars["gen_var_x"].attrs["long_name"]
+        == "prediction variance of x as fraction of target variance"
+    )
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
 
