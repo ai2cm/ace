@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping, Union
+from typing import Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -19,6 +19,7 @@ class DataWriter:
         coords: Mapping[str, np.ndarray],
         enable_prediction_netcdfs: bool,
         enable_video_netcdfs: bool,
+        save_names: Optional[Sequence[str]],
     ):
         """
         Args:
@@ -31,6 +32,8 @@ class DataWriter:
                 containing the predictions.
             enable_video_netcdfs: Whether to enable writing of netCDF files
                 containing video metrics.
+            save_names: Names of variables to save in the predictions netcdf file.
+                Ignored if enable_prediction_netcdfs is False.
         """
         self._writers: List[Union[PredictionDataWriter, VideoDataWriter]] = []
         if enable_prediction_netcdfs:
@@ -38,6 +41,7 @@ class DataWriter:
                 PredictionDataWriter(
                     path=path,
                     n_samples=n_samples,
+                    save_names=save_names,
                     metadata=metadata,
                     coords=coords,
                 )

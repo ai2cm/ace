@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Mapping, Optional
+from typing import Dict, Iterable, Mapping, Optional, Sequence, Set
 
 import numpy as np
 import torch
@@ -17,6 +17,7 @@ class PredictionDataWriter:
         self,
         path: str,
         n_samples: int,
+        save_names: Optional[Sequence[str]],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
@@ -25,11 +26,14 @@ class PredictionDataWriter:
             filename: Path to write netCDF file(s).
             n_samples: Number of samples to write to the file.
             n_timesteps: Number of timesteps to write to the file.
+            save_names: Names of variables to save in the predictions netcdf file.
+                If None, all predicted variables will be saved.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         self.path = path
         filename = str(Path(path) / "autoregressive_predictions.nc")
+        self._save_names = save_names
         self.metadata = metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
@@ -40,6 +44,17 @@ class PredictionDataWriter:
         self.dataset.variables["source"][:] = np.array(["target", "prediction"])
         self._n_lat: Optional[int] = None
         self._n_lon: Optional[int] = None
+
+    def _get_variable_names_to_save(
+        self, *data_varnames: Iterable[str]
+    ) -> Iterable[str]:
+        variables: Set[str] = set()
+        for varnames in data_varnames:
+            variables = variables.union(set(varnames))
+        if self._save_names is None:
+            return variables
+        else:
+            return variables.intersection(set(self._save_names))
 
     def append_batch(
         self,
@@ -71,7 +86,8 @@ class PredictionDataWriter:
                 self.dataset.variables["lon"][:] = self.coords["lon"]
 
         dims = ("source", "sample", "timestep", "lat", "lon")
-        for variable_name in set(target.keys()).union(prediction.keys()):
+        save_names = self._get_variable_names_to_save(target.keys(), prediction.keys())
+        for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
                 self.dataset.createVariable(
