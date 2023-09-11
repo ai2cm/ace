@@ -273,6 +273,8 @@ def _initialize_video_from_batch(
 class _MaybePairedVideoData:
     caption: str
     gen: torch.Tensor
+    units: Optional[str]
+    long_name: Optional[str]
     target: Optional[torch.Tensor] = None
 
     def make_video(self):
@@ -302,6 +304,10 @@ class VideoAggregator:
             metadata: Mapping of variable names their metadata that will
                 used in generating logged video captions.
         """
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
         self._mean_data = _MeanVideoData(n_timesteps=n_timesteps, dist=dist)
         if enable_extended_videos:
             self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
@@ -315,10 +321,6 @@ class VideoAggregator:
             self._error_data = None
             self._variance_data = None
             self._enable_extended_videos = False
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
-        else:
-            self._metadata = metadata
 
     @torch.no_grad()
     def record_batch(
@@ -373,16 +375,33 @@ class VideoAggregator:
         """
         gen_data, target_data = self._mean_data.get()
         video_data = {}
+
+        def get_units(name: str) -> Optional[str]:
+            if name in self._metadata:
+                return self._metadata[name].units
+            else:
+                return None
+
+        def get_long_name(name: str) -> Optional[str]:
+            if name in self._metadata:
+                return self._metadata[name].long_name
+            else:
+                return None
+
         for name in gen_data:
             video_data[f"{label}/{name}"] = _MaybePairedVideoData(
                 caption=self._get_caption(name),
                 gen=gen_data[name],
                 target=target_data[name],
+                units=get_units(name),
+                long_name=f"ensemble mean of {get_long_name(name)}",
             )
             if self._enable_extended_videos:
                 video_data[f"{label}/bias/{name}"] = _MaybePairedVideoData(
                     caption=(f"prediction - target for {name}"),
                     gen=gen_data[name] - target_data[name],
+                    units=get_units(name),
+                    long_name=f"bias of {get_long_name(name)}",
                 )
         if self._error_data is not None:
             data = self._error_data.get()
@@ -390,16 +409,26 @@ class VideoAggregator:
                 video_data[f"{label}/rmse/{name}"] = _MaybePairedVideoData(
                     caption=f"RMSE over ensemble for {name}",
                     gen=data.rmse[name],
+                    units=get_units(name),
+                    long_name=f"root mean squared error of {get_long_name(name)}",
                 )
             for name in data.min_err:
                 video_data[f"{label}/min_err/{name}"] = _MaybePairedVideoData(
                     caption=f"Min across ensemble members of min error for {name}",
                     gen=data.min_err[name],
+                    units=get_units(name),
+                    long_name=(
+                        f"min error of {get_long_name(name)} " "across ensemble members"
+                    ),
                 )
             for name in data.max_err:
                 video_data[f"{label}/max_err/{name}"] = _MaybePairedVideoData(
                     caption=f"Max across ensemble members of max error for {name}",
                     gen=data.max_err[name],
+                    units=get_units(name),
+                    long_name=(
+                        f"max error of {get_long_name(name)} " "across ensemble members"
+                    ),
                 )
         if self._variance_data is not None:
             gen_data, target_data = self._variance_data.get()
@@ -410,6 +439,11 @@ class VideoAggregator:
                         "as fraction of target variance"
                     ),
                     gen=gen_data[name] / target_data[name],
+                    units="",
+                    long_name=(
+                        f"prediction variance of {get_long_name(name)} "
+                        "as fraction of target variance"
+                    ),
                 )
         return video_data
 
@@ -422,6 +456,11 @@ class VideoAggregator:
         video_data = {}
         for label, d in data.items():
             label = label.strip("/").replace("/", "_")  # remove leading slash
+            attrs = {}
+            if d.units is not None:
+                attrs["units"] = d.units
+            if d.long_name is not None:
+                attrs["long_name"] = d.long_name
             if d.target is not None:
                 video_data[label] = xr.DataArray(
                     data=np.concatenate(
@@ -429,10 +468,13 @@ class VideoAggregator:
                         axis=0,
                     ),
                     dims=("source", "timestep", "lat", "lon"),
+                    attrs=attrs,
                 )
             else:
                 video_data[label] = xr.DataArray(
-                    data=d.gen.cpu().numpy(), dims=("timestep", "lat", "lon")
+                    data=d.gen.cpu().numpy(),
+                    dims=("timestep", "lat", "lon"),
+                    attrs=attrs,
                 )
         return xr.Dataset(video_data)
 
