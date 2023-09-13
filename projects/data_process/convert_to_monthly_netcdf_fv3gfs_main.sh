@@ -21,10 +21,10 @@ python convert_to_monthly_netcdf.py \
     --start-date 2021-01-01 \
     --end-date 2030-12-31 &
 
-# process C48 baseline run
+# process C48 baseline run (with roundtrip filter truncation, 0.65 mode fraction kept)
 python convert_to_monthly_netcdf.py \
     --prepend-nans \
-    gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011.zarr \
-    /net/nfs/climate/data/2023-08-11-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011 \
+    gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011.zarr \
+    /net/nfs/climate/data/2023-09-12-vertically-resolved-1deg-fme-c48-baseline-dataset-truncated-065/ic_0011 \
     --start-date 2021-01-01 \
     --end-date 2030-12-31 &

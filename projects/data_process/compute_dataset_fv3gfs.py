@@ -10,14 +10,15 @@
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
 # it on our GKE cluster.
 
-from typing import List, MutableMapping, Sequence, Tuple
+from typing import List, Mapping, MutableMapping, Optional, Sequence, Tuple
 
 import click
 import fsspec
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
-from dask.diagnostics import ProgressBar
+import xtorch_harmonics
+from dask.distributed import Client
 
 FLUXES_2D = "fluxes_2d"
 FOURCASTNET_VANILLA = "fourcastnet_vanilla"
@@ -51,13 +52,15 @@ VERTICAL_DIM = "pfull"
 
 CHUNKS = {"time": 160, "grid_yt": 180, "grid_xt": 360}
 
+DEFAULT_ROOT = "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}"  # noqa: 501
+
 # these are assumed to all have the same coordinates
 DATASET_URLS = {
-    FLUXES_2D: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/fluxes_2d.zarr",  # noqa: 501
-    FOURCASTNET_VANILLA: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/fourcastnet_vanilla.zarr",  # noqa: 501
-    FULL_STATE: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/full_state.zarr",  # noqa: 501
-    TENDENCIES_3D: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/tendencies_3d.zarr",  # noqa: 501
-    SURFACE_FRACTIONS: "gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d}/encoded_surface_type.zarr",  # noqa: 501
+    FLUXES_2D: "{root}/fluxes_2d.zarr",
+    FOURCASTNET_VANILLA: "{root}/fourcastnet_vanilla.zarr",
+    FULL_STATE: "{root}/full_state.zarr",
+    TENDENCIES_3D: "{root}/tendencies_3d.zarr",
+    SURFACE_FRACTIONS: "{root}/encoded_surface_type.zarr",
 }
 
 VERTICAL_COORDINATE_URL = "gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc"  # noqa: 501
@@ -160,9 +163,13 @@ def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray
     return (da * weights).sum(dims) / weights.sum(dims)
 
 
-def open_datasets(
-    dataset_urls: MutableMapping[str, str]
-) -> MutableMapping[str, xr.Dataset]:
+def get_ic_dataset_urls(root, ic) -> Mapping[str, str]:
+    # need to do this in two steps if user provided a root with an ic placeholder
+    dataset_urls_for_ic = {k: v.format(root=root) for k, v in DATASET_URLS.items()}
+    return {k: v.format(ic=ic) for k, v in dataset_urls_for_ic.items()}
+
+
+def open_datasets(dataset_urls: Mapping[str, str]) -> MutableMapping[str, xr.Dataset]:
     """Open datasets from zarr urls."""
     return {category: xr.open_zarr(url) for category, url in dataset_urls.items()}
 
@@ -362,14 +369,23 @@ def assert_global_moisture_conservation(
     )
 
 
-def construct_lazy_dataset(ic: int) -> xr.Dataset:
-    dataset_urls_for_ic = {k: v.format(ic=ic) for k, v in DATASET_URLS.items()}
+def construct_lazy_dataset(
+    root: str, ic: int, roundtrip_fraction_kept: Optional[float]
+) -> xr.Dataset:
+    dataset_urls_for_ic = get_ic_dataset_urls(root, ic)
     datasets_dict = open_datasets(dataset_urls_for_ic)
     ds = merge_inputs(INPUT_VARIABLE_NAMES, datasets_dict)
     for var in ds:
         del ds[var].encoding["chunks"]
         del ds[var].encoding["preferred_chunks"]
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+    if roundtrip_fraction_kept is not None:
+        ds = xtorch_harmonics.roundtrip_filter(
+            ds,
+            lat_dim="grid_yt",
+            lon_dim="grid_xt",
+            fraction_modes_kept=roundtrip_fraction_kept,
+        )
     ds = compute_specific_total_water(ds, WATER_SPECIES_NAMES)
     ds = compute_vertical_coarsening(
         ds,
@@ -401,6 +417,15 @@ def construct_lazy_dataset(ic: int) -> xr.Dataset:
 @click.option("--subsample", is_flag=True, help="Subsample the data before writing.")
 @click.option("--check-conservation", is_flag=True, help="Check conservation.")
 @click.option(
+    "--roundtrip-fraction-kept",
+    default=None,
+    type=float,
+    help=(
+        "Fraction of spherical harmonics to keep in roundtrip transform. "
+        "Must be between 0 and 1. If omitted, no roundtrip transform is applied."
+    ),
+)
+@click.option(
     "-o",
     "--output",
     default=OUTPUT_URL,
@@ -408,10 +433,30 @@ def construct_lazy_dataset(ic: int) -> xr.Dataset:
 )
 @click.option("--n-split", default=65, help="Number of steps to split job over.")
 @click.option("--ic", default=1, help="Initial condition index (can be 1 through 11).")
-def main(debug, subsample, check_conservation, output, n_split, ic):
+@click.option(
+    "--root",
+    default=DEFAULT_ROOT,
+    help=(
+        "Root directory containing input zarrs. If it contains '{ic}', "
+        "it will be replaced by the ic arg."
+    ),
+)
+@click.option("--n-workers", default=8, help="Number of dask workers.")
+def main(
+    debug,
+    subsample,
+    check_conservation,
+    roundtrip_fraction_kept,
+    output,
+    n_split,
+    ic,
+    root,
+    n_workers,
+):
+    Client(n_workers=n_workers)
     output = output.format(ic=ic)
     xr.set_options(keep_attrs=True)
-    ds = construct_lazy_dataset(ic)
+    ds = construct_lazy_dataset(root, ic, roundtrip_fraction_kept)
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
@@ -427,10 +472,9 @@ def main(debug, subsample, check_conservation, output, n_split, ic):
         ds.partition.initialize_store(output)
         for i in range(n_split):
             print(f"Writing segment {i + 1} / {n_split}")
-            with ProgressBar():
-                ds.partition.write(
-                    output, n_split, ["time"], i, collect_variable_writes=True
-                )
+            ds.partition.write(
+                output, n_split, ["time"], i, collect_variable_writes=True
+            )
 
 
 if __name__ == "__main__":
