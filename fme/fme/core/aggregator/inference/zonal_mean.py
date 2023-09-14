@@ -7,6 +7,8 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
+from .image_scaling import scale_image
+
 wandb = WandB.get_instance()
 
 
@@ -108,6 +110,7 @@ class ZonalMeanAggregator:
                 # we want lat on y-axis (increasing upward) and time on x-axis
                 # so transpose and flip along lat axis
                 data = data.t().flip(dims=[0])
+                data = scale_image(data.cpu().numpy())
                 wandb_image = wandb.Image(data, caption=caption)
                 logs[f"{label}/{key}/{name}"] = wandb_image
         return logs
