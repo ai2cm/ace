@@ -1,5 +1,6 @@
 from typing import Dict, Mapping, MutableMapping, Optional
 
+import numpy as np
 import torch
 import xarray as xr
 
@@ -7,6 +8,8 @@ from fme.core import metrics
 from fme.core.data_loading.typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
+
+from .image_scaling import scale_image
 
 wandb = WandB.get_instance()
 
@@ -51,6 +54,7 @@ class TimeMeanAggregator:
         else:
             self._metadata = metadata
 
+        # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._target_data_norm = None
@@ -63,6 +67,7 @@ class TimeMeanAggregator:
         new_data: Mapping[str, torch.Tensor],
         ignore_initial: bool = False,
     ) -> Dict[str, torch.Tensor]:
+        sample_dim = 0
         time_dim = 1
         if ignore_initial:
             time_slice = slice(1, None)
@@ -70,13 +75,13 @@ class TimeMeanAggregator:
             time_slice = slice(0, None)
         if maybe_dict is None:
             d: Dict[str, torch.Tensor] = {
-                name: tensor[:, time_slice].mean(dim=time_dim)
+                name: tensor[:, time_slice].mean(dim=time_dim).mean(dim=sample_dim)
                 for name, tensor in new_data.items()
             }
         else:
             d = dict(maybe_dict)
             for name, tensor in new_data.items():
-                d[name] += tensor[:, time_slice].mean(dim=time_dim)
+                d[name] += tensor[:, time_slice].mean(dim=time_dim).mean(dim=sample_dim)
         return d
 
     @torch.no_grad()
@@ -118,7 +123,10 @@ class TimeMeanAggregator:
             target = self._dist.reduce_mean(self._target_data[name] / self._n_batches)
             images = {"bias_map": gen - target, "gen_map": gen}
             for key, data in images.items():
-                logs[f"{key}/{name}"] = self._get_image(key, name, data)
+                logs[f"{key}/{name}"] = _make_image(
+                    caption=self._get_caption(key, name, data),
+                    data=data,
+                )
             logs[f"rmse/{name}"] = float(
                 metrics.root_mean_squared_error(
                     predicted=gen, truth=target, weights=self._area_weights
@@ -127,20 +135,13 @@ class TimeMeanAggregator:
                 .numpy()
             )
             logs[f"bias/{name}"] = float(
-                metrics.time_and_global_mean_bias(
+                metrics.weighted_mean_bias(
                     predicted=gen, truth=target, weights=self._area_weights
                 )
                 .cpu()
                 .numpy()
             )
         return {f"{label}/{key}": logs[key] for key in logs}
-
-    def _get_image(self, key: str, name: str, data: torch.Tensor):
-        sample_dim = 0
-        lat_dim = -2
-        data = data.mean(dim=sample_dim).flip(dims=[lat_dim]).cpu()
-        caption = self._get_caption(key, name, data)
-        return wandb.Image(data, caption=caption)
 
     def _get_caption(self, key: str, name: str, data: torch.Tensor) -> str:
         if name in self._metadata:
@@ -160,3 +161,16 @@ class TimeMeanAggregator:
         for key, value in logs.items():
             data_vars[key] = xr.DataArray(value)
         return xr.Dataset(data_vars=data_vars)
+
+
+def _make_image(
+    caption: str,
+    data: torch.Tensor,
+):
+    image_data = data.cpu().numpy()
+    image_data = scale_image(image_data)
+    lat_dim = -2
+    return wandb.Image(
+        np.flip(image_data, axis=lat_dim),
+        caption=caption,
+    )
