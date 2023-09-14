@@ -110,7 +110,7 @@ class DummyWrapper(nn.Module):
 
 @dataclasses.dataclass
 class SteppedData:
-    loss: float
+    metrics: Dict[str, torch.Tensor]
     gen_data: Dict[str, torch.Tensor]
     target_data: Dict[str, torch.Tensor]
     gen_data_norm: Dict[str, torch.Tensor]
@@ -118,7 +118,7 @@ class SteppedData:
 
     def remove_initial_condition(self) -> "SteppedData":
         return SteppedData(
-            loss=self.loss,
+            metrics=self.metrics,
             gen_data={k: v[:, 1:] for k, v in self.gen_data.items()},
             target_data={k: v[:, 1:] for k, v in self.target_data.items()},
             gen_data_norm={k: v[:, 1:] for k, v in self.gen_data_norm.items()},
@@ -128,7 +128,7 @@ class SteppedData:
     def copy(self) -> "SteppedData":
         """Creates new dictionaries for the data but with the same tensors."""
         return SteppedData(
-            loss=self.loss,
+            metrics=self.metrics,
             gen_data={k: v for k, v in self.gen_data.items()},
             target_data={k: v for k, v in self.target_data.items()},
             gen_data_norm={k: v for k, v in self.gen_data_norm.items()},
@@ -359,10 +359,11 @@ def run_on_batch(
 
     full_target_tensor_norm = out_packer.pack(full_data_norm, axis=channel_dim)
     loss = torch.tensor(0.0, device=get_device())
+    metrics = {}
     input_data_norm = get_input_data_norm(in_packer.names, time_input)
     gen_data_norm = []
     optimization.set_mode(module)
-    for _ in range(n_forward_steps):
+    for step in range(n_forward_steps):
         input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
         target_tensor_norm = full_target_tensor_norm.select(
             dim=time_dim, index=time_target
@@ -372,7 +373,9 @@ def run_on_batch(
             gen_tensor_norm = module(input_tensor_norm).to(
                 get_device(), dtype=torch.float
             )
-            loss += loss_obj(gen_tensor_norm, target_tensor_norm)
+            step_loss = loss_obj(gen_tensor_norm, target_tensor_norm)
+            loss += step_loss
+            metrics[f"loss_step_{step}"] = step_loss.detach()
         gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
         target_norm = out_packer.unpack(target_tensor_norm, axis=channel_dim)
         data_time = {
@@ -387,6 +390,7 @@ def run_on_batch(
         forcing_data_norm = get_input_data_norm(forcing_names, time_input)
         input_data_norm = {**forcing_data_norm, **gen_norm}
 
+    metrics["loss"] = loss.detach()
     optimization.step_weights(loss)
     # prepend the initial (pre-first-timestep) output data to the generated data
     initial = get_input_data_norm(out_packer.names, 0)
@@ -405,7 +409,7 @@ def run_on_batch(
         gen_data_norm=gen_data_norm_timeseries,
     )
     return SteppedData(
-        loss=loss,
+        metrics=metrics,
         gen_data=gen_data,
         target_data=data,
         gen_data_norm=gen_data_norm_timeseries,

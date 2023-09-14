@@ -240,10 +240,12 @@ class Trainer:
                 )
 
                 if self.config.log_train_every_n_batches > 0:
-                    wandb.log(
-                        {"batch_loss": self.dist.reduce_mean(stepped.loss)},
-                        step=self.num_batches_seen,
-                    )
+                    with torch.no_grad():
+                        metrics = {
+                            f"batch_{name}": self.dist.reduce_mean(metric)
+                            for name, metric in sorted(stepped.metrics.items())
+                        }
+                    wandb.log(metrics, step=self.num_batches_seen)
         for data in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
                 data,
@@ -257,11 +259,12 @@ class Trainer:
                 self.config.log_train_every_n_batches > 0
                 and self.num_batches_seen % self.config.log_train_every_n_batches == 0
             ):
-                reduced_batch_loss = self.dist.reduce_mean(stepped.loss)
-                wandb.log(
-                    {"batch_loss": reduced_batch_loss},
-                    step=self.num_batches_seen,
-                )
+                with torch.no_grad():
+                    metrics = {
+                        f"batch_{name}": self.dist.reduce_mean(metric)
+                        for name, metric in sorted(stepped.metrics.items())
+                    }
+                wandb.log(metrics, step=self.num_batches_seen)
 
         return aggregator.get_logs(label="train")
 

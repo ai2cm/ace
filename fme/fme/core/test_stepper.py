@@ -107,7 +107,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         rtol=1e-4,
     )
     assert torch.allclose(
-        stepped.loss, 4.0 * stepped_double_std.loss, rtol=1e-4
+        stepped.metrics["loss"], 4.0 * stepped_double_std.metrics["loss"], rtol=1e-4
     )  # mse scales with std**2
 
 
@@ -244,7 +244,7 @@ def test_reloaded_stepper_gives_same_prediction():
         optimization=NullOptimization(),
         n_forward_steps=1,
     )
-    assert torch.allclose(first_result.loss, second_result.loss)
+    assert torch.allclose(first_result.metrics["loss"], second_result.metrics["loss"])
     assert torch.allclose(first_result.gen_data["a"], second_result.gen_data["a"])
     assert torch.allclose(first_result.gen_data["b"], second_result.gen_data["b"])
     assert torch.allclose(
