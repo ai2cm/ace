@@ -9,7 +9,7 @@ from .derived_variables import DerivedVariableRegistryEntry, _compute_derived_va
 def test_compute_derived_variable():
     fake_data = {"a": torch.tensor([1.0]), "b": torch.tensor([2.0])}
     data = SteppedData(
-        loss=0,
+        metrics={"loss": torch.tensor(0.0)},
         gen_data=fake_data,
         target_data=fake_data,
         gen_data_norm=fake_data,
@@ -29,7 +29,7 @@ def test_compute_derived_variable():
 def test_compute_derived_variable_raises_value_error_when_overwriting():
     fake_data = {"a": torch.tensor([1.0]), "b": torch.tensor([2.0])}
     data = SteppedData(
-        loss=0,
+        metrics={"loss": torch.tensor(0.0)},
         gen_data=fake_data,
         target_data=fake_data,
         gen_data_norm=fake_data,
