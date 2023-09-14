@@ -1,7 +1,6 @@
 import logging
 from typing import Dict, Mapping, Optional, Protocol, Union
 
-import numpy as np
 import torch
 
 from fme.core import SingleModuleStepper
@@ -111,7 +110,7 @@ def _inference_internal_loop(
     batch_manager.append(stepped.target_data, stepped.gen_data)
     # record metrics
     aggregator.record_batch(
-        loss=stepped.loss,
+        loss=float(stepped.metrics["loss"]),
         target_data=stepped.target_data,
         gen_data=stepped.gen_data,
         target_data_norm=stepped.target_data_norm,
@@ -242,7 +241,7 @@ def run_dataset_inference(
                     key: value.to(device) for key, value in predicted_data.items()
                 }
                 stepped = SteppedData(
-                    np.nan,
+                    {"loss": torch.tensor(float("nan"))},
                     predicted_data,
                     valid_data,
                     normalizer.normalize(predicted_data),
