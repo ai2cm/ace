@@ -32,9 +32,9 @@ jobs:
         run: |
           make test_fme_unit_tests
   build-gpu:
-    # The gpu-runner is a self-hosted runner with multiple GPUs present
-    # see: https://github.com/ai2cm/vulcanclimatemodeling.com/tree/main/github-arc
-    runs-on: gpu-runner
+    # These steps run on our self-hosted k8s GPU runners. See below for setup notes
+    # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
+    runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -48,6 +48,8 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y make git
           python -m pip install --upgrade pip
           make install_dependencies
           make install_local_packages
