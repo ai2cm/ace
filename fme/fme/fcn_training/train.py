@@ -66,8 +66,6 @@ from fme.fcn_training.inference import run_inference
 from fme.fcn_training.train_config import TrainConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
 
-wandb = WandB.get_instance()
-
 
 class Trainer:
     def count_parameters(self):
@@ -112,7 +110,7 @@ class Trainer:
         self.num_batches_seen = 0
         self.startEpoch = 0
 
-        self.epoch = self.startEpoch
+        self._model_epoch = self.startEpoch
         self.num_batches_seen = 0
 
         for data in self.train_data.loader:
@@ -132,6 +130,7 @@ class Trainer:
             logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)
             self.restore_checkpoint(config.latest_checkpoint_path)
 
+        wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
         logging.info(
@@ -169,17 +168,22 @@ class Trainer:
         logging.info("Starting Training Loop...")
 
         best_valid_loss = torch.inf
-        self.epoch = self.startEpoch
-        for _ in range(self.startEpoch, self.config.max_epochs):
-            logging.info(f"Epoch: {self.epoch+1}")
+        self._model_epoch = self.startEpoch
+        # "epoch" describes the loop, self._model_epoch describes model weights
+        # needed so we can describe the loop even after weights are updated
+        for epoch in range(self.startEpoch, self.config.max_epochs):
+            logging.info(f"Epoch: {epoch+1}")
             if self.train_data.sampler is not None:
-                self.train_data.sampler.set_epoch(self.epoch)
+                self.train_data.sampler.set_epoch(epoch)
 
             start_time = time.time()
+            logging.info(f"Starting training step on epoch {epoch + 1}")
             train_logs = self.train_one_epoch()
             train_end = time.time()
+            logging.info(f"Starting validation step on epoch {epoch + 1}")
             valid_logs = self.validate_one_epoch()
             valid_end = time.time()
+            logging.info(f"Starting inference step on epoch {epoch + 1}")
             inference_logs = self.inference_one_epoch()
             inference_end = time.time()
 
@@ -193,9 +197,9 @@ class Trainer:
                 if self.config.save_checkpoint:
                     # checkpoint at the end of every epoch
                     self.save_checkpoint(self.config.latest_checkpoint_path)
-                    if self.config.epoch_checkpoint_enabled(self.epoch):
+                    if self.config.epoch_checkpoint_enabled(self._model_epoch):
                         self.save_checkpoint(
-                            self.config.epoch_checkpoint_path(self.epoch)
+                            self.config.epoch_checkpoint_path(self._model_epoch)
                         )
                     if valid_loss <= best_valid_loss:
                         self.save_checkpoint(self.config.best_checkpoint_path)
@@ -204,7 +208,7 @@ class Trainer:
                         self.save_checkpoint(self.config.ema_checkpoint_path)
 
             time_elapsed = time.time() - start_time
-            logging.info(f"Time taken for epoch {self.epoch + 1} is {time_elapsed} sec")
+            logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
             logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
 
             logging.info("Logging to wandb")
@@ -214,20 +218,19 @@ class Trainer:
                 **inference_logs,
                 **{
                     "lr": lr,
-                    "epoch": self.epoch,
+                    "epoch": epoch,
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_inference_seconds": inference_end - valid_end,
                     "epoch_total_seconds": time_elapsed,
                 },
             }
+            wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
-            self.epoch += 1
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
-        logging.info(f"Starting training step on epoch {self.epoch + 1}")
-
+        wandb = WandB.get_instance()
         aggregator = TrainAggregator()
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
@@ -265,6 +268,7 @@ class Trainer:
                         for name, metric in sorted(stepped.metrics.items())
                     }
                 wandb.log(metrics, step=self.num_batches_seen)
+        self._model_epoch += 1
 
         return aggregator.get_logs(label="train")
 
@@ -295,7 +299,6 @@ class Trainer:
             self._ema.restore(parameters=self.stepper.modules.parameters())
 
     def validate_one_epoch(self):
-        logging.info(f"Starting validation step on epoch {self.epoch + 1}")
         aggregator = OneStepAggregator(
             self.train_data.area_weights.to(fme.get_device()),
             self.train_data.sigma_coordinates,
@@ -313,7 +316,6 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        logging.info(f"Starting inference step on epoch {self.epoch + 1}")
         if self.config.inference.parallel:
             dist = self.dist
         else:
@@ -353,7 +355,7 @@ class Trainer:
         torch.save(
             {
                 "num_batches_seen": self.num_batches_seen,
-                "epoch": self.epoch,
+                "epoch": self._model_epoch,
                 "stepper": self.stepper.get_state(),
                 "optimization": self.optimization.get_state(),
             },
