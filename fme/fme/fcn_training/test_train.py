@@ -10,6 +10,7 @@ import pytest
 import xarray as xr
 import yaml
 
+from fme.core.testing.wandb import mock_wandb
 from fme.fcn_training.inference.inference import main as inference_main
 from fme.fcn_training.train import _restore_checkpoint
 from fme.fcn_training.train import main as train_main
@@ -32,6 +33,8 @@ def _get_test_yaml_files(
     n_forward_steps=2,
     nettype="afno",
     stepper_checkpoint_file=None,
+    log_to_wandb=False,
+    max_epochs=1,
 ):
     new_stepper_config = f"""
   in_names: {in_variable_names}
@@ -85,11 +88,11 @@ inference:
     n_forward_steps: 2
     forward_steps_in_memory: 2
 n_forward_steps: {n_forward_steps}
-max_epochs: 1
+max_epochs: {max_epochs}
 save_checkpoint: true
 logging:
   log_to_screen: true
-  log_to_wandb: false
+  log_to_wandb: {str(log_to_wandb).lower()}
   log_to_file: false
   project: fme
   entity: ai2cm
@@ -104,7 +107,7 @@ log_video: true
 save_prediction_files: true
 logging:
   log_to_screen: true
-  log_to_wandb: false
+  log_to_wandb: {str(log_to_wandb).lower()}
   log_to_file: false
   project: fme
   entity: ai2cm
@@ -157,7 +160,9 @@ def _save_netcdf(
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-def _setup(path, nettype):
+def _setup(path, nettype, log_to_wandb=False, max_epochs=1):
+    if not path.exists():
+        path.mkdir()
     seed = 0
     np.random.seed(seed)
     in_variable_names = ["foo", "bar", "baz"]
@@ -207,6 +212,8 @@ def _setup(path, nettype):
         out_variable_names=out_variable_names,
         mask_name=mask_name,
         nettype=nettype,
+        log_to_wandb=log_to_wandb,
+        max_epochs=max_epochs,
     )
     return train_config_filename, inference_config_filename
 
@@ -270,18 +277,44 @@ def test_train_and_inference_script(tmp_path, nettype, skip_slow: bool):
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
-    train_config, inference_config = _setup(tmp_path, nettype)
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
-        train_main(
-            yaml_config=train_config,
+        train_config, inference_config = _setup(
+            tmp_path, nettype, log_to_wandb=True, max_epochs=1
+        )
+        with mock_wandb() as wandb:
+            train_main(
+                yaml_config=train_config,
+            )
+        assert (
+            min([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
+            == 0
+        )
+        assert (
+            max([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
+            == 0
         )
         assert not mock.called
-        train_main(
-            yaml_config=train_config,
+        # replace max_epochs in train config so we can continue training
+        with open(train_config, "r") as f:
+            config_data = yaml.safe_load(f)
+        config_data["max_epochs"] = 2
+        with open(train_config, "w") as f:
+            yaml.dump(config_data, f)
+        with mock_wandb() as wandb:
+            train_main(
+                yaml_config=train_config,
+            )
+        mock.assert_called()
+        assert (
+            min([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
+            == 1
         )
-    mock.assert_called()
+        assert (
+            max([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
+            == 1
+        )
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
