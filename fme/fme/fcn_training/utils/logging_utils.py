@@ -29,3 +29,20 @@ def log_beaker_url(beaker_id=None):
     logging.info(f"Beaker ID: {beaker_id}")
     logging.info(f"Beaker URL: {beaker_url}")
     return beaker_id
+
+
+def log_slurm_info():
+    """Log information about the SLURM environment."""
+    try:
+        job_id = os.environ["SLURM_JOB_ID"]
+    except KeyError:
+        logging.warning("SLURM_JOB_ID not found.")
+    else:
+        logging.info(f"SLURM job ID: {job_id}")
+
+    try:
+        job_user = os.environ["SLURM_JOB_USER"]
+    except KeyError:
+        logging.warning("SLURM_JOB_USER not found.")
+    else:
+        logging.info(f"SLURM job user: {job_user}")
