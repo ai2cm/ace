@@ -153,6 +153,7 @@ def main(
 
     logging_utils.log_versions()
     logging_utils.log_beaker_url()
+    logging_utils.log_slurm_info()
 
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
