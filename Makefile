@@ -9,6 +9,12 @@ build_docker_image:
 build_beaker_image: build_docker_image
 	beaker image create --name $(IMAGE)-$(VERSION) $(IMAGE):$(VERSION)
 
+build_podman_image:
+	podman-hpc build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
+
+migrate_podman_image: build_podman_image
+	podman-hpc migrate $(IMAGE):$(VERSION)
+
 enter_docker_image: build_docker_image
 	docker run -it --rm $(IMAGE):$(VERSION) bash
 
