@@ -403,6 +403,7 @@ def main(
     gcs_utils.authenticate()
     logging_utils.log_versions()
     logging_utils.log_beaker_url()
+    logging_utils.log_slurm_info()
     trainer = Trainer(train_config)
     trainer.train()
     logging.info("DONE ---- rank %d" % dist.rank)
