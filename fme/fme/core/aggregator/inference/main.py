@@ -1,6 +1,7 @@
-from typing import Dict, List, Mapping, Optional, Protocol, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
+import xarray as xr
 from wandb import Table
 
 from fme.core.data_loading.typing import SigmaCoordinates, VariableMetadata
@@ -30,6 +31,10 @@ class _Aggregator(Protocol):
 
     @torch.no_grad()
     def get_logs(self, label: str):
+        ...
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
         ...
 
 
@@ -74,14 +79,20 @@ class InferenceAggregator:
                 target="denorm",
                 n_timesteps=n_timesteps,
                 dist=dist,
+                metadata=metadata,
             ),
             "mean_norm": MeanAggregator(
                 area_weights,
                 target="norm",
                 n_timesteps=n_timesteps,
                 dist=dist,
+                metadata=metadata,
             ),
-            "time_mean": TimeMeanAggregator(area_weights, dist=dist, metadata=metadata),
+            "time_mean": TimeMeanAggregator(
+                area_weights,
+                dist=dist,
+                metadata=metadata,
+            ),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
@@ -96,7 +107,9 @@ class InferenceAggregator:
             )
         if log_zonal_mean_images:
             self._aggregators["zonal_mean"] = ZonalMeanAggregator(
-                n_timesteps=n_timesteps, dist=dist, metadata=metadata
+                n_timesteps=n_timesteps,
+                dist=dist,
+                metadata=metadata,
             )
 
     @torch.no_grad()
@@ -147,6 +160,24 @@ class InferenceAggregator:
         from tables into a list of dictionaries.
         """
         return to_inference_logs(self.get_logs(label=label))
+
+    @torch.no_grad()
+    def get_datasets(
+        self, aggregator_whitelist: Optional[Iterable[str]] = None
+    ) -> Dict[str, xr.Dataset]:
+        """
+        Args:
+            aggregator_whitelist: aggregator names to include in the output. If
+                None, return all the datasets associated with all aggregators.
+        """
+        datasets = (
+            (name, agg.get_dataset()) for name, agg in self._aggregators.items()
+        )
+        if aggregator_whitelist is not None:
+            filter_ = set(aggregator_whitelist)
+            return {name: ds for name, ds in datasets if name in filter_}
+
+        return {name: ds for name, ds in datasets}
 
 
 def to_inference_logs(

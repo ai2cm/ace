@@ -1,6 +1,9 @@
+import dataclasses
 from typing import Dict, Mapping, Optional
 
+import numpy as np
 import torch
+from wandb import Image
 
 from fme.core.data_loading.typing import VariableMetadata
 from fme.core.device import get_device
@@ -10,6 +13,24 @@ from fme.core.wandb import WandB
 from .image_scaling import scale_image
 
 wandb = WandB.get_instance()
+
+import xarray as xr
+
+
+@dataclasses.dataclass
+class _RawData:
+    datum: np.ndarray
+    caption: str
+    metadata: VariableMetadata
+
+    def get_image(self):
+        # images are y, x from upper left corner
+        # data is time, lat
+        # we want lat on y-axis (increasing upward) and time on x-axis
+        # so transpose and flip along lat axis
+        datum = np.flip(self.datum.transpose(), axis=0)
+        datum = scale_image(datum)
+        return wandb.Image(self.datum, caption=self.caption)
 
 
 class ZonalMeanAggregator:
@@ -90,30 +111,59 @@ class ZonalMeanAggregator:
             self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
         self._n_batches[:, time_slice, :] += 1
 
-    def get_logs(self, label: str) -> Dict[str, torch.Tensor]:
+    def _get_data(self) -> Dict[str, _RawData]:
         if self._gen_data is None or self._target_data is None:
             raise RuntimeError("No data recorded")
         sample_dim = 0
-        logs = {}
+        data: Dict[str, _RawData] = {}
         for name in self._gen_data.keys():
-            zonal_means = {}
-            gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
-            zonal_means["gen"] = gen.mean(dim=sample_dim).cpu()
-            error = self._dist.reduce_mean(
-                (self._gen_data[name] - self._target_data[name]) / self._n_batches
+            gen = (
+                self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
+                .mean(sample_dim)
+                .cpu()
+                .numpy()
             )
-            zonal_means["error"] = error.mean(dim=sample_dim).cpu()
-            for key, data in zonal_means.items():
-                caption = self._get_caption(key, name, data)
-                # images are y, x from upper left corner
-                # data is time, lat
-                # we want lat on y-axis (increasing upward) and time on x-axis
-                # so transpose and flip along lat axis
-                data = data.t().flip(dims=[0])
-                data = scale_image(data.cpu().numpy())
-                wandb_image = wandb.Image(data, caption=caption)
-                logs[f"{label}/{key}/{name}"] = wandb_image
+            error = (
+                self._dist.reduce_mean(
+                    (self._gen_data[name] - self._target_data[name]) / self._n_batches
+                )
+                .mean(sample_dim)
+                .cpu()
+                .numpy()
+            )
+
+            metadata = self._metadata.get(name, VariableMetadata("unknown_units", name))
+            data[f"gen/{name}"] = _RawData(
+                datum=gen,
+                caption=self._get_caption("gen", name, gen),
+                # generated data is not considered to have units
+                metadata=VariableMetadata(units="", long_name=metadata.long_name),
+            )
+            data[f"error/{name}"] = _RawData(
+                datum=error,
+                caption=self._get_caption("error", name, error),
+                metadata=metadata,
+            )
+
+        return data
+
+    def get_logs(self, label: str) -> Dict[str, Image]:
+        logs = {}
+        data = self._get_data()
+        for key, datum in data.items():
+            logs[f"{label}/{key}"] = datum.get_image()
         return logs
+
+    def get_dataset(self) -> xr.Dataset:
+        data = {
+            k.replace("/", "-"): xr.DataArray(
+                v.datum, dims=("forecast_step", "lat"), attrs=v.metadata._asdict()
+            )
+            for k, v in self._get_data().items()
+        }
+
+        ret = xr.Dataset(data)
+        return ret
 
     def _get_caption(self, caption_key: str, varname: str, data: torch.Tensor) -> str:
         if varname in self._metadata:
