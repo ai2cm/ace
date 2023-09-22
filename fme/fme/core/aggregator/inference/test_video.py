@@ -83,23 +83,23 @@ def test_video_data(offsets: np.ndarray):
         aggregator.record_batch(
             loss=0, target_data=target_window, gen_data=gen_window, i_time_start=i_start
         )
-    data = aggregator._get_data("video")
-    assert data["video/bias/a"].target is None
-    assert data["video/min_err/a"].target is None
-    assert data["video/max_err/a"].target is None
-    assert data["video/a"].gen.shape[0] == len(offsets)
-    assert data["video/a"].target.shape[0] == len(offsets)
-    assert data["video/bias/a"].gen.shape[0] == len(offsets)
-    assert data["video/min_err/a"].gen.shape[0] == len(offsets)
-    assert data["video/max_err/a"].gen.shape[0] == len(offsets)
+    data = aggregator._get_data()
+    assert data["bias/a"].target is None
+    assert data["min_err/a"].target is None
+    assert data["max_err/a"].target is None
+    assert data["a"].gen.shape[0] == len(offsets)
+    assert data["a"].target.shape[0] == len(offsets)
+    assert data["bias/a"].gen.shape[0] == len(offsets)
+    assert data["min_err/a"].gen.shape[0] == len(offsets)
+    assert data["max_err/a"].gen.shape[0] == len(offsets)
     for i, offset_i in enumerate(offsets):
         np.testing.assert_allclose(
-            data["video/a"].gen[i, :], data["video/a"].target[i, :] + offset_i
+            data["a"].gen[i, :], data["a"].target[i, :] + offset_i
         )
-        np.testing.assert_allclose(data["video/bias/a"].gen[i, :], offset_i)
-        np.testing.assert_allclose(data["video/min_err/a"].gen[i, :], offset_i)
-        np.testing.assert_allclose(data["video/max_err/a"].gen[i, :], offset_i)
-        np.testing.assert_allclose(data["video/gen_var/a"].gen[i, :], 1.0)
+        np.testing.assert_allclose(data["bias/a"].gen[i, :], offset_i)
+        np.testing.assert_allclose(data["min_err/a"].gen[i, :], offset_i)
+        np.testing.assert_allclose(data["max_err/a"].gen[i, :], offset_i)
+        np.testing.assert_allclose(data["gen_var/a"].gen[i, :], 1.0)
 
 
 @pytest.mark.parametrize(
@@ -123,13 +123,13 @@ def test_video_data_without_extended_videos(offsets: np.ndarray):
         aggregator.record_batch(
             loss=0, target_data=target_window, gen_data=gen_window, i_time_start=i_start
         )
-    data = aggregator._get_data("video")
+    data = aggregator._get_data()
     assert len(data) == 1
-    assert data["video/a"].gen.shape[0] == len(offsets)
-    assert data["video/a"].target.shape[0] == len(offsets)
+    assert data["a"].gen.shape[0] == len(offsets)
+    assert data["a"].target.shape[0] == len(offsets)
     for i, offset_i in enumerate(offsets):
         np.testing.assert_allclose(
-            data["video/a"].gen[i, :], data["video/a"].target[i, :] + offset_i
+            data["a"].gen[i, :], data["a"].target[i, :] + offset_i
         )
 
 
@@ -172,40 +172,40 @@ def test_video_data_values_on_random_inputs(n_batches: int):
                 ),
                 i_time_start=i_start,
             )
-    data = aggregator._get_data("video")
-    assert data["video/bias/a"].target is None
-    assert data["video/rmse/a"].target is None
-    assert data["video/min_err/a"].target is None
-    assert data["video/max_err/a"].target is None
-    assert data["video/a"].gen.shape[0] == len(offsets)
-    assert data["video/a"].target.shape[0] == len(offsets)
-    assert data["video/bias/a"].gen.shape[0] == len(offsets)
-    assert data["video/rmse/a"].gen.shape[0] == len(offsets)
-    assert data["video/min_err/a"].gen.shape[0] == len(offsets)
-    assert data["video/max_err/a"].gen.shape[0] == len(offsets)
+    data = aggregator._get_data()
+    assert data["bias/a"].target is None
+    assert data["rmse/a"].target is None
+    assert data["min_err/a"].target is None
+    assert data["max_err/a"].target is None
+    assert data["a"].gen.shape[0] == len(offsets)
+    assert data["a"].target.shape[0] == len(offsets)
+    assert data["bias/a"].gen.shape[0] == len(offsets)
+    assert data["rmse/a"].gen.shape[0] == len(offsets)
+    assert data["min_err/a"].gen.shape[0] == len(offsets)
+    assert data["max_err/a"].gen.shape[0] == len(offsets)
     np.testing.assert_allclose(
-        data["video/a"].gen.cpu().numpy(), gen["a"].mean(dim=0).cpu().numpy()
+        data["a"].gen.cpu().numpy(), gen["a"].mean(dim=0).cpu().numpy()
     )
     np.testing.assert_allclose(
-        data["video/a"].target.cpu().numpy(), target["a"].mean(dim=0).cpu().numpy()
+        data["a"].target.cpu().numpy(), target["a"].mean(dim=0).cpu().numpy()
     )
     np.testing.assert_allclose(
-        data["video/bias/a"].gen.cpu().numpy(),
+        data["bias/a"].gen.cpu().numpy(),
         (gen["a"] - target["a"]).mean(dim=0).cpu().numpy(),
     )
     np.testing.assert_allclose(
-        data["video/rmse/a"].gen.cpu().numpy(),
+        data["rmse/a"].gen.cpu().numpy(),
         ((gen["a"] - target["a"]) ** 2).mean(dim=0).sqrt().cpu().numpy(),
     )
     np.testing.assert_allclose(
-        data["video/min_err/a"].gen.cpu().numpy(),
+        data["min_err/a"].gen.cpu().numpy(),
         (gen["a"] - target["a"]).min(dim=0)[0].cpu().numpy(),
     )
     np.testing.assert_allclose(
-        data["video/max_err/a"].gen.cpu().numpy(),
+        data["max_err/a"].gen.cpu().numpy(),
         (gen["a"] - target["a"]).max(dim=0)[0].cpu().numpy(),
     )
     np.testing.assert_allclose(
-        data["video/gen_var/a"].gen.cpu().numpy(),
+        data["gen_var/a"].gen.cpu().numpy(),
         (gen["a"].var(dim=0) / target["a"].var(dim=0)).cpu().numpy(),
     )
