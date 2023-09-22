@@ -1,4 +1,4 @@
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional, Union
 
 import torch
 import xarray as xr
@@ -119,6 +119,21 @@ class MeanAggregator:
             # only increment n_batches if we actually recorded a batch
             self._n_batches += 1
 
+    def _get_data(self):
+        if self._variable_metrics is None or self._n_batches == 0:
+            raise ValueError("No batches have been recorded.")
+        data: Dict[str, Union[float, torch.Tensor]] = {
+            "loss": self._loss / self._n_batches
+        }
+        for metric in self._variable_metrics:
+            for key in self._variable_metrics[metric]:
+                data[f"{metric}/{key}"] = (
+                    self._variable_metrics[metric][key].get() / self._n_batches
+                )
+        for key in sorted(data.keys()):
+            data[key] = float(self._dist.reduce_mean(data[key].detach()).cpu().numpy())
+        return data
+
     @torch.no_grad()
     def get_logs(self, label: str):
         """
@@ -127,23 +142,15 @@ class MeanAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        if self._variable_metrics is None or self._n_batches == 0:
-            raise ValueError("No batches have been recorded.")
-        logs = {f"{label}/loss": self._loss / self._n_batches}
-        for metric in self._variable_metrics:
-            for key in self._variable_metrics[metric]:
-                logs[f"{label}/{metric}/{key}"] = (
-                    self._variable_metrics[metric][key].get() / self._n_batches
-                )
-        for key in sorted(logs.keys()):
-            logs[key] = float(self._dist.reduce_mean(logs[key].detach()).cpu().numpy())
-        return logs
+        return {
+            f"{label}/{key}": data for key, data in sorted(self._get_data().items())
+        }
 
     @torch.no_grad()
-    def get_dataset(self, label: str) -> xr.Dataset:
-        logs = self.get_logs(label=label)
-        logs = {key.replace("/", "-"): logs[key] for key in logs}
+    def get_dataset(self) -> xr.Dataset:
+        data = self._get_data()
+        data = {key.replace("/", "-"): data[key] for key in data}
         data_vars = {}
-        for key, value in logs.items():
+        for key, value in data.items():
             data_vars[key] = xr.DataArray(value)
         return xr.Dataset(data_vars=data_vars)

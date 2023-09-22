@@ -209,6 +209,27 @@ def inference_helper(
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
 
+    time_mean_diagnostics = xr.open_dataset(tmp_path / "time_mean_diagnostics.nc")
+    actual_var_names = sorted([str(k) for k in time_mean_diagnostics.keys()])
+    assert len(actual_var_names) == 2
+    assert "bias_map-x" in actual_var_names
+    assert time_mean_diagnostics.data_vars["bias_map-x"].attrs["units"] == "m"
+    assert "gen_map-x" in actual_var_names
+    assert time_mean_diagnostics.data_vars["gen_map-x"].attrs["units"] == ""
+    assert len(time_mean_diagnostics.coords) == 2
+    assert "lat" in time_mean_diagnostics.coords
+    assert "lon" in time_mean_diagnostics.coords
+
+    zonal_mean_diagnostics = xr.open_dataset(tmp_path / "zonal_mean_diagnostics.nc")
+    actual_var_names = sorted([str(k) for k in zonal_mean_diagnostics.keys()])
+    assert len(actual_var_names) == 2
+    assert "error-x" in actual_var_names
+    assert zonal_mean_diagnostics.data_vars["error-x"].attrs["units"] == "m"
+    assert "gen-x" in actual_var_names
+    assert zonal_mean_diagnostics.data_vars["gen-x"].attrs["units"] == ""
+    assert len(zonal_mean_diagnostics.coords) == 1
+    assert "lat" in zonal_mean_diagnostics.coords
+
 
 @pytest.mark.parametrize("n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10)])
 def test_inference_writer_boundaries(
