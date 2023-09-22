@@ -1,4 +1,5 @@
-from typing import Dict, Mapping, MutableMapping, Optional
+import dataclasses
+from typing import Dict, List, Mapping, MutableMapping, Optional, Union
 
 import numpy as np
 import torch
@@ -12,6 +13,37 @@ from fme.core.wandb import WandB
 from .image_scaling import scale_image
 
 wandb = WandB.get_instance()
+
+
+@dataclasses.dataclass
+class _TargetGenPair:
+    name: str
+    target: torch.Tensor
+    gen: torch.Tensor
+
+    def bias(self):
+        return self.gen - self.target
+
+    def rmse(self, weights: torch.Tensor) -> float:
+        ret = float(
+            metrics.root_mean_squared_error(
+                predicted=self.gen,
+                truth=self.target,
+                weights=weights,
+            )
+            .cpu()
+            .numpy()
+        )
+        return ret
+
+    def weighted_mean_bias(self, weights: torch.Tensor) -> float:
+        return float(
+            metrics.weighted_mean_bias(
+                predicted=self.gen, truth=self.target, weights=weights
+            )
+            .cpu()
+            .numpy()
+        )
 
 
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
@@ -107,41 +139,42 @@ class TimeMeanAggregator:
         # same length
         self._n_batches += 1
 
-    @torch.no_grad()
-    def get_logs(self, label: str):
-        """
-        Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
-        """
+    def _get_target_gen_pairs(self) -> List[_TargetGenPair]:
         if self._n_batches == 0 or self._gen_data is None or self._target_data is None:
             raise ValueError("No data recorded.")
-        logs = {}
+
+        ret = []
         for name in self._gen_data.keys():
             gen = self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
             target = self._dist.reduce_mean(self._target_data[name] / self._n_batches)
-            images = {"bias_map": gen - target, "gen_map": gen}
-            for key, data in images.items():
-                logs[f"{key}/{name}"] = _make_image(
-                    caption=self._get_caption(key, name, data),
-                    data=data,
-                )
-            logs[f"rmse/{name}"] = float(
-                metrics.root_mean_squared_error(
-                    predicted=gen, truth=target, weights=self._area_weights
-                )
-                .cpu()
-                .numpy()
+            ret.append(_TargetGenPair(gen=gen, target=target, name=name))
+        return ret
+
+    @torch.no_grad()
+    def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor]]:
+        logs = {}
+        preds = self._get_target_gen_pairs()
+        bias_map_key, gen_map_key = "bias_map", "gen_map"
+        for pred in preds:
+            logs.update(
+                {
+                    f"{bias_map_key}/{pred.name}": _make_image(
+                        self._get_caption(bias_map_key, pred.name, pred.bias()),
+                        pred.bias(),
+                    ),
+                    f"{gen_map_key}/{pred.name}": _make_image(
+                        self._get_caption(gen_map_key, pred.name, pred.gen), pred.gen
+                    ),
+                    f"rmse/{pred.name}": pred.rmse(weights=self._area_weights),
+                    f"bias/{pred.name}": pred.weighted_mean_bias(
+                        weights=self._area_weights
+                    ),
+                }
             )
-            logs[f"bias/{name}"] = float(
-                metrics.weighted_mean_bias(
-                    predicted=gen, truth=target, weights=self._area_weights
-                )
-                .cpu()
-                .numpy()
-            )
-        return {f"{label}/{key}": logs[key] for key in logs}
+
+        if len(label) != 0:
+            return {f"{label}/{key}": logs[key] for key in logs}
+        return logs
 
     def _get_caption(self, key: str, name: str, data: torch.Tensor) -> str:
         if name in self._metadata:
@@ -153,14 +186,28 @@ class TimeMeanAggregator:
         caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
         return caption
 
-    @torch.no_grad()
-    def get_dataset(self, label: str) -> xr.Dataset:
-        logs = self.get_logs(label=label)
-        logs = {key.replace("/", "-"): logs[key] for key in logs}
-        data_vars = {}
-        for key, value in logs.items():
-            data_vars[key] = xr.DataArray(value)
-        return xr.Dataset(data_vars=data_vars)
+    def get_dataset(self) -> xr.Dataset:
+        data = {}
+        preds = self._get_target_gen_pairs()
+        dims = ("lat", "lon")
+        for pred in preds:
+            bias_metadata = self._metadata.get(
+                pred.name, VariableMetadata(units="unknown_units", long_name=pred.name)
+            )._asdict()
+            gen_metadata = VariableMetadata(units="", long_name=pred.name)._asdict()
+            data.update(
+                {
+                    f"bias_map-{pred.name}": xr.DataArray(
+                        pred.bias().cpu(), dims=dims, attrs=bias_metadata
+                    ),
+                    f"gen_map-{pred.name}": xr.DataArray(
+                        pred.gen.cpu(),
+                        dims=dims,
+                        attrs=gen_metadata,
+                    ),
+                }
+            )
+        return xr.Dataset(data)
 
 
 def _make_image(

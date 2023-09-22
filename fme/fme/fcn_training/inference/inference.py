@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Optional, Sequence
 
 import dacite
@@ -232,6 +233,12 @@ def main(
         # wandb.log cannot be called more than "a few times per second"
         time.sleep(0.3)
     writer.flush()
+
+    logging.info("Writing reduced metrics to disk in netcdf format.")
+    for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
+        coords = {k: v for k, v in validation.coords.items() if k in ds.dims}
+        ds = ds.assign_coords(coords)
+        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
     return step_logs
 
 

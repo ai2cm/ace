@@ -359,14 +359,14 @@ class VideoAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        data = self._get_data(label=label)
+        data = self._get_data()
         videos = {}
-        for label, d in data.items():
-            videos[label] = d.make_video()
+        for sub_label, d in data.items():
+            videos[f"{label}/{sub_label}"] = d.make_video()
         return videos
 
     @torch.no_grad()
-    def _get_data(self, label: str) -> Mapping[str, _MaybePairedVideoData]:
+    def _get_data(self) -> Mapping[str, _MaybePairedVideoData]:
         """
         Returns video data as can be reported to WandB.
 
@@ -389,7 +389,7 @@ class VideoAggregator:
                 return None
 
         for name in gen_data:
-            video_data[f"{label}/{name}"] = _MaybePairedVideoData(
+            video_data[name] = _MaybePairedVideoData(
                 caption=self._get_caption(name),
                 gen=gen_data[name],
                 target=target_data[name],
@@ -397,7 +397,7 @@ class VideoAggregator:
                 long_name=f"ensemble mean of {get_long_name(name)}",
             )
             if self._enable_extended_videos:
-                video_data[f"{label}/bias/{name}"] = _MaybePairedVideoData(
+                video_data[f"bias/{name}"] = _MaybePairedVideoData(
                     caption=(f"prediction - target for {name}"),
                     gen=gen_data[name] - target_data[name],
                     units=get_units(name),
@@ -406,14 +406,14 @@ class VideoAggregator:
         if self._error_data is not None:
             data = self._error_data.get()
             for name in data.rmse:
-                video_data[f"{label}/rmse/{name}"] = _MaybePairedVideoData(
+                video_data[f"rmse/{name}"] = _MaybePairedVideoData(
                     caption=f"RMSE over ensemble for {name}",
                     gen=data.rmse[name],
                     units=get_units(name),
                     long_name=f"root mean squared error of {get_long_name(name)}",
                 )
             for name in data.min_err:
-                video_data[f"{label}/min_err/{name}"] = _MaybePairedVideoData(
+                video_data[f"min_err/{name}"] = _MaybePairedVideoData(
                     caption=f"Min across ensemble members of min error for {name}",
                     gen=data.min_err[name],
                     units=get_units(name),
@@ -422,7 +422,7 @@ class VideoAggregator:
                     ),
                 )
             for name in data.max_err:
-                video_data[f"{label}/max_err/{name}"] = _MaybePairedVideoData(
+                video_data[f"max_err/{name}"] = _MaybePairedVideoData(
                     caption=f"Max across ensemble members of max error for {name}",
                     gen=data.max_err[name],
                     units=get_units(name),
@@ -433,7 +433,7 @@ class VideoAggregator:
         if self._variance_data is not None:
             gen_data, target_data = self._variance_data.get()
             for name in gen_data:
-                video_data[f"{label}/gen_var/{name}"] = _MaybePairedVideoData(
+                video_data[f"gen_var/{name}"] = _MaybePairedVideoData(
                     caption=(
                         f"Variance of gen data for {name} "
                         "as fraction of target variance"
@@ -452,7 +452,7 @@ class VideoAggregator:
         """
         Return video data as an xarray Dataset.
         """
-        data = self._get_data(label="")
+        data = self._get_data()
         video_data = {}
         for label, d in data.items():
             label = label.strip("/").replace("/", "_")  # remove leading slash

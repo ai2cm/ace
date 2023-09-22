@@ -1,16 +1,31 @@
-from typing import Dict, Literal, Mapping, Optional, Protocol
+import dataclasses
+from typing import Dict, List, Literal, Mapping, Optional, Protocol
 
 import numpy as np
 import torch
 import xarray as xr
 
 from fme.core import metrics
+from fme.core.data_loading.typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import Dimension
 from fme.core.wandb import WandB
 
 wandb = WandB.get_instance()
+
+
+@dataclasses.dataclass
+class _SeriesData:
+    metric_name: str
+    var_name: str
+    data: np.ndarray
+
+    def get_wandb_key(self) -> str:
+        return f"{self.metric_name}/{self.var_name}"
+
+    def get_xarray_key(self) -> str:
+        return f"{self.metric_name}-{self.var_name}"
 
 
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
@@ -137,6 +152,7 @@ class MeanAggregator:
         target: Literal["norm", "denorm"],
         n_timesteps: int,
         dist: Optional[Distributed] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._area_weights = area_weights
         self._variable_metrics: Optional[Dict[str, Dict[str, MeanMetric]]] = None
@@ -144,10 +160,15 @@ class MeanAggregator:
         self._shape_y = None
         self._target = target
         self._n_timesteps = n_timesteps
+
         if dist is None:
             self._dist = Distributed.get_instance()
         else:
             self._dist = dist
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
 
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
@@ -219,26 +240,21 @@ class MeanAggregator:
                     i_time_start=i_time_start,
                 )
 
-    def _get_series_data(self) -> Dict[str, np.ndarray]:
-        """
-        Returns a dictionary of series data, where each key is a metric name.
-
-        Used as a helper, as we present this series data in different ways.
-        """
+    def _get_series_data(self) -> List[_SeriesData]:
+        """Converts internally stored variable_metrics to a list."""
         if self._variable_metrics is None:
             raise ValueError("No batches have been recorded.")
-        series_tensors: Dict[str, torch.Tensor] = {}
+        data: List[_SeriesData] = []
         for metric in self._variable_metrics:
             for key in self._variable_metrics[metric]:
-                series_tensors[f"{metric}/{key}"] = self._variable_metrics[metric][
-                    key
-                ].get()
-        series_arrays: Dict[str, np.ndarray] = {}
-        for key in sorted(series_tensors.keys()):
-            series_arrays[key] = (
-                self._dist.reduce_mean(series_tensors[key].detach()).cpu().numpy()
-            )
-        return series_arrays
+                arr = self._variable_metrics[metric][key].get().detach()
+                datum = _SeriesData(
+                    metric_name=metric,
+                    var_name=key,
+                    data=self._dist.reduce_mean(arr).cpu().numpy(),
+                )
+                data.append(datum)
+        return data
 
     @torch.no_grad()
     def get_logs(self, label: str):
@@ -249,26 +265,29 @@ class MeanAggregator:
             label: Label to prepend to all log keys.
         """
         logs = {}
-        series_data = self._get_series_data()
+        series_data: Dict[str, np.ndarray] = {
+            datum.get_wandb_key(): datum.data for datum in self._get_series_data()
+        }
         table = data_to_table(series_data)
         logs[f"{label}/series"] = table
         return logs
 
     @torch.no_grad()
-    def get_dataset(self, label: str) -> xr.Dataset:
+    def get_dataset(self) -> xr.Dataset:
         """
         Returns a dataset representation of the logs.
         """
-        if len(label) > 0:
-            label = f"{label}_"
-        series_data = self._get_series_data()
-        series_data = {
-            key.replace("/", "-"): value for key, value in series_data.items()
-        }
         data_vars = {}
-        for key in series_data:
-            data_vars[f"{label}{key}"] = (["forecast_step"], series_data[key])
-        coords = {"forecast_step": np.arange(len(series_data[key]))}
+        for datum in self._get_series_data():
+            metadata = self._metadata.get(
+                datum.var_name, VariableMetadata("unknown_units", datum.var_name)
+            )
+            data_vars[datum.get_xarray_key()] = xr.DataArray(
+                datum.data, dims=["forecast_step"], attrs=metadata._asdict()
+            )
+
+        n_forecast_steps = len(next(iter(data_vars.values())))
+        coords = {"forecast_step": np.arange(n_forecast_steps)}
         return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
