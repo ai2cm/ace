@@ -13,6 +13,7 @@ from .core.metrics import (
     weighted_mean,
     weighted_mean_bias,
     weighted_mean_gradient_magnitude,
+    weighted_std,
 )
 
 APPLY_SHT_FIX = True
