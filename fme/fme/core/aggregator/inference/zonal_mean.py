@@ -30,7 +30,7 @@ class _RawData:
         # so transpose and flip along lat axis
         datum = np.flip(self.datum.transpose(), axis=0)
         datum = scale_image(datum)
-        return wandb.Image(self.datum, caption=self.caption)
+        return wandb.Image(datum, caption=self.caption)
 
 
 class ZonalMeanAggregator:
