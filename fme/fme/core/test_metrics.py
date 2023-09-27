@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 
@@ -61,6 +62,38 @@ def test_weighted_mean(variable, time, lats, n_lon):
     assert torch.all(
         torch.isclose(result, torch.Tensor([1.0]))
     ), "The weighted mean of a constant should be that constant."
+
+
+def test_weighted_std_constant_weights():
+    """Tests the weighted std with constant weights."""
+    torch.manual_seed(0)
+    n_lat = 4
+    n_lon = 5
+    x = torch.randn(2, 3, n_lat, n_lon)
+    weights = torch.ones(n_lat, n_lon)
+    result = fme.weighted_std(x, weights, dim=(0, 2, 3))
+    # must use numpy std here as we want the standard deviation of
+    # the sample, not the population
+    unweighted_std = np.std(x.cpu().numpy(), axis=(0, 2, 3))
+    assert torch.all(
+        torch.isclose(result, torch.as_tensor(unweighted_std))
+    ), "Weighted std with constant weights should be same as unweighted std."
+
+
+def test_weighted_std_none_weights():
+    """Tests the weighted std without passing weights."""
+    torch.manual_seed(0)
+    n_lat = 4
+    n_lon = 5
+    x = torch.randn(2, 3, n_lat, n_lon)
+    weights = None
+    result = fme.weighted_std(x, weights, dim=(0, 2, 3))
+    # must use numpy std here as we want the standard deviation of
+    # the sample, not the population
+    unweighted_std = np.std(x.cpu().numpy(), axis=(0, 2, 3))
+    assert torch.all(
+        torch.isclose(result, torch.as_tensor(unweighted_std))
+    ), "Weighted std with constant weights should be same as unweighted std."
 
 
 @pytest.mark.parametrize(*test_cases)

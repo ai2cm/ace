@@ -177,6 +177,7 @@ class MeanAggregator:
                 "weighted_grad_mag_percent_diff": {},
                 "weighted_mean_gen": {},
                 "weighted_bias": {},
+                "weighted_std_gen": {},
             }
             device = get_device()
             area_weights = self._area_weights
@@ -213,6 +214,16 @@ class MeanAggregator:
                     area_weights=area_weights,
                     device=device,
                     compute_metric=metrics.weighted_mean_bias,
+                    n_timesteps=self._n_timesteps,
+                )
+                self._variable_metrics["weighted_std_gen"][
+                    key
+                ] = AreaWeightedReducedMetric(
+                    area_weights=area_weights,
+                    device=device,
+                    compute_metric=compute_metric_on(
+                        source="gen", metric=metrics.weighted_std
+                    ),
                     n_timesteps=self._n_timesteps,
                 )
 

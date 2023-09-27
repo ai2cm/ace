@@ -45,6 +45,7 @@ def test_logs_labels_exist():
         "weighted_grad_mag_percent_diff/a",
         "weighted_mean_gen/a",
         "weighted_rmse/a",
+        "weighted_std_gen/a",
     ]
     assert "test/time_mean/rmse/a" in logs
     assert "test/time_mean/bias/a" in logs
