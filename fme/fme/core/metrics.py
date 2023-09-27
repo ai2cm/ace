@@ -18,7 +18,8 @@ def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
         num_lon: Number of longitude points.
         device: Device to place the tensor on.
 
-    Returns a torch.tensor of shape (num_lat, num_lon).
+    Returns:
+        a torch.tensor of shape (num_lat, num_lon).
     """
     if isinstance(lats, np.ndarray):
         lats = torch.from_numpy(lats)
@@ -31,6 +32,7 @@ def weighted_mean(
     tensor: torch.Tensor,
     weights: Optional[torch.Tensor] = None,
     dim: Dimension = (),
+    keepdim: bool = False,
 ) -> torch.Tensor:
     """Computes the weighted mean across the specified list of dimensions.
 
@@ -38,13 +40,45 @@ def weighted_mean(
         tensor: torch.Tensor
         weights: Weights to apply to the mean.
         dim: Dimensions to compute the mean over.
+        keepdim: Whether the output tensor has `dim` retained or not.
 
-    Returns a tensor of the weighted mean averaged over the specified dimensions `dim`.
+    Returns:
+        a tensor of the weighted mean averaged over the specified dimensions `dim`.
     """
     if weights is None:
-        return tensor.mean(dim=dim)
+        return tensor.mean(dim=dim, keepdim=keepdim)
 
-    return (tensor * weights).sum(dim=dim) / weights.expand(tensor.shape).sum(dim=dim)
+    return (tensor * weights).sum(dim=dim, keepdim=keepdim) / weights.expand(
+        tensor.shape
+    ).sum(dim=dim, keepdim=keepdim)
+
+
+def weighted_std(
+    tensor: torch.Tensor,
+    weights: Optional[torch.Tensor] = None,
+    dim: Dimension = (),
+) -> torch.Tensor:
+    """Computes the weighted standard deviation across the specified list of dimensions.
+
+    Computed by first computing the weighted variance, then taking the square root.
+
+    weighted_variance = weighted_mean((tensor - weighted_mean(tensor)) ** 2)) ** 0.5
+
+    Args:
+        tensor: torch.Tensor
+        weights: Weights to apply to the variance.
+        dim: Dimensions to compute the standard deviation over.
+
+    Returns:
+        a tensor of the weighted standard deviation over the
+            specified dimensions `dim`.
+    """
+    if weights is None:
+        weights = torch.tensor(1.0, device=tensor.device)
+
+    mean = weighted_mean(tensor, weights=weights, dim=dim, keepdim=True)
+    variance = weighted_mean((tensor - mean) ** 2, weights=weights, dim=dim)
+    return torch.sqrt(variance)
 
 
 def weighted_mean_bias(
@@ -62,7 +96,8 @@ def weighted_mean_bias(
         dim: Dimensions to compute the mean over.
         weights: Weights to apply to the mean.
 
-    Returns a tensor of the mean biases averaged over the specified dimensions `dim`.
+    Returns:
+        a tensor of the mean biases averaged over the specified dimensions `dim`.
     """
     assert (
         truth.shape == predicted.shape
@@ -91,7 +126,8 @@ def root_mean_squared_error(
         weights: torch.Tensor to apply to the squared bias.
         dim: Dimensions to average over.
 
-    Returns a tensor of shape (variable,) of weighted RMSEs.
+    Returns:
+        a tensor of shape (variable,) of weighted RMSEs.
     """
     assert (
         truth.shape == predicted.shape
@@ -144,7 +180,7 @@ def rmse_of_time_mean(
 
     Returns:
         The RMSE between the time-mean of the two input tensors. The time and
-        spatial dims are reduced.
+            spatial dims are reduced.
     """
     truth_time_mean = truth.mean(dim=time_dim)
     predicted_time_mean = predicted.mean(dim=time_dim)
@@ -172,7 +208,7 @@ def time_and_global_mean_bias(
 
     Returns:
         The global- and time-mean bias between the predicted and truth tensors. The
-        time and spatial dims are reduced.
+            time and spatial dims are reduced.
     """
     truth_time_mean = truth.mean(dim=time_dim)
     predicted_time_mean = predicted.mean(dim=time_dim)
