@@ -1,5 +1,6 @@
 from typing import Any, Mapping, Optional
 
+import numpy as np
 import wandb
 
 from fme.core.distributed import Distributed
@@ -60,9 +61,11 @@ class WandB:
         if self._enabled:
             wandb.log(data, step=step)
 
-    @property
-    def Image(self):
-        return wandb.Image
+    def Image(self, data_or_path, *args, **kwargs):
+        if isinstance(data_or_path, np.ndarray):
+            data_or_path = scale_image(data_or_path)
+
+        return wandb.Image(data_or_path, *args, **kwargs)
 
     @property
     def Video(self):
@@ -71,3 +74,19 @@ class WandB:
     @property
     def Table(self):
         return wandb.Table
+
+
+def scale_image(
+    image_data: np.ndarray,
+) -> np.ndarray:
+    """
+    Given an array of scalar data, rescale the data to the range [0, 255].
+    """
+    data_min = np.nanmin(image_data)
+    data_max = np.nanmax(image_data)
+    # video data is brightness values on a 0-255 scale
+    image_data = 255 * (image_data - data_min) / (data_max - data_min)
+    image_data = np.minimum(image_data, 255)
+    image_data = np.maximum(image_data, 0)
+    image_data[np.isnan(image_data)] = 0
+    return image_data
