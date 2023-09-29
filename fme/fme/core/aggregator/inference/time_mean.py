@@ -10,8 +10,6 @@ from fme.core.data_loading.typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
-from .image_scaling import scale_image
-
 wandb = WandB.get_instance()
 
 
@@ -215,7 +213,6 @@ def _make_image(
     data: torch.Tensor,
 ):
     image_data = data.cpu().numpy()
-    image_data = scale_image(image_data)
     lat_dim = -2
     return wandb.Image(
         np.flip(image_data, axis=lat_dim),

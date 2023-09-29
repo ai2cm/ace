@@ -10,8 +10,6 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
-from .image_scaling import scale_image
-
 wandb = WandB.get_instance()
 
 import xarray as xr
@@ -29,7 +27,6 @@ class _RawData:
         # we want lat on y-axis (increasing upward) and time on x-axis
         # so transpose and flip along lat axis
         datum = np.flip(self.datum.transpose(), axis=0)
-        datum = scale_image(datum)
         return wandb.Image(datum, caption=self.caption)
 
 
