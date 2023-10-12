@@ -1,11 +1,18 @@
 import numpy as np
+import pytest
 
 from fme.core.histogram import DynamicHistogram
 
 
-def test_dynamic_histogram_random_values():
+@pytest.mark.parametrize(
+    "n_times, time_bin_len",
+    [
+        pytest.param(3, 3, id="one_time_bin"),
+        pytest.param(6, 2, id="multiple_time_bins"),
+    ],
+)
+def test_dynamic_histogram_random_values(n_times: int, time_bin_len: int):
     np.random.seed(0)
-    n_times = 3
     n_values = 1000
     n_window = 100
     # gradually increasing values in time ensure bins get expanded
@@ -14,8 +21,12 @@ def test_dynamic_histogram_random_values():
         * np.arange(1, 1001)[None, :]
     )
     histogram = DynamicHistogram(n_times=n_times, n_bins=20)
-    for i in range(0, n_values, n_window):
-        histogram.add(data[:, i : i + n_window])
+    for i_time in range(0, n_times, time_bin_len):
+        for i in range(0, n_values, n_window):
+            histogram.add(
+                data[i_time : i_time + time_bin_len, i : i + n_window],
+                i_time_start=i_time,
+            )
     assert np.sum(histogram.counts) == n_times * n_values
     direct_histogram = np.apply_along_axis(
         lambda arr: np.histogram(arr, bins=histogram.bin_edges)[0],
@@ -23,6 +34,7 @@ def test_dynamic_histogram_random_values():
         arr=data,
     )
     assert np.allclose(histogram.counts, direct_histogram)
+    assert histogram.bin_edges is not None
     histogram_range = histogram.bin_edges[-1] - histogram.bin_edges[0]
     value_range = np.max(data) - np.min(data)
 

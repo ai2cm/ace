@@ -230,6 +230,19 @@ def inference_helper(
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
+    histograms = xr.open_dataset(tmp_path / "histograms.nc")
+    actual_var_names = sorted([str(k) for k in histograms.keys()])
+    assert len(actual_var_names) == 2
+    assert "x" in actual_var_names
+    assert histograms.data_vars["x"].attrs["units"] == "count"
+    assert "x_bin_edges" in actual_var_names
+    assert histograms.data_vars["x_bin_edges"].attrs["units"] == "m"
+    x_counts_per_timestep = histograms["x"].sum(dim=["bin", "source"])
+    same_count_each_timestep = np.all(
+        x_counts_per_timestep.values == x_counts_per_timestep.values[0]
+    )
+    assert same_count_each_timestep
+
 
 @pytest.mark.parametrize("n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10)])
 def test_inference_writer_boundaries(
