@@ -5,6 +5,7 @@ import torch
 
 from fme.core.data_loading.typing import VariableMetadata
 
+from .histograms import HistogramDataWriter
 from .prediction import PredictionDataWriter
 from .video import VideoDataWriter
 
@@ -35,7 +36,9 @@ class DataWriter:
             save_names: Names of variables to save in the predictions netcdf file.
                 Ignored if enable_prediction_netcdfs is False.
         """
-        self._writers: List[Union[PredictionDataWriter, VideoDataWriter]] = []
+        self._writers: List[
+            Union[PredictionDataWriter, VideoDataWriter, HistogramDataWriter]
+        ] = []
         if enable_prediction_netcdfs:
             self._writers.append(
                 PredictionDataWriter(
@@ -55,6 +58,13 @@ class DataWriter:
                     coords=coords,
                 )
             )
+        self._writers.append(
+            HistogramDataWriter(
+                path=path,
+                n_timesteps=n_timesteps,
+                metadata=metadata,
+            )
+        )
 
     def append_batch(
         self,
