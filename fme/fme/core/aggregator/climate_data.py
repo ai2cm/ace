@@ -46,7 +46,7 @@ class ClimateData:
         ]
 
         if not names:
-            logging.warning(f'No fields with prefix "{prefix}" found.')
+            logging.debug(f'No fields with prefix "{prefix}" found.')
             return None
 
         if len(names) > 10:
@@ -66,5 +66,5 @@ class ClimateData:
         try:
             return self._data[self._prefixes["surface_pressure"]]
         except KeyError:
-            logging.warning("No fields for surface pressure found.")
+            logging.debug("No fields for surface pressure found.")
             return None

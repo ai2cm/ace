@@ -3,6 +3,7 @@ from typing import NamedTuple
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 from netCDF4 import Dataset
 
 from fme.fcn_training.inference.data_writer import DataWriter
@@ -61,10 +62,11 @@ class TestDataWriter:
         save_names,
     ):
         n_samples = 4
+        n_timesteps = 6
         writer = DataWriter(
             str(tmp_path),
             n_samples=n_samples,
-            n_timesteps=3,
+            n_timesteps=n_timesteps,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
@@ -78,11 +80,12 @@ class TestDataWriter:
             sample_target_data, sample_prediction_data, start_timestep=0, start_sample=2
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=2, start_sample=0
+            sample_target_data, sample_prediction_data, start_timestep=3, start_sample=0
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=2, start_sample=2
+            sample_target_data, sample_prediction_data, start_timestep=3, start_sample=2
         )
+        writer.flush()
 
         # Open the file again and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -100,7 +103,13 @@ class TestDataWriter:
 
         for var_name in expected_variables:
             var_data = dataset.variables[var_name][:]
-            assert var_data.shape == (2, 4, 5, 4, 5)  # source, sample, time, lat, lon
+            assert var_data.shape == (
+                2,
+                n_samples,
+                n_timesteps,
+                4,
+                5,
+            )  # source, sample, time, lat, lon
             assert not np.isnan(var_data[0, :]).any(), "unexpected NaNs in target data"
             if var_name in sample_prediction_data:
                 assert not np.isnan(
@@ -120,6 +129,19 @@ class TestDataWriter:
                 assert not hasattr(dataset.variables[var_name], "long_name")
 
         dataset.close()
+
+        histograms = xr.open_dataset(tmp_path / "histograms.nc")
+        actual_var_names = sorted([str(k) for k in histograms.keys()])
+        assert len(actual_var_names) == 8
+        assert "humidity" in actual_var_names
+        assert histograms.data_vars["humidity"].attrs["units"] == "count"
+        assert "humidity_bin_edges" in actual_var_names
+        assert histograms.data_vars["humidity_bin_edges"].attrs["units"] == "%"
+        counts_per_timestep = histograms["humidity"].sum(dim=["bin", "source"])
+        same_count_each_timestep = np.all(
+            counts_per_timestep.values == counts_per_timestep.values[0]
+        )
+        assert same_count_each_timestep
 
     def test_append_batch_past_end_of_samples(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path

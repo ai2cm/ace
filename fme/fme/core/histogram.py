@@ -28,12 +28,13 @@ class DynamicHistogram:
         self.bin_edges: Optional[np.ndarray] = None
         self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
 
-    def add(self, value: np.ndarray):
+    def add(self, value: np.ndarray, i_time_start: int = 0):
         """
         Add new values to the histogram.
 
         Args:
             value: array of values of shape (n_times, n_values) to add to the histogram
+            i_time_start: index of the first time to add values to
         """
         vmin = np.min(value)
         vmax = np.max(value)
@@ -44,7 +45,8 @@ class DynamicHistogram:
                 self._double_size_left()
             while vmax > self.bin_edges[-1]:
                 self._double_size_right()
-        self.counts += np.apply_along_axis(
+        i_time_end = i_time_start + value.shape[0]
+        self.counts[i_time_start:i_time_end, :] += np.apply_along_axis(
             lambda arr: np.histogram(arr, bins=self.bin_edges)[0],
             axis=1,
             arr=value,
