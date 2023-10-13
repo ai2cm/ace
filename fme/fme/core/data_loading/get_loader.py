@@ -9,10 +9,11 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
+from ._xarray import XarrayDataset
 from .params import DataLoaderParams
 from .requirements import DataRequirements
 from .typing import Dataset, GriddedData
-from .xarray import XarrayDataset
+from .utils import BatchData
 
 
 def _all_same(iterable, cmp=lambda x, y: x == y):
@@ -110,6 +111,7 @@ def get_data_loader(
         sampler=sampler if train else None,
         drop_last=True,
         pin_memory=using_gpu(),
+        collate_fn=BatchData.from_sample_tuples,
     )
 
     return GriddedData(
