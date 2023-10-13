@@ -1,5 +1,17 @@
 import dataclasses
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union, cast
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 import dacite
 import torch
@@ -16,7 +28,7 @@ from fme.core.normalizer import (
     NormalizationConfig,
     StandardNormalizer,
 )
-from fme.core.packer import Packer
+from fme.core.packer import DataShapesNotUniform, Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
@@ -150,7 +162,7 @@ class SingleModuleStepper:
         """
         Args:
             config: The configuration.
-            data_shapes: The shapes of the data.
+            data_shapes: Shapes of the module inputs.
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
         """
@@ -301,6 +313,44 @@ class SingleModuleStepper:
         return stepper
 
 
+def get_name_and_time_query_fn(
+    data: Dict[str, torch.Tensor], data_norm: Dict[str, torch.Tensor], time_dim: int
+) -> Callable[
+    [Iterable[str], int, Literal["norm", "denorm"]],
+    Dict[str, torch.Tensor],
+]:
+    """Construct a function for querying `data` by name and time and whether it
+    is normalized or not. (Note: that the `names` argument can contain None values
+    to handle NullPrescriber)."""
+
+    norm_mode_to_data = {"norm": data_norm, "denorm": data}
+
+    def name_and_time_query_fn(names, time_index, norm_mode):
+        _data = norm_mode_to_data[norm_mode]
+        query_results = {}
+        for name in names:
+            try:
+                query_results[name] = _data[name].select(dim=time_dim, index=time_index)
+            except IndexError as err:
+                raise ValueError(
+                    f'tensor "{name}" does not have values at t={time_index}'
+                ) from err
+        return query_results
+
+    return name_and_time_query_fn
+
+
+def _pack_data_if_available(
+    packer: Packer,
+    data: Dict[str, torch.Tensor],
+    axis: int,
+) -> Optional[torch.Tensor]:
+    try:
+        return packer.pack(data, axis=axis)
+    except DataShapesNotUniform:
+        return None
+
+
 def run_on_batch(
     data: Dict[str, torch.Tensor],
     module: nn.Module,
@@ -341,59 +391,60 @@ def run_on_batch(
             and the normalized batch data. The generated data contains
             the initial input data as its first timestep.
     """
-    # must be negative-indexed so it works with or without a time dim
     channel_dim = -3
     time_dim = 1
-    example_shape = data[list(data.keys())[0]].shape
-    assert len(example_shape) == 4
-    assert example_shape[1] == n_forward_steps + 1
     full_data_norm = normalizer.normalize(data)
-    time_input = 0
-    time_target = 1
+    name_and_time_query_fn = get_name_and_time_query_fn(data, full_data_norm, time_dim)
 
-    def get_input_data_norm(names, time_index):
-        return {
-            name: full_data_norm[name].select(dim=time_dim, index=time_index)
-            for name in names
-        }
+    full_target_tensor_norm = _pack_data_if_available(
+        out_packer,
+        full_data_norm,
+        channel_dim,
+    )
 
-    full_target_tensor_norm = out_packer.pack(full_data_norm, axis=channel_dim)
     loss = torch.tensor(0.0, device=get_device())
     metrics = {}
-    input_data_norm = get_input_data_norm(in_packer.names, time_input)
+    input_data_norm = name_and_time_query_fn(in_packer.names, 0, "norm")
     gen_data_norm = []
     optimization.set_mode(module)
     for step in range(n_forward_steps):
         input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
-        target_tensor_norm = full_target_tensor_norm.select(
-            dim=time_dim, index=time_target
-        )
+
+        if full_target_tensor_norm is None:
+            target_tensor_norm: Optional[torch.Tensor] = None
+        else:
+            target_tensor_norm = full_target_tensor_norm.select(
+                dim=time_dim, index=step + 1
+            )
 
         with optimization.autocast():
             gen_tensor_norm = module(input_tensor_norm).to(
                 get_device(), dtype=torch.float
             )
-            step_loss = loss_obj(gen_tensor_norm, target_tensor_norm)
+            if target_tensor_norm is None:
+                step_loss = torch.tensor(torch.nan)
+            else:
+                step_loss = loss_obj(gen_tensor_norm, target_tensor_norm)
             loss += step_loss
             metrics[f"loss_step_{step}"] = step_loss.detach()
         gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
-        target_norm = out_packer.unpack(target_tensor_norm, axis=channel_dim)
-        data_time = {
-            k: v.select(dim=time_dim, index=time_target) for k, v in data.items()
-        }
-        gen_norm = prescriber(data_time, gen_norm, target_norm)
-        time_input += 1
-        time_target += 1
+
+        gen_norm = prescriber(
+            name_and_time_query_fn(prescriber.mask_names, step + 1, "denorm"),
+            gen_norm,
+            name_and_time_query_fn(prescriber.prescribed_names, step + 1, "norm"),
+        )
+
         gen_data_norm.append(gen_norm)
         # update input data with generated outputs, and forcings for missing outputs
         forcing_names = list(set(in_packer.names).difference(gen_norm.keys()))
-        forcing_data_norm = get_input_data_norm(forcing_names, time_input)
+        forcing_data_norm = name_and_time_query_fn(forcing_names, step + 1, "norm")
         input_data_norm = {**forcing_data_norm, **gen_norm}
 
     metrics["loss"] = loss.detach()
     optimization.step_weights(loss)
     # prepend the initial (pre-first-timestep) output data to the generated data
-    initial = get_input_data_norm(out_packer.names, 0)
+    initial = name_and_time_query_fn(out_packer.names, 0, "norm")
     gen_data_norm = [initial] + gen_data_norm
     gen_data_norm_timeseries = {}
     for name in out_packer.names:
@@ -401,13 +452,15 @@ def run_on_batch(
             [x[name] for x in gen_data_norm], dim=time_dim
         )
     gen_data = normalizer.denormalize(gen_data_norm_timeseries)
+
     aggregator.record_batch(
-        loss,
+        float(loss),
         target_data=data,
         gen_data=gen_data,
         target_data_norm=full_data_norm,
         gen_data_norm=gen_data_norm_timeseries,
     )
+
     return SteppedData(
         metrics=metrics,
         gen_data=gen_data,
