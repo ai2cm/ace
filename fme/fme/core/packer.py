@@ -4,6 +4,12 @@ import torch
 import torch.jit
 
 
+class DataShapesNotUniform(ValueError):
+    """Indicates that a set of tensors do not all have the same shape."""
+
+    pass
+
+
 class Packer:
     """
     Responsible for packing tensors into a single tensor.
@@ -19,7 +25,19 @@ class Packer:
         Args:
             tensors: Dict from names to tensors.
             axis: index for new concatenation axis.
+
+        Raises:
+            DataShapesNotUniform: when packed tensors do not all have the same shape.
         """
+        shape = next(iter(tensors.values())).shape
+        for name in tensors:
+            if tensors[name].shape != shape:
+                raise DataShapesNotUniform(
+                    (
+                        f"Cannot pack tensors of different shapes. "
+                        'Expected "{shape}" got "{tensors[name].shape}"'
+                    )
+                )
         return _pack(tensors, self.names, axis=axis)
 
     def unpack(self, tensor: torch.Tensor, axis=0) -> Dict[str, torch.Tensor]:
