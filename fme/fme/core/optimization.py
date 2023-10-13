@@ -64,6 +64,8 @@ class Optimization:
                 self.scheduler.step()
 
     def step_weights(self, loss: torch.Tensor):
+        self._validate_loss(loss)
+
         if self.gscaler is not None:
             self.gscaler.scale(loss).backward()
             self.gscaler.step(self.optimizer)
@@ -99,6 +101,11 @@ class Optimization:
             self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
+
+    def _validate_loss(self, loss: torch.Tensor):
+        with torch.no_grad():
+            if torch.isnan(loss):
+                raise ValueError("Loss is NaN-valued during training.")
 
 
 @dataclasses.dataclass
