@@ -129,19 +129,23 @@ class AreaWeightedReducedMetric:
             gen: Generated data. Should have shape [batch, time, height, width].
             i_time_start: The index of the first timestep in the batch.
         """
-        new_value = self._compute_metric(
-            target, gen, weights=self._area_weights, dim=(-2, -1)
-        ).mean(dim=0)
-        if self._total is None:
-            self._total = torch.zeros(
-                [self._n_timesteps], dtype=new_value.dtype, device=self._device
-            )
-        time_slice = slice(i_time_start, i_time_start + gen.shape[1])
-        self._total[time_slice] += new_value
-        self._n_batches[time_slice] += 1
+        time_dim = 1
+        if target.shape[time_dim] >= gen.shape[time_dim]:
+            new_value = self._compute_metric(
+                target, gen, weights=self._area_weights, dim=(-2, -1)
+            ).mean(dim=0)
+            if self._total is None:
+                self._total = torch.zeros(
+                    [self._n_timesteps], dtype=new_value.dtype, device=self._device
+                )
+            time_slice = slice(i_time_start, i_time_start + gen.shape[1])
+            self._total[time_slice] += new_value
+            self._n_batches[time_slice] += 1
 
     def get(self) -> torch.Tensor:
         """Returns the mean metric across recorded batches."""
+        if self._total is None:
+            return torch.tensor(torch.nan)
         return self._total / self._n_batches
 
 

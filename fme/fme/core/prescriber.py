@@ -80,6 +80,15 @@ class Prescriber:
             gen_norm: Dictionary of generated data.
             target_norm: Dictionary of target data.
         """
+        for name, named_tensors in [("gen", gen_norm), ("target", target_norm)]:
+            if self.prescribed_name not in named_tensors:
+                raise ValueError(
+                    (
+                        f'Prescribed variable "{self.prescribed_name}" '
+                        f'is missing from "{name}"'
+                    )
+                )
+
         if self.interpolate:
             mask = data[self.mask_name]
             # 0 keeps the generated values, 1 replaces completely with the target values
@@ -120,6 +129,14 @@ class Prescriber:
             state.get("interpolate", False),
         )
 
+    @property
+    def prescribed_names(self) -> List[str]:
+        return [self.prescribed_name]
+
+    @property
+    def mask_names(self) -> List[str]:
+        return [self.mask_name]
+
 
 class NullPrescriber:
     """Dummy prescriber that does nothing."""
@@ -137,3 +154,11 @@ class NullPrescriber:
 
     def load_state(self, state):
         return
+
+    @property
+    def prescribed_names(self) -> List[str]:
+        return []
+
+    @property
+    def mask_names(self) -> List[str]:
+        return []
