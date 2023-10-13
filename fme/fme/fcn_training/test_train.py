@@ -5,6 +5,7 @@ import tempfile
 import unittest.mock
 from typing import Dict
 
+import cftime
 import numpy as np
 import pytest
 import xarray as xr
@@ -172,7 +173,7 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1):
     data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
     grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
     time = [
-        datetime.datetime(2000, 1, 1) + datetime.timedelta(days=i)
+        cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
         for i in range(data_dim_sizes["time"])
     ]
     stats_dim_sizes = {}

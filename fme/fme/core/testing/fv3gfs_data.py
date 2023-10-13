@@ -3,6 +3,7 @@ import datetime
 import pathlib
 from typing import Dict, List, Optional, Tuple
 
+import cftime
 import numpy as np
 import xarray as xr
 
@@ -10,10 +11,10 @@ from fme.core.data_loading.params import DataLoaderParams
 
 
 def _coord_value(name, size):
-    # xarray data loader requires time to be a datetime or cftime.datetime object
+    # xarray data loader requires time to be a cftime.datetime object
     if name == "time":
         return [
-            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
+            cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(hours=i)
             for i in range(size)
         ]
     else:

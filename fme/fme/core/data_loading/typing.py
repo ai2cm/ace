@@ -66,6 +66,7 @@ class GriddedData:
             averages. Has shape [n_lat, n_lon].
         sigma_coordinates: Sigma coordinates for each grid cell, used for computing
             pressure levels.
+        horizontal_coordinates: Lat/lon coordinates for the data.
         sampler: Optional sampler for the data loader. Provided to allow support for
             distributed training.
     """

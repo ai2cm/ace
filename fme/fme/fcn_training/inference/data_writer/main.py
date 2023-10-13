@@ -2,6 +2,7 @@ from typing import Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.data_loading.typing import VariableMetadata
 
@@ -72,6 +73,7 @@ class DataWriter:
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
         start_sample: int,
+        batch_times: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -81,6 +83,7 @@ class DataWriter:
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
             start_sample: Sample at which to start writing.
+            batch_times: Time coordinates for each sample in the batch.
         """
         for writer in self._writers:
             writer.append_batch(
@@ -88,6 +91,7 @@ class DataWriter:
                 prediction=prediction,
                 start_timestep=start_timestep,
                 start_sample=start_sample,
+                batch_times=batch_times,
             )
 
     def flush(self):
@@ -112,5 +116,6 @@ class NullDataWriter:
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
         start_sample: int,
+        batch_times: xr.DataArray,
     ):
         pass

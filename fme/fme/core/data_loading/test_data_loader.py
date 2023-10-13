@@ -7,27 +7,32 @@ from typing import List
 
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.typing import SigmaCoordinates
-from fme.core.data_loading.utils import apply_slice
+from fme.core.data_loading.utils import BatchData, apply_slice, get_times
 
 
-def _coord_value(name, size):
-    # xarray data loader requires time to be a datetime or cftime.datetime object
-    if name == "time":
-        return [
-            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
-            for i in range(size)
-        ]
-    else:
-        return np.arange(size, dtype=np.float32)
+def _get_coords(dim_sizes, calendar):
+    coords = {}
+    for dim_name, size in dim_sizes.items():
+        if dim_name == "time":
+            dtype = np.int64
+            attrs = {"calendar": calendar, "units": "seconds since 1970-01-01"}
+        else:
+            dtype = np.float32
+            attrs = {}
+        coord_value = np.arange(size, dtype=dtype)
+        coord = xr.DataArray(coord_value, dims=(dim_name,), attrs=attrs)
+        coords[dim_name] = coord
+    return coords
 
 
-def _save_netcdf(filename, dim_sizes, variable_names):
+def _save_netcdf(filename, dim_sizes, variable_names, calendar):
     data_vars = {}
     for name in variable_names:
         data = np.random.randn(*list(dim_sizes.values()))
@@ -36,14 +41,7 @@ def _save_netcdf(filename, dim_sizes, variable_names):
         data_vars[name] = xr.DataArray(
             data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
         )
-    coords = {
-        dim_name: xr.DataArray(
-            _coord_value(dim_name, size),
-            dims=(dim_name,),
-        )
-        for dim_name, size in dim_sizes.items()
-    }
-
+    coords = _get_coords(dim_sizes, calendar)
     for i in range(7):
         data_vars[f"ak_{i}"] = float(i)
         data_vars[f"bk_{i}"] = float(i + 1)
@@ -52,7 +50,9 @@ def _save_netcdf(filename, dim_sizes, variable_names):
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-def _create_dataset_on_disk(data_dir: pathlib.Path) -> pathlib.Path:
+def _create_dataset_on_disk(
+    data_dir: pathlib.Path, calendar: str = "proleptic_gregorian"
+) -> pathlib.Path:
     seed = 0
     np.random.seed(seed)
     in_variable_names = ["foo", "bar", "baz"]
@@ -62,7 +62,7 @@ def _create_dataset_on_disk(data_dir: pathlib.Path) -> pathlib.Path:
     data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
 
     data_path = data_dir / "data.nc"
-    _save_netcdf(data_path, data_dim_sizes, all_variable_names)
+    _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar)
 
     return data_path
 
@@ -99,6 +99,58 @@ def test_xarray_loader(tmp_path):
     requirements = DataRequirements(["foo"], [], [], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+
+
+@pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
+def calendar(request):
+    """
+    These are the calendars for the datasets we tend to use: 'julian'
+    for FV3GFS, 'noleap' for E3SM, and 'proleptic_gregorian' for generic
+    datetimes in testing.
+
+    Check that datasets created with each calendar for their time coordinate
+    are read by the data loader and the calendar is retained.
+    """
+    return request.param
+
+
+def test_data_loader_outputs(tmp_path, calendar):
+    _create_dataset_on_disk(tmp_path, calendar=calendar)
+    n_samples = 2
+    params = DataLoaderParams(
+        data_path=tmp_path,
+        data_type="xarray",
+        batch_size=n_samples,
+        num_data_workers=0,
+        n_samples=n_samples,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], [], [], window_timesteps)
+    data = get_data_loader(params, True, requirements)  # type: ignore
+    batch_data = next(iter(data.loader))
+    assert isinstance(batch_data, BatchData)
+    assert isinstance(batch_data.data["foo"], torch.Tensor)
+    assert batch_data.data["foo"].shape[0] == n_samples
+    assert isinstance(batch_data.times, xr.DataArray)
+    assert list(batch_data.times.dims) == ["sample", "time"]
+    assert batch_data.times.sizes["sample"] == n_samples
+    assert batch_data.times.sizes["time"] == window_timesteps
+    assert batch_data.times.dt.calendar == calendar
+
+
+def test_get_times_non_cftime():
+    """
+    Check that `get_times` raises an error when the time coordinate is not
+    cftime.datetime
+    """
+    n_times = 5
+    times = [datetime.datetime(2020, 1, 1, i, 0, 0) for i in range(n_times)]
+    ds = xr.Dataset(
+        {"foo": xr.DataArray(np.arange(n_times), dims=("time",))},
+        coords={"time": times},
+    )
+    with pytest.raises(AssertionError):
+        get_times(ds, 0, 1)
 
 
 @pytest.mark.parametrize(

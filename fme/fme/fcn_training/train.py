@@ -113,8 +113,8 @@ class Trainer:
         self._model_epoch = self.startEpoch
         self.num_batches_seen = 0
 
-        for data in self.train_data.loader:
-            shapes = {k: v.shape for k, v in data.items()}
+        for batch in self.train_data.loader:
+            shapes = {k: v.shape for k, v in batch.data.items()}
             break
         logging.info("Starting model initialization")
         self.stepper = config.stepper.get_stepper(
@@ -235,9 +235,9 @@ class Trainer:
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
             with torch.no_grad():
-                data = next(iter(self.train_data.loader))
+                batch = next(iter(self.train_data.loader))
                 stepped = self.stepper.run_on_batch(
-                    data,
+                    batch.data,
                     optimization=self._no_optimization,
                     n_forward_steps=self.config.n_forward_steps,
                 )
@@ -249,9 +249,9 @@ class Trainer:
                             for name, metric in sorted(stepped.metrics.items())
                         }
                     wandb.log(metrics, step=self.num_batches_seen)
-        for data in self.train_data.loader:
+        for batch in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
-                data,
+                batch.data,
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
                 aggregator=aggregator,
@@ -306,9 +306,9 @@ class Trainer:
         )
 
         with torch.no_grad(), self._validation_context():
-            for data in self.valid_data.loader:
+            for batch in self.valid_data.loader:
                 self.stepper.run_on_batch(
-                    data,
+                    batch.data,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
                     aggregator=aggregator,

@@ -5,11 +5,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from fme.core.data_loading._xarray import XarrayDataset, get_file_local_index
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.typing import SigmaCoordinates
-from fme.core.data_loading.xarray import XarrayDataset, get_file_local_index
 
 
 def _mock_netcdf_factory(tmpdir, start, end, file_freq, step_freq, calendar):
@@ -131,13 +130,15 @@ def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
     assert len(dataset) == len(obs_times) - 1
+    arrays, times = dataset[global_idx]
     with xr.open_mfdataset(tmpdir.glob("*.nc"), use_cftime=True) as ds:
+        target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
+        xr.testing.assert_equal(times, target_times)
         for varname in var_names:
-            target_data = ds[varname][global_idx : global_idx + 2, :, :].values
-            data = dataset[global_idx][varname].detach().numpy()
+            data = arrays[varname].detach().numpy()
             assert data.shape[0] == 2
+            target_data = ds[varname][global_idx : global_idx + 2, :, :].values
             assert np.all(data == target_data)
-    assert isinstance(dataset.sigma_coordinates, SigmaCoordinates)
 
 
 def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs):
@@ -229,9 +230,10 @@ def test_XarrayDataset_monthly_time_window_sample_length(mock_monthly_netcdfs):
         requirements=requirements,
         window_time_slice=slice(80, 120),
     )
-    batch = data.loader.dataset[129]
+    batch, times = data.loader.dataset[129]
     assert batch["foo"].shape[0] == 40  # time window should be length 40
     assert batch["bar"].shape[0] == 40
+    assert len(times) == 40
 
 
 @pytest.fixture(scope="session")
@@ -305,9 +307,14 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
                 target_data = ds[varname][
                     global_idx : global_idx + n_steps, :, :
                 ].values
-                data = dataset[global_idx][varname].detach().numpy()
+                target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
+                    "time"
+                )
+                data, times = dataset[global_idx]
+                data = data[varname].detach().numpy()
                 assert data.shape[0] == n_steps
                 assert np.all(data == target_data)
+                xr.testing.assert_equal(times, target_times)
 
 
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
@@ -323,5 +330,5 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
         names=var_names, in_names=var_names, out_names=var_names, n_timesteps=15
     )
     data = get_data_loader(params=params, train=False, requirements=requirements)
-    batch = data.loader.dataset[0]
+    batch, _ = data.loader.dataset[0]
     assert batch["constant_var"].shape[0] == 15
