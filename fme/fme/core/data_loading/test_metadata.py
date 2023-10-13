@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from typing import Literal, Mapping, Optional
 
+import cftime
 import numpy as np
 import pytest
 import xarray as xr
@@ -36,10 +37,10 @@ METADATA = [
 
 
 def _coord_value(name, size):
-    # xarray data loader requires time to be a datetime or cftime.datetime object
+    # xarray data loader requires time to be cftime.datetime object
     if name == "time":
         return [
-            datetime.datetime(2000, 1, 1) + datetime.timedelta(hours=i)
+            cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(hours=i)
             for i in range(size)
         ]
     else:

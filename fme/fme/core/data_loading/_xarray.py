@@ -12,7 +12,7 @@ from fme.core import metrics
 from .params import DataLoaderParams
 from .requirements import DataRequirements
 from .typing import Dataset, HorizontalCoordinates, SigmaCoordinates, VariableMetadata
-from .utils import apply_slice, get_lons_and_lats, load_series_data
+from .utils import apply_slice, get_lons_and_lats, get_times, load_series_data
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
@@ -173,7 +173,7 @@ class XarrayDataset(Dataset):
         return self._metadata
 
     @property
-    def sigma_coordinates(self):
+    def sigma_coordinates(self) -> SigmaCoordinates:
         return self._sigma_coordinates
 
     def __len__(self):
@@ -183,17 +183,24 @@ class XarrayDataset(Dataset):
         return xr.open_dataset(
             self.full_paths[idx],
             engine=self.engine,
-            decode_times=False,
+            use_cftime=True,
             cache=False,
             mask_and_scale=False,
         )
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
         """Open a time-ordered subset of the files which contain the input with
         global index idx and its outputs. Get a starting index in the first file
         (input_local_idx) and a final index in the last file (output_local_idx),
         returning the time-ordered sequence of observations from input_local_idx
         to output_local_idx (inclusive).
+
+        Args:
+            idx: Index of the sample to retrieve.
+
+        Returns:
+            Tuple of a sample's data (a mapping from names to data, for use in
+                training and inference) and its corresponding time coordinates.
 
         """
         # transform sample index to timestep index
@@ -217,6 +224,7 @@ class XarrayDataset(Dataset):
 
         # get the sequence of observations
         arrays: Dict[str, torch.Tensor] = {}
+        times_segments: List[xr.DataArray] = []
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):
@@ -230,9 +238,11 @@ class XarrayDataset(Dataset):
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
+            times_segments.append(get_times(ds, start, n_steps))
             del ds
         for n, tensor_list in arrays.items():
             arrays[n] = torch.cat(tensor_list)
+        times: xr.DataArray = xr.concat(times_segments, dim="time")
 
         # load time-invariant variables from first dataset
         ds = self._open_file(idxs[0])
@@ -240,4 +250,4 @@ class XarrayDataset(Dataset):
             tensor = torch.as_tensor(ds[name].values)
             arrays[name] = tensor.repeat((total_steps, 1, 1))
 
-        return arrays
+        return arrays, times

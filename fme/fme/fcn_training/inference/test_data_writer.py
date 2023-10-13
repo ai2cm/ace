@@ -1,5 +1,6 @@
 from typing import NamedTuple
 
+import cftime
 import numpy as np
 import pytest
 import torch
@@ -7,12 +8,51 @@ import xarray as xr
 from netCDF4 import Dataset
 
 from fme.fcn_training.inference.data_writer import DataWriter
+from fme.fcn_training.inference.data_writer.prediction import (
+    get_batch_lead_times_microseconds,
+)
+
+CALENDAR_CFTIME = {
+    "julian": cftime.DatetimeJulian,
+    "proleptic_gregorian": cftime.DatetimeProlepticGregorian,
+    "noleap": cftime.DatetimeNoLeap,
+}
+
+SECONDS_PER_HOUR = 3600
+MICROSECONDS_PER_SECOND = 1_000_000
 
 
 class TestDataWriter:
     class VariableMetadata(NamedTuple):
         units: str
         long_name: str
+
+    @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
+    def calendar(self, request):
+        """
+        These are the calendars for the datasets we tend to use: 'julian'
+        for FV3GFS, 'noleap' for E3SM, and 'proleptic_gregorian' for generic
+        datetimes in testing.
+
+        Check that output datasets written with each calendar for their
+        time coordinate re-load correctly.
+        """
+        return request.param
+
+    def get_batch_times(self, start_time, end_time, freq, n_samples, calendar="julian"):
+        datetime_class = CALENDAR_CFTIME[calendar]
+        start_time = datetime_class(*start_time)
+        end_time = datetime_class(*end_time)
+        batch_times = xr.DataArray(
+            xr.cftime_range(
+                start_time,
+                end_time,
+                freq=freq,
+                calendar=calendar,
+            ).values,
+            dims="time",
+        )
+        return xr.concat([batch_times for _ in range(n_samples)], dim="sample")
 
     @pytest.fixture
     def sample_metadata(self):
@@ -46,20 +86,13 @@ class TestDataWriter:
         }
         return data
 
-    @pytest.mark.parametrize(
-        ["save_names"],
-        [
-            pytest.param(None, id="None"),
-            pytest.param(["temp", "humidity", "pressure"], id="subset"),
-        ],
-    )
     def test_append_batch(
         self,
         sample_metadata,
         sample_target_data,
         sample_prediction_data,
         tmp_path,
-        save_names,
+        calendar,
     ):
         n_samples = 4
         n_timesteps = 6
@@ -71,37 +104,62 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
-            save_names=save_names,
+            save_names=None,
+        )
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 12, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6H",
+            n_samples=n_samples // 2,
+            calendar=calendar,
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=0,
+            start_sample=0,
+            batch_times=batch_times,
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=2
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=0,
+            start_sample=2,
+            batch_times=batch_times,
+        )
+        start_time_2 = (2020, 1, 1, 18, 0, 0)
+        end_time_2 = (2020, 1, 2, 6, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time_2,
+            end_time=end_time_2,
+            freq="6H",
+            n_samples=n_samples // 2,
+            calendar=calendar,
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=3, start_sample=0
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=3,
+            start_sample=0,
+            batch_times=batch_times,
         )
         writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=3, start_sample=2
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=3,
+            start_sample=2,
+            batch_times=batch_times,
         )
         writer.flush()
 
-        # Open the file again and check the data
+        # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
-        expected_variables = (
-            set(save_names)
-            if save_names is not None
-            else set(sample_target_data.keys())
-        )
-        assert set(dataset.variables.keys()) == expected_variables.union(
-            {"source", "lat", "lon"}
-        )
-        assert (
-            dataset.variables["source"][:] == np.array(["target", "prediction"])
-        ).all()
-
-        for var_name in expected_variables:
+        assert dataset["lead"].units == "microseconds"
+        assert dataset["init"].units == "microseconds since 1970-01-01 00:00:00"
+        assert dataset["init"].calendar == calendar
+        for var_name in set(sample_target_data.keys()):
             var_data = dataset.variables[var_name][:]
             assert var_data.shape == (
                 2,
@@ -130,6 +188,40 @@ class TestDataWriter:
 
         dataset.close()
 
+        # Open the file again with xarray and check the time coordinates,
+        # since the values opened this way depend on calendar/units
+        with xr.open_dataset(
+            tmp_path / "autoregressive_predictions.nc",
+            use_cftime=True,
+            decode_timedelta=False,  # prefer handling lead times in ints not timedelta
+        ) as ds:
+            expected_lead_times = xr.DataArray(
+                [
+                    MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
+                    for i in np.arange(0, 31, 6)
+                ],
+                dims="lead",
+            ).assign_coords(
+                {
+                    "lead": [
+                        MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
+                        for i in np.arange(0, 31, 6)
+                    ]
+                }
+            )
+            xr.testing.assert_equal(ds["lead"], expected_lead_times)
+            expected_init_times = xr.DataArray(
+                [CALENDAR_CFTIME[calendar](*start_time) for _ in range(n_samples)],
+                dims=["sample"],
+            )
+            expected_init_times = expected_init_times.assign_coords(
+                {"init": expected_init_times}
+            )
+            xr.testing.assert_equal(ds["init"], expected_init_times)
+            for var_name in set(sample_target_data.keys()):
+                assert "valid_time" in ds[var_name].coords
+                assert "init" in ds[var_name].coords
+
         histograms = xr.open_dataset(tmp_path / "histograms.nc")
         actual_var_names = sorted([str(k) for k in histograms.keys()])
         assert len(actual_var_names) == 8
@@ -143,10 +235,107 @@ class TestDataWriter:
         )
         assert same_count_each_timestep
 
+    @pytest.mark.parametrize(
+        ["save_names"],
+        [
+            pytest.param(None, id="None"),
+            pytest.param(["temp", "humidity", "pressure"], id="subset"),
+        ],
+    )
+    def test_append_batch_save_names(
+        self,
+        sample_metadata,
+        sample_target_data,
+        sample_prediction_data,
+        tmp_path,
+        save_names,
+    ):
+        n_samples = 2
+        writer = DataWriter(
+            str(tmp_path),
+            n_samples=n_samples,
+            n_timesteps=4,  # unused
+            metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            enable_prediction_netcdfs=True,
+            enable_video_netcdfs=False,
+            save_names=save_names,
+        )
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 12, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6H",
+            n_samples=n_samples,
+        )
+        writer.append_batch(
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=0,
+            start_sample=0,
+            batch_times=batch_times,
+        )
+        # Open the file again and check the data
+        dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
+        expected_variables = (
+            set(save_names)
+            if save_names is not None
+            else set(sample_target_data.keys())
+        )
+        assert set(dataset.variables.keys()) == expected_variables.union(
+            {"source", "init", "lead", "lat", "lon", "valid_time"}
+        )
+
     def test_append_batch_past_end_of_samples(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
         n_samples = 4
+        writer = DataWriter(
+            str(tmp_path),
+            n_samples=n_samples,
+            n_timesteps=4,  # unused
+            metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            enable_prediction_netcdfs=True,
+            enable_video_netcdfs=False,
+            save_names=None,
+        )
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 12, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6H",
+            n_samples=n_samples // 2,
+        )
+        writer.append_batch(
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=0,
+            start_sample=0,
+            batch_times=batch_times,
+        )
+        writer.append_batch(
+            sample_target_data,
+            sample_prediction_data,
+            start_timestep=0,
+            start_sample=2,
+            batch_times=batch_times,
+        )
+        with pytest.raises(ValueError):
+            writer.append_batch(
+                sample_target_data,
+                sample_prediction_data,
+                start_timestep=0,
+                start_sample=4,
+                batch_times=batch_times,
+            )
+
+    def test_append_batch_data_time_mismatch(
+        self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
+    ):
+        n_samples = 2
         writer = DataWriter(
             str(tmp_path),
             n_samples=n_samples,
@@ -157,16 +346,158 @@ class TestDataWriter:
             enable_video_netcdfs=False,
             save_names=None,
         )
-        writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=0
-        )
-        writer.append_batch(
-            sample_target_data, sample_prediction_data, start_timestep=0, start_sample=2
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 12, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6H",
+            n_samples=n_samples + 1,
         )
         with pytest.raises(ValueError):
             writer.append_batch(
                 sample_target_data,
                 sample_prediction_data,
                 start_timestep=0,
-                start_sample=4,
+                start_sample=0,
+                batch_times=batch_times,
             )
+
+
+@pytest.mark.parametrize(
+    ["init_times", "batch_times", "expected"],
+    [
+        pytest.param(
+            np.array([cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0) for _ in range(3)]),
+            np.array(
+                [
+                    xr.cftime_range(
+                        cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0),
+                        freq="6H",
+                        periods=3,
+                    ).values
+                    for _ in range(3)
+                ]
+            ),
+            np.array(
+                [
+                    MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
+                    for i in range(0, 18, 6)
+                ]
+            ),
+            id="init_same",
+        ),
+        pytest.param(
+            np.array(
+                [cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0) for i in range(3)]
+            ),
+            np.array(
+                [
+                    xr.cftime_range(
+                        cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0),
+                        freq="6H",
+                        periods=3,
+                    )
+                    for i in range(3)
+                ]
+            ),
+            np.array(
+                [
+                    MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
+                    for i in range(0, 18, 6)
+                ]
+            ),
+            id="init_different",
+        ),
+        pytest.param(
+            np.array(
+                [cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0) for i in range(3)]
+            ),
+            np.array(
+                [
+                    xr.cftime_range(
+                        cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
+                        freq="6H",
+                        periods=3,
+                    )
+                    for i in range(3)
+                ]
+            ),
+            np.array(
+                [
+                    MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
+                    for i in range(24, 42, 6)
+                ]
+            ),
+            id="not_initial_time_window",
+        ),
+    ],
+)
+def test_get_batch_lead_times_microseconds(init_times, batch_times, expected):
+    lead_time_seconds = get_batch_lead_times_microseconds(init_times, batch_times)
+    assert lead_time_seconds.shape == expected.shape
+    np.testing.assert_equal(lead_time_seconds, expected)
+
+
+def test_get_batch_lead_times_microseconds_length_mismatch():
+    init_times = np.array(
+        [cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0) for i in range(3)]
+    )
+    batch_times = np.array(
+        [
+            xr.cftime_range(
+                cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
+                freq="6H",
+                periods=3,
+            ).values
+            for i in range(2)
+        ],
+    )
+    with pytest.raises(ValueError):
+        get_batch_lead_times_microseconds(init_times, batch_times)
+
+
+def test_get_batch_lead_times_microseconds_inconsistent_samples():
+    init_times = np.array(
+        [cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0) for _ in range(2)]
+    )
+    batch_times = np.array(
+        [
+            xr.cftime_range(
+                cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0),
+                freq="6H",
+                periods=3,
+            ),
+            xr.cftime_range(
+                cftime.DatetimeJulian(2020, 1, 1, 12, 0, 0),
+                freq="6H",
+                periods=3,
+            ),
+        ]
+    )
+    with pytest.raises(ValueError):
+        get_batch_lead_times_microseconds(init_times, batch_times)
+
+
+@pytest.mark.parametrize(
+    ["years_ahead", "overflow"],
+    [
+        pytest.param(1e2, False, id="100_years_OK"),
+        pytest.param(1e4, False, id="10_000_years_OK"),
+        pytest.param(1e6, True, id="1_000_000_years_fails"),
+    ],
+)
+def test_get_batch_lead_times_microseconds_overflow(years_ahead, overflow):
+    init_times = np.array([cftime.DatetimeNoLeap(2020, 1, 1)])
+    batch_times = np.array([cftime.DatetimeNoLeap(2020 + years_ahead, 1, 1)])[:, None]
+    days_per_year_noleap = 365
+    seconds_per_day = 86400
+    expected_lead_time_microseconds = (
+        MICROSECONDS_PER_SECOND * seconds_per_day * days_per_year_noleap * years_ahead
+    )
+    if not overflow:
+        lead_time = get_batch_lead_times_microseconds(init_times, batch_times)
+        assert lead_time.item() == expected_lead_time_microseconds
+    else:
+        with pytest.raises(OverflowError):
+            get_batch_lead_times_microseconds(init_times, batch_times)

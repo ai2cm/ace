@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Mapping, Optional, Protocol, Union
 
 import torch
+import xarray as xr
 
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
@@ -29,7 +30,12 @@ class EnsembleBatch:
         # tensors have shape [n_sample, n_lat, n_lon] with no time axis
         self._initial_condition: Optional[Mapping[str, torch.Tensor]] = None
 
-    def append(self, data, gen_data):
+    def append(
+        self,
+        data: Dict[str, torch.tensor],
+        gen_data: Dict[str, torch.tensor],
+        batch_times: xr.DataArray,
+    ) -> None:
         """
         Appends a time segment of data to the ensemble batch.
 
@@ -38,6 +44,7 @@ class EnsembleBatch:
                 should have shape [n_sample, n_time, n_lat, n_lon]
             gen_data: The generated data for the current time segment, tensors
                 should have shape [n_sample, n_time, n_lat, n_lon]
+            batch_times: Time coordinates for each sample in the batch.
         """
         tensor_shape = next(data.values().__iter__()).shape
         batch_size = tensor_shape[0]
@@ -46,6 +53,7 @@ class EnsembleBatch:
             prediction=gen_data,
             start_timestep=self.i_time,
             start_sample=self.i_batch * batch_size,
+            batch_times=batch_times,
         )
         self.i_time += tensor_shape[1]
         if self.i_time < self.n_forward_steps:  # only store if needed
@@ -91,6 +99,7 @@ def _inference_internal_loop(
     sigma_coords: SigmaCoordinates,
     aggregator: InferenceAggregator,
     batch_manager: EnsembleBatch,
+    batch_times: xr.DataArray,
 ):
     """Do operations that need to be done on each time step of the inference loop.
 
@@ -102,12 +111,13 @@ def _inference_internal_loop(
     # and discard the initial sample of the window
     if i_time > 0:
         stepped = stepped.remove_initial_condition()
+        batch_times = batch_times.isel(time=slice(1, None))
         i_time_aggregator = i_time + 1
     else:
         i_time_aggregator = i_time
     # record raw data for the batch, and store the final state
     # for the next segment
-    batch_manager.append(stepped.target_data, stepped.gen_data)
+    batch_manager.append(stepped.target_data, stepped.gen_data, batch_times)
     # record metrics
     aggregator.record_batch(
         loss=float(stepped.metrics["loss"]),
@@ -160,8 +170,8 @@ def run_inference(
             # time window
             valid_data_loader = data_loader_factory(window_time_slice=time_slice)
             sigma_coords = valid_data_loader.sigma_coordinates
-            for data, batch_manager in zip(valid_data_loader.loader, batch_managers):
-                data = {key: value.to(device) for key, value in data.items()}
+            for batch, batch_manager in zip(valid_data_loader.loader, batch_managers):
+                data = {key: value.to(device) for key, value in batch.data.items()}
                 # overwrite the first timestep with the last generated timestep
                 # from the previous segment
                 batch_manager.apply_initial_condition(data)
@@ -176,6 +186,7 @@ def run_inference(
                     sigma_coords,
                     aggregator,
                     batch_manager,
+                    batch.times,
                 )
 
 
@@ -231,14 +242,14 @@ def run_dataset_inference(
                 window_time_slice=time_slice
             )
             sigma_coords = valid_data_loader.sigma_coordinates
-            for valid_data, predicted_data, batch_manager in zip(
+            for valid_batch, predicted_batch, batch_manager in zip(
                 valid_data_loader.loader, predicted_data_loader.loader, batch_managers
             ):
                 valid_data = {
-                    key: value.to(device) for key, value in valid_data.items()
+                    key: value.to(device) for key, value in valid_batch.data.items()
                 }
                 predicted_data = {
-                    key: value.to(device) for key, value in predicted_data.items()
+                    key: value.to(device) for key, value in predicted_batch.data.items()
                 }
                 stepped = SteppedData(
                     {"loss": torch.tensor(float("nan"))},
@@ -253,4 +264,5 @@ def run_dataset_inference(
                     sigma_coords,
                     aggregator,
                     batch_manager,
+                    valid_batch.times,
                 )

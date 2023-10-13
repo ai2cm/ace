@@ -3,6 +3,7 @@ from typing import Dict, Mapping
 
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.aggregator.inference.video import VideoAggregator
 from fme.core.data_loading.typing import VariableMetadata
@@ -44,6 +45,7 @@ class VideoDataWriter:
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
         start_sample: int,
+        batch_times: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -52,7 +54,8 @@ class VideoDataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing.
+            start_sample: Sample at which to start writing. Unused.
+            batch_times: Time coordinates for each sample in the batch. Unused.
         """
         self._video.record_batch(
             loss=np.nan,

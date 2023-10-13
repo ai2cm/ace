@@ -126,8 +126,8 @@ class InferenceConfig:
 
 def get_n_samples(data_loader):
     n_samples = 0
-    for data in data_loader:
-        n_samples += next(data.values().__iter__()).shape[0]
+    for batch in data_loader:
+        n_samples += next(iter(batch.data.values())).shape[0]
     return n_samples
 
 
