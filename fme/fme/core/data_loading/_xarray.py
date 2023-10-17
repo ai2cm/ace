@@ -80,11 +80,7 @@ class XarrayDataset(Dataset):
         window_time_slice: Optional[slice] = None,
     ):
         self.params = params
-        self.in_names = requirements.in_names
-        self.out_names = requirements.out_names
         self.names = requirements.names
-        self.n_in_channels = len(self.in_names)
-        self.n_out_channels = len(self.out_names)
         self.path = params.data_path
         self.n_workers = params.num_data_workers
         self.engine = "netcdf4" if params.engine is None else params.engine

@@ -81,7 +81,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
     params = DataLoaderParams(tmp_path, "ensemble_xarray", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
-    requirements = DataRequirements(["foo"], [], [], window_timesteps)
+    requirements = DataRequirements(["foo"], window_timesteps)
 
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
@@ -96,7 +96,7 @@ def test_xarray_loader(tmp_path):
     _create_dataset_on_disk(tmp_path)
     params = DataLoaderParams(tmp_path, "xarray", 1, 0, None)
     window_timesteps = 2  # 1 initial condition and 1 step forward
-    requirements = DataRequirements(["foo"], [], [], window_timesteps)
+    requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
@@ -125,7 +125,7 @@ def test_data_loader_outputs(tmp_path, calendar):
         n_samples=n_samples,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
-    requirements = DataRequirements(["foo"], [], [], window_timesteps)
+    requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
