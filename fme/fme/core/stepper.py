@@ -48,8 +48,6 @@ class SingleModuleStepperConfig:
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
             names=self.all_names,
-            in_names=self.in_names,
-            out_names=self.out_names,
             n_timesteps=n_forward_steps + 1,
         )
 
