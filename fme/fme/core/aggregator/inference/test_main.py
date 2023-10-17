@@ -44,6 +44,7 @@ def test_logs_labels_exist():
         "weighted_bias/a",
         "weighted_grad_mag_percent_diff/a",
         "weighted_mean_gen/a",
+        "weighted_mean_target/a",
         "weighted_rmse/a",
         "weighted_std_gen/a",
     ]
@@ -82,10 +83,12 @@ def test_inference_logs_labels_exist():
     assert len(logs) == n_time
     assert "test/mean/weighted_bias/a" in logs[0]
     assert "test/mean/weighted_mean_gen/a" in logs[0]
+    assert "test/mean/weighted_mean_target/a" in logs[0]
     assert "test/mean/weighted_grad_mag_percent_diff/a" in logs[0]
     assert "test/mean/weighted_rmse/a" in logs[0]
     assert "test/mean_norm/weighted_bias/a" in logs[0]
     assert "test/mean_norm/weighted_mean_gen/a" in logs[0]
+    assert "test/mean_norm/weighted_mean_target/a" in logs[0]
     assert "test/mean_norm/weighted_grad_mag_percent_diff/a" in logs[0]
     assert "test/mean_norm/weighted_rmse/a" in logs[0]
     # series/table data should be rolled out, not included as a table
