@@ -114,9 +114,7 @@ def test_metadata(metadata, data_type):
             data_path=str(path), data_type=data_type, batch_size=1, num_data_workers=0
         )
         var_names = list(metadata.keys())
-        requirements = DataRequirements(
-            names=var_names, in_names=var_names, out_names=var_names, n_timesteps=2
-        )
+        requirements = DataRequirements(names=var_names, n_timesteps=2)
         data = get_data_loader(params=params, train=True, requirements=requirements)
         target_metadata = {
             name: metadata[name] for name in metadata if metadata[name] is not None
