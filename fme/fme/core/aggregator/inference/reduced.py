@@ -180,6 +180,7 @@ class MeanAggregator:
                 "weighted_rmse": {},
                 "weighted_grad_mag_percent_diff": {},
                 "weighted_mean_gen": {},
+                "weighted_mean_target": {},
                 "weighted_bias": {},
                 "weighted_std_gen": {},
             }
@@ -209,6 +210,16 @@ class MeanAggregator:
                     device=device,
                     compute_metric=compute_metric_on(
                         source="gen", metric=metrics.weighted_mean
+                    ),
+                    n_timesteps=self._n_timesteps,
+                )
+                self._variable_metrics["weighted_mean_target"][
+                    key
+                ] = AreaWeightedReducedMetric(
+                    area_weights=area_weights,
+                    device=device,
+                    compute_metric=compute_metric_on(
+                        source="target", metric=metrics.weighted_mean
                     ),
                     n_timesteps=self._n_timesteps,
                 )
