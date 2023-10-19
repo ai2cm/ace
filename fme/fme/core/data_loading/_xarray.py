@@ -1,5 +1,6 @@
 import logging
 import os
+from collections import namedtuple
 from glob import glob
 from typing import Dict, List, Mapping, Optional, Tuple
 
@@ -13,6 +14,11 @@ from .params import DataLoaderParams
 from .requirements import DataRequirements
 from .typing import Dataset, HorizontalCoordinates, SigmaCoordinates, VariableMetadata
 from .utils import apply_slice, get_lons_and_lats, get_times, load_series_data
+
+VariableNames = namedtuple(
+    "VariableNames",
+    ("time_dependent_names", "time_invariant_names", "initial_condition_names"),
+)
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
@@ -73,6 +79,9 @@ def get_file_local_index(
 
 
 class XarrayDataset(Dataset):
+    """Handles dataloading over multiple netcdf files using the xarray library.
+    Assumes that the netcdf filenames are time-ordered."""
+
     def __init__(
         self,
         params: DataLoaderParams,
@@ -91,7 +100,8 @@ class XarrayDataset(Dataset):
         (
             self.time_dependent_names,
             self.time_invariant_names,
-        ) = self._get_time_names()
+            self.initial_condition_names,
+        ) = self._group_variable_names_by_time_type()
         self.window_time_slice = window_time_slice
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -128,8 +138,12 @@ class XarrayDataset(Dataset):
         self.file_start_times = xr.CFTimeIndex(file_start_times)
         with xr.open_mfdataset(self.full_paths, use_cftime=True) as ds:
             self.observation_times = ds.get_index("time")
-            # minus (n_steps - 1) since don't have outputs for those steps
-            n_candidate_ics = len(self.observation_times) - self.n_steps + 1
+
+            if "initial_condition" in ds.dims:
+                n_candidate_ics = 1
+            else:
+                n_candidate_ics = len(self.observation_times) - self.n_steps + 1
+
             self._initial_conditions = list(range(n_candidate_ics))[
                 self.params.window_starts.slice
             ]
@@ -148,17 +162,26 @@ class XarrayDataset(Dataset):
             logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
             logging.info(f"Following variables are available: {list(ds.variables)}.")
 
-    def _get_time_names(self) -> Tuple[List[str], List[str]]:
-        time_dependent_names = []
-        # Don't use open_mfdataset here, because it will give time-invariant fields
-        # a time dimension. We are assuming that time-invariant fields which exist
-        # in all individual datasets are invariant across those datasets.
+    def _group_variable_names_by_time_type(self) -> VariableNames:
+        """Returns lists of time-dependent variable names, time-independent
+        variable names, and variables which are only present as an initial
+        condition."""
+        time_dependent_names, time_invariant_names, initial_condition_names = [], [], []
+        # Don't use open_mfdataset here, because it will give time-invariant
+        # fields a time dimension. We assume that all fields are present in the
+        # netcdf file corresponding to the first chunk of time.
         with xr.open_dataset(self.full_paths[0]) as ds:
             for name in self.names:
-                if "time" in ds[name].dims:
+                dims = ds[name].dims
+                if "time" in dims:
                     time_dependent_names.append(name)
-        time_invariant_names = list(set(self.names) - set(time_dependent_names))
-        return time_dependent_names, time_invariant_names
+                elif "initial_condition" in dims:
+                    initial_condition_names.append(name)
+                else:
+                    time_invariant_names.append(name)
+        return VariableNames(
+            time_dependent_names, time_invariant_names, initial_condition_names
+        )
 
     @property
     def area_weights(self) -> torch.Tensor:
@@ -197,7 +220,6 @@ class XarrayDataset(Dataset):
         Returns:
             Tuple of a sample's data (a mapping from names to data, for use in
                 training and inference) and its corresponding time coordinates.
-
         """
         # transform sample index to timestep index
         idx = self._initial_conditions[idx]
@@ -219,7 +241,7 @@ class XarrayDataset(Dataset):
         )
 
         # get the sequence of observations
-        arrays: Dict[str, torch.Tensor] = {}
+        arrays: Dict[str, List[torch.Tensor]] = {}
         times_segments: List[xr.DataArray] = []
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
@@ -236,14 +258,20 @@ class XarrayDataset(Dataset):
                 arrays.setdefault(n, []).append(tensor_dict[n])
             times_segments.append(get_times(ds, start, n_steps))
             del ds
+
+        tensors: Dict[str, torch.Tensor] = {}
         for n, tensor_list in arrays.items():
-            arrays[n] = torch.cat(tensor_list)
+            tensors[n] = torch.cat(tensor_list)
+        del arrays
         times: xr.DataArray = xr.concat(times_segments, dim="time")
 
         # load time-invariant variables from first dataset
         ds = self._open_file(idxs[0])
         for name in self.time_invariant_names:
             tensor = torch.as_tensor(ds[name].values)
-            arrays[name] = tensor.repeat((total_steps, 1, 1))
+            tensors[name] = tensor.repeat((total_steps, 1, 1))
 
-        return arrays, times
+        for name in self.initial_condition_names:
+            tensors[name] = torch.as_tensor(ds[name].values)
+
+        return tensors, times
