@@ -195,7 +195,6 @@ class SingleModuleStepper:
                 self.module,
                 device_ids=device_ids,
                 output_device=output_device,
-                find_unused_parameters=True,
             )
         else:
             self.module = DummyWrapper(self.module)
