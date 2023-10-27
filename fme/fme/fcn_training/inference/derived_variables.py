@@ -6,7 +6,7 @@ import torch
 from toolz import curry
 
 from fme.core import metrics
-from fme.core.aggregator.climate_data import ClimateData
+from fme.core.climate_data import ClimateData
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
