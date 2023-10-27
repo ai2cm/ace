@@ -46,12 +46,14 @@ def save_plus_one_stepper(
         ),
         prescriber=None,
     )
-
+    area = torch.ones(data_shape[-2:], device=get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         shapes={
             name: data_shape for name in names
         },  # this data is unused for this test
-        area=None,  # not actually used in this test
+        area=area,
+        sigma_coordinates=sigma_coordinates,
     )
     torch.save({"stepper": stepper.get_state()}, path)
 

@@ -4,10 +4,50 @@ import numpy as np
 import torch
 from typing_extensions import TypeAlias
 
+from fme.core.data_loading.typing import SigmaCoordinates
+
+from .climate_data import ClimateData
+
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
 
 GRAVITY = 9.80665  # m/s^2
+
+
+def compute_dry_air_absolute_differences(
+    climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+) -> torch.Tensor:
+    """
+    Computes the absolute value of the dry air tendency of each time step.
+
+    Args:
+        climate_data: ClimateData object.
+        area: Area of each grid cell as a [lat, lon] tensor, in m^2.
+        sigma_coordinates: The sigma coordinates of the model.
+
+    Returns:
+        A tensor of shape (time,) of the absolute value of the dry air tendency
+            of each time step.
+    """
+    water = climate_data.specific_total_water
+    pressure = climate_data.surface_pressure
+    if water is None or pressure is None:
+        return torch.tensor([torch.nan])
+    return (
+        weighted_mean(
+            surface_pressure_due_to_dry_air(
+                water,  # (sample, time, y, x, level)
+                pressure,
+                sigma_coordinates.ak,
+                sigma_coordinates.bk,
+            ),
+            area,
+            dim=(2, 3),
+        )
+        .diff(dim=-1)
+        .abs()
+        .mean(dim=0)
+    )
 
 
 def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:

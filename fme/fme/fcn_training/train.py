@@ -120,6 +120,7 @@ class Trainer:
         self.stepper = config.stepper.get_stepper(
             shapes,
             area=self.train_data.area_weights,
+            sigma_coordinates=self.train_data.sigma_coordinates,
         )
         self.optimization = config.optimization.build(
             self.stepper.module.parameters(), config.max_epochs

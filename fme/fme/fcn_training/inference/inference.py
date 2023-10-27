@@ -15,7 +15,7 @@ from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
-from fme.core.data_loading.typing import GriddedData
+from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
@@ -30,9 +30,13 @@ def _load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
     return SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
 
 
-def _load_stepper(checkpoint_file: str, area: torch.Tensor) -> SingleModuleStepper:
+def _load_stepper(
+    checkpoint_file: str, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(checkpoint["stepper"], area=area)
+    stepper = SingleModuleStepper.from_state(
+        checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
+    )
     return stepper
 
 
@@ -97,14 +101,19 @@ class InferenceConfig:
     def configure_gcs(self):
         self.logging.configure_gcs()
 
-    def load_stepper(self, area: torch.Tensor) -> SingleModuleStepper:
+    def load_stepper(
+        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+    ) -> SingleModuleStepper:
         """
         Args:
             area: A tensor of shape (n_lat, n_lon) containing the area of
                 each grid cell.
+            sigma_coordinates: The sigma coordinates of the model.
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return _load_stepper(self.checkpoint_path, area)
+        return _load_stepper(
+            self.checkpoint_path, area, sigma_coordinates=sigma_coordinates
+        )
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
@@ -178,7 +187,10 @@ def main(
     # use window_time_slice to avoid loading a large number of timesteps
     validation = _get_data_loader(window_time_slice=slice(0, 1))
 
-    stepper = config.load_stepper(validation.area_weights.to(fme.get_device()))
+    stepper = config.load_stepper(
+        validation.area_weights.to(fme.get_device()),
+        sigma_coordinates=validation.sigma_coordinates.to(fme.get_device()),
+    )
 
     aggregator = InferenceAggregator(
         validation.area_weights.to(fme.get_device()),

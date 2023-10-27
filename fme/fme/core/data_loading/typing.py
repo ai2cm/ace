@@ -29,6 +29,15 @@ class SigmaCoordinates:
     def coords(self) -> Mapping[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
 
+    def to(self, device: str) -> "SigmaCoordinates":
+        return SigmaCoordinates(
+            ak=self.ak.to(device),
+            bk=self.bk.to(device),
+        )
+
+    def as_dict(self) -> Mapping[str, torch.Tensor]:
+        return {"ak": self.ak, "bk": self.bk}
+
 
 @dataclasses.dataclass
 class HorizontalCoordinates:
