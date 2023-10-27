@@ -27,21 +27,14 @@ DROP_VARIABLES = (
     + [f"bk_{i}" for i in range(9)]
 )
 
-# The "residual scaling" approach is only applied to prognostic variables, which are
-# specified below.
-PROGNOSTIC_VARIABLES = {
-    "FV3GFS": ["PRESsfc", "surface_temperature"]
-    + [f"air_temperature_{i}" for i in range(8)]
-    + [f"specific_total_water_{i}" for i in range(8)]
-    + [f"eastward_wind_{i}" for i in range(8)]
-    + [f"northward_wind_{i}" for i in range(8)],
-    "E3SMV2": ["PS", "TS"]
-    + [f"T_{i}" for i in range(8)]
-    + [f"specific_total_water_{i}" for i in range(8)]
-    + [f"U_{i}" for i in range(8)]
-    + [f"V_{i}" for i in range(8)],
+# these variables either have no time dimension, or we expect them to vary
+# only slightly in time (e.g. ocean_fraction and sea_ice_fraction). So we
+# specify them here to indicate that their standard deviations should always be
+# computed using the "full-field" approach.
+TIME_INVARIANT_VARIABLES = {
+    "FV3GFS": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
+    "E3SMV2": ("PHIS", "OCNFRAC"),
 }
-
 
 DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
@@ -71,10 +64,16 @@ def compute_residual_scaling(
     norm = (ds - centering) / scaling
     norm_residual = norm.diff("time")
     norm_residual_stddev = norm_residual.std(dim=dims)
-    # normalize the rescaling by max across variables so that minimum prognostic
-    # variable standard deviation will be equal to 1.
-    norm_residual_stddev_max = norm_residual_stddev.to_array().max("variable")
-    norm_residual_stddev /= norm_residual_stddev_max
+    # We want to multiply the global_stds by the above norm_residual_stddev variable
+    # so that the residuals are more evenly weighted. However, we don't want to
+    # make the standard deviations of the normalized inputs/outputs very different from
+    # 1. Therefore we rescale the norm_residual_stddev variable so that its geometric
+    # mean is 1. Choice of using geometric mean is somewhat arbitrary.
+    as_variable_array = norm_residual_stddev.to_array()
+    n_variables = as_variable_array.sizes["variable"]
+    geometric_mean = as_variable_array.prod(dim="variable") ** (1 / n_variables)
+    norm_residual_stddev /= geometric_mean
+    # rescale standard deviations so that residuals are evenly weighted in loss
     return scaling * norm_residual_stddev
 
 
@@ -109,20 +108,20 @@ def main(
     ds = ds.sel(time=slice(start_date, end_date))
 
     dims = DIMS[data_type]
-    prognostic_variables = PROGNOSTIC_VARIABLES[data_type]
+    time_invariant_variables = TIME_INVARIANT_VARIABLES[data_type]
 
     centering = ds.mean(dim=dims)
     scaling = ds.std(dim=dims)
     time_means = ds.mean(dim="time")
 
     if not full_field:
-        ds_prognostic = ds[prognostic_variables]
-        centering_prognostic = centering[prognostic_variables]
-        scaling_prognostic = scaling[prognostic_variables]
+        ds_time_varying = ds.drop_vars(time_invariant_variables)
+        centering_time_varying = centering.drop_vars(time_invariant_variables)
+        scaling_time_varying = scaling.drop_vars(time_invariant_variables)
         residual_scaling = compute_residual_scaling(
-            ds_prognostic, centering_prognostic, scaling_prognostic, dims
+            ds_time_varying, centering_time_varying, scaling_time_varying, dims
         )
-        for name in prognostic_variables:
+        for name in residual_scaling:
             scaling[name] = residual_scaling[name]
 
     for dataset in [centering, scaling, time_means]:

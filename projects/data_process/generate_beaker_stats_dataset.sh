@@ -13,8 +13,8 @@ python get_stats.py \
 
 beaker dataset create \
     $OUTPUT_DIR \
-    --name "fv3gfs-ensemble-ic0001-stats-residual-scaling-all-years-v4" \
-    --desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using residual scaling. Includes surface height. Residual scaling only applied to prognostic variables, with min standard deviation set to 1."
+    --name "fv3gfs-ensemble-ic0001-stats-residual-scaling-all-years-v2" \
+    --desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using residual scaling. Includes surface height."
 
 rm -r $OUTPUT_DIR
 
@@ -27,7 +27,7 @@ python get_stats.py \
 
 beaker dataset create \
     $OUTPUT_DIR \
-    --name "fv3gfs-ensemble-ic0001-stats-full-field-scaling-all-years-v4" \
+    --name "fv3gfs-ensemble-ic0001-stats-full-field-scaling-all-years-v2" \
     --desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using full field scaling. Includes surface height."
 
 rm -r $OUTPUT_DIR
