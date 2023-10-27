@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from fme.core.aggregator.climate_data import ClimateData
+from fme.core.climate_data import ClimateData
 
 
 @pytest.mark.parametrize("has_water_variable", [True, False])

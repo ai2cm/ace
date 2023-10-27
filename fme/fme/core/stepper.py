@@ -20,9 +20,10 @@ from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggregator
 from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
-from fme.core.loss import LossConfig
+from fme.core.loss import ConservationLoss, ConservationLossConfig, LossConfig
 from fme.core.normalizer import (
     FromStateNormalizer,
     NormalizationConfig,
@@ -44,6 +45,9 @@ class SingleModuleStepperConfig:
     optimization: Optional[DisabledOptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
+    conservation_loss: ConservationLossConfig = dataclasses.field(
+        default_factory=lambda: ConservationLossConfig()
+    )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -58,11 +62,13 @@ class SingleModuleStepperConfig:
         self,
         shapes: Dict[str, Tuple[int, ...]],
         area: Optional[torch.Tensor],
+        sigma_coordinates: SigmaCoordinates,
     ):
         return SingleModuleStepper(
             config=self,
             data_shapes=shapes,
             area=area,
+            sigma_coordinates=sigma_coordinates,
         )
 
     @classmethod
@@ -97,9 +103,13 @@ class ExistingStepperConfig:
             self._load_checkpoint()["stepper"]["config"]
         ).get_data_requirements(n_forward_steps)
 
-    def get_stepper(self, shapes, area):
+    def get_stepper(self, shapes, area, sigma_coordinates):
         del shapes  # unused
-        return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"], area)
+        return SingleModuleStepper.from_state(
+            self._load_checkpoint()["stepper"],
+            area=area,
+            sigma_coordinates=sigma_coordinates,
+        )
 
 
 class DummyWrapper(nn.Module):
@@ -156,6 +166,7 @@ class SingleModuleStepper:
         config: SingleModuleStepperConfig,
         data_shapes: Dict[str, Tuple[int, ...]],
         area: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
     ):
         """
         Args:
@@ -163,6 +174,7 @@ class SingleModuleStepper:
             data_shapes: Shapes of the module inputs.
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
+            sigma_coordinates: The sigma coordinates.
         """
         dist = Distributed.get_instance()
         n_in_channels = len(config.in_names)
@@ -200,7 +212,13 @@ class SingleModuleStepper:
             self.module = DummyWrapper(self.module)
         self._is_distributed = dist.is_distributed()
 
-        self.loss_obj = config.loss.build(area)
+        self.area = area
+        self.sigma_coordinates = sigma_coordinates.to(get_device())
+        self.loss_obj = config.loss.build(self.area)
+        self._conservation_loss = config.conservation_loss.build(
+            area_weights=self.area,
+            sigma_coordinates=self.sigma_coordinates,
+        )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
@@ -256,6 +274,7 @@ class SingleModuleStepper:
             n_forward_steps=n_forward_steps,
             prescriber=self.prescriber,
             aggregator=non_none_aggregator,
+            conservation_loss=self._conservation_loss,
         )
 
     def get_state(self):
@@ -271,6 +290,8 @@ class SingleModuleStepper:
             "data_shapes": self.data_shapes,
             "config": self._config.get_state(),
             "prescriber": self.prescriber.get_state(),
+            "area": self.area,
+            "sigma_coordinates": self.sigma_coordinates.as_dict(),
         }
 
     def load_state(self, state):
@@ -287,7 +308,9 @@ class SingleModuleStepper:
         self.prescriber.load_state(state["prescriber"])
 
     @classmethod
-    def from_state(cls, state, area: torch.Tensor) -> "SingleModuleStepper":
+    def from_state(
+        cls, state, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+    ) -> "SingleModuleStepper":
         """
         Load the state of the stepper.
 
@@ -295,16 +318,25 @@ class SingleModuleStepper:
             state: The state to load.
             area: (n_lat, n_lon) array containing relative gridcell area, in any
                 units including unitless.
+            sigma_coordinates: The sigma coordinates.
 
         Returns:
             The stepper.
         """
         config = {**state["config"]}  # make a copy to avoid mutating input
         config["normalization"] = FromStateNormalizer(state["normalizer"])
+        area = state.get("area", area)
+        if "sigma_coordinates" in state:
+            sigma_coordinates = dacite.from_dict(
+                data_class=SigmaCoordinates,
+                data=state["sigma_coordinates"],
+                config=dacite.Config(strict=True),
+            )
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
             data_shapes=state["data_shapes"],
             area=area,
+            sigma_coordinates=sigma_coordinates,
         )
         stepper.load_state(state)
         return stepper
@@ -358,6 +390,7 @@ def run_on_batch(
     loss_obj: nn.Module,
     prescriber: Union[Prescriber, NullPrescriber],
     aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
+    conservation_loss: ConservationLoss,
     n_forward_steps: int = 1,
 ) -> SteppedData:
     """
@@ -380,8 +413,7 @@ def run_on_batch(
         prescriber: Overwrite an output with target value in specified region.
         aggregator: The data aggregator.
         n_forward_steps: The number of timesteps to run the model for.
-        i_time_start: The index of the first timestep of the data time window,
-            passed to the aggregator.
+        conservation_loss: Computes conservation-related losses, if any.
 
     Returns:
         The loss, the generated data, the normalized generated data,
@@ -438,8 +470,6 @@ def run_on_batch(
         forcing_data_norm = name_and_time_query_fn(forcing_names, step + 1, "norm")
         input_data_norm = {**forcing_data_norm, **gen_norm}
 
-    metrics["loss"] = loss.detach()
-    optimization.step_weights(loss)
     # prepend the initial (pre-first-timestep) output data to the generated data
     initial = name_and_time_query_fn(out_packer.names, 0, "norm")
     gen_data_norm = [initial] + gen_data_norm
@@ -449,6 +479,13 @@ def run_on_batch(
             [x[name] for x in gen_data_norm], dim=time_dim
         )
     gen_data = normalizer.denormalize(gen_data_norm_timeseries)
+
+    conservation_metrics, conservation_loss = conservation_loss(gen_data)
+    metrics.update(conservation_metrics)
+    loss += conservation_loss
+
+    metrics["loss"] = loss.detach()
+    optimization.step_weights(loss)
 
     aggregator.record_batch(
         float(loss),
