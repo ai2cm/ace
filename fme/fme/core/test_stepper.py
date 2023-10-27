@@ -11,6 +11,7 @@ from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.loss import ConservationLoss
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.packer import Packer
@@ -74,6 +75,13 @@ def test_stepper_config_all_names_property(
 def test_run_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    conservation_loss = ConservationLoss(
+        dry_air_penalty=None,
+        area_weights=area,
+        sigma_coordinates=sigma_coordinates,
+    )
     stepped = run_on_batch(
         data=data,
         module=torch.nn.Identity(),
@@ -88,6 +96,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
+        conservation_loss=conservation_loss,
     )
     assert torch.allclose(
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
@@ -106,6 +115,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
+        conservation_loss=conservation_loss,
     )
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
@@ -132,6 +142,13 @@ def test_run_on_batch_addition_series():
 
     n_steps = 4
     data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    conservation_loss = ConservationLoss(
+        dry_air_penalty=None,
+        area_weights=area,
+        sigma_coordinates=sigma_coordinates,
+    )
     stepped = run_on_batch(
         data=data,
         module=AddOne(),
@@ -146,6 +163,7 @@ def test_run_on_batch_addition_series():
         prescriber=NullPrescriber(),
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
+        conservation_loss=conservation_loss,
     )
     assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
     for i in range(n_steps - 1):
@@ -189,6 +207,13 @@ def test_run_on_batch_with_prescriber():
         "b": torch.tensor([3.0], device=fme.get_device()),
         "mask": torch.tensor([1.0], device=fme.get_device()),
     }
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    conservation_loss = ConservationLoss(
+        dry_air_penalty=None,
+        area_weights=area,
+        sigma_coordinates=sigma_coordinates,
+    )
     stepped = run_on_batch(
         data=data,
         module=AddOne(),
@@ -203,6 +228,7 @@ def test_run_on_batch_with_prescriber():
         n_forward_steps=n_steps,
         prescriber=Prescriber("b", "mask", 1),
         aggregator=MagicMock(),
+        conservation_loss=conservation_loss,
     )
     for i in range(n_steps):
         # "a" should be increasing by 1 according to AddOne
@@ -239,12 +265,17 @@ def test_reloaded_stepper_gives_same_prediction():
         "a": (1, 1, 5, 5),
         "b": (1, 1, 5, 5),
     }
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         shapes=shapes,
-        area=None,  # not actually used in this test
+        area=area,
+        sigma_coordinates=sigma_coordinates,
     )
     area = torch.ones((5, 5), device=fme.get_device())
-    new_stepper = SingleModuleStepper.from_state(stepper.get_state(), area=area)
+    new_stepper = SingleModuleStepper.from_state(
+        stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates
+    )
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.run_on_batch(
         data=data,
@@ -324,6 +355,13 @@ def _setup_and_run_on_batch(
     else:
         prescriber = prescriber_config.build(in_names, out_names)
 
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    conservation_loss = ConservationLoss(
+        dry_air_penalty=None,
+        area_weights=area,
+        sigma_coordinates=sigma_coordinates,
+    )
     stepped = run_on_batch(
         data=data,
         module=module,
@@ -338,6 +376,7 @@ def _setup_and_run_on_batch(
         n_forward_steps=n_forward_steps,
         prescriber=prescriber,
         aggregator=aggregator,
+        conservation_loss=conservation_loss,
     )
 
     return stepped

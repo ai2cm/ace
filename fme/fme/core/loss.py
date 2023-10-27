@@ -1,9 +1,108 @@
 import dataclasses
-from typing import Any, List, Literal, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 import torch
 
+from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
+
+from .climate_data import ClimateData
+from .metrics import compute_dry_air_absolute_differences
+
+
+def get_dry_air_nonconservation(
+    data: Mapping[str, torch.Tensor],
+    area_weights: torch.Tensor,
+    sigma_coordinates: SigmaCoordinates,
+):
+    """
+    Computes the time-average one-step absolute difference in surface pressure due to
+    changes in globally integrated dry air.
+
+    Args:
+        data: A mapping from variable name to tensor of shape
+            [sample, time, lat, lon], in physical units. specific_total_water in kg/kg
+            and surface_pressure in Pa must be present.
+        area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
+        sigma_coordinates: The sigma coordinates of the model.
+    """
+    return compute_dry_air_absolute_differences(
+        ClimateData(data), area=area_weights, sigma_coordinates=sigma_coordinates
+    ).mean()
+
+
+class ConservationLoss:
+    def __init__(
+        self,
+        dry_air_penalty: Optional[float],
+        area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+    ):
+        """
+        Args:
+            dry_air_penalty: A constant by which to multiply one-step non-conservation
+                of surface pressure due to dry air in Pa as an L1 loss penalty. By
+                default, no such loss will be included.
+            area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
+            sigma_coordinates: The sigma coordinates of the model.
+        """
+        self._dry_air_penalty = dry_air_penalty
+        self._area_weights = area_weights.to(get_device())
+        self._sigma_coordinates = sigma_coordinates.to(get_device())
+
+    def __call__(
+        self, gen_data: Mapping[str, torch.Tensor]
+    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+        """
+        Compute loss and metrics related to conservation.
+
+        Args:
+            gen_data: A mapping from variable name to tensor of shape
+                [sample, time, lat, lon], in physical units.
+        """
+        conservation_metrics = {}
+        loss = torch.tensor(0.0, device=get_device())
+        if self._dry_air_penalty is not None:
+            dry_air_loss = self._dry_air_penalty * get_dry_air_nonconservation(
+                gen_data,
+                area_weights=self._area_weights,
+                sigma_coordinates=self._sigma_coordinates,
+            )
+            conservation_metrics["dry_air_loss"] = dry_air_loss.detach()
+            loss += dry_air_loss
+        return conservation_metrics, loss
+
+    def get_state(self):
+        return {
+            "dry_air_penalty": self._dry_air_penalty,
+            "sigma_coordinates": self._sigma_coordinates,
+            "area_weights": self._area_weights,
+        }
+
+    @classmethod
+    def from_state(cls, state) -> "ConservationLoss":
+        return cls(**state)
+
+
+@dataclasses.dataclass
+class ConservationLossConfig:
+    """
+    Attributes:
+        dry_air_penalty: A constant by which to multiply one-step non-conservation
+            of surface pressure due to dry air in Pa as an L1 loss penalty. By
+            default, no such loss will be included.
+    """
+
+    dry_air_penalty: Optional[float] = None
+
+    def build(
+        self, area_weights: torch.Tensor, sigma_coordinates: SigmaCoordinates
+    ) -> ConservationLoss:
+        return ConservationLoss(
+            dry_air_penalty=self.dry_air_penalty,
+            area_weights=area_weights,
+            sigma_coordinates=sigma_coordinates,
+        )
 
 
 class LpLoss(torch.nn.Module):
