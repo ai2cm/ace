@@ -1,8 +1,6 @@
 import dataclasses
 from typing import Any, Literal, Mapping, Optional, Protocol, Tuple, Type
 
-import torch_harmonics as harmonics
-
 # this package is installed in models/FourCastNet
 from fourcastnet.networks.afnonet import AFNONetBuilder
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
@@ -79,27 +77,6 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
             out_chans=n_out_channels,
             img_shape=img_shape,
         )
-
-        # Patch in the grid that our data lies on rather than the one which is
-        # hard-coded in the modulus codebase [1]. Duplicate the code to compute
-        # the number of SHT modes determined by hard_thresholding_fraction. Note
-        # that this does not handle the distributed case which is handled by
-        # L518 [2] in their codebase.
-
-        # [1] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py  # noqa: E501
-        # [2] https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L518  # noqa: E501
-        nlat, nlon = img_shape
-        modes_lat = int(nlat * self.hard_thresholding_fraction)
-        modes_lon = int((nlon // 2 + 1) * self.hard_thresholding_fraction)
-        sht = harmonics.RealSHT(
-            nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid=self.data_grid
-        ).float()
-        isht = harmonics.InverseRealSHT(
-            nlat, nlon, lmax=modes_lat, mmax=modes_lon, grid=self.data_grid
-        ).float()
-
-        sfno_net.trans_down = sht
-        sfno_net.itrans_up = isht
 
         return sfno_net
 
