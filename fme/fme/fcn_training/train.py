@@ -59,7 +59,6 @@ import yaml
 import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.device import get_device
 from fme.core.distributed import Distributed, NotDistributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
@@ -382,26 +381,11 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer.startEpoch = checkpoint["epoch"]
 
 
-def force_cudnn_initialization():
-    """
-    Force initialization of CuDNN. This is necessary to avoid
-    https://stackoverflow.com/questions/66588715/runtimeerror-cudnn-error-cudnn-status-not-initialized-using-pytorch  # noqa: E501
-    """
-    s = 4
-    dev = get_device()
-    torch.nn.functional.conv2d(
-        torch.zeros(s, s, s, s, device=dev), torch.zeros(s, s, s, s, device=dev)
-    )
-
-
 def main(
     yaml_config: str,
 ):
     dist = Distributed.get_instance()
     if fme.using_gpu():
-        # https://stackoverflow.com/questions/66588715/runtimeerror-cudnn-error-cudnn-status-not-initialized-using-pytorch  # noqa: E501
-        torch.cuda.empty_cache()
-        force_cudnn_initialization()
         torch.backends.cudnn.benchmark = True
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
