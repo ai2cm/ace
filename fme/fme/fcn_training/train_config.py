@@ -4,7 +4,7 @@ import os
 from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
@@ -71,6 +71,9 @@ class InlineInferenceConfig:
         n_samples: number of sample windows to take from the validation data
         batch_size: batch size for the data loader, must be a multiple of
             the number of parallel workers if parallel is True
+        epochs: epochs on which to run inference, where the first epoch is
+            defined as epoch 0 (unlike in logs which show epochs as starting
+            from 1). By default runs inference every epoch.
         parallel: whether to run inference in parallel across workers,
             by default runs only on the root rank
     """
@@ -79,6 +82,7 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int = 2
     n_samples: int = 1
     batch_size: int = 1
+    epochs: Slice = Slice(start=0, stop=None, step=1)
     parallel: bool = False
 
     def __post_init__(self):
