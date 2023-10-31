@@ -1,13 +1,13 @@
 import dataclasses
 from typing import (
     Any,
-    Callable,
     Dict,
     Iterable,
     List,
     Literal,
     Mapping,
     Optional,
+    Protocol,
     Tuple,
     Union,
     cast,
@@ -18,7 +18,9 @@ import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
+from fme.core import metrics
 from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggregator
+from fme.core.climate_data import ClimateData
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device, using_gpu
@@ -45,6 +47,7 @@ class SingleModuleStepperConfig:
     optimization: Optional[DisabledOptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
+    conserve_dry_air: bool = False
     conservation_loss: ConservationLossConfig = dataclasses.field(
         default_factory=lambda: ConservationLossConfig()
     )
@@ -274,6 +277,9 @@ class SingleModuleStepper:
             n_forward_steps=n_forward_steps,
             prescriber=self.prescriber,
             aggregator=non_none_aggregator,
+            conserve_dry_air=self._config.conserve_dry_air,
+            sigma_coordinates=self.sigma_coordinates,
+            area=self.area,
             conservation_loss=self._conservation_loss,
         )
 
@@ -342,12 +348,19 @@ class SingleModuleStepper:
         return stepper
 
 
+class NameAndTimeQueryFunction(Protocol):
+    def __call__(
+        self,
+        names: Iterable[str],
+        time_index: int,
+        norm_mode: Literal["norm", "denorm"],
+    ) -> Dict[str, torch.Tensor]:
+        ...
+
+
 def get_name_and_time_query_fn(
     data: Dict[str, torch.Tensor], data_norm: Dict[str, torch.Tensor], time_dim: int
-) -> Callable[
-    [Iterable[str], int, Literal["norm", "denorm"]],
-    Dict[str, torch.Tensor],
-]:
+) -> NameAndTimeQueryFunction:
     """Construct a function for querying `data` by name and time and whether it
     is normalized or not. (Note: that the `names` argument can contain None values
     to handle NullPrescriber)."""
@@ -380,6 +393,62 @@ def _pack_data_if_available(
         return None
 
 
+def _force_conserve_dry_air(
+    input_data: Mapping[str, torch.Tensor],
+    gen_data: Mapping[str, torch.Tensor],
+    area: torch.Tensor,
+    sigma_coordinates: SigmaCoordinates,
+) -> Dict[str, torch.Tensor]:
+    """
+    Update the generated data to conserve dry air.
+
+    This is done by adding a constant correction to the dry air pressure of
+    each column, and may result in changes in per-mass values such as
+    total water or energy.
+
+    We first compute the target dry air pressure by computing the globally
+    averaged difference in dry air pressure between the input_data and gen_data,
+    and then add this offset to the fully-resolved gen_data dry air pressure.
+    We can then solve for the surface pressure corresponding to this new dry air
+    pressure.
+
+    We start from the expression for dry air pressure:
+
+        dry_air = ps - sum_k((ak_diff + bk_diff * ps) * wat_k)
+
+    To update the dry air, we compute and update the surface pressure:
+
+        ps = (
+            dry_air + sum_k(ak_diff * wat_k)
+        ) / (
+            1 - sum_k(bk_diff * wat_k)
+        )
+    """
+    input = ClimateData(input_data)
+    if input.surface_pressure is None:
+        raise ValueError("surface_pressure is required to force dry air conservation")
+    gen = ClimateData(gen_data)
+    gen_dry_air = gen.surface_pressure_due_to_dry_air(sigma_coordinates)
+    global_gen_dry_air = metrics.weighted_mean(gen_dry_air, weights=area, dim=(-2, -1))
+    global_target_gen_dry_air = metrics.weighted_mean(
+        input.surface_pressure_due_to_dry_air(sigma_coordinates),
+        weights=area,
+        dim=(-2, -1),
+    )
+    error = global_gen_dry_air - global_target_gen_dry_air
+    new_gen_dry_air = gen_dry_air - error[..., None, None]
+    wat = gen.specific_total_water
+    if wat is None:
+        raise ValueError("specific_total_water is required for conservation")
+    ak_diff = sigma_coordinates.ak.diff()
+    bk_diff = sigma_coordinates.bk.diff()
+    new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
+        1 - (bk_diff * wat).sum(-1)
+    )
+    gen.surface_pressure = new_pressure.to(dtype=input.surface_pressure.dtype)
+    return gen.data
+
+
 def run_on_batch(
     data: Dict[str, torch.Tensor],
     module: nn.Module,
@@ -390,8 +459,11 @@ def run_on_batch(
     loss_obj: nn.Module,
     prescriber: Union[Prescriber, NullPrescriber],
     aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
+    sigma_coordinates: SigmaCoordinates,
+    area: torch.Tensor,
     conservation_loss: ConservationLoss,
     n_forward_steps: int = 1,
+    conserve_dry_air: bool = False,
 ) -> SteppedData:
     """
     Run the model on a batch of data.
@@ -412,8 +484,12 @@ def run_on_batch(
         loss_obj: The loss object.
         prescriber: Overwrite an output with target value in specified region.
         aggregator: The data aggregator.
-        n_forward_steps: The number of timesteps to run the model for.
+        sigma_coordinates: The sigma coordinates.
+        area: (n_lat, n_lon) array containing relative gridcell area, in any
+            units including unitless.
         conservation_loss: Computes conservation-related losses, if any.
+        n_forward_steps: The number of timesteps to run the model for.
+        conserve_dry_air: if True, force global dry air mass conservation
 
     Returns:
         The loss, the generated data, the normalized generated data,
@@ -423,7 +499,7 @@ def run_on_batch(
     channel_dim = -3
     time_dim = 1
     full_data_norm = normalizer.normalize(data)
-    name_and_time_query_fn = get_name_and_time_query_fn(data, full_data_norm, time_dim)
+    get_input_data = get_name_and_time_query_fn(data, full_data_norm, time_dim)
 
     full_target_tensor_norm = _pack_data_if_available(
         out_packer,
@@ -433,8 +509,8 @@ def run_on_batch(
 
     loss = torch.tensor(0.0, device=get_device())
     metrics = {}
-    input_data_norm = name_and_time_query_fn(in_packer.names, 0, "norm")
-    gen_data_norm = []
+    input_data_norm = get_input_data(in_packer.names, time_index=0, norm_mode="norm")
+    gen_data_norm_list = []
     optimization.set_mode(module)
     for step in range(n_forward_steps):
         input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
@@ -450,6 +526,19 @@ def run_on_batch(
             gen_tensor_norm = module(input_tensor_norm).to(
                 get_device(), dtype=torch.float
             )
+            if conserve_dry_air:
+                gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+                gen_data = normalizer.denormalize(gen_norm)
+                input_data = get_input_data(
+                    in_packer.names, time_index=step, norm_mode="denorm"
+                )
+                gen_data = _force_conserve_dry_air(
+                    input_data, gen_data, area=area, sigma_coordinates=sigma_coordinates
+                )
+                gen_norm = normalizer.normalize(gen_data)
+                gen_tensor_norm = out_packer.pack(gen_norm, axis=channel_dim).to(
+                    get_device(), dtype=torch.float
+                )
             if target_tensor_norm is None:
                 step_loss = torch.tensor(torch.nan)
             else:
@@ -459,24 +548,30 @@ def run_on_batch(
         gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
 
         gen_norm = prescriber(
-            name_and_time_query_fn(prescriber.mask_names, step + 1, "denorm"),
+            get_input_data(
+                prescriber.mask_names, time_index=step + 1, norm_mode="denorm"
+            ),
             gen_norm,
-            name_and_time_query_fn(prescriber.prescribed_names, step + 1, "norm"),
+            get_input_data(
+                prescriber.prescribed_names, time_index=step + 1, norm_mode="norm"
+            ),
         )
 
-        gen_data_norm.append(gen_norm)
+        gen_data_norm_list.append(gen_norm)
         # update input data with generated outputs, and forcings for missing outputs
         forcing_names = list(set(in_packer.names).difference(gen_norm.keys()))
-        forcing_data_norm = name_and_time_query_fn(forcing_names, step + 1, "norm")
+        forcing_data_norm = get_input_data(
+            forcing_names, time_index=step + 1, norm_mode="norm"
+        )
         input_data_norm = {**forcing_data_norm, **gen_norm}
 
     # prepend the initial (pre-first-timestep) output data to the generated data
-    initial = name_and_time_query_fn(out_packer.names, 0, "norm")
-    gen_data_norm = [initial] + gen_data_norm
+    initial = get_input_data(out_packer.names, time_index=0, norm_mode="norm")
+    gen_data_norm_list = [initial] + gen_data_norm_list
     gen_data_norm_timeseries = {}
     for name in out_packer.names:
         gen_data_norm_timeseries[name] = torch.stack(
-            [x[name] for x in gen_data_norm], dim=time_dim
+            [x[name] for x in gen_data_norm_list], dim=time_dim
         )
     gen_data = normalizer.denormalize(gen_data_norm_timeseries)
 
