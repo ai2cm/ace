@@ -170,6 +170,9 @@ class Trainer:
 
         best_valid_loss = torch.inf
         self._model_epoch = self.startEpoch
+        inference_epochs = list(range(0, self.config.max_epochs))[
+            self.config.inference.epochs.slice
+        ]
         # "epoch" describes the loop, self._model_epoch describes model weights
         # needed so we can describe the loop even after weights are updated
         for epoch in range(self.startEpoch, self.config.max_epochs):
@@ -184,9 +187,13 @@ class Trainer:
             logging.info(f"Starting validation step on epoch {epoch + 1}")
             valid_logs = self.validate_one_epoch()
             valid_end = time.time()
-            logging.info(f"Starting inference step on epoch {epoch + 1}")
-            inference_logs = self.inference_one_epoch()
-            inference_end = time.time()
+            if epoch in inference_epochs:
+                logging.info(f"Starting inference step on epoch {epoch + 1}")
+                inference_logs = self.inference_one_epoch()
+                inference_end: Optional[float] = time.time()
+            else:
+                inference_logs = {}
+                inference_end = None
 
             train_loss = train_logs["train/mean/loss"]
             valid_loss = valid_logs["val/mean/loss"]
@@ -222,10 +229,11 @@ class Trainer:
                     "epoch": epoch,
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
-                    "epoch_inference_seconds": inference_end - valid_end,
                     "epoch_total_seconds": time_elapsed,
                 },
             }
+            if inference_end is not None:
+                all_logs["epoch_inference_seconds"] = inference_end - valid_end
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
 
