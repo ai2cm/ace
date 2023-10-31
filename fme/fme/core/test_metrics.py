@@ -265,3 +265,45 @@ def test_dry_air_shapes():
 
     dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
     assert dry_air.shape == (nlat, nlon)
+
+
+def single_level_ak_bk():
+    ak = torch.zeros(size=[2])
+    bk = torch.asarray([0.0, 1.0])
+    return ak, bk
+
+
+def test_single_level_dry_air_no_water():
+    torch.manual_seed(0)
+    nlat, nlon, nz = 4, 8, 1
+    water = torch.zeros(nlat, nlon, nz)
+    pressure = torch.rand(nlat, nlon)
+    ak, bk = single_level_ak_bk()
+
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    np.testing.assert_allclose(dry_air.cpu().numpy(), pressure.cpu().numpy())
+
+
+def test_single_level_dry_air_all_water():
+    torch.manual_seed(0)
+    nlat, nlon, nz = 4, 8, 1
+    water = torch.ones(nlat, nlon, nz)
+    pressure = torch.rand(nlat, nlon)
+    ak, bk = single_level_ak_bk()
+
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    np.testing.assert_almost_equal(dry_air.cpu().numpy(), 0.0, decimal=6)
+
+
+def test_single_level_dry_air_some_water():
+    torch.manual_seed(0)
+    nlat, nlon, nz = 4, 8, 1
+    water = torch.rand(nlat, nlon, nz)
+    pressure = torch.rand(nlat, nlon)
+    ak, bk = single_level_ak_bk()
+    target_dry_air = pressure * (1.0 - water[:, :, 0])
+
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    np.testing.assert_allclose(
+        dry_air.cpu().numpy(), target_dry_air.cpu().numpy(), rtol=1e-5
+    )
