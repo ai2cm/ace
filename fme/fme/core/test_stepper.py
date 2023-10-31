@@ -3,6 +3,7 @@ from collections import namedtuple
 from typing import Dict, Iterable, Optional, Union
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import torch
 
@@ -11,7 +12,7 @@ from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.loss import ConservationLoss
+from fme.core.loss import ConservationLoss, get_dry_air_nonconservation
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.packer import Packer
@@ -19,6 +20,7 @@ from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.core.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
+    _force_conserve_dry_air,
     run_on_batch,
 )
 from fme.fcn_training.registry import ModuleSelector
@@ -96,6 +98,8 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
+        area=area,
+        sigma_coordinates=sigma_coordinates,
         conservation_loss=conservation_loss,
     )
     assert torch.allclose(
@@ -115,6 +119,8 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
+        area=area,
+        sigma_coordinates=sigma_coordinates,
         conservation_loss=conservation_loss,
     )
     assert torch.allclose(
@@ -163,6 +169,8 @@ def test_run_on_batch_addition_series():
         prescriber=NullPrescriber(),
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
+        area=area,
+        sigma_coordinates=sigma_coordinates,
         conservation_loss=conservation_loss,
     )
     assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
@@ -228,6 +236,8 @@ def test_run_on_batch_with_prescriber():
         n_forward_steps=n_steps,
         prescriber=Prescriber("b", "mask", 1),
         aggregator=MagicMock(),
+        area=area,
+        sigma_coordinates=sigma_coordinates,
         conservation_loss=conservation_loss,
     )
     for i in range(n_steps):
@@ -376,6 +386,8 @@ def _setup_and_run_on_batch(
         n_forward_steps=n_forward_steps,
         prescriber=prescriber,
         aggregator=aggregator,
+        area=area,
+        sigma_coordinates=sigma_coordinates,
         conservation_loss=conservation_loss,
     )
 
@@ -453,3 +465,40 @@ def test_run_on_batch(
             optimization,
             aggregator,
         )
+
+
+def test_force_conserve_dry_air():
+    torch.random.manual_seed(0)
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)),
+        "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
+        "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
+    }
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    area_weights = 1.0 + torch.rand(size=(5, 5))
+    original_nonconservation = get_dry_air_nonconservation(
+        data,
+        sigma_coordinates=sigma_coordinates,
+        area_weights=area_weights,
+    )
+    assert original_nonconservation > 0.0
+    in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
+    out_data = {k: v.select(dim=1, index=1) for k, v in data.items()}
+    fixed_out_data = _force_conserve_dry_air(
+        in_data,
+        out_data,
+        sigma_coordinates=sigma_coordinates,
+        area=area_weights,
+    )
+    new_data = {
+        k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
+    }
+    new_nonconservation = get_dry_air_nonconservation(
+        new_data,
+        sigma_coordinates=sigma_coordinates,
+        area_weights=area_weights,
+    )
+    assert new_nonconservation < original_nonconservation
+    np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
