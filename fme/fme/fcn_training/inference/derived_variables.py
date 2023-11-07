@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from typing import Callable, MutableMapping, Sequence
+from typing import Callable, MutableMapping
 
 import torch
 from toolz import curry
@@ -14,7 +14,6 @@ from fme.core.stepper import SteppedData
 @dataclasses.dataclass
 class DerivedVariableRegistryEntry:
     func: Callable[[ClimateData, SigmaCoordinates], torch.Tensor]
-    required_names: Sequence[str]
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = {}
@@ -22,20 +21,17 @@ _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = 
 
 @curry
 def register(
-    required_names: Sequence[str],
     func: Callable[[ClimateData, SigmaCoordinates], torch.Tensor],
 ):
     """Decorator for registering a function that computes a derived variable."""
     label = func.__name__
     if label in _DERIVED_VARIABLE_REGISTRY:
         raise ValueError(f"Function {label} has already been added to registry.")
-    _DERIVED_VARIABLE_REGISTRY[label] = DerivedVariableRegistryEntry(
-        func=func, required_names=required_names
-    )
+    _DERIVED_VARIABLE_REGISTRY[label] = DerivedVariableRegistryEntry(func=func)
     return func
 
 
-@register(["specific_total_water", "surface_pressure"])
+@register()
 def surface_pressure_due_to_dry_air(
     data: ClimateData, sigma_coordinates: SigmaCoordinates
 ) -> torch.Tensor:
@@ -47,7 +43,7 @@ def surface_pressure_due_to_dry_air(
     )
 
 
-@register(["specific_total_water", "surface_pressure"])
+@register()
 def total_water_path(
     data: ClimateData, sigma_coordinates: SigmaCoordinates
 ) -> torch.Tensor:
@@ -66,6 +62,9 @@ def _compute_derived_variable(
     derived_variable: DerivedVariableRegistryEntry,
 ) -> SteppedData:
     """Computes a derived variable and adds it to the given data.
+
+    If the required input data is not available, a warning will be logged and
+    no change will be made to the data.
 
     Args:
         stepped: SteppedData instance to add the derived variable to.
@@ -87,15 +86,15 @@ def _compute_derived_variable(
                 "to overwrite existing variables with derived variables."
             )
         climate_data = ClimateData(getattr(stepped, data_type))
-        for name in derived_variable.required_names:
-            if not hasattr(climate_data, name) or getattr(climate_data, name) is None:
-                logging.warning(
-                    f"Could not compute {label} because {name} is missing "
-                    f"for {data_type}."
-                )
-                return stepped
-        output = derived_variable.func(climate_data, sigma_coordinates)
-        getattr(new_stepped, data_type)[label] = output
+        try:
+            output = derived_variable.func(climate_data, sigma_coordinates)
+        except KeyError as key_error:
+            logging.warning(
+                f"Could not compute {label} because {key_error} is missing "
+                f"for {data_type}."
+            )
+        else:  # if no exception was raised
+            getattr(new_stepped, data_type)[label] = output
     return new_stepped
 
 
