@@ -1,6 +1,5 @@
-import logging
 from types import MappingProxyType
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping
 
 import torch
 
@@ -36,24 +35,16 @@ class ClimateData:
         self._data = dict(climate_data)
         self._prefixes = climate_field_name_prefixes
 
-    def __getattr__(self, name):
-        """Return variable with given name, without renaming or handling vertical."""
-        try:
-            return self._data[name]
-        except KeyError:
-            raise AttributeError(f"{name} is not an available variable.")
-
-    def _extract_levels(self, prefix) -> Optional[torch.Tensor]:
+    def _extract_levels(self, prefix) -> torch.Tensor:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
         ]
 
-        if not names:
-            logging.debug(f'No fields with prefix "{prefix}" found.')
-            return None
-
-        if len(names) > 10:
+        if len(names) == 0:
+            raise KeyError(prefix)
+        elif len(names) > 10:
             raise NotImplementedError("No support for > 10 vertical levels.")
+
         names = sorted(names)
         return torch.stack([self._data[name] for name in names], dim=-1)
 
@@ -63,28 +54,29 @@ class ClimateData:
         return self._data
 
     @property
-    def specific_total_water(self) -> Optional[torch.Tensor]:
+    def specific_total_water(self) -> torch.Tensor:
         """Returns all vertical levels of specific total water, e.g. a tensor of
         shape `(..., vertical_level)`."""
         prefix = self._prefixes["specific_total_water"]
         return self._extract_levels(prefix)
 
     @property
-    def surface_pressure(self) -> Optional[torch.Tensor]:
-        try:
-            return self._data[self._prefixes["surface_pressure"]]
-        except KeyError:
-            logging.debug("No fields for surface pressure found.")
-            return None
+    def surface_pressure(self) -> torch.Tensor:
+        return self._get("surface_pressure")
 
     @surface_pressure.setter
     def surface_pressure(self, value: torch.Tensor):
         self._data[self._prefixes["surface_pressure"]] = value
 
-    def surface_pressure_due_to_dry_air(self, sigma_coordinates: SigmaCoordinates):
+    def surface_pressure_due_to_dry_air(
+        self, sigma_coordinates: SigmaCoordinates
+    ) -> torch.Tensor:
         return metrics.surface_pressure_due_to_dry_air(
             self.specific_total_water,
             self.surface_pressure,
             sigma_coordinates.ak,
             sigma_coordinates.bk,
         )
+
+    def _get(self, name):
+        return self._data[self._prefixes[name]]

@@ -29,9 +29,10 @@ def compute_dry_air_absolute_differences(
         A tensor of shape (time,) of the absolute value of the dry air tendency
             of each time step.
     """
-    water = climate_data.specific_total_water
-    pressure = climate_data.surface_pressure
-    if water is None or pressure is None:
+    try:
+        water = climate_data.specific_total_water
+        pressure = climate_data.surface_pressure
+    except KeyError:
         return torch.tensor([torch.nan])
     return (
         weighted_mean(
