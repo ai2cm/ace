@@ -86,6 +86,11 @@ optimization:
 stepper:
 {stepper_config}
 inference:
+    data:
+        data_path: '{valid_data_path}'
+        data_type: "xarray"
+        batch_size: 2
+        num_data_workers: 1
     n_forward_steps: 2
     forward_steps_in_memory: 2
 n_forward_steps: {n_forward_steps}
