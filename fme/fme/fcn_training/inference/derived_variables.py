@@ -7,6 +7,7 @@ from toolz import curry
 
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
+from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
@@ -53,6 +54,29 @@ def total_water_path(
         sigma_coordinates.ak,
         sigma_coordinates.bk,
     )
+
+
+@register()
+def total_water_path_budget_residual(
+    data: ClimateData, sigma_coordinates: SigmaCoordinates
+):
+    total_water_path = metrics.vertical_integral(
+        data.specific_total_water,
+        data.surface_pressure,
+        sigma_coordinates.ak,
+        sigma_coordinates.bk,
+    )
+    twp_total_tendency = (total_water_path[:, 1:] - total_water_path[:, :-1]) / (
+        TIMESTEP_SECONDS
+    )
+    twp_budget_residual = torch.zeros_like(total_water_path)
+    # no budget residual on initial step
+    twp_budget_residual[:, 1:] = twp_total_tendency - (
+        data.evaporation_rate[:, 1:]
+        - data.precipitation_rate[:, 1:]
+        + data.tendency_of_total_water_path_due_to_advection[:, 1:]
+    )
+    return twp_budget_residual
 
 
 def _compute_derived_variable(
