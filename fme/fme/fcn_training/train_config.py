@@ -65,6 +65,7 @@ class LoggingConfig:
 class InlineInferenceConfig:
     """
     Attributes:
+        data: configuration for the data loader used during inference
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
             re-reading data from disk
@@ -78,10 +79,9 @@ class InlineInferenceConfig:
             by default runs only on the root rank
     """
 
+    data: DataLoaderParams
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
-    n_samples: int = 1
-    batch_size: int = 1
     epochs: Slice = Slice(start=0, stop=None, step=1)
     parallel: bool = False
 
@@ -93,7 +93,7 @@ class InlineInferenceConfig:
             )
         if self.parallel:
             dist = Distributed.get_instance()
-            if self.batch_size % dist.world_size != 0:
+            if self.data.batch_size % dist.world_size != 0:
                 raise ValueError(
                     "batch_size must be divisible by the number of parallel "
                     f"workers, got {self.batch_size} and {dist.world_size}"
