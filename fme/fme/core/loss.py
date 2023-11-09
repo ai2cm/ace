@@ -6,8 +6,7 @@ import torch
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
 
-from .climate_data import ClimateData
-from .metrics import compute_dry_air_absolute_differences
+from .climate_data import ClimateData, compute_dry_air_absolute_differences
 
 
 def get_dry_air_nonconservation(
