@@ -134,13 +134,7 @@ class Trainer:
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
-        logging.info(
-            "Number of trainable model parameters: {}".format(self.count_parameters())
-        )
-        # copy dataclass from validation data
-        inference_data = dataclasses.replace(config.validation_data)
-        inference_data.n_samples = config.inference.n_samples
-        inference_data.batch_size = config.inference.batch_size
+        logging.info(f"Number of trainable model parameters: {self.count_parameters()}")
         inference_data_requirements = dataclasses.replace(data_requirements)
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
@@ -150,7 +144,7 @@ class Trainer:
             else:
                 dist = NotDistributed(is_root=self.dist.is_root())
             return get_data_loader(
-                inference_data,
+                config.inference.data,
                 train=False,
                 requirements=inference_data_requirements,
                 window_time_slice=window_time_slice,
