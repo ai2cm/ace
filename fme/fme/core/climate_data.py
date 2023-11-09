@@ -114,3 +114,40 @@ class ClimateData:
         Tendency of total water path due to advection in kg m-2 s-1.
         """
         return self._get("tendency_of_total_water_path_due_to_advection")
+
+
+def compute_dry_air_absolute_differences(
+    climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+) -> torch.Tensor:
+    """
+    Computes the absolute value of the dry air tendency of each time step.
+
+    Args:
+        climate_data: ClimateData object.
+        area: Area of each grid cell as a [lat, lon] tensor, in m^2.
+        sigma_coordinates: The sigma coordinates of the model.
+
+    Returns:
+        A tensor of shape (time,) of the absolute value of the dry air tendency
+            of each time step.
+    """
+    try:
+        water = climate_data.specific_total_water
+        pressure = climate_data.surface_pressure
+    except KeyError:
+        return torch.tensor([torch.nan])
+    return (
+        metrics.weighted_mean(
+            metrics.surface_pressure_due_to_dry_air(
+                water,  # (sample, time, y, x, level)
+                pressure,
+                sigma_coordinates.ak,
+                sigma_coordinates.bk,
+            ),
+            area,
+            dim=(2, 3),
+        )
+        .diff(dim=-1)
+        .abs()
+        .mean(dim=0)
+    )

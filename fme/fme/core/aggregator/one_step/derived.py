@@ -6,8 +6,11 @@ from typing import Dict, Mapping, Optional, Protocol, Tuple
 
 import torch
 
-from fme.core import metrics
-from fme.core.climate_data import CLIMATE_FIELD_NAME_PREFIXES, ClimateData
+from fme.core.climate_data import (
+    CLIMATE_FIELD_NAME_PREFIXES,
+    ClimateData,
+    compute_dry_air_absolute_differences,
+)
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
 
@@ -52,7 +55,7 @@ class DryAir(DerivedMetric):
 
     def record(self, target: ClimateData, gen: ClimateData) -> None:
         def _compute_dry_air_helper(climate_data: ClimateData) -> torch.Tensor:
-            return metrics.compute_dry_air_absolute_differences(
+            return compute_dry_air_absolute_differences(
                 climate_data,
                 area=self._area_weights,
                 sigma_coordinates=self._sigma_coordinates,
