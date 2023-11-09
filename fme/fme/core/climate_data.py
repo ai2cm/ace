@@ -4,12 +4,16 @@ from typing import Dict, Mapping
 import torch
 
 from fme.core import metrics
+from fme.core.constants import LATENT_HEAT_OF_VAPORIZATION
 from fme.core.data_loading.typing import SigmaCoordinates
 
 CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
     {
         "specific_total_water": "specific_total_water_",
         "surface_pressure": "PRESsfc",
+        "tendency_of_total_water_path_due_to_advection": "tendency_of_total_water_path_due_to_advection",  # noqa: E501
+        "latent_heat_flux": "LHTFLsfc",
+        "precipitation_rate": "PRATEsfc",
     }
 )
 
@@ -48,6 +52,9 @@ class ClimateData:
         names = sorted(names)
         return torch.stack([self._data[name] for name in names], dim=-1)
 
+    def _get(self, name):
+        return self._data[self._prefixes[name]]
+
     @property
     def data(self) -> Dict[str, torch.Tensor]:
         """Mapping from field names to tensors."""
@@ -78,5 +85,32 @@ class ClimateData:
             sigma_coordinates.bk,
         )
 
-    def _get(self, name):
-        return self._data[self._prefixes[name]]
+    @property
+    def precipitation_rate(self) -> torch.Tensor:
+        """
+        Precipitation rate in kg m-2 s-1.
+        """
+        return self._get("precipitation_rate")
+
+    @property
+    def latent_heat_flux(self) -> torch.Tensor:
+        """
+        Latent heat flux in W m-2.
+        """
+        return self._get("latent_heat_flux")
+
+    @property
+    def evaporation_rate(self) -> torch.Tensor:
+        """
+        Evaporation rate in kg m-2 s-1.
+        """
+        lhf = self.latent_heat_flux  # W/m^2
+        # (W/m^2) / (J/kg) = (J s^-1 m^-2) / (J/kg) = kg/m^2/s
+        return lhf / LATENT_HEAT_OF_VAPORIZATION
+
+    @property
+    def tendency_of_total_water_path_due_to_advection(self) -> torch.Tensor:
+        """
+        Tendency of total water path due to advection in kg m-2 s-1.
+        """
+        return self._get("tendency_of_total_water_path_due_to_advection")

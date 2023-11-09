@@ -4,14 +4,13 @@ import numpy as np
 import torch
 from typing_extensions import TypeAlias
 
+from fme.core.constants import GRAVITY
 from fme.core.data_loading.typing import SigmaCoordinates
 
 from .climate_data import ClimateData
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
-
-GRAVITY = 9.80665  # m/s^2
 
 
 def compute_dry_air_absolute_differences(
