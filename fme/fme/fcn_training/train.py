@@ -169,9 +169,15 @@ class Trainer:
         inference_epochs = list(range(0, self.config.max_epochs))[
             self.config.inference.epochs.slice
         ]
+        if self.config.segment_epochs is None:
+            segment_max_epochs = self.config.max_epochs
+        else:
+            segment_max_epochs = min(
+                self.startEpoch + self.config.segment_epochs, self.config.max_epochs
+            )
         # "epoch" describes the loop, self._model_epoch describes model weights
         # needed so we can describe the loop even after weights are updated
-        for epoch in range(self.startEpoch, self.config.max_epochs):
+        for epoch in range(self.startEpoch, segment_max_epochs):
             logging.info(f"Epoch: {epoch+1}")
             if self.train_data.sampler is not None:
                 self.train_data.sampler.set_epoch(epoch)

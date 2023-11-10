@@ -134,6 +134,9 @@ class TrainConfig:
             if save_checkpoint is True. If None, checkpoints are only saved
             for the most recent epoch and the best epoch.
         log_train_every_n_batches: how often to log batch_loss during training
+        segment_epochs: (optional) exit after training for at most this many epochs
+            in current job, without exceeding `max_epochs`. Use this if training
+            must be run in segments, e.g. due to wall clock limit.
     """
 
     train_data: DataLoaderParams
@@ -150,6 +153,7 @@ class TrainConfig:
     validate_using_ema: bool = False
     checkpoint_every_n_epochs: Optional[int] = None
     log_train_every_n_batches: int = 100
+    segment_epochs: Optional[int] = None
 
     @property
     def checkpoint_dir(self) -> str:
