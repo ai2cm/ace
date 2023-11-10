@@ -34,11 +34,8 @@ def _load_stepper(
     checkpoint_file: str,
     area: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
-    force_conserve_dry_air: bool,
 ) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    if force_conserve_dry_air:
-        checkpoint["stepper"]["config"]["conserve_dry_air"] = True
     stepper = SingleModuleStepper.from_state(
         checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
     )
@@ -72,8 +69,6 @@ class InferenceConfig:
              netcdf file. Ignored if save_prediction_files is False.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
-        force_conserve_dry_air: if True, inference will update the stepper to
-            conserve dry air regardless of how it was trained
     """
 
     experiment_dir: str
@@ -89,7 +84,6 @@ class InferenceConfig:
     save_prediction_files: bool = True
     save_raw_prediction_names: Optional[Sequence[str]] = None
     forward_steps_in_memory: int = 1
-    force_conserve_dry_air: bool = False
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -123,7 +117,6 @@ class InferenceConfig:
             self.checkpoint_path,
             area=area,
             sigma_coordinates=sigma_coordinates,
-            force_conserve_dry_air=self.force_conserve_dry_air,
         )
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
