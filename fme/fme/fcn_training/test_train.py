@@ -36,6 +36,7 @@ def _get_test_yaml_files(
     stepper_checkpoint_file=None,
     log_to_wandb=False,
     max_epochs=1,
+    segment_epochs=1,
 ):
     new_stepper_config = f"""
   in_names: {in_variable_names}
@@ -95,6 +96,7 @@ inference:
     forward_steps_in_memory: 2
 n_forward_steps: {n_forward_steps}
 max_epochs: {max_epochs}
+segment_epochs: {segment_epochs}
 save_checkpoint: true
 logging:
   log_to_screen: true
@@ -166,7 +168,7 @@ def _save_netcdf(
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-def _setup(path, nettype, log_to_wandb=False, max_epochs=1):
+def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
     if not path.exists():
         path.mkdir()
     seed = 0
@@ -220,6 +222,7 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1):
         nettype=nettype,
         log_to_wandb=log_to_wandb,
         max_epochs=max_epochs,
+        segment_epochs=segment_epochs,
     )
     return train_config_filename, inference_config_filename
 
@@ -287,7 +290,7 @@ def test_resume(tmp_path, nettype):
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
         train_config, inference_config = _setup(
-            tmp_path, nettype, log_to_wandb=True, max_epochs=1
+            tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )
         with mock_wandb() as wandb:
             train_main(
@@ -302,12 +305,6 @@ def test_resume(tmp_path, nettype):
             == 0
         )
         assert not mock.called
-        # replace max_epochs in train config so we can continue training
-        with open(train_config, "r") as f:
-            config_data = yaml.safe_load(f)
-        config_data["max_epochs"] = 2
-        with open(train_config, "w") as f:
-            yaml.dump(config_data, f)
         with mock_wandb() as wandb:
             train_main(
                 yaml_config=train_config,
