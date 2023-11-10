@@ -115,6 +115,12 @@ class ClimateData:
         """
         return self._get("tendency_of_total_water_path_due_to_advection")
 
+    @tendency_of_total_water_path_due_to_advection.setter
+    def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
+        self._data[
+            self._prefixes["tendency_of_total_water_path_due_to_advection"]
+        ] = value
+
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
