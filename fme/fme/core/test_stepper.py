@@ -8,19 +8,26 @@ import pytest
 import torch
 
 import fme
+from fme.core import ClimateData, metrics
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.loss import ConservationLoss, get_dry_air_nonconservation
+from fme.core.loss import (
+    ConservationLoss,
+    ConservationLossConfig,
+    get_dry_air_nonconservation,
+)
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.packer import Packer
 from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.core.stepper import (
+    CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
     _force_conserve_dry_air,
+    _force_zero_global_mean_moisture_advection,
     run_on_batch,
 )
 from fme.fcn_training.registry import ModuleSelector
@@ -80,7 +87,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     conservation_loss = ConservationLoss(
-        dry_air_penalty=None,
+        config=ConservationLossConfig(),
         area_weights=area,
         sigma_coordinates=sigma_coordinates,
     )
@@ -98,8 +105,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        corrector=None,
         conservation_loss=conservation_loss,
     )
     assert torch.allclose(
@@ -119,8 +125,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         prescriber=NullPrescriber(),
         n_forward_steps=1,
         aggregator=MagicMock(),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        corrector=None,
         conservation_loss=conservation_loss,
     )
     assert torch.allclose(
@@ -151,7 +156,7 @@ def test_run_on_batch_addition_series():
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     conservation_loss = ConservationLoss(
-        dry_air_penalty=None,
+        config=ConservationLossConfig(),
         area_weights=area,
         sigma_coordinates=sigma_coordinates,
     )
@@ -169,8 +174,7 @@ def test_run_on_batch_addition_series():
         prescriber=NullPrescriber(),
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        corrector=None,
         conservation_loss=conservation_loss,
     )
     assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
@@ -218,7 +222,7 @@ def test_run_on_batch_with_prescriber():
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     conservation_loss = ConservationLoss(
-        dry_air_penalty=None,
+        config=ConservationLossConfig(),
         area_weights=area,
         sigma_coordinates=sigma_coordinates,
     )
@@ -236,8 +240,7 @@ def test_run_on_batch_with_prescriber():
         n_forward_steps=n_steps,
         prescriber=Prescriber("b", "mask", 1),
         aggregator=MagicMock(),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        corrector=None,
         conservation_loss=conservation_loss,
     )
     for i in range(n_steps):
@@ -368,7 +371,7 @@ def _setup_and_run_on_batch(
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     conservation_loss = ConservationLoss(
-        dry_air_penalty=None,
+        config=ConservationLossConfig(),
         area_weights=area,
         sigma_coordinates=sigma_coordinates,
     )
@@ -386,8 +389,7 @@ def _setup_and_run_on_batch(
         n_forward_steps=n_forward_steps,
         prescriber=prescriber,
         aggregator=aggregator,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        corrector=None,
         conservation_loss=conservation_loss,
     )
 
@@ -467,6 +469,31 @@ def test_run_on_batch(
         )
 
 
+def test_force_no_global_mean_moisture_advection():
+    torch.random.manual_seed(0)
+    data = {
+        "tendency_of_total_water_path_due_to_advection": torch.rand(size=(3, 2, 5, 5)),
+    }
+    area_weights = 1.0 + torch.rand(size=(5, 5))
+    original_mean = metrics.weighted_mean(
+        data["tendency_of_total_water_path_due_to_advection"],
+        weights=area_weights,
+        dim=[-2, -1],
+    )
+    assert (original_mean.abs() > 0.0).all()
+    fixed_data = _force_zero_global_mean_moisture_advection(
+        data,
+        area=area_weights,
+    )
+    new_mean = metrics.weighted_mean(
+        fixed_data["tendency_of_total_water_path_due_to_advection"],
+        weights=area_weights,
+        dim=[-2, -1],
+    )
+    assert (new_mean.abs() < original_mean.abs()).all()
+    np.testing.assert_almost_equal(new_mean.cpu().numpy(), 0.0, decimal=6)
+
+
 def test_force_conserve_dry_air():
     torch.random.manual_seed(0)
     data = {
@@ -502,3 +529,92 @@ def test_force_conserve_dry_air():
     )
     assert new_nonconservation < original_nonconservation
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
+
+
+def test_stepper_corrector():
+    torch.random.manual_seed(0)
+    device = get_device()
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)).to(device),
+        "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)).to(device),
+        "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)).to(device),
+        "PRATEsfc": torch.rand(size=(3, 2, 5, 5)).to(device),
+        "LHTFLsfc": torch.rand(size=(3, 2, 5, 5)).to(device),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(
+            size=(3, 2, 5, 5)
+        ).to(device),
+    }
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    ).to(device)
+    area_weights = 1.0 + torch.rand(size=(5, 5)).to(device)
+    corrector_config = CorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+    )
+
+    mean_advection = metrics.weighted_mean(
+        data["tendency_of_total_water_path_due_to_advection"],
+        weights=area_weights,
+        dim=[-2, -1],
+    )
+    assert (mean_advection.abs() > 0.0).all()
+
+    # use a randomly initialized Linear layer for the module
+    # using PrebuiltBuilder
+    stepper_config = SingleModuleStepperConfig(
+        builder=ModuleSelector(
+            type="prebuilt",
+            config={
+                "module": torch.nn.Conv2d(
+                    in_channels=len(data), out_channels=len(data), kernel_size=1
+                ).to(device),
+            },
+        ),
+        in_names=list(data.keys()),
+        out_names=list(data.keys()),
+        normalization=NormalizationConfig(
+            means={key: 0.0 for key in data.keys()},
+            stds={key: 1.0 for key in data.keys()},
+        ),
+        corrector=corrector_config,
+    )
+    stepper = stepper_config.get_stepper(
+        shapes={key: value.shape for key, value in data.items()},
+        area=area_weights,
+        sigma_coordinates=sigma_coordinates,
+    )
+    # run the stepper on the data
+    with torch.no_grad():
+        stepped = stepper.run_on_batch(
+            data=data,
+            optimization=NullOptimization(),
+            n_forward_steps=1,
+        )
+
+    # check there is no mean advection
+    mean_advection = (
+        metrics.weighted_mean(
+            stepped.gen_data["tendency_of_total_water_path_due_to_advection"],
+            weights=area_weights,
+            dim=[-2, -1],
+        )
+        .cpu()
+        .numpy()
+    )
+    np.testing.assert_almost_equal(mean_advection[:, 1:], 0.0, decimal=6)
+
+    # check that the dry air is conserved
+    dry_air = (
+        metrics.weighted_mean(
+            ClimateData(stepped.gen_data).surface_pressure_due_to_dry_air(
+                sigma_coordinates
+            ),
+            weights=area_weights,
+            dim=[-2, -1],
+        )
+        .cpu()
+        .numpy()
+    )
+    dry_air_nonconservation = np.abs(dry_air[:, 1:] - dry_air[:, :-1])
+    np.testing.assert_almost_equal(dry_air_nonconservation, 0.0, decimal=3)

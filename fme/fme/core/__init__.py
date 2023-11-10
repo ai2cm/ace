@@ -1,3 +1,4 @@
+from .climate_data import ClimateData
 from .device import get_device, using_gpu
 from .metrics import (
     root_mean_squared_error,
@@ -21,4 +22,5 @@ __all__ = [
     "Packer",
     "SingleModuleStepper",
     "SingleModuleStepperConfig",
+    "ClimateData",
 ]
