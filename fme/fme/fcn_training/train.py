@@ -58,11 +58,13 @@ import yaml
 
 import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
+from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.distributed import Distributed, NotDistributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.fcn_training.inference import run_inference
+from fme.fcn_training.inference.derived_variables import compute_derived_quantities
 from fme.fcn_training.train_config import TrainConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
 
@@ -310,11 +312,21 @@ class Trainer:
 
         with torch.no_grad(), self._validation_context():
             for batch in self.valid_data.loader:
-                self.stepper.run_on_batch(
+                stepped = self.stepper.run_on_batch(
                     batch.data,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
-                    aggregator=aggregator,
+                    aggregator=NullAggregator(),
+                )
+                stepped = compute_derived_quantities(
+                    stepped, self.valid_data.sigma_coordinates
+                )
+                aggregator.record_batch(
+                    loss=stepped.metrics["loss"],
+                    target_data=stepped.target_data,
+                    gen_data=stepped.gen_data,
+                    target_data_norm=stepped.target_data_norm,
+                    gen_data_norm=stepped.gen_data_norm,
                 )
         return aggregator.get_logs(label="val")
 
