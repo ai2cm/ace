@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from typing import (
     Any,
     Dict,
@@ -39,6 +40,48 @@ from .optimization import DisabledOptimizationConfig, NullOptimization, Optimiza
 
 
 @dataclasses.dataclass
+class CorrectorConfig:
+    conserve_dry_air: bool = False
+    zero_global_mean_moisture_advection: bool = False
+
+    def build(
+        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+    ) -> Optional["Corrector"]:
+        return Corrector(config=self, area=area, sigma_coordinates=sigma_coordinates)
+
+
+class Corrector:
+    def __init__(
+        self,
+        config: CorrectorConfig,
+        area: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+    ):
+        self._config = config
+        self._area = area.to(get_device())
+        self._sigma_coordinates = sigma_coordinates.to(get_device())
+
+    def __call__(
+        self,
+        input_data: Mapping[str, torch.Tensor],
+        gen_data: Mapping[str, torch.Tensor],
+    ):
+        if self._config.conserve_dry_air:
+            gen_data = _force_conserve_dry_air(
+                input_data=input_data,
+                gen_data=gen_data,
+                area=self._area,
+                sigma_coordinates=self._sigma_coordinates,
+            )
+        if self._config.zero_global_mean_moisture_advection:
+            gen_data = _force_zero_global_mean_moisture_advection(
+                gen_data=gen_data,
+                area=self._area,
+            )
+        return gen_data
+
+
+@dataclasses.dataclass
 class SingleModuleStepperConfig:
     builder: ModuleSelector
     in_names: List[str]
@@ -47,10 +90,22 @@ class SingleModuleStepperConfig:
     optimization: Optional[DisabledOptimizationConfig] = None
     prescriber: Optional[PrescriberConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
-    conserve_dry_air: bool = False
+    conserve_dry_air: Optional[bool] = None
+    corrector: CorrectorConfig = dataclasses.field(
+        default_factory=lambda: CorrectorConfig()
+    )
     conservation_loss: ConservationLossConfig = dataclasses.field(
         default_factory=lambda: ConservationLossConfig()
     )
+
+    def __post_init__(self):
+        if self.conserve_dry_air is not None:
+            warnings.warn(
+                "conserve_dry_air is deprecated, "
+                "use corrector.conserve_dry_air instead",
+                category=DeprecationWarning,
+            )
+            self.corrector.conserve_dry_air = self.conserve_dry_air
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -222,6 +277,9 @@ class SingleModuleStepper:
             area_weights=self.area,
             sigma_coordinates=self.sigma_coordinates,
         )
+        self._corrector = config.corrector.build(
+            area=area, sigma_coordinates=sigma_coordinates
+        )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
@@ -277,9 +335,7 @@ class SingleModuleStepper:
             n_forward_steps=n_forward_steps,
             prescriber=self.prescriber,
             aggregator=non_none_aggregator,
-            conserve_dry_air=self._config.conserve_dry_air,
-            sigma_coordinates=self.sigma_coordinates,
-            area=self.area,
+            corrector=self._corrector,
             conservation_loss=self._conservation_loss,
         )
 
@@ -449,6 +505,34 @@ def _force_conserve_dry_air(
     return gen.data
 
 
+def _force_zero_global_mean_moisture_advection(
+    gen_data: Mapping[str, torch.Tensor],
+    area: torch.Tensor,
+) -> Dict[str, torch.Tensor]:
+    """
+    Update the generated data so advection conserves moisture.
+
+    Does so by adding a constant offset to the moisture advective tendency.
+
+    Args:
+        gen_data: The generated data.
+        area: (n_lat, n_lon) array containing relative gridcell area, in any
+            units including unitless.
+    """
+    gen = ClimateData(gen_data)
+
+    mean_moisture_advection = metrics.weighted_mean(
+        gen.tendency_of_total_water_path_due_to_advection,
+        weights=area,
+        dim=(-2, -1),
+    )
+    gen.tendency_of_total_water_path_due_to_advection = (
+        gen.tendency_of_total_water_path_due_to_advection
+        - mean_moisture_advection[..., None, None]
+    )
+    return gen.data
+
+
 def run_on_batch(
     data: Dict[str, torch.Tensor],
     module: nn.Module,
@@ -459,11 +543,9 @@ def run_on_batch(
     loss_obj: nn.Module,
     prescriber: Union[Prescriber, NullPrescriber],
     aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
-    sigma_coordinates: SigmaCoordinates,
-    area: torch.Tensor,
+    corrector: Optional[Corrector],  # Optional so we can skip code when unused
     conservation_loss: ConservationLoss,
     n_forward_steps: int = 1,
-    conserve_dry_air: bool = False,
 ) -> SteppedData:
     """
     Run the model on a batch of data.
@@ -484,12 +566,9 @@ def run_on_batch(
         loss_obj: The loss object.
         prescriber: Overwrite an output with target value in specified region.
         aggregator: The data aggregator.
-        sigma_coordinates: The sigma coordinates.
-        area: (n_lat, n_lon) array containing relative gridcell area, in any
-            units including unitless.
+        corrector: The post-step corrector.
         conservation_loss: Computes conservation-related losses, if any.
         n_forward_steps: The number of timesteps to run the model for.
-        conserve_dry_air: if True, force global dry air mass conservation
 
     Returns:
         The loss, the generated data, the normalized generated data,
@@ -526,15 +605,13 @@ def run_on_batch(
             gen_tensor_norm = module(input_tensor_norm).to(
                 get_device(), dtype=torch.float
             )
-            if conserve_dry_air:
+            if corrector is not None:
                 gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
                 gen_data = normalizer.denormalize(gen_norm)
                 input_data = get_input_data(
                     in_packer.names, time_index=step, norm_mode="denorm"
                 )
-                gen_data = _force_conserve_dry_air(
-                    input_data, gen_data, area=area, sigma_coordinates=sigma_coordinates
-                )
+                gen_data = corrector(input_data, gen_data)
                 gen_norm = normalizer.normalize(gen_data)
                 gen_tensor_norm = out_packer.pack(gen_norm, axis=channel_dim).to(
                     get_device(), dtype=torch.float
