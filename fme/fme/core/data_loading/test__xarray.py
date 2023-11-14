@@ -10,10 +10,15 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from fme.core.data_loading._xarray import XarrayDataset, get_file_local_index
+from fme.core.data_loading._xarray import (
+    XarrayDataset,
+    get_cumulative_timesteps,
+    get_file_local_index,
+)
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.typing import GriddedData
 
 
 @dataclasses.dataclass
@@ -41,7 +46,9 @@ class VariableNames:
         return self._concat(self.time_dependent_names, self.time_invariant_names)
 
 
-MockData = namedtuple("MockData", ("tmpdir", "obs_times", "start_times", "var_names"))
+MockData = namedtuple(
+    "MockData", ("tmpdir", "obs_times", "start_times", "start_indices", "var_names")
+)
 
 
 def _get_data(
@@ -80,6 +87,7 @@ def _get_data(
     ak = {f"ak_{i}": float(i) for i in range(n_levels)}
     bk = {f"bk_{i}": float(i + 1) for i in range(n_levels)}
     tmpdir = tmp_path_factory.mktemp(dirname)
+    filenames = []
     for i, first in enumerate(start_times):
         if first != start_times[-1]:
             last = start_times[i + 1]
@@ -113,23 +121,27 @@ def _get_data(
             )
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords)
+        filename = tmpdir / f"{first.strftime('%Y%m%d%H')}.nc"
         ds.to_netcdf(
-            tmpdir / f"{first.strftime('%Y%m%d%H')}.nc",
+            filename,
             unlimited_dims=["time"],
             format="NETCDF4",
         )
+        filenames.append(filename)
 
     if has_ragged_var:
         initial_condition_names: Iterable[str] = ("ragged_var",)
     else:
         initial_condition_names = ()
 
+    start_indices = get_cumulative_timesteps(filenames)
+
     variable_names = VariableNames(
         time_dependent_names=("foo", "bar"),
         time_invariant_names=("constant_var",),
         initial_condition_names=initial_condition_names,
     )
-    return MockData(tmpdir, obs_times, start_times, variable_names)
+    return MockData(tmpdir, obs_times, start_times, start_indices, variable_names)
 
 
 def get_mock_monthly_netcdfs(tmp_path_factory, dirname, has_ragged_var) -> MockData:
@@ -187,16 +199,15 @@ def test_monthly_file_local_index(
     mock_monthly_netcdfs, global_idx, expected_file_local_idx
 ):
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, obs_times, start_times, _ = mock_data
-    file_local_idx = get_file_local_index(global_idx, obs_times, start_times)
+    file_local_idx = get_file_local_index(global_idx, mock_data.start_indices)
     assert file_local_idx == expected_file_local_idx
-    delta = obs_times[1] - obs_times[0]
+    delta = mock_data.obs_times[1] - mock_data.obs_times[0]
     target_timestamp = np.datetime64(
         cftime.DatetimeGregorian(2003, 3, 1, 0, 0, 0, 0, has_year_zero=False)
         + global_idx * delta
     )
     file_idx, local_idx = file_local_idx
-    full_paths = sorted(list(tmpdir.glob("*.nc")))
+    full_paths = sorted(list(mock_data.tmpdir.glob("*.nc")))
     with xr.open_dataset(full_paths[file_idx], use_cftime=True) as ds:
         assert ds["time"][local_idx].item() == target_timestamp
 
@@ -277,16 +288,15 @@ def test_XarrayDataset_ragged_raises_error(
 ):
     """Check that you are only allowed to specify n_samples = 1 or None."""
     mock_data: MockData = mock_monthly_netcdfs_ragged_time_dim
-    tmpdir, _, _, var_names = mock_data
 
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
         n_samples=n_samples,
     )
-    requirements = DataRequirements(names=var_names.all_names, n_timesteps=2)
+    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=2)
 
     with error_context:
         XarrayDataset(params=params, requirements=requirements)
@@ -296,11 +306,10 @@ def test_XarrayDataset_ragged_raises_error(
 def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     """Test that increasing n_timesteps decreases the number of samples."""
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, obs_times, _, var_names = mock_data
-    if len(var_names.initial_condition_names) != 0:
+    if len(mock_data.var_names.initial_condition_names) != 0:
         return
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
@@ -308,12 +317,12 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     )
     n_forward_steps = 4
     requirements = DataRequirements(
-        names=var_names.all_names,
+        names=mock_data.var_names.all_names,
         n_timesteps=n_forward_steps + 1,
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
     if n_samples is None:
-        assert len(dataset) == len(obs_times) - n_forward_steps
+        assert len(dataset) == len(mock_data.obs_times) - n_forward_steps
     else:
         assert len(dataset) == n_samples
 
@@ -324,17 +333,16 @@ def test_XarrayDataset_monthly_start_slice(mock_monthly_netcdfs):
     be fewer samples.
     """
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, obs_time, _, var_names = mock_data
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
         window_starts=Slice(5, None),
     )
-    requirements = DataRequirements(names=var_names.all_names, n_timesteps=2)
+    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=2)
     dataset = XarrayDataset(params=params, requirements=requirements)
-    assert len(dataset) == len(obs_time) - 1 - 5
+    assert len(dataset) == len(mock_data.obs_times) - 1 - 5
 
 
 @pytest.mark.parametrize(
@@ -346,34 +354,34 @@ def test_XarrayDataset_monthly_step_slice(mock_monthly_netcdfs, n_forward_steps)
     When we subsample initial conditions every N steps, there should be fewer samples.
     """
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, obs_time, _, var_names = mock_data
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
         window_starts=Slice(None, None, 2),
     )
     requirements = DataRequirements(
-        names=var_names.all_names,
+        names=mock_data.var_names.all_names,
         n_timesteps=n_forward_steps + 1,
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
-    n_all_samples = len(obs_time) - n_forward_steps
+    n_all_samples = len(mock_data.obs_times) - n_forward_steps
     # +1 because if the number of samples is odd, we include the first and last sample
     assert len(dataset) == int((n_all_samples + 1) / 2)
 
 
 def test_XarrayDataset_monthly_time_window_sample_length(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, _, _, var_names = mock_data
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
     )
-    requirements = DataRequirements(names=var_names.all_names, n_timesteps=120)
+    requirements = DataRequirements(
+        names=mock_data.var_names.all_names, n_timesteps=120
+    )
     data = get_data_loader(
         params=params,
         train=False,
@@ -400,16 +408,15 @@ def test_yearly_file_local_index(
     mock_yearly_netcdfs, global_idx, expected_file_local_idx
 ):
     mock_data: MockData = mock_yearly_netcdfs
-    tmpdir, obs_times, start_times, _ = mock_data
-    file_local_idx = get_file_local_index(global_idx, obs_times, start_times)
+    file_local_idx = get_file_local_index(global_idx, mock_data.start_indices)
     assert file_local_idx == expected_file_local_idx
-    delta = obs_times[1] - obs_times[0]
+    delta = mock_data.obs_times[1] - mock_data.obs_times[0]
     target_timestamp = (
         cftime.DatetimeNoLeap(1999, 1, 1, 0, 0, 0, 0, has_year_zero=True)
         + global_idx * delta
     )
     file_idx, local_idx = file_local_idx
-    full_paths = sorted(list(tmpdir.glob("*.nc")))
+    full_paths = sorted(list(mock_data.tmpdir.glob("*.nc")))
     with xr.open_dataset(full_paths[file_idx], use_cftime=True) as ds:
         assert ds["time"][local_idx].item() == target_timestamp
 
@@ -423,22 +430,21 @@ def test_yearly_file_local_index(
 )
 def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     mock_data: MockData = mock_yearly_netcdfs
-    tmpdir, obs_times, _, var_names = mock_data
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
     )
-    with xr.open_mfdataset(tmpdir.glob("*.nc"), use_cftime=True) as ds:
+    with xr.open_mfdataset(mock_data.tmpdir.glob("*.nc"), use_cftime=True) as ds:
         for n_steps in [3, 2 * 365]:
             requirements = DataRequirements(
-                names=var_names.all_names,
+                names=mock_data.var_names.all_names,
                 n_timesteps=n_steps,
             )
             dataset = XarrayDataset(params=params, requirements=requirements)
-            assert len(dataset) == len(obs_times) - n_steps + 1
-            for varname in var_names.time_resolved_names:
+            assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
+            for varname in mock_data.var_names.time_resolved_names:
                 target_data = ds[varname][
                     global_idx : global_idx + n_steps, :, :
                 ].values
@@ -454,14 +460,43 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
 
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
-    tmpdir, _, _, var_names = mock_data
     params = DataLoaderParams(
-        data_path=tmpdir,
+        data_path=mock_data.tmpdir,
         data_type="xarray",
         batch_size=1,
         num_data_workers=0,
     )
-    requirements = DataRequirements(names=var_names.all_names, n_timesteps=15)
+    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=15)
     data = get_data_loader(params=params, train=False, requirements=requirements)
     batch, _ = data.loader.dataset[0]
     assert batch["constant_var"].shape[0] == 15
+
+
+def _get_repeat_data_loader(
+    mock_data: MockData, n_timesteps: int, n_repeats: int
+) -> GriddedData:
+    params = DataLoaderParams(
+        data_path=mock_data.tmpdir,
+        data_type="xarray",
+        batch_size=1,
+        num_data_workers=0,
+        n_repeats=n_repeats,
+    )
+    requirements = DataRequirements(
+        names=mock_data.var_names.all_names, n_timesteps=n_timesteps
+    )
+    return get_data_loader(params=params, train=False, requirements=requirements)
+
+
+@pytest.mark.parametrize("n_timesteps", [1, 2, 4])
+@pytest.mark.parametrize("n_repeats", [1, 2])
+def test_repeat_dataset_num_timesteps(
+    mock_monthly_netcdfs: MockData, n_timesteps, n_repeats
+):
+    unrepeated_loader = _get_repeat_data_loader(mock_monthly_netcdfs, n_timesteps, 1)
+    data = _get_repeat_data_loader(mock_monthly_netcdfs, n_timesteps, n_repeats)
+    offset = n_timesteps - 1
+    expected_length = (
+        n_repeats * (len(unrepeated_loader.loader.dataset) + offset) - offset
+    )
+    assert len(data.loader.dataset) == expected_length
