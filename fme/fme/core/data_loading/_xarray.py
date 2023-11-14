@@ -4,6 +4,7 @@ from collections import namedtuple
 from glob import glob
 from typing import Dict, List, Mapping, Optional, Tuple
 
+import numpy as np
 import torch
 import xarray as xr
 
@@ -59,23 +60,23 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
     )
 
 
-def get_file_local_index(
-    global_idx: int,
-    observation_times: xr.CFTimeIndex,
-    file_start_times: xr.CFTimeIndex,
-) -> Tuple[int, int]:
-    """Takes a global_idx which identifies the position of an observation in the
-    time-ordered union of all observations across some number of files. Returns
-    a tuple where the first element gives the index of the file where the
-    observation is found (assuming files are time ordered), and the second
-    element gives the file-local index of the observation in that file.
+def get_cumulative_timesteps(paths: List[str]) -> np.ndarray:
+    """Returns a list of cumulative timesteps for each file in paths."""
+    num_timesteps_per_file = [0]
+    for path in paths:
+        with xr.open_dataset(path, use_cftime=True) as ds:
+            num_timesteps_per_file.append(len(ds.time))
+    return np.array(num_timesteps_per_file).cumsum()
 
+
+def get_file_local_index(index: int, start_indices: np.ndarray) -> Tuple[int, int]:
     """
-    observation_time = observation_times[global_idx]
-    file_idx = file_start_times.get_indexer([observation_time], method="ffill").item()
-    file_start_time = file_start_times[file_idx]
-    local_idx = global_idx - observation_times.get_indexer([file_start_time]).item()
-    return file_idx, local_idx
+    Return a tuple of the index of the file containing the time point at `index`
+    and the index of the time point within that file.
+    """
+    file_index = np.searchsorted(start_indices, index, side="right") - 1
+    time_index = index - start_indices[file_index]
+    return int(file_index), time_index
 
 
 class XarrayDataset(Dataset):
@@ -95,6 +96,7 @@ class XarrayDataset(Dataset):
         self.engine = "netcdf4" if params.engine is None else params.engine
         # assume that filenames include time ordering
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
+        self.full_paths *= self.params.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
         (
@@ -119,6 +121,24 @@ class XarrayDataset(Dataset):
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         return self._horizontal_coordinates
 
+    def _get_samples_and_initial_conditions(self, ds):
+        if "initial_condition" in ds.dims:
+            n_candidate_ics = 1
+        else:
+            n_candidate_ics = self.total_timesteps - self.n_steps + 1
+        self._initial_conditions = list(range(n_candidate_ics))[
+            self.params.window_starts.slice
+        ]
+        self._n_initial_conditions = len(self._initial_conditions)
+        if self.params.n_samples is not None:
+            if self.params.n_samples > self._n_initial_conditions:
+                raise ValueError(
+                    f"Requested {self.params.n_samples} samples, but only "
+                    f"{self._n_initial_conditions} initial conditions "
+                    "are available."
+                )
+            self._n_initial_conditions = self.params.n_samples
+
     def _get_metadata(self, ds):
         result = {}
         for name in self.names:
@@ -131,36 +151,19 @@ class XarrayDataset(Dataset):
 
     def _get_files_stats(self):
         logging.info(f"Opening data at {os.path.join(self.path, '*.nc')}")
-        file_start_times = []
-        for path in self.full_paths:
-            with xr.open_dataset(path, use_cftime=True) as ds:
-                file_start_times.append(ds["time"][0].item())
-        self.file_start_times = xr.CFTimeIndex(file_start_times)
-        with xr.open_mfdataset(self.full_paths, use_cftime=True) as ds:
-            self.observation_times = ds.get_index("time")
+        cum_num_timesteps = get_cumulative_timesteps(self.full_paths)
+        self.start_indices = cum_num_timesteps[:-1]
+        self.total_timesteps = cum_num_timesteps[-1]
+        del cum_num_timesteps
 
-            if "initial_condition" in ds.dims:
-                n_candidate_ics = 1
-            else:
-                n_candidate_ics = len(self.observation_times) - self.n_steps + 1
+        ds = self._open_file(0)
+        self._get_samples_and_initial_conditions(ds)
+        self._get_metadata(ds)
 
-            self._initial_conditions = list(range(n_candidate_ics))[
-                self.params.window_starts.slice
-            ]
-            self._n_initial_conditions = len(self._initial_conditions)
-            if self.params.n_samples is not None:
-                if self.params.n_samples > self._n_initial_conditions:
-                    raise ValueError(
-                        f"Requested {self.params.n_samples} samples, but only "
-                        f"{self._n_initial_conditions} initial conditions "
-                        "are available."
-                    )
-                self._n_initial_conditions = self.params.n_samples
-            self._get_metadata(ds)
-            img_shape = ds[self.names[0]].shape[1:]
-            logging.info(f"Found {self._n_initial_conditions} samples.")
-            logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
-            logging.info(f"Following variables are available: {list(ds.variables)}.")
+        img_shape = ds[self.names[0]].shape[1:]
+        logging.info(f"Found {self._n_initial_conditions} samples.")
+        logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
+        logging.info(f"Following variables are available: {list(ds.variables)}.")
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
@@ -232,12 +235,10 @@ class XarrayDataset(Dataset):
             time_slice = slice(idx, idx + self.n_steps)
 
         input_file_idx, input_local_idx = get_file_local_index(
-            time_slice.start, self.observation_times, self.file_start_times
+            time_slice.start, self.start_indices
         )
         output_file_idx, output_local_idx = get_file_local_index(
-            time_slice.stop - 1,
-            self.observation_times,
-            self.file_start_times,
+            time_slice.stop - 1, self.start_indices
         )
 
         # get the sequence of observations

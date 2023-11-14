@@ -29,6 +29,7 @@ class DataLoaderParams:
         data_type: Type of data to load.
         batch_size: Batch size.
         num_data_workers: Number of parallel data workers.
+        n_repeats: Number of times to repeat the dataset (in time).
         n_samples: Number of samples to load, starting at the beginning of the data.
             If None, load all samples.
         window_starts: Slice indicating the set of indices to consider for initial
@@ -43,6 +44,7 @@ class DataLoaderParams:
     data_type: Literal["xarray", "ensemble_xarray"]
     batch_size: int
     num_data_workers: int
+    n_repeats: int = 1
     n_samples: Optional[int] = None
     window_starts: Slice = dataclasses.field(default_factory=Slice)
     engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
@@ -67,3 +69,6 @@ class DataLoaderParams:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
+
+        if self.n_repeats != 1 and self.data_type == "ensemble_xarray":
+            raise ValueError("n_repeats must be 1 when using ensemble_xarray")
