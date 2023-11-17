@@ -18,7 +18,7 @@ import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
 import xtorch_harmonics
-from dask.distributed import Client
+from dask.diagnostics import ProgressBar
 
 FLUXES_2D = "fluxes_2d"
 FOURCASTNET_VANILLA = "fourcastnet_vanilla"
@@ -441,7 +441,6 @@ def construct_lazy_dataset(
         "it will be replaced by the ic arg."
     ),
 )
-@click.option("--n-workers", default=8, help="Number of dask workers.")
 def main(
     debug,
     subsample,
@@ -451,9 +450,7 @@ def main(
     n_split,
     ic,
     root,
-    n_workers,
 ):
-    Client(n_workers=n_workers)
     output = output.format(ic=ic)
     xr.set_options(keep_attrs=True)
     ds = construct_lazy_dataset(root, ic, roundtrip_fraction_kept)
@@ -472,9 +469,10 @@ def main(
         ds.partition.initialize_store(output)
         for i in range(n_split):
             print(f"Writing segment {i + 1} / {n_split}")
-            ds.partition.write(
-                output, n_split, ["time"], i, collect_variable_writes=True
-            )
+            with ProgressBar():
+                ds.partition.write(
+                    output, n_split, ["time"], i, collect_variable_writes=True
+                )
 
 
 if __name__ == "__main__":

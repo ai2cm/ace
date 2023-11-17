@@ -1,0 +1,88 @@
+# The dependencies of the scripts below (where not containerized) are installed in the "fv3net" conda environment
+# which can be installed using fv3net's Makefile. See
+# https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
+
+.PHONY: fv3gfs_1deg_climSST_dataset
+fv3gfs_1deg_climSST_dataset:
+	./compute_dataset_fv3gfs.sh \
+	--root gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d} \
+	--output gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset/ic_{ic:04d}.zarr \
+	--ic-max 11
+
+.PHONY: fv3gfs_1deg_climSST_monthly_netcdfs
+fv3gfs_1deg_climSST_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset \
+	--n-ic 11 \
+	--output-dir /net/nfs/climate/data/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31
+
+.PHONY: fv3gfs_1deg_climSST_residual_stats_beaker_dataset
+fv3gfs_1deg_climSST_residual_stats_beaker_dataset:
+	./generate_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset/ic_0001.zarr \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31 \
+	--name "fv3gfs-ensemble-ic0001-stats-residual-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using residual scaling. Includes surface height."
+
+.PHONY: fv3gfs_1deg_climSST_full_field_stats_beaker_dataset
+fv3gfs_1deg_climSST_full_field_stats_beaker_dataset:
+	./generate_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2023-08-09-vertically-resolved-1deg-fme-ensemble-dataset/ic_0001.zarr \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31 \
+	--name "fv3gfs-ensemble-ic0001-stats-full-field-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using full field scaling. Includes surface height." \
+	--script-flags "--full-field"
+
+# This took around ~10 hours to complete.  The roundtrip_filter adds significant computational time.
+# If we plan to do this regularly, paralellizing the script across time using xpartition to
+# launch jobs for different time chunks would probably be a good idea.
+.PHONY: fv3gfs_climSST_c48_baseline_dataset
+fv3gfs_climSST_c48_baseline_dataset:
+	./compute_dataset_fv3gfs.sh \
+	--root gs://vcm-ml-raw-flexible-retention/2023-08-03-C48-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0011_2021010100 \
+	--output gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011.zarr \
+	--script-flags "--roundtrip-fraction-kept 0.65"
+
+.PHONY: fv3gfs_climSST_c48_baseline_monthly_netcdfs
+fv3gfs_climSST_c48_baseline_monthly_netcdfs:
+	python convert_to_monthly_netcdf.py \
+	--prepend-nans \
+	gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011.zarr \
+	/net/nfs/climate/data/2023-09-12-vertically-resolved-1deg-fme-c48-baseline-dataset-truncated-065/ic_0011 \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31
+
+.PHONY: fv3gfs_1deg_AMIP_dataset
+fv3gfs_1deg_AMIP_dataset:
+	./compute_dataset_fv3gfs.sh \
+	--root gs://vcm-ml-raw-flexible-retention/2023-10-20-C96-FME-AMIP-ensemble-reference/regridded-zarrs/gaussian_grid_180_by_360/ic_{ic:04d} \
+	--output gs://vcm-ml-intermediate/2023-10-27-vertically-resolved-1deg-fme-amip-ensemble-dataset/ic_{ic:04d}.zarr \
+	--ic-max 4
+
+.PHONY: fv3gfs_1deg_AMIP_monthly_netcdfs
+fv3gfs_1deg_AMIP_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2023-10-27-vertically-resolved-1deg-fme-amip-ensemble-dataset \
+	--n-ic 4 \
+	--output-dir /pscratch/sd/b/bhenn/data/2023-11-01-vertically-resolved-1deg-fme-amip-ensemble-dataset \
+	--start-date 1990-01-01 \
+	--end-date 2019-12-31
+
+.PHONY: fv3gfs_1deg_AMIP_stats_beaker_dataset
+fv3gfs_1deg_AMIP_stats_beaker_dataset:
+	./generate_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2023-10-27-vertically-resolved-1deg-fme-amip-ensemble-dataset/ic_0001.zarr \
+	--start-date 1990-01-01 \
+	--end-date 2019-12-31 \
+	--name "fv3gfs-AMIP-ensemble-ic0001-stats-residual-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with AMIP SSTs, using residual scaling."
+
+# TODO: Add AMIP baseline C48 dataset processing when available
+
+# TODO: add rule for generation of the E3SM dataset
+# The data generation scripts for E3SM are nicely parameterized but I don't
+# have record of the parameters used - BH

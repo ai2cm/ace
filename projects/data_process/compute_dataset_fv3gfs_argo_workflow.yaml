@@ -12,6 +12,11 @@ spec:
   arguments:
     parameters:
     - name: python_script
+    - name: ic_max
+    - name: root
+    - name: output
+    - name: script_flags
+      value: ""
   templates:
     - name: compute-fme-dataset-ensemble
       steps:
@@ -23,9 +28,15 @@ spec:
               value: "{{workflow.parameters.python_script}}"
             - name: ic
               value: "{{item}}"
+            - name: root
+              value: "{{workflow.parameters.root}}"
+            - name: output
+              value: "{{workflow.parameters.output}}"
+            - name: script_flags
+              value: "{{workflow.parameters.script_flags}}"
           withSequence:
             start: "1"
-            end: "11"
+            end: "{{workflow.parameters.ic_max}}"
     - name: compute-fme-dataset-individual
       tolerations:
         - effect: NoSchedule
@@ -35,8 +46,11 @@ spec:
         parameters:
           - name: python_script
           - name: ic
+          - name: root
+          - name: output
+          - name: script_flags
       container:
-        image: us.gcr.io/vcm-ml/fv3net:5a8a41762278f2f1c4418a10a839b195aa3b3082
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
         resources:
           limits:
             cpu: "8000m"
@@ -44,14 +58,15 @@ spec:
           requests:
             cpu: "7500m"
             memory: "27Gi"
-        command: ["bash", "-c", "-x", "-e"]
+        command: ["bash", "-c", "-e"]
         args:
           - |
             cat << EOF > script.py
             {{inputs.parameters.python_script}}
             EOF
 
-            python script.py --ic {{inputs.parameters.ic}}
+            python script.py --ic {{inputs.parameters.ic}} --root {{inputs.parameters.root}} \
+              --output {{inputs.parameters.output}} {{inputs.parameters.script_flags}}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
