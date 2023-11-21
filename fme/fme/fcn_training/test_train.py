@@ -11,10 +11,12 @@ import pytest
 import xarray as xr
 import yaml
 
+from fme.core.data_loading.params import Slice
 from fme.core.testing.wandb import mock_wandb
 from fme.fcn_training.inference.inference import main as inference_main
 from fme.fcn_training.train import _restore_checkpoint
 from fme.fcn_training.train import main as train_main
+from fme.fcn_training.train_config import epoch_checkpoint_enabled
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
@@ -368,3 +370,16 @@ def test_fine_tuning(tmp_path, nettype):
     fine_tuning_config = _create_fine_tuning_config(train_config, ckpt)
 
     train_main(yaml_config=fine_tuning_config)
+
+
+@pytest.mark.parametrize(
+    "checkpoint_save_epochs,expected_save_epochs",
+    [(None, []), (Slice(start=-2), [2, 3]), (Slice(step=2), [0, 2])],
+)
+def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
+    max_epochs = 4
+    for i in range(max_epochs):
+        if i in expected_save_epochs:
+            assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
+        else:
+            assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
