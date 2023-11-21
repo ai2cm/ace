@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import os
+import warnings
 from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
@@ -130,7 +131,7 @@ class TrainConfig:
         save_checkpoint: whether to save checkpoints
         experiment_dir: directory where checkpoints and logs are saved
         inference: configuration for inline inference
-        checkpoint_every_n_epochs: how often to save epoch-based checkpoints,
+        checkpoint_save_epochs: how often to save epoch-based checkpoints,
             if save_checkpoint is True. If None, checkpoints are only saved
             for the most recent epoch and the best epoch.
         log_train_every_n_batches: how often to log batch_loss during training
@@ -151,9 +152,23 @@ class TrainConfig:
     n_forward_steps: int
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
-    checkpoint_every_n_epochs: Optional[int] = None
+    checkpoint_save_epochs: Optional[Slice] = None
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
+    checkpoint_every_n_epochs: Optional[int] = None
+
+    def __post_init__(self):
+        if self.checkpoint_every_n_epochs is not None:
+            warnings.warn(
+                "checkpoint_every_n_epochs is deprecated, use"
+                "checkpoint_save_epochs instead.",
+                category=DeprecationWarning,
+            )
+            self.checkpoint_save_epochs = Slice(
+                start=0,
+                stop=self.max_epochs,
+                step=self.checkpoint_every_n_epochs,
+            )
 
     @property
     def checkpoint_dir(self) -> str:
@@ -178,9 +193,9 @@ class TrainConfig:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
 
     def epoch_checkpoint_enabled(self, epoch: int) -> bool:
-        if self.checkpoint_every_n_epochs is None:
-            return False
-        return epoch % self.checkpoint_every_n_epochs == 0
+        return epoch_checkpoint_enabled(
+            epoch, self.max_epochs, self.checkpoint_save_epochs
+        )
 
     @property
     def resuming(self) -> bool:
@@ -200,3 +215,11 @@ class TrainConfig:
         logging.info("------------------ Configuration ------------------")
         logging.info(str(self))
         logging.info("---------------------------------------------------")
+
+
+def epoch_checkpoint_enabled(
+    epoch: int, max_epochs: int, save_epochs: Optional[Slice]
+) -> bool:
+    if save_epochs is None:
+        return False
+    return epoch in range(max_epochs)[save_epochs.slice]
