@@ -85,6 +85,14 @@ class ClimateData:
             sigma_coordinates.bk,
         )
 
+    def total_water_path(self, sigma_coordinates: SigmaCoordinates) -> torch.Tensor:
+        return metrics.vertical_integral(
+            self.specific_total_water,
+            self.surface_pressure,
+            sigma_coordinates.ak,
+            sigma_coordinates.bk,
+        )
+
     @property
     def precipitation_rate(self) -> torch.Tensor:
         """
@@ -92,12 +100,20 @@ class ClimateData:
         """
         return self._get("precipitation_rate")
 
+    @precipitation_rate.setter
+    def precipitation_rate(self, value: torch.Tensor):
+        self._data[self._prefixes["precipitation_rate"]] = value
+
     @property
     def latent_heat_flux(self) -> torch.Tensor:
         """
         Latent heat flux in W m-2.
         """
         return self._get("latent_heat_flux")
+
+    @latent_heat_flux.setter
+    def latent_heat_flux(self, value: torch.Tensor):
+        self._data[self._prefixes["latent_heat_flux"]] = value
 
     @property
     def evaporation_rate(self) -> torch.Tensor:
@@ -107,6 +123,10 @@ class ClimateData:
         lhf = self.latent_heat_flux  # W/m^2
         # (W/m^2) / (J/kg) = (J s^-1 m^-2) / (J/kg) = kg/m^2/s
         return lhf / LATENT_HEAT_OF_VAPORIZATION
+
+    @evaporation_rate.setter
+    def evaporation_rate(self, value: torch.Tensor):
+        self.latent_heat_flux = value * LATENT_HEAT_OF_VAPORIZATION
 
     @property
     def tendency_of_total_water_path_due_to_advection(self) -> torch.Tensor:
