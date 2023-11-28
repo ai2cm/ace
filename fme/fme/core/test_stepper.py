@@ -1,6 +1,6 @@
 import contextlib
 from collections import namedtuple
-from typing import Dict, Iterable, Optional, Union
+from typing import Dict, Iterable, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -27,8 +27,13 @@ from fme.core.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
     _force_conserve_dry_air,
+    _force_conserve_moisture,
     _force_zero_global_mean_moisture_advection,
     run_on_batch,
+)
+from fme.fcn_training.inference.derived_variables import (
+    compute_derived_quantities,
+    total_water_path_budget_residual,
 )
 from fme.fcn_training.registry import ModuleSelector
 
@@ -531,26 +536,138 @@ def test_force_conserve_dry_air():
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
 
 
-def test_stepper_corrector():
+@pytest.mark.parametrize(
+    "global_only, terms_to_modify",
+    [
+        (True, "precipitation"),
+        (True, "evaporation"),
+        (False, "advection_and_precipitation"),
+        (False, "advection_and_evaporation"),
+    ],
+)
+def test_force_conserve_moisture(global_only: bool, terms_to_modify):
     torch.random.manual_seed(0)
+    data = {
+        "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)),
+        "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
+        "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
+        "PRATEsfc": torch.rand(size=(3, 2, 5, 5)),
+        "LHTFLsfc": torch.rand(size=(3, 2, 5, 5)),
+        "tendency_of_total_water_path_due_to_advection": torch.rand(size=(3, 2, 5, 5)),
+    }
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    area_weights = 1.0 + torch.rand(size=(5, 5))
+    data["tendency_of_total_water_path_due_to_advection"] -= metrics.weighted_mean(
+        data["tendency_of_total_water_path_due_to_advection"],
+        weights=area_weights,
+        dim=[-2, -1],
+    )[..., None, None]
+    original_budget_residual = total_water_path_budget_residual(
+        ClimateData(data),
+        sigma_coordinates=sigma_coordinates,
+    )[
+        :, 1
+    ]  # no meaning for initial value data, want first timestep
+    if global_only:
+        original_budget_residual = metrics.weighted_mean(
+            original_budget_residual, weights=area_weights, dim=[-2, -1]
+        )
+    original_budget_residual = original_budget_residual.cpu().numpy()
+    original_dry_air = (
+        ClimateData(data)
+        .surface_pressure_due_to_dry_air(sigma_coordinates)
+        .cpu()
+        .numpy()
+    )
+    assert np.any(np.abs(original_budget_residual) > 0.0)
+    in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
+    out_data = {k: v.select(dim=1, index=1) for k, v in data.items()}
+    fixed_out_data = _force_conserve_moisture(
+        in_data,
+        out_data,
+        sigma_coordinates=sigma_coordinates,
+        area=area_weights,
+        terms_to_modify=terms_to_modify,
+    )
+    new_data = {
+        k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
+    }
+    new_budget_residual = total_water_path_budget_residual(
+        ClimateData(new_data),
+        sigma_coordinates=sigma_coordinates,
+    )[
+        :, 1
+    ]  # no meaning for initial value data, want first timestep
+    new_dry_air = (
+        ClimateData(data)
+        .surface_pressure_due_to_dry_air(sigma_coordinates)
+        .cpu()
+        .numpy()
+    )
+
+    global_budget_residual = (
+        metrics.weighted_mean(new_budget_residual, weights=area_weights, dim=[-2, -1])
+        .cpu()
+        .numpy()
+    )
+    np.testing.assert_almost_equal(global_budget_residual, 0.0, decimal=6)
+
+    if not global_only:
+        new_budget_residual = new_budget_residual.cpu().numpy()
+        assert np.all(np.abs(new_budget_residual) < np.abs(original_budget_residual))
+        np.testing.assert_almost_equal(new_budget_residual, 0.0, decimal=6)
+
+    np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
+
+
+class Multiply(torch.nn.Module):
+    def __init__(self, factor):
+        super().__init__()
+        self.factor = factor
+
+    def forward(self, x):
+        return x * self.factor
+
+
+@pytest.mark.parametrize(
+    "global_only, terms_to_modify",
+    [
+        (True, "none"),
+        (True, "precipitation"),
+        (True, "evaporation"),
+        (False, "advection_and_precipitation"),
+        (False, "advection_and_evaporation"),
+    ],
+)
+def test_stepper_corrector(global_only: bool, terms_to_modify):
+    torch.random.manual_seed(0)
+    n_forward_steps = 5
     device = get_device()
     data = {
-        "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)).to(device),
-        "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)).to(device),
-        "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)).to(device),
-        "PRATEsfc": torch.rand(size=(3, 2, 5, 5)).to(device),
-        "LHTFLsfc": torch.rand(size=(3, 2, 5, 5)).to(device),
+        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
+        "specific_total_water_0": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(
+            device
+        ),
+        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(
+            device
+        ),
+        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
+        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
         "tendency_of_total_water_path_due_to_advection": torch.rand(
-            size=(3, 2, 5, 5)
+            size=(3, n_forward_steps + 1, 5, 5)
         ).to(device),
     }
     sigma_coordinates = SigmaCoordinates(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     ).to(device)
     area_weights = 1.0 + torch.rand(size=(5, 5)).to(device)
+
     corrector_config = CorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
+        moisture_budget_correction=terms_to_modify,
     )
 
     mean_advection = metrics.weighted_mean(
@@ -566,9 +683,7 @@ def test_stepper_corrector():
         builder=ModuleSelector(
             type="prebuilt",
             config={
-                "module": torch.nn.Conv2d(
-                    in_channels=len(data), out_channels=len(data), kernel_size=1
-                ).to(device),
+                "module": Multiply(1.5).to(device),
             },
         ),
         in_names=list(data.keys()),
@@ -589,8 +704,31 @@ def test_stepper_corrector():
         stepped = stepper.run_on_batch(
             data=data,
             optimization=NullOptimization(),
-            n_forward_steps=1,
+            n_forward_steps=n_forward_steps,
         )
+
+    stepped = compute_derived_quantities(
+        stepped,
+        sigma_coordinates=sigma_coordinates,
+    )
+
+    # check that the budget residual is zero
+    budget_residual = stepped.gen_data["total_water_path_budget_residual"]
+    if global_only:
+        budget_residual = metrics.weighted_mean(
+            budget_residual, weights=area_weights, dim=[-2, -1]
+        )
+    budget_residual = budget_residual.cpu().numpy()
+    if terms_to_modify != "none":
+        if global_only:
+            mean_axis: Tuple[int, ...] = (0,)
+        else:
+            mean_axis = (0, 2, 3)
+        # first assert on timeseries, easier to look at
+        np.testing.assert_almost_equal(
+            np.abs(budget_residual).mean(axis=mean_axis), 0.0, decimal=6
+        )
+        np.testing.assert_almost_equal(budget_residual, 0.0, decimal=5)
 
     # check there is no mean advection
     mean_advection = (
