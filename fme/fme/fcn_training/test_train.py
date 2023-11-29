@@ -1,4 +1,6 @@
+import contextlib
 import datetime
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -21,6 +23,9 @@ from fme.fcn_training.train_config import epoch_checkpoint_enabled
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
     REPOSITORY_PATH / "fme" / "fme" / "fcn_training" / "run-train-and-inference.sh"
+)
+REQUEUEABLE_TRAIN_SCRIPT_PATH = (
+    REPOSITORY_PATH / "fme" / "fme" / "fcn_training" / "requeueable-train.sh"
 )
 
 
@@ -283,6 +288,37 @@ def test_train_and_inference_script(tmp_path, nettype, skip_slow: bool):
         ]
     )
     train_and_inference_process.check_returncode()
+
+
+@contextlib.contextmanager
+def set_env(**environ):
+    """
+    Temporarily set the process environment variables.
+
+    Args:
+        environ: Environment variables to set
+    """
+    old_environ = dict(os.environ)
+    os.environ.update(environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(old_environ)
+
+
+def test_requeueable_train_script(tmp_path, skip_slow: bool):
+    """Make sure that the perlmutter requeueable train script runs
+    and is killed by timeout signal"""
+    if skip_slow:
+        # script is slow as everything is re-imported when it runs
+        pytest.skip("Skipping slow tests")
+    # train with 0 epochs since we just want to make sure it runs
+    train_config, _ = _setup(
+        tmp_path, nettype="SphericalFourierNeuralOperatorNet", max_epochs=0
+    )
+    with set_env(SLURM_GPUS_PER_NODE="1"):
+        subprocess.check_call([REQUEUEABLE_TRAIN_SCRIPT_PATH, train_config, "0.1"])
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
