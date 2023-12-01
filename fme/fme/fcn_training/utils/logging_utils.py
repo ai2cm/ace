@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import os
 
@@ -46,3 +47,15 @@ def log_slurm_info():
         logging.warning("SLURM_JOB_USER not found.")
     else:
         logging.info(f"SLURM job user: {job_user}")
+
+
+@contextlib.contextmanager
+def log_level(level):
+    """Temporarily set the log level of the global logger."""
+    logger = logging.getLogger()  # presently, data loading uses the root logger
+    old_level = logger.getEffectiveLevel()
+    try:
+        logger.setLevel(level)
+        yield
+    finally:
+        logger.setLevel(old_level)

@@ -209,18 +209,20 @@ def main(
     writer = config.get_data_writer(validation)
 
     def data_loader_factory(window_time_slice: Optional[slice] = None):
-        return _get_data_loader(window_time_slice=window_time_slice)
+        with logging_utils.log_level(logging.WARNING):
+            return _get_data_loader(window_time_slice=window_time_slice)
 
     logging.info("Starting inference")
     if config.prediction_data is not None:
         # define data loader factory for prediction data
         def prediction_data_loader_factory(window_time_slice: Optional[slice] = None):
-            return get_data_loader(
-                config.prediction_data,
-                requirements=data_requirements,
-                train=False,
-                window_time_slice=window_time_slice,
-            )
+            with logging_utils.log_level(logging.WARNING):
+                return get_data_loader(
+                    config.prediction_data,
+                    requirements=data_requirements,
+                    train=False,
+                    window_time_slice=window_time_slice,
+                )
 
         run_dataset_inference(
             aggregator=aggregator,
