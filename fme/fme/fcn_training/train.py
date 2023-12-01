@@ -145,13 +145,14 @@ class Trainer:
                 dist = self.dist
             else:
                 dist = NotDistributed(is_root=self.dist.is_root())
-            return get_data_loader(
-                config.inference.data,
-                train=False,
-                requirements=inference_data_requirements,
-                window_time_slice=window_time_slice,
-                dist=dist,
-            )
+            with logging_utils.log_level(logging.WARNING):
+                return get_data_loader(
+                    config.inference.data,
+                    train=False,
+                    requirements=inference_data_requirements,
+                    window_time_slice=window_time_slice,
+                    dist=dist,
+                )
 
         self._inference_data_loader_factory = get_inference_data_loader
 
