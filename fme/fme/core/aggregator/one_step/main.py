@@ -5,6 +5,7 @@ import torch
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.typing import SigmaCoordinates, VariableMetadata
 
+from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
 
@@ -38,13 +39,11 @@ class OneStepAggregator:
         sigma_coordinates: SigmaCoordinates,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
-        self._snapshot = SnapshotAggregator(metadata)
-        self._mean = MeanAggregator(area_weights)
-        self._derived = DerivedMetricsAggregator(area_weights, sigma_coordinates)
         self._aggregators: Mapping[str, _Aggregator] = {
-            "snapshot": self._snapshot,
-            "mean": self._mean,
-            "derived": self._derived,
+            "snapshot": SnapshotAggregator(metadata),
+            "mean": MeanAggregator(area_weights),
+            "derived": DerivedMetricsAggregator(area_weights, sigma_coordinates),
+            "mean_map": MapAggregator(metadata),
         }
 
     @torch.no_grad()
