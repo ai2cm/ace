@@ -1,0 +1,17 @@
+experiment_dir: /path/to/save/output
+n_forward_steps: 400
+forward_steps_in_memory: 100
+checkpoint_path: /path/to/ace_ckpt.tar
+log_video: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+  entity: your_wandb_entity
+validation_data:
+  batch_size: 1
+  data_path: /path/to/validation/ic_0011
+  data_type: xarray
+  num_data_workers: 4
+  n_samples: 1
