@@ -83,6 +83,13 @@ fv3gfs_1deg_AMIP_stats_beaker_dataset:
 
 # TODO: Add AMIP baseline C48 dataset processing when available
 
-# TODO: add rule for generation of the E3SM dataset
-# The data generation scripts for E3SM are nicely parameterized but I don't
-# have record of the parameters used - BH
+# In total (not including full_field stats), this took 7 hours 15 minutes to
+# complete using a single Perlmutter CPU node.
+
+.PHONY: e3smv2_1deg_climSST_dataset
+e3smv2_1deg_climSST_dataset:
+	sbatch -J 2023-11-22-generate_datasets_e3smv2 generate_datasets_e3smv2.sh \
+	--input-dir /global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts \
+	--time-invariant-input-dir /global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant \
+	--zarr $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr \
+	--output-dir $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr

@@ -33,7 +33,7 @@ DROP_VARIABLES = (
 # computed using the "full-field" approach.
 TIME_INVARIANT_VARIABLES = {
     "FV3GFS": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
-    "E3SMV2": ("PHIS", "OCNFRAC"),
+    "E3SMV2": ("PHIS", "OCNFRAC", "ICEFRAC", "LANDFRAC"),
 }
 
 DIMS = {

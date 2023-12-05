@@ -31,12 +31,12 @@ from compute_dataset_fv3gfs import (
 )
 from dask.diagnostics import ProgressBar
 from dask.distributed import Client
-from xtorch_harmonics import roundtrip
+from xtorch_harmonics import roundtrip_filter
 
 # default paths for input/output; can be changed when calling this script
 INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: 501
 TIME_INVARIANT_INPUT_DIR = "/global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant"
-OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/e3smv2-1deg-gaussian-20yr-fme.zarr"
+OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: 501
 
 # these are subdirs of INPUT_DIR
 INSTANT = "6hourly_instant/1yr"
@@ -111,6 +111,8 @@ INPUT_VARIABLE_NAMES = {
         "TGCLDLWP",
         "TGCLDIWP",
         "OCNFRAC",
+        "LANDFRAC",
+        "ICEFRAC",
     ],
     MEAN: [
         TOTAL_PRECIP_RATE,
@@ -421,7 +423,7 @@ def construct_lazy_dataset(
     print(f"Dataset opened in {time.time() - start:.2f} s total.")
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
     if sht_roundtrip:
-        ds = roundtrip(ds, lat_dim="lat", lon_dim="lon")
+        ds = roundtrip_filter(ds, lat_dim="lat", lon_dim="lon")
     if not vanilla:
         ds = compute_pressure_thickness(ds)
         ds = compute_rad_fluxes(ds)
