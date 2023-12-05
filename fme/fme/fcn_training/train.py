@@ -410,8 +410,6 @@ def main(
         torch.backends.cudnn.benchmark = True
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
-        with open(os.path.join(data["experiment_dir"], "config.yaml"), "w") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,
         data=data,
@@ -420,6 +418,8 @@ def main(
 
     if not os.path.isdir(train_config.experiment_dir):
         os.makedirs(train_config.experiment_dir)
+    with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     train_config.configure_logging(log_filename="out.log")
     train_config.configure_wandb(resume=True)
     gcs_utils.authenticate()
