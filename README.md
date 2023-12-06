@@ -39,7 +39,7 @@ python -m fme.fcn_training.inference.inference examples/config-inference.yaml
 ## Configuration options
 See the `InferenceConfig` class in [this file](fme/fme/fcn_training/inference/inference.py) for
 description of configuration options. The [example config](examples/config-inference.yaml)
-shows some useful defaults for performing a 400-step (100-day) simulation (e.g. using a 6-hr time-step)
+shows some useful defaults for performing a 400-step simulation (100 days, with the 6-hour time step).
 
 ## Performance
 While inference can be performed without a GPU, it may be very slow in that case. In addition,
