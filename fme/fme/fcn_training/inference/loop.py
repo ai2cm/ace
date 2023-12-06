@@ -6,7 +6,7 @@ import xarray as xr
 
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
+from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization

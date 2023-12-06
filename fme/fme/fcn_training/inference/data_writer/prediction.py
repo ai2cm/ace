@@ -9,7 +9,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.core.data_loading.typing import VariableMetadata
+from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "lead"
 LEAD_TIME_UNITS = "microseconds"

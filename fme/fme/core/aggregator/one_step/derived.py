@@ -11,7 +11,7 @@ from fme.core.climate_data import (
     ClimateData,
     compute_dry_air_absolute_differences,
 )
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
 

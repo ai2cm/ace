@@ -10,10 +10,10 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.data_loading.utils import BatchData, apply_slice, get_times
 
 

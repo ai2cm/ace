@@ -11,7 +11,7 @@ import fme
 from fme.core import ClimateData, metrics
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.aggregator.null import NullAggregator
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import (
     ConservationLoss,

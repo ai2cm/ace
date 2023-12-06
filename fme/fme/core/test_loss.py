@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from fme.core import metrics
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import (
     AreaWeightedMSELoss,

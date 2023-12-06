@@ -8,7 +8,7 @@ from toolz import curry
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
 from fme.core.constants import TIMESTEP_SECONDS
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
 
