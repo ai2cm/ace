@@ -4,7 +4,7 @@ import torch
 import xarray as xr
 from wandb import Table
 
-from fme.core.data_loading.typing import SigmaCoordinates, VariableMetadata
+from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 

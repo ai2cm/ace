@@ -23,8 +23,8 @@ from fme.core import metrics
 from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggregator
 from fme.core.climate_data import ClimateData
 from fme.core.constants import TIMESTEP_SECONDS
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.loss import ConservationLoss, ConservationLossConfig, LossConfig

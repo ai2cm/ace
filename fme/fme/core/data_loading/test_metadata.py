@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.typing import VariableMetadata
 
 METADATA = [
     pytest.param(

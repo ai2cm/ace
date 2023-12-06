@@ -15,10 +15,10 @@ from fme.core.data_loading._xarray import (
     get_cumulative_timesteps,
     get_file_local_index,
 )
+from fme.core.data_loading.data_typing import GriddedData
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.typing import GriddedData
 
 
 @dataclasses.dataclass
