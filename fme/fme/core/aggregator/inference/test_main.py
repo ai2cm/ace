@@ -4,7 +4,7 @@ import torch
 
 import fme
 from fme.core.aggregator.inference import InferenceAggregator
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
 

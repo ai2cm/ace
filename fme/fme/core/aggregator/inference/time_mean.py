@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from fme.core import metrics
-from fme.core.data_loading.typing import VariableMetadata
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
 from .derived_variables import (

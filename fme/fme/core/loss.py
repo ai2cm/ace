@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 import torch
 
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
 from .climate_data import ClimateData, compute_dry_air_absolute_differences
