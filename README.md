@@ -47,7 +47,7 @@ I/O performance is critical for fast inference due to loading of forcing data an
 during inference.
 
 ## Analyzing output
-Various training and climate performance metrics are computed online by the inference code. These can be viewed via
+Various climate performance metrics are computed online by the inference code. These can be viewed via
 [wandb](https://wandb.ai) by setting `logging.log_to_wandb` to true and updating `logging.entity`
 to your wandb entity. Additionally, raw output data is saved to netCDF by the inference code.
 
