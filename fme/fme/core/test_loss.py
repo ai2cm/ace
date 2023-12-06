@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 import torch
 
+from fme.core import metrics
 from fme.core.data_loading.typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import (
+    AreaWeightedMSELoss,
     ConservationLossConfig,
     GlobalMeanLoss,
     LossConfig,
@@ -179,3 +181,16 @@ def test_get_dry_air_conservation_loss_single_level():
     dry_air_initial = (dry_air[:, 0, :, :] * area_weights).sum() / area_weights.sum()
     target_loss = torch.abs(dry_air_final - dry_air_initial)
     np.testing.assert_almost_equal(loss.cpu().numpy(), target_loss.cpu().numpy())
+
+
+def test_area_weighted_mse():
+    torch.manual_seed(0)
+    x = torch.rand(10, 10).to(get_device())
+    target = torch.rand(10, 10).to(get_device())
+    area = torch.rand(10, 10).to(get_device())
+    area_weighted_mse = AreaWeightedMSELoss(area)
+    result = area_weighted_mse(x, target)
+    expected = metrics.weighted_mean(
+        torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
+    ).mean()
+    torch.testing.assert_allclose(result, expected)

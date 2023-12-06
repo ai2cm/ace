@@ -133,6 +133,15 @@ class LpLoss(torch.nn.Module):
         return self.rel(x, y)
 
 
+class AreaWeightedMSELoss(torch.nn.Module):
+    def __init__(self, area: torch.Tensor):
+        super(AreaWeightedMSELoss, self).__init__()
+        self._area_weights = area / area.mean()
+
+    def __call__(self, x, y):
+        return torch.mean((x - y) ** 2 * self._area_weights)
+
+
 class WeightedSum(torch.nn.Module):
     """
     A module which applies multiple loss-function modules (taking two inputs)
@@ -216,7 +225,7 @@ class LossConfig:
             relative to the main loss
     """
 
-    type: Literal["LpLoss"] = "LpLoss"
+    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Optional[Literal["LpLoss"]] = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -225,10 +234,10 @@ class LossConfig:
     global_mean_weight: float = 1.0
 
     def __post_init__(self):
-        if self.type != "LpLoss":
-            raise NotImplementedError()
+        if self.type not in ("LpLoss", "MSE", "AreaWeightedMSE"):
+            raise NotImplementedError(self.type)
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
-            raise NotImplementedError()
+            raise NotImplementedError(self.global_mean_type)
 
     def build(self, area: torch.Tensor) -> Any:
         """
@@ -236,10 +245,17 @@ class LossConfig:
             area: A tensor of shape (n_lat, n_lon) containing the area of
                 each grid cell.
         """
-        main_loss = LpLoss(**self.kwargs)
+        area = area.to(get_device())
+        if self.type == "LpLoss":
+            main_loss = LpLoss(**self.kwargs)
+        elif self.type == "MSE":
+            main_loss = torch.nn.MSELoss(reduction="mean")
+        elif self.type == "AreaWeightedMSE":
+            main_loss = AreaWeightedMSELoss(area)
+
         if self.global_mean_type is not None:
             global_mean_loss = GlobalMeanLoss(
-                area=area.to(get_device()), loss=LpLoss(**self.global_mean_kwargs)
+                area=area, loss=LpLoss(**self.global_mean_kwargs)
             )
             final_loss = WeightedSum(
                 modules=[main_loss, global_mean_loss],
