@@ -5,7 +5,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.constants import LATENT_HEAT_OF_VAPORIZATION
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 
 CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
     {

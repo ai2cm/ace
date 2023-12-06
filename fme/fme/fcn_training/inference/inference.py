@@ -13,9 +13,9 @@ import yaml
 import fme
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.get_loader import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams
-from fme.core.data_loading.typing import GriddedData, SigmaCoordinates
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB

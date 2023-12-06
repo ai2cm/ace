@@ -11,9 +11,14 @@ import xarray as xr
 import fme
 from fme.core import metrics
 
+from .data_typing import (
+    Dataset,
+    HorizontalCoordinates,
+    SigmaCoordinates,
+    VariableMetadata,
+)
 from .params import DataLoaderParams
 from .requirements import DataRequirements
-from .typing import Dataset, HorizontalCoordinates, SigmaCoordinates, VariableMetadata
 from .utils import apply_slice, get_lons_and_lats, get_times, load_series_data
 
 VariableNames = namedtuple(

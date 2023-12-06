@@ -3,7 +3,7 @@ from typing import Mapping, Optional
 import numpy as np
 import torch
 
-from fme.core.data_loading.typing import VariableMetadata
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.wandb import WandB
 

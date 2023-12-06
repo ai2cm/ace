@@ -10,9 +10,9 @@ from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset
+from .data_typing import Dataset, GriddedData
 from .params import DataLoaderParams
 from .requirements import DataRequirements
-from .typing import Dataset, GriddedData
 from .utils import BatchData
 
 

@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from fme.core.aggregator.one_step import OneStepAggregator
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
 
