@@ -8,7 +8,7 @@ This is rapidly changing research software. We make no guarantees of maintaining
 
 ### 1. Clone this repository and install dependencies
 
-Assuming [conda](https://docs.anaconda.com/free/anaconda/install/index.html) is available, run
+Assuming [conda](https://docs.conda.io/en/latest/) is available, run
 ```
 make create_environment
 ```
