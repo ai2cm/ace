@@ -1,22 +1,24 @@
 # ACE: AI2 Climate Emulator
-Inference code accompanying "ACE: A fast, skillful learned global atmospheric
-model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)).
+This repo constains the inference code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)).
 
 ## DISCLAIMER
-This is rapidly changing research software. No guarantees are made of maintaining
-backwards compatibility.
+This is rapidly changing research software. We make no guarantees of maintaining backwards compatibility.
 
 ## Quickstart
 
-1. Clone this repository. Then assuming conda is available, run
+### 1. Clone this repository and install dependencies
+
+Assuming [conda](https://docs.anaconda.com/free/anaconda/install/index.html) is available, run
 ```
 make create_environment
 ```
 to create a conda environment called `fme` with dependencies and source
 code installed. Alternatively, a Docker image can be built with `make build_docker_image`.
-You may verify installation by running `pytest`.
+You may verify installation by running `pytest fme/`.
 
-2. Download data and checkpoint. These are available via a public
+### 2. Download data and checkpoint
+
+These are available via a public
 [requester pays](https://cloud.google.com/storage/docs/requester-pays)
 Google Cloud Storage bucket. The checkpoint can be downloaded with:
 ```
@@ -28,7 +30,7 @@ but it is required to download enough data to span the desired prediction period
 gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
 ```
 
-3. Update the paths in the [example config](examples/config-inference.yaml).
+### 3. Update the paths in the [example config](examples/config-inference.yaml).
 Then in the `fme` conda environment, run inference with:
 ```
 python -m fme.fcn_training.inference.inference examples/config-inference.yaml
@@ -37,7 +39,7 @@ python -m fme.fcn_training.inference.inference examples/config-inference.yaml
 ## Configuration options
 See the `InferenceConfig` class in [this file](fme/fme/fcn_training/inference/inference.py) for
 description of configuration options. The [example config](examples/config-inference.yaml)
-shows some useful defaults for performing a 400-step (100-day) simulation.
+shows some useful defaults for performing a 400-step (100-day) simulation (e.g. using a 6-hr time-step)
 
 ## Performance
 While inference can be performed without a GPU, it may be very slow in that case. In addition,
@@ -45,7 +47,7 @@ I/O performance is critical for fast inference due to loading of forcing data an
 during inference.
 
 ## Analyzing output
-Various metrics are computed online by the inference code. These can be viewed via
+Various training and climate performance metrics are computed online by the inference code. These can be viewed via
 [wandb](https://wandb.ai) by setting `logging.log_to_wandb` to true and updating `logging.entity`
 to your wandb entity. Additionally, raw output data is saved to netCDF by the inference code.
 
@@ -56,5 +58,5 @@ are available:
 gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-zarrs
 gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs
 ```
-The zarr format is convenient for ad-hoc analysis. The netCDF version contains our
-train/validation split, and was used for training and inference.
+The `zarr` format is convenient for ad-hoc analysis. The netCDF version contains our
+train/validation split which was used for training and inference.
