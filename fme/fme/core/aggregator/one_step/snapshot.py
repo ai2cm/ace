@@ -1,11 +1,13 @@
 from typing import Mapping, Optional
 
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.wandb import WandB
+
+from ..plotting import get_cmap_limits, plot_imshow
 
 wandb = WandB.get_instance()
 
@@ -77,30 +79,42 @@ class SnapshotAggregator:
             gap = torch.full(gap_shape, target.min()).to(get_device())
             gap_res = torch.full(gap_shape, (target - input).min()).to(get_device())
             images = {}
-            images["error"] = gen - target
-            images["full-field"] = torch.cat((gen, gap, target), axis=1)
-            images["residual"] = torch.cat(
-                (
-                    gen - input,
-                    gap_res,
-                    target - input,
-                ),
-                axis=1,
+            images["error"] = (gen - target).cpu().numpy()
+            images["full-field"] = torch.cat((gen, gap, target), axis=1).cpu().numpy()
+            images["residual"] = (
+                torch.cat(
+                    (
+                        gen - input,
+                        gap_res,
+                        target - input,
+                    ),
+                    axis=1,
+                )
+                .cpu()
+                .numpy()
             )
             for key, data in images.items():
-                caption = self._get_caption(key, name, data)
-                data = np.flip(data.cpu().numpy(), axis=-2)
-                wandb_image = wandb.Image(data, caption=caption)
+                if key == "error" or key == "residual":
+                    diverging = True
+                    cmap = "RdBu_r"
+                else:
+                    diverging = False
+                    cmap = None
+                vmin, vmax = get_cmap_limits(data, diverging=diverging)
+                caption = self._get_caption(key, name, vmin, vmax)
+                fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
+                wandb_image = wandb.Image(fig, caption=caption)
+                plt.close(fig)
                 image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
         return image_logs
 
-    def _get_caption(self, caption_key: str, name: str, data: torch.Tensor) -> str:
+    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         if name in self._metadata:
             caption_name = self._metadata[name].long_name
             units = self._metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
-        caption = self._captions[caption_key].format(name=caption_name, units=units)
-        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        caption = self._captions[key].format(name=caption_name, units=units)
+        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption

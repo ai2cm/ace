@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Dict, List, Mapping, MutableMapping, Optional, Union
 
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import xarray as xr
 
@@ -9,6 +9,8 @@ from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
+
+from ..plotting import get_cmap_limits, plot_imshow
 
 wandb = WandB.get_instance()
 
@@ -154,15 +156,27 @@ class TimeMeanAggregator:
         preds = self._get_target_gen_pairs()
         bias_map_key, gen_map_key = "bias_map", "gen_map"
         for pred in preds:
+            bias_data = pred.bias().cpu().numpy()
+            vmin_bias, vmax_bias = get_cmap_limits(bias_data, diverging=True)
+            vmin_pred, vmax_pred = get_cmap_limits(pred.gen.cpu().numpy())
+            bias_fig = plot_imshow(
+                bias_data, vmin=vmin_bias, vmax=vmax_bias, cmap="RdBu_r"
+            )
+            bias_image = wandb.Image(
+                bias_fig,
+                caption=self._get_caption(
+                    bias_map_key, pred.name, vmin_bias, vmax_bias
+                ),
+            )
+            prediction_image = wandb.Image(
+                plot_imshow(pred.gen.cpu().numpy()),
+                caption=self._get_caption(gen_map_key, pred.name, vmin_pred, vmax_pred),
+            )
+            plt.close("all")
             logs.update(
                 {
-                    f"{bias_map_key}/{pred.name}": _make_image(
-                        self._get_caption(bias_map_key, pred.name, pred.bias()),
-                        pred.bias(),
-                    ),
-                    f"{gen_map_key}/{pred.name}": _make_image(
-                        self._get_caption(gen_map_key, pred.name, pred.gen), pred.gen
-                    ),
+                    f"{bias_map_key}/{pred.name}": bias_image,
+                    f"{gen_map_key}/{pred.name}": prediction_image,
                     f"rmse/{pred.name}": pred.rmse(weights=self._area_weights),
                     f"bias/{pred.name}": pred.weighted_mean_bias(
                         weights=self._area_weights
@@ -174,14 +188,14 @@ class TimeMeanAggregator:
             return {f"{label}/{key}": logs[key] for key in logs}
         return logs
 
-    def _get_caption(self, key: str, name: str, data: torch.Tensor) -> str:
+    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         if name in self._metadata:
             caption_name = self._metadata[name].long_name
             units = self._metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
-        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
     def get_dataset(self) -> xr.Dataset:
@@ -206,15 +220,3 @@ class TimeMeanAggregator:
                 }
             )
         return xr.Dataset(data)
-
-
-def _make_image(
-    caption: str,
-    data: torch.Tensor,
-):
-    image_data = data.cpu().numpy()
-    lat_dim = -2
-    return wandb.Image(
-        np.flip(image_data, axis=lat_dim),
-        caption=caption,
-    )
