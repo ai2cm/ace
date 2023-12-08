@@ -1,6 +1,7 @@
 import dataclasses
 from typing import Dict, Mapping, Optional
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from wandb import Image
@@ -10,6 +11,8 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
+from ..plotting import get_cmap_limits, plot_imshow
+
 wandb = WandB.get_instance()
 
 import xarray as xr
@@ -17,9 +20,12 @@ import xarray as xr
 
 @dataclasses.dataclass
 class _RawData:
-    datum: np.ndarray
+    datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
+    vmin: Optional[float] = None
+    vmax: Optional[float] = None
+    cmap: Optional[str] = None
 
     def get_image(self):
         # images are y, x from upper left corner
@@ -27,7 +33,12 @@ class _RawData:
         # we want lat on y-axis (increasing upward) and time on x-axis
         # so transpose and flip along lat axis
         datum = np.flip(self.datum.transpose(), axis=0)
-        return wandb.Image(datum, caption=self.caption)
+        fig = plot_imshow(
+            datum, vmin=self.vmin, vmax=self.vmax, cmap=self.cmap, flip_lat=False
+        )
+        wandb_image = wandb.Image(fig, caption=self.caption)
+        plt.close(fig)
+        return wandb_image
 
 
 class ZonalMeanAggregator:
@@ -130,16 +141,21 @@ class ZonalMeanAggregator:
             )
 
             metadata = self._metadata.get(name, VariableMetadata("unknown_units", name))
+            vmin, vmax = get_cmap_limits(gen)
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
-                caption=self._get_caption("gen", name, gen),
+                caption=self._get_caption("gen", name, vmin, vmax),
                 # generated data is not considered to have units
                 metadata=VariableMetadata(units="", long_name=metadata.long_name),
             )
+            vmin, vmax = get_cmap_limits(error, diverging=True)
             data[f"error/{name}"] = _RawData(
                 datum=error,
-                caption=self._get_caption("error", name, error),
+                caption=self._get_caption("error", name, vmin, vmax),
                 metadata=metadata,
+                vmin=vmin,
+                vmax=vmax,
+                cmap="RdBu_r",
             )
 
         return data
@@ -162,14 +178,14 @@ class ZonalMeanAggregator:
         ret = xr.Dataset(data)
         return ret
 
-    def _get_caption(self, caption_key: str, varname: str, data: torch.Tensor) -> str:
+    def _get_caption(self, key: str, varname: str, vmin: float, vmax: float) -> str:
         if varname in self._metadata:
             caption_name = self._metadata[varname].long_name
             units = self._metadata[varname].units
         else:
             caption_name, units = varname, "unknown_units"
-        caption = self._captions[caption_key].format(name=caption_name, units=units)
-        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        caption = self._captions[key].format(name=caption_name, units=units)
+        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
     @staticmethod
