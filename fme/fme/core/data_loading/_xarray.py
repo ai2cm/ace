@@ -165,7 +165,7 @@ class XarrayDataset(Dataset):
         self._get_samples_and_initial_conditions(ds)
         self._get_metadata(ds)
 
-        img_shape = ds[self.names[0]].shape[1:]
+        img_shape = ds[self.names[0]].shape[-2:]
         logging.info(f"Found {self._n_initial_conditions} samples.")
         logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
         logging.info(f"Following variables are available: {list(ds.variables)}.")
