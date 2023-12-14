@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import os
 import time
+import warnings
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -19,7 +20,7 @@ from fme.core.data_loading.params import DataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
-from fme.fcn_training.inference.data_writer import DataWriter
+from fme.fcn_training.inference.data_writer import DataWriter, DataWriterConfig
 from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
@@ -79,11 +80,14 @@ class InferenceConfig:
     prediction_data: Optional[DataLoaderParams] = None
     log_video: bool = True
     log_extended_video: bool = False
-    log_extended_video_netcdfs: bool = False
+    log_extended_video_netcdfs: Optional[bool] = None
     log_zonal_mean_images: bool = True
-    save_prediction_files: bool = True
+    save_prediction_files: Optional[bool] = None
     save_raw_prediction_names: Optional[Sequence[str]] = None
     forward_steps_in_memory: int = 1
+    data_writer: DataWriterConfig = dataclasses.field(
+        default_factory=lambda: DataWriterConfig()
+    )
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -91,6 +95,22 @@ class InferenceConfig:
                 "n_forward_steps must be divisible by steps_in_memory, "
                 f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
             )
+        deprecated_writer_attrs = {
+            k: getattr(self, k)
+            for k in [
+                "log_extended_video_netcdfs",
+                "save_prediction_files",
+                "save_raw_prediction_names",
+            ]
+            if getattr(self, k) is not None
+        }
+        for k, v in deprecated_writer_attrs.items():
+            warnings.warn(
+                f"Inference configuration attribute `{k}` is deprecated. "
+                f"Using its value `{v}`, but please use attribute `data_writer` "
+                "instead."
+            )
+            setattr(self.data_writer, k, v)
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -125,15 +145,12 @@ class InferenceConfig:
 
     def get_data_writer(self, validation_data: GriddedData) -> DataWriter:
         n_samples = get_n_samples(validation_data.loader)
-        return DataWriter(
-            path=self.experiment_dir,
+        return self.data_writer.build(
+            experiment_dir=self.experiment_dir,
             n_samples=n_samples,
             n_timesteps=self.n_forward_steps + 1,
             metadata=validation_data.metadata,
             coords=validation_data.coords,
-            enable_prediction_netcdfs=self.save_prediction_files,
-            save_names=self.save_raw_prediction_names,
-            enable_video_netcdfs=self.log_extended_video_netcdfs,
         )
 
 
