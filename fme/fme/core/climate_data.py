@@ -12,8 +12,8 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
         "tendency_of_total_water_path_due_to_advection": ["tendency_of_total_water_path_due_to_advection"],  # noqa: E501
-        "latent_heat_flux": ["LHTFLsfc","LHFLX"],
-        "precipitation_rate": ["PRATEsfc","surface_precipitation_rate"],
+        "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
+        "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
     }
 )
 
@@ -62,10 +62,8 @@ class ClimateData:
 
     def _get(self, name):
         for prefix in self._prefixes[name]:
-            try:
+            if prefix in self._data.keys():
                 return self._get_prefix(prefix)
-            except KeyError:
-                pass
         raise KeyError(name)
 
     def _get_prefix(self, prefix):
@@ -73,11 +71,9 @@ class ClimateData:
 
     def _set(self, name, value):
         for prefix in self._prefixes[name]:
-            try:
-                self._set_prefix(prefix, value)
+            if prefix in self._data.keys():
+                self._set_prefix(prefix,value)
                 return
-            except KeyError:
-                pass
         raise KeyError(name)
     
     def _set_prefix(self, prefix, value):
@@ -131,7 +127,6 @@ class ClimateData:
     @precipitation_rate.setter
     def precipitation_rate(self, value: torch.Tensor):
         self._set("precipitation_rate", value)
-
     @property
     def latent_heat_flux(self) -> torch.Tensor:
         """
@@ -148,7 +143,7 @@ class ClimateData:
         """
         Evaporation rate in kg m-2 s-1.
         """
-        lhf = self.latent_heat_flux  # W/m^2
+        lhf = self._get("latent_heat_flux")  # W/m^2
         # (W/m^2) / (J/kg) = (J s^-1 m^-2) / (J/kg) = kg/m^2/s
         return lhf / LATENT_HEAT_OF_VAPORIZATION
 
