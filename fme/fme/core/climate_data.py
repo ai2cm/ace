@@ -12,8 +12,8 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
         "tendency_of_total_water_path_due_to_advection": ["tendency_of_total_water_path_due_to_advection"],  # noqa: E501
-        "latent_heat_flux": ["LHTFLsfc"],
-        "precipitation_rate": ["PRATEsfc"],
+        "latent_heat_flux": ["LHTFLsfc","LHFLX"],
+        "precipitation_rate": ["PRATEsfc","surface_precipitation_rate"],
     }
 )
 
@@ -25,7 +25,7 @@ class ClimateData:
     def __init__(
         self,
         climate_data: Mapping[str, torch.Tensor],
-        climate_field_name_prefixes: Mapping[str, str] = CLIMATE_FIELD_NAME_PREFIXES,
+        climate_field_name_prefixes: Mapping[str, list] = CLIMATE_FIELD_NAME_PREFIXES,
     ):
         """
         Initializes the instance based on the climate data and prefixes.
@@ -39,8 +39,8 @@ class ClimateData:
         self._data = dict(climate_data)
         self._prefixes = climate_field_name_prefixes
 
-    def _extract_levels(self, name: str) -> torch.Tensor:
-        for prefix in self._prefixes[tuple(name)]:
+    def _extract_levels(self, name: list) -> torch.Tensor:
+        for prefix in name:
             try:
                 return self._extract_prefix_levels(prefix)
             except KeyError:
@@ -154,7 +154,7 @@ class ClimateData:
 
     @evaporation_rate.setter
     def evaporation_rate(self, value: torch.Tensor):
-        self._set("evaporation_rate", value * LATENT_HEAT_OF_VAPORIZATION)
+        self._set("latent_heat_flux", value * LATENT_HEAT_OF_VAPORIZATION)
 
     @property
     def tendency_of_total_water_path_due_to_advection(self) -> torch.Tensor:
@@ -165,10 +165,7 @@ class ClimateData:
 
     @tendency_of_total_water_path_due_to_advection.setter
     def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
-        self._data[
-            self._prefixes["tendency_of_total_water_path_due_to_advection"]
-        ] = value
-
+        self._set("tendency_of_total_water_path_due_to_advection", value)
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
