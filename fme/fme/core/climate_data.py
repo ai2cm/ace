@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Dict, Mapping
+from typing import Dict, List, Mapping
 
 import torch
 
@@ -11,7 +11,9 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
     {
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
-        "tendency_of_total_water_path_due_to_advection": ["tendency_of_total_water_path_due_to_advection"],  # noqa: E501
+        "tendency_of_total_water_path_due_to_advection": [
+            "tendency_of_total_water_path_due_to_advection"
+        ],  # noqa: E501
         "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
         "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
     }
@@ -25,7 +27,9 @@ class ClimateData:
     def __init__(
         self,
         climate_data: Mapping[str, torch.Tensor],
-        climate_field_name_prefixes: Mapping[str, list] = CLIMATE_FIELD_NAME_PREFIXES,
+        climate_field_name_prefixes: Mapping[
+            str, List[str]
+        ] = CLIMATE_FIELD_NAME_PREFIXES,
     ):
         """
         Initializes the instance based on the climate data and prefixes.
@@ -39,7 +43,7 @@ class ClimateData:
         self._data = dict(climate_data)
         self._prefixes = climate_field_name_prefixes
 
-    def _extract_levels(self, name: list) -> torch.Tensor:
+    def _extract_levels(self, name: List[str]) -> torch.Tensor:
         for prefix in name:
             try:
                 return self._extract_prefix_levels(prefix)
@@ -47,7 +51,7 @@ class ClimateData:
                 pass
         raise KeyError(name)
 
-    def _extract_prefix_levels(self, prefix) -> torch.Tensor:
+    def _extract_prefix_levels(self, prefix: str) -> torch.Tensor:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
         ]
@@ -72,10 +76,10 @@ class ClimateData:
     def _set(self, name, value):
         for prefix in self._prefixes[name]:
             if prefix in self._data.keys():
-                self._set_prefix(prefix,value)
+                self._set_prefix(prefix, value)
                 return
         raise KeyError(name)
-    
+
     def _set_prefix(self, prefix, value):
         self._data[prefix] = value
 
@@ -127,6 +131,7 @@ class ClimateData:
     @precipitation_rate.setter
     def precipitation_rate(self, value: torch.Tensor):
         self._set("precipitation_rate", value)
+
     @property
     def latent_heat_flux(self) -> torch.Tensor:
         """
@@ -161,6 +166,7 @@ class ClimateData:
     @tendency_of_total_water_path_due_to_advection.setter
     def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
         self._set("tendency_of_total_water_path_due_to_advection", value)
+
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
