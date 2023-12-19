@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
@@ -9,6 +10,53 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from .histograms import HistogramDataWriter
 from .prediction import PredictionDataWriter
 from .video import VideoDataWriter
+
+
+@dataclasses.dataclass
+class DataWriterConfig:
+    """
+    Configuration for inference data writers.
+
+    Args:
+        log_extended_video_netcdfs: Whether to enable writing of netCDF files
+            containing video metrics.
+        save_prediction_files: Whether to enable writing of netCDF files
+            containing the predictions.
+        save_raw_prediction_names: Names of variables to save in the predictions
+            netcdf file.
+    """
+
+    log_extended_video_netcdfs: bool = False
+    save_prediction_files: bool = True
+    save_raw_prediction_names: Optional[Sequence[str]] = None
+
+    def __post_init__(self):
+        if (
+            not self.save_prediction_files
+            and self.save_raw_prediction_names is not None
+        ):
+            raise ValueError(
+                "save_raw_prediction_names provided but save_prediction_files is False"
+            )
+
+    def build(
+        self,
+        experiment_dir: str,
+        n_samples: int,
+        n_timesteps: int,
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ):
+        return DataWriter(
+            path=experiment_dir,
+            n_samples=n_samples,
+            n_timesteps=n_timesteps,
+            metadata=metadata,
+            coords=coords,
+            enable_prediction_netcdfs=self.save_prediction_files,
+            save_names=self.save_raw_prediction_names,
+            enable_video_netcdfs=self.log_extended_video_netcdfs,
+        )
 
 
 class DataWriter:
@@ -35,7 +83,6 @@ class DataWriter:
             enable_video_netcdfs: Whether to enable writing of netCDF files
                 containing video metrics.
             save_names: Names of variables to save in the predictions netcdf file.
-                Ignored if enable_prediction_netcdfs is False.
         """
         self._writers: List[
             Union[PredictionDataWriter, VideoDataWriter, HistogramDataWriter]
