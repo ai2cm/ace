@@ -535,7 +535,8 @@ def test_force_conserve_dry_air():
     assert new_nonconservation < original_nonconservation
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
 
-@pytest.mark.parametrize("is_fv3_data", [True, False])
+
+@pytest.mark.parametrize("fv3_data", [True, False])
 @pytest.mark.parametrize(
     "global_only, terms_to_modify",
     [
@@ -545,16 +546,18 @@ def test_force_conserve_dry_air():
         (False, "advection_and_evaporation"),
     ],
 )
-def test_force_conserve_moisture(is_fv3_data, global_only: bool, terms_to_modify):
+def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_modify):
     torch.random.manual_seed(0)
-    if is_fv3_data:
+    if fv3_data:
         data = {
             "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)),
             "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
             "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
             "PRATEsfc": torch.rand(size=(3, 2, 5, 5)),
             "LHTFLsfc": torch.rand(size=(3, 2, 5, 5)),
-            "tendency_of_total_water_path_due_to_advection": torch.rand(size=(3, 2, 5, 5)),
+            "tendency_of_total_water_path_due_to_advection": torch.rand(
+                size=(3, 2, 5, 5)
+            ),
         }
     else:
         data = {
@@ -563,7 +566,9 @@ def test_force_conserve_moisture(is_fv3_data, global_only: bool, terms_to_modify
             "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
             "surface_precipitation_rate": torch.rand(size=(3, 2, 5, 5)),
             "LHFLX": torch.rand(size=(3, 2, 5, 5)),
-            "tendency_of_total_water_path_due_to_advection": torch.rand(size=(3, 2, 5, 5)),
+            "tendency_of_total_water_path_due_to_advection": torch.rand(
+                size=(3, 2, 5, 5)
+            ),
         }
     sigma_coordinates = SigmaCoordinates(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
