@@ -10,6 +10,7 @@ import xarray as xr
 
 import fme
 from fme.core import metrics
+from fme.core.winds import lon_lat_to_xyz
 
 from .data_typing import (
     Dataset,
@@ -23,7 +24,12 @@ from .utils import apply_slice, get_lons_and_lats, get_times, load_series_data
 
 VariableNames = namedtuple(
     "VariableNames",
-    ("time_dependent_names", "time_invariant_names", "initial_condition_names"),
+    (
+        "time_dependent_names",
+        "time_invariant_names",
+        "initial_condition_names",
+        "static_derived_names",
+    ),
 )
 
 
@@ -84,6 +90,39 @@ def get_file_local_index(index: int, start_indices: np.ndarray) -> Tuple[int, in
     return int(file_index), time_index
 
 
+class StaticDerivedData:
+    names = ("x", "y", "z")
+    metadata = {
+        "x": VariableMetadata(units="", long_name="Euclidean x-coordinate"),
+        "y": VariableMetadata(units="", long_name="Euclidean y-coordinate"),
+        "z": VariableMetadata(units="", long_name="Euclidean z-coordinate"),
+    }
+
+    def __init__(self, lons, lats):
+        """
+        Args:
+            lons: 1D array of longitudes.
+            lats: 1D array of latitudes.
+        """
+        self._lats = lats
+        self._lons = lons
+        self._x: Optional[torch.Tensor] = None
+        self._y: Optional[torch.Tensor] = None
+        self._z: Optional[torch.Tensor] = None
+
+    def _get_xyz(self) -> Dict[str, torch.Tensor]:
+        if self._x is None or self._y is None or self._z is None:
+            lats, lons = np.broadcast_arrays(self._lats[:, None], self._lons[None, :])
+            x, y, z = lon_lat_to_xyz(lons, lats)
+            self._x = torch.as_tensor(x)
+            self._y = torch.as_tensor(y)
+            self._z = torch.as_tensor(z)
+        return {"x": self._x, "y": self._y, "z": self._z}
+
+    def __getitem__(self, name: str) -> torch.Tensor:
+        return self._get_xyz()[name]
+
+
 class XarrayDataset(Dataset):
     """Handles dataloading over multiple netcdf files using the xarray library.
     Assumes that the netcdf filenames are time-ordered."""
@@ -104,17 +143,19 @@ class XarrayDataset(Dataset):
         self.full_paths *= self.params.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
-        (
-            self.time_dependent_names,
-            self.time_invariant_names,
-            self.initial_condition_names,
-        ) = self._group_variable_names_by_time_type()
         self.window_time_slice = window_time_slice
         first_dataset = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
         )
         lons, lats = get_lons_and_lats(first_dataset)
+        self._static_derived_data = StaticDerivedData(lons, lats)
+        (
+            self.time_dependent_names,
+            self.time_invariant_names,
+            self.initial_condition_names,
+            self.static_derived_names,
+        ) = self._group_variable_names_by_time_type()
         self._area_weights = metrics.spherical_area_weights(lats, len(lons))
         self._sigma_coordinates = get_sigma_coordinates(first_dataset)
         self._horizontal_coordinates = HorizontalCoordinates(
@@ -147,7 +188,9 @@ class XarrayDataset(Dataset):
     def _get_metadata(self, ds):
         result = {}
         for name in self.names:
-            if hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
+            if name in StaticDerivedData.names:
+                result[name] = StaticDerivedData.metadata[name]
+            elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
                 result[name] = VariableMetadata(
                     units=ds[name].units,
                     long_name=ds[name].long_name,
@@ -165,7 +208,15 @@ class XarrayDataset(Dataset):
         self._get_samples_and_initial_conditions(ds)
         self._get_metadata(ds)
 
-        img_shape = ds[self.names[0]].shape[-2:]
+        for i in range(len(self.names)):
+            if self.names[i] in ds.variables:
+                img_shape = ds[self.names[0]].shape[-2:]
+                break
+        else:
+            raise ValueError(
+                f"None of the requested variables {self.names} are present "
+                f"in the dataset."
+            )
         logging.info(f"Found {self._n_initial_conditions} samples.")
         logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
         logging.info(f"Following variables are available: {list(ds.variables)}.")
@@ -174,21 +225,32 @@ class XarrayDataset(Dataset):
         """Returns lists of time-dependent variable names, time-independent
         variable names, and variables which are only present as an initial
         condition."""
-        time_dependent_names, time_invariant_names, initial_condition_names = [], [], []
+        (
+            time_dependent_names,
+            time_invariant_names,
+            initial_condition_names,
+            static_derived_names,
+        ) = ([], [], [], [])
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
         with xr.open_dataset(self.full_paths[0]) as ds:
             for name in self.names:
-                dims = ds[name].dims
-                if "time" in dims:
-                    time_dependent_names.append(name)
-                elif "initial_condition" in dims:
-                    initial_condition_names.append(name)
+                if name in StaticDerivedData.names:
+                    static_derived_names.append(name)
                 else:
-                    time_invariant_names.append(name)
+                    dims = ds[name].dims
+                    if "time" in dims:
+                        time_dependent_names.append(name)
+                    elif "initial_condition" in dims:
+                        initial_condition_names.append(name)
+                    else:
+                        time_invariant_names.append(name)
         return VariableNames(
-            time_dependent_names, time_invariant_names, initial_condition_names
+            time_dependent_names,
+            time_invariant_names,
+            initial_condition_names,
+            static_derived_names,
         )
 
     @property
@@ -275,6 +337,11 @@ class XarrayDataset(Dataset):
         ds = self._open_file(idxs[0])
         for name in self.time_invariant_names:
             tensor = torch.as_tensor(ds[name].values)
+            tensors[name] = tensor.repeat((total_steps, 1, 1))
+
+        # load static derived variables
+        for name in self.static_derived_names:
+            tensor = self._static_derived_data[name]
             tensors[name] = tensor.repeat((total_steps, 1, 1))
 
         for name in self.initial_condition_names:
