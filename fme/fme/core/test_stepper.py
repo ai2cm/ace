@@ -564,7 +564,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
             "PS": 10.0 + torch.rand(size=(3, 2, 5, 5)),
             "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
             "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
-            "surface_precipitation_rate": torch.rand(size=(3, 2, 5, 5)),
+            "PRECT": torch.rand(size=(3, 2, 5, 5)),
             "LHFLX": torch.rand(size=(3, 2, 5, 5)),
             "tendency_of_total_water_path_due_to_advection": torch.rand(
                 size=(3, 2, 5, 5)
