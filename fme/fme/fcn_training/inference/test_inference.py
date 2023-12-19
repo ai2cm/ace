@@ -36,8 +36,8 @@ def save_plus_one_stepper(
 ):
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=["x"],
-        out_names=["x"],
+        in_names=["var"],
+        out_names=["var"],
         normalization=FromStateNormalizer(
             state={
                 "means": {name: mean for name in names},
@@ -61,8 +61,8 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
     Inference test using a serialized model from an earlier commit, to ensure
     earlier models can be used with the updated inference code.
     """
-    in_names = ["x"]
-    out_names = ["x"]
+    in_names = ["var"]
+    out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = DIR / "stepper_test_data"
     dim_sizes = DimSizes(
@@ -102,8 +102,8 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
 def test_inference_plus_one_model(
     tmp_path: pathlib.Path, use_prediction_data: bool, n_forward_steps: int
 ):
-    in_names = ["x"]
-    out_names = ["x"]
+    in_names = ["var"]
+    out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
@@ -173,40 +173,40 @@ def inference_helper(
     for log in inference_logs:
         # if these are off by something like 90% then probably the stepper
         # is being used instead of the prediction_data
-        assert log["inference/mean/weighted_rmse/x"] == 0.0
-        assert log["inference/mean/weighted_bias/x"] == 0.0
+        assert log["inference/mean/weighted_rmse/var"] == 0.0
+        assert log["inference/mean/weighted_bias/var"] == 0.0
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
     )
     assert len(prediction_ds["lead"]) == config.n_forward_steps + 1
     for i in range(config.n_forward_steps):
         np.testing.assert_allclose(
-            prediction_ds["x"].isel(lead=i).values + 1,
-            prediction_ds["x"].isel(lead=i + 1).values,
+            prediction_ds["var"].isel(lead=i).values + 1,
+            prediction_ds["var"].isel(lead=i + 1).values,
         )
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
-    assert "x" in metric_ds.data_vars
-    assert metric_ds.data_vars["x"].attrs["units"] == "m"
-    assert metric_ds.data_vars["x"].attrs["long_name"] == "ensemble mean of x"
-    assert "rmse_x" in metric_ds.data_vars
-    assert metric_ds.data_vars["rmse_x"].attrs["units"] == "m"
+    assert "var" in metric_ds.data_vars
+    assert metric_ds.data_vars["var"].attrs["units"] == "m"
+    assert metric_ds.data_vars["var"].attrs["long_name"] == "ensemble mean of var"
+    assert "rmse_var" in metric_ds.data_vars
+    assert metric_ds.data_vars["rmse_var"].attrs["units"] == "m"
     assert (
-        metric_ds.data_vars["rmse_x"].attrs["long_name"]
-        == "root mean squared error of x"
+        metric_ds.data_vars["rmse_var"].attrs["long_name"]
+        == "root mean squared error of var"
     )
-    assert "bias_x" in metric_ds.data_vars
-    assert metric_ds.data_vars["bias_x"].attrs["units"] == "m"
-    assert "min_err_x" in metric_ds.data_vars
-    assert metric_ds.data_vars["min_err_x"].attrs["units"] == "m"
-    assert "max_err_x" in metric_ds.data_vars
-    assert metric_ds.data_vars["max_err_x"].attrs["units"] == "m"
-    assert "gen_var_x" in metric_ds.data_vars
-    assert metric_ds.data_vars["gen_var_x"].attrs["units"] == ""
+    assert "bias_var" in metric_ds.data_vars
+    assert metric_ds.data_vars["bias_var"].attrs["units"] == "m"
+    assert "min_err_var" in metric_ds.data_vars
+    assert metric_ds.data_vars["min_err_var"].attrs["units"] == "m"
+    assert "max_err_var" in metric_ds.data_vars
+    assert metric_ds.data_vars["max_err_var"].attrs["units"] == "m"
+    assert "gen_var_var" in metric_ds.data_vars
+    assert metric_ds.data_vars["gen_var_var"].attrs["units"] == ""
     assert (
-        metric_ds.data_vars["gen_var_x"].attrs["long_name"]
-        == "prediction variance of x as fraction of target variance"
+        metric_ds.data_vars["gen_var_var"].attrs["long_name"]
+        == "prediction variance of var as fraction of target variance"
     )
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
@@ -214,10 +214,10 @@ def inference_helper(
     time_mean_diagnostics = xr.open_dataset(tmp_path / "time_mean_diagnostics.nc")
     actual_var_names = sorted([str(k) for k in time_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2
-    assert "bias_map-x" in actual_var_names
-    assert time_mean_diagnostics.data_vars["bias_map-x"].attrs["units"] == "m"
-    assert "gen_map-x" in actual_var_names
-    assert time_mean_diagnostics.data_vars["gen_map-x"].attrs["units"] == ""
+    assert "bias_map-var" in actual_var_names
+    assert time_mean_diagnostics.data_vars["bias_map-var"].attrs["units"] == "m"
+    assert "gen_map-var" in actual_var_names
+    assert time_mean_diagnostics.data_vars["gen_map-var"].attrs["units"] == ""
     assert len(time_mean_diagnostics.coords) == 2
     assert "lat" in time_mean_diagnostics.coords
     assert "lon" in time_mean_diagnostics.coords
@@ -225,23 +225,23 @@ def inference_helper(
     zonal_mean_diagnostics = xr.open_dataset(tmp_path / "zonal_mean_diagnostics.nc")
     actual_var_names = sorted([str(k) for k in zonal_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2
-    assert "error-x" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars["error-x"].attrs["units"] == "m"
-    assert "gen-x" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars["gen-x"].attrs["units"] == ""
+    assert "error-var" in actual_var_names
+    assert zonal_mean_diagnostics.data_vars["error-var"].attrs["units"] == "m"
+    assert "gen-var" in actual_var_names
+    assert zonal_mean_diagnostics.data_vars["gen-var"].attrs["units"] == ""
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
     histograms = xr.open_dataset(tmp_path / "histograms.nc")
     actual_var_names = sorted([str(k) for k in histograms.keys()])
     assert len(actual_var_names) == 2
-    assert "x" in actual_var_names
-    assert histograms.data_vars["x"].attrs["units"] == "count"
-    assert "x_bin_edges" in actual_var_names
-    assert histograms.data_vars["x_bin_edges"].attrs["units"] == "m"
-    x_counts_per_timestep = histograms["x"].sum(dim=["bin", "source"])
+    assert "var" in actual_var_names
+    assert histograms.data_vars["var"].attrs["units"] == "count"
+    assert "var_bin_edges" in actual_var_names
+    assert histograms.data_vars["var_bin_edges"].attrs["units"] == "m"
+    var_counts_per_timestep = histograms["var"].sum(dim=["bin", "source"])
     same_count_each_timestep = np.all(
-        x_counts_per_timestep.values == x_counts_per_timestep.values[0]
+        var_counts_per_timestep.values == var_counts_per_timestep.values[0]
     )
     assert same_count_each_timestep
 
@@ -251,8 +251,8 @@ def test_inference_writer_boundaries(
     tmp_path: pathlib.Path, n_forward_steps: int, forward_steps_in_memory: int
 ):
     """Test that data at initial condition boundaires"""
-    in_names = ["x"]
-    out_names = ["x"]
+    in_names = ["var"]
+    out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
@@ -298,10 +298,10 @@ def test_inference_writer_boundaries(
         tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
     )
     assert len(prediction_ds["lead"]) == n_forward_steps + 1
-    assert not np.any(np.isnan(prediction_ds["x"].values))
+    assert not np.any(np.isnan(prediction_ds["var"].values))
 
-    gen = prediction_ds["x"].sel(source="prediction")
-    tar = prediction_ds["x"].sel(source="target")
+    gen = prediction_ds["var"].sel(source="prediction")
+    tar = prediction_ds["var"].sel(source="target")
     gen_time_mean = torch.from_numpy(gen[:, 1:].mean(dim="lead").values)
     tar_time_mean = torch.from_numpy(tar[:, 1:].mean(dim="lead").values)
     area_weights = metrics.spherical_area_weights(
@@ -312,24 +312,28 @@ def test_inference_writer_boundaries(
     tol = 1e-4  # relative tolerance
     assert metrics.root_mean_squared_error(
         tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(inference_logs[-1]["inference/time_mean/rmse/x"], rel=tol)
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/rmse/var"], rel=tol
+    )
     assert metrics.weighted_mean_bias(
         tar_time_mean, gen_time_mean, area_weights
-    ).item() == pytest.approx(inference_logs[-1]["inference/time_mean/bias/x"], rel=tol)
+    ).item() == pytest.approx(
+        inference_logs[-1]["inference/time_mean/bias/var"], rel=tol
+    )
 
     prediction_ds = prediction_ds.isel(sample=0)
     ds = xr.open_dataset(data._data_filename)
 
     # the global initial condition should be identical for prediction and target
     np.testing.assert_allclose(
-        prediction_ds["x"].isel(lead=0).sel(source="prediction").values,
-        prediction_ds["x"].isel(lead=0).sel(source="target").values,
+        prediction_ds["var"].isel(lead=0).sel(source="prediction").values,
+        prediction_ds["var"].isel(lead=0).sel(source="target").values,
     )
     # the target initial condition should the same as the validation data
     # initial condition
     np.testing.assert_allclose(
-        prediction_ds["x"].isel(lead=0).sel(source="target").values,
-        ds["x"].isel(time=0).values,
+        prediction_ds["var"].isel(lead=0).sel(source="target").values,
+        ds["var"].isel(time=0).values,
     )
     for i in range(0, n_forward_steps + 1):
         log = inference_logs[i]
@@ -340,30 +344,31 @@ def test_inference_writer_boundaries(
         # check that manually computed metrics match logged metrics
         assert metrics.root_mean_squared_error(
             tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_rmse/x"], rel=tol)
+        ).item() == pytest.approx(log["inference/mean/weighted_rmse/var"], rel=tol)
         assert metrics.weighted_mean_bias(
             tar_i, gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_bias/x"], rel=tol)
+        ).item() == pytest.approx(log["inference/mean/weighted_bias/var"], rel=tol)
         assert metrics.gradient_magnitude_percent_diff(
             tar_i, gen_i, area_weights, dim=(-2, -1)
         ).item() == pytest.approx(
-            log["inference/mean/weighted_grad_mag_percent_diff/x"], rel=tol
+            log["inference/mean/weighted_grad_mag_percent_diff/var"], rel=tol
         )
         assert metrics.weighted_mean(
             gen_i, area_weights, dim=(-2, -1)
-        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/x"], rel=tol)
+        ).item() == pytest.approx(log["inference/mean/weighted_mean_gen/var"], rel=tol)
 
         # the target obs should be the same as the validation data obs
         np.testing.assert_allclose(
-            prediction_ds["x"].isel(lead=i).sel(source="target").values,
-            ds["x"].isel(time=i).values,
+            prediction_ds["var"].isel(lead=i).sel(source="target").values,
+            ds["var"].isel(time=i).values,
         )
         if i > 0:
-            lead_da = prediction_ds["x"].isel(lead=i)
+            lead_da = prediction_ds["var"].isel(lead=i)
             # predictions should be previous condition + 1
             np.testing.assert_allclose(
                 lead_da.sel(source="prediction").values,
-                prediction_ds["x"].sel(source="prediction").isel(lead=i - 1).values + 1,
+                prediction_ds["var"].sel(source="prediction").isel(lead=i - 1).values
+                + 1,
             )
             # prediction and target should not have entirely the same values at
             # any lead > 0
@@ -437,8 +442,8 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
 
     n_forward_steps = 2
 
-    in_names = ["x", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
-    out_names = ["x", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
+    in_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
+    out_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
