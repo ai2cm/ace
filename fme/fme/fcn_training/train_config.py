@@ -70,9 +70,6 @@ class InlineInferenceConfig:
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
             re-reading data from disk
-        n_samples: number of sample windows to take from the validation data
-        batch_size: batch size for the data loader, must be a multiple of
-            the number of parallel workers if parallel is True
         epochs: epochs on which to run inference, where the first epoch is
             defined as epoch 0 (unlike in logs which show epochs as starting
             from 1). By default runs inference every epoch.
