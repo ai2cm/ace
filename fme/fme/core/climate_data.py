@@ -15,7 +15,7 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
             "tendency_of_total_water_path_due_to_advection"
         ],  # noqa: E501
         "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
-        "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
+        "precipitation_rate": ["PRATEsfc", "PRECT"],
     }
 )
 
