@@ -317,7 +317,7 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     )
     n_forward_steps = 4
     requirements = DataRequirements(
-        names=mock_data.var_names.all_names,
+        names=mock_data.var_names.all_names + ["x"],
         n_timesteps=n_forward_steps + 1,
     )
     dataset = XarrayDataset(params=params, requirements=requirements)
@@ -325,6 +325,7 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
         assert len(dataset) == len(mock_data.obs_times) - n_forward_steps
     else:
         assert len(dataset) == n_samples
+    assert "x" in dataset[0][0]
 
 
 def test_XarrayDataset_monthly_start_slice(mock_monthly_netcdfs):
