@@ -13,7 +13,10 @@ from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 
 from .data_writer import DataWriter, NullDataWriter
-from .derived_variables import compute_derived_quantities
+from .derived_variables import (
+    compute_derived_quantities,
+    compute_stepped_derived_quantities,
+)
 
 
 class EnsembleBatch:
@@ -105,7 +108,6 @@ def _inference_internal_loop(
 
     This function exists to de-duplicate code between run_inference and
     run_data_inference."""
-    stepped = compute_derived_quantities(stepped, sigma_coords)
 
     # for non-initial windows, we want to record only the new data
     # and discard the initial sample of the window
@@ -171,7 +173,13 @@ def run_inference(
             valid_data_loader = data_loader_factory(window_time_slice=time_slice)
             sigma_coords = valid_data_loader.sigma_coordinates
             for batch, batch_manager in zip(valid_data_loader.loader, batch_managers):
-                data = {key: value.to(device) for key, value in batch.data.items()}
+                data = {
+                    key: value.to(device, dtype=torch.float)
+                    for key, value in batch.data.items()
+                }
+                # must compute derived targets before applying initial condition
+                # so that time differencing is still valid
+                target_data = compute_derived_quantities(data, sigma_coords)
                 # overwrite the first timestep with the last generated timestep
                 # from the previous segment
                 batch_manager.apply_initial_condition(data)
@@ -179,6 +187,10 @@ def run_inference(
                     data,
                     NullOptimization(),
                     n_forward_steps=forward_steps_in_memory,
+                )
+                stepped.target_data = target_data
+                stepped.gen_data = compute_derived_quantities(
+                    stepped.gen_data, sigma_coords
                 )
                 _inference_internal_loop(
                     stepped,
@@ -258,6 +270,7 @@ def run_dataset_inference(
                     normalizer.normalize(predicted_data),
                     normalizer.normalize(valid_data),
                 )
+                stepped = compute_stepped_derived_quantities(stepped, sigma_coords)
                 _inference_internal_loop(
                     stepped,
                     i_time,
