@@ -32,7 +32,7 @@ from fme.core.stepper import (
     run_on_batch,
 )
 from fme.fcn_training.inference.derived_variables import (
-    compute_derived_quantities,
+    compute_stepped_derived_quantities,
     total_water_path_budget_residual,
 )
 from fme.fcn_training.registry import ModuleSelector
@@ -722,7 +722,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
             n_forward_steps=n_forward_steps,
         )
 
-    stepped = compute_derived_quantities(
+    stepped = compute_stepped_derived_quantities(
         stepped,
         sigma_coordinates=sigma_coordinates,
     )
