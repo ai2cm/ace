@@ -64,7 +64,9 @@ from fme.core.distributed import Distributed, NotDistributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.fcn_training.inference import run_inference
-from fme.fcn_training.inference.derived_variables import compute_derived_quantities
+from fme.fcn_training.inference.derived_variables import (
+    compute_stepped_derived_quantities,
+)
 from fme.fcn_training.train_config import TrainConfig
 from fme.fcn_training.utils import gcs_utils, logging_utils
 
@@ -325,7 +327,7 @@ class Trainer:
                     n_forward_steps=self.config.n_forward_steps,
                     aggregator=NullAggregator(),
                 )
-                stepped = compute_derived_quantities(
+                stepped = compute_stepped_derived_quantities(
                     stepped, self.valid_data.sigma_coordinates
                 )
                 aggregator.record_batch(
