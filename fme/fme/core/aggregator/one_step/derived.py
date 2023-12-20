@@ -2,7 +2,7 @@
 variable, e.g. dry air mass."""
 
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Protocol, Tuple
+from typing import Dict, List, Mapping, Optional, Protocol, Tuple
 
 import torch
 
@@ -88,7 +88,9 @@ class DerivedMetricsAggregator:
         self,
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
-        climate_field_name_prefixes: Mapping[str, str] = CLIMATE_FIELD_NAME_PREFIXES,
+        climate_field_name_prefixes: Mapping[
+            str, List[str]
+        ] = CLIMATE_FIELD_NAME_PREFIXES,
     ):
         self.area_weights = area_weights
         self.sigma_coordinates = sigma_coordinates
