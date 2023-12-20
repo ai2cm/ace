@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from typing import Callable, MutableMapping
+from typing import Callable, Dict, MutableMapping
 
 import torch
 from toolz import curry
@@ -80,18 +80,18 @@ def total_water_path_budget_residual(
 
 
 def _compute_derived_variable(
-    stepped: SteppedData,
+    data: Dict[str, torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     label: str,
     derived_variable: DerivedVariableRegistryEntry,
-) -> SteppedData:
+) -> Dict[str, torch.Tensor]:
     """Computes a derived variable and adds it to the given data.
 
     If the required input data is not available, a warning will be logged and
     no change will be made to the data.
 
     Args:
-        stepped: SteppedData instance to add the derived variable to.
+        data: dictionary of data add the derived variable to.
         sigma_coordinates: the vertical coordinate.
         label: the name of the derived variable.
         derived_variable: class indicating required names and function to compute.
@@ -102,36 +102,49 @@ def _compute_derived_variable(
     Note:
         Derived variables are only computed for the denormalized data in stepped.
     """
-    new_stepped = stepped.copy()
-    for data_type in ["gen_data", "target_data"]:
-        if label in getattr(stepped, data_type):
-            raise ValueError(
-                f"Variable {label} already exists in {data_type}. It is not permitted "
-                "to overwrite existing variables with derived variables."
-            )
-        climate_data = ClimateData(getattr(stepped, data_type))
-        try:
-            output = derived_variable.func(climate_data, sigma_coordinates)
-        except KeyError as key_error:
-            logging.warning(
-                f"Could not compute {label} because {key_error} is missing "
-                f"for {data_type}."
-            )
-        else:  # if no exception was raised
-            getattr(new_stepped, data_type)[label] = output
-    return new_stepped
+    if label in data:
+        raise ValueError(
+            f"Variable {label} already exists. It is not permitted "
+            "to overwrite existing variables with derived variables."
+        )
+    new_data = data.copy()
+    climate_data = ClimateData(data)
+    try:
+        output = derived_variable.func(climate_data, sigma_coordinates)
+    except KeyError as key_error:
+        logging.warning(f"Could not compute {label} because {key_error} is missing")
+    else:  # if no exception was raised
+        new_data[label] = output
+    return new_data
 
 
 def compute_derived_quantities(
+    data: Dict[str, torch.Tensor],
+    sigma_coordinates: SigmaCoordinates,
+    registry: MutableMapping[
+        str, DerivedVariableRegistryEntry
+    ] = _DERIVED_VARIABLE_REGISTRY,
+) -> Dict[str, torch.Tensor]:
+    """Computes all derived quantities from the given data."""
+
+    for label, derived_variable in registry.items():
+        data = _compute_derived_variable(
+            data, sigma_coordinates, label, derived_variable
+        )
+    return data
+
+
+def compute_stepped_derived_quantities(
     stepped: SteppedData,
     sigma_coordinates: SigmaCoordinates,
     registry: MutableMapping[
         str, DerivedVariableRegistryEntry
     ] = _DERIVED_VARIABLE_REGISTRY,
 ) -> SteppedData:
-    """Computes all derived quantities from the given data."""
-    for label, derived_variable in registry.items():
-        stepped = _compute_derived_variable(
-            stepped, sigma_coordinates, label, derived_variable
-        )
+    stepped.gen_data = compute_derived_quantities(
+        stepped.gen_data, sigma_coordinates, registry
+    )
+    stepped.target_data = compute_derived_quantities(
+        stepped.target_data, sigma_coordinates, registry
+    )
     return stepped
