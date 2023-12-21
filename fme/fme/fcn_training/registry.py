@@ -1,8 +1,6 @@
 import dataclasses
 from typing import Any, Literal, Mapping, Optional, Protocol, Tuple, Type
 
-# this package is installed in models/FourCastNet
-from fourcastnet.networks.afnonet import AFNONetBuilder
 from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 from torch import nn
 
@@ -101,7 +99,6 @@ class PreBuiltBuilder(ModuleConfig):
 
 
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
-    "afno": AFNONetBuilder,  # using short acronym for backwards compatibility
     "SphericalFourierNeuralOperatorNet": SphericalFourierNeuralOperatorBuilder,  # type: ignore  # noqa: E501
     "prebuilt": PreBuiltBuilder,
 }
@@ -126,11 +123,7 @@ class ModuleSelector:
         config: data for a ModuleConfig instance of the indicated type
     """
 
-    type: Literal[
-        "afno",
-        "SphericalFourierNeuralOperatorNet",
-        "prebuilt",
-    ]
+    type: Literal["SphericalFourierNeuralOperatorNet", "prebuilt"]
     config: Mapping[str, Any]
 
     def build(

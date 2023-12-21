@@ -39,7 +39,7 @@ def _get_test_yaml_files(
     out_variable_names,
     mask_name,
     n_forward_steps=2,
-    nettype="afno",
+    nettype="SphericalFourierNeuralOperatorNet",
     stepper_checkpoint_file=None,
     log_to_wandb=False,
     max_epochs=1,
@@ -234,7 +234,7 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
     return train_config_filename, inference_config_filename
 
 
-@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet", "afno"])
+@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_train_and_inference_inline(tmp_path, nettype):
     """Make sure that training and inference run without errors
 

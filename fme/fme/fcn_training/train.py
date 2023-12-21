@@ -435,9 +435,7 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--yaml_config", default="./config/AFNO.yaml", type=str)
+    parser.add_argument("--yaml_config", required=True, type=str)
 
     args = parser.parse_args()
-    main(
-        yaml_config=args.yaml_config,
-    )
+    main(yaml_config=args.yaml_config)

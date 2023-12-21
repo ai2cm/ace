@@ -16,7 +16,6 @@ RUN python3 -m pip install -r /tmp/requirements.txt
 RUN python3 -m pip install --no-deps -r /tmp/requirements_no_deps.txt
 
 # copy local code
-COPY models/FourCastNet ${FME_DIR}/models/FourCastNet
 COPY fme ${FME_DIR}/fme
 COPY install_local_packages.sh ${FME_DIR}/install_local_packages.sh
 
