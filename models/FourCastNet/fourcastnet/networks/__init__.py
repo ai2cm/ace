@@ -1,1 +1,0 @@
-from .afnonet import AFNONet
