@@ -69,7 +69,7 @@ def test_global_mean_loss():
 
     mse = torch.nn.MSELoss()
     expected = mse(global_weighted_mean(x, area), global_weighted_mean(y, area))
-    torch.testing.assert_allclose(result, expected)
+    torch.testing.assert_close(result, expected)
 
 
 def setup_single_level_conservation_loss(
@@ -193,4 +193,4 @@ def test_area_weighted_mse():
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
-    torch.testing.assert_allclose(result, expected)
+    torch.testing.assert_close(result, expected)
