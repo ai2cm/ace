@@ -46,7 +46,9 @@ def test_i_time_start_gets_correct_time_one_step_windows():
             i_time_start=i,
         )
     logs = agg.get_logs(label="metrics")
-    torch.testing.assert_allclose(logs["metrics/weighted_bias/a"], target_time)
+    torch.testing.assert_close(
+        logs["metrics/weighted_bias/a"], target_time, check_dtype=False
+    )
 
 
 @pytest.mark.parametrize(

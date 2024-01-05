@@ -3,4 +3,4 @@
 # cannot be installed on MacOS. Since we'd like to be able to do dev on Macs, and
 # since we do not currently require the features in modulus that depend on
 # nvidia_dali_cuda110, we choose to install nvidia-modulus with --no-deps
-nvidia-modulus@git+https://github.com/ai2cm/modulus.git@94f62e1ce2083640829ec12d80b00619c40a47f8
+nvidia-modulus@git+https://github.com/ai2cm/modulus.git@559965a5cc94b55d1a51e853dcd829146c1e2f99
