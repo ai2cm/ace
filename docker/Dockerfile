@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/pytorch:22.08-py3
+FROM nvcr.io/nvidia/pytorch:23.10-py3
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
@@ -11,8 +11,8 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 
 # install python deps
 COPY requirements_except_torch.txt /tmp/requirements.txt
-COPY requirements_no_deps.txt /tmp/requirements_no_deps.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
+COPY requirements_no_deps.txt /tmp/requirements_no_deps.txt
 RUN python3 -m pip install --no-deps -r /tmp/requirements_no_deps.txt
 
 # copy local code
