@@ -30,8 +30,8 @@ install_dependencies:
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
-	conda run -no-capture-output -n $(ENVIRONMENT_NAME) ./install_dependencies.sh
-	conda run -no-capture-output -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) ./install_dependencies.sh
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
 
 test_fme_unit_tests:
 	pytest -m "not requires_gpu" --durations 10 fme/
