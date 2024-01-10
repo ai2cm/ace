@@ -1,3 +1,4 @@
+import dataclasses
 from pathlib import Path
 from typing import Optional
 
@@ -34,12 +35,9 @@ def _get_ensemble_dataset(
     ensemble member.
     """
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
-
     datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
-        params_curr_member = DataLoaderParams(
-            path, params.data_type, params.batch_size, params.num_data_workers
-        )
+        params_curr_member = DataLoaderParams(dataclasses.replace(params, data_path=path))
         dataset = XarrayDataset(
             params_curr_member, requirements, window_time_slice=window_time_slice
         )
