@@ -1,10 +1,15 @@
 VERSION ?= $(shell git rev-parse --short HEAD)
 IMAGE ?= fme
+REGISTRY ?= registry.nersc.gov/m4331/ai2cm
 ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 
 build_docker_image:
 	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
+
+push_shifter_image: build_docker_image
+	docker tag $(IMAGE):$(VERSION) $(REGISTRY)/$(IMAGE):$(VERSION)
+	docker push $(REGISTRY)/$(IMAGE):$(VERSION)
 
 build_beaker_image: build_docker_image
 	beaker image create --name $(IMAGE)-$(VERSION) $(IMAGE):$(VERSION)
