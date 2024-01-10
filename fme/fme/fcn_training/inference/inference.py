@@ -70,6 +70,7 @@ class InferenceConfig:
              netcdf file. Ignored if save_prediction_files is False.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
+        data_writer: Configuration for data writers.
     """
 
     experiment_dir: str
@@ -111,6 +112,15 @@ class InferenceConfig:
                 "instead."
             )
             setattr(self.data_writer, k, v)
+        if (self.data_writer.time_coarsen is not None) and (
+            self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
+            != 0
+        ):
+            raise ValueError(
+                "forward_steps_in_memory must be divisible by "
+                f"time_coarsen.coarsen_factor. Got {self.forward_steps_in_memory} "
+                f"and {self.data_writer.time_coarsen.coarsen_factor}."
+            )
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
