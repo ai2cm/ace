@@ -37,7 +37,7 @@ def _get_ensemble_dataset(
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
     datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
-        params_curr_member =  dataclasses.replace(params, data_path=path)
+        params_curr_member = dataclasses.replace(params, data_path=path)
         dataset = XarrayDataset(
             params_curr_member, requirements, window_time_slice=window_time_slice
         )
