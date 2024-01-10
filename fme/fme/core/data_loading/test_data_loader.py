@@ -93,7 +93,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
 def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1):
     """Tests that the ensemble loader returns the correct number of samples
-        when n_samples is set in params.
+    when n_samples is set in params.
     """
 
     # Create a dataset for each ensemble member. We assume that each member
@@ -109,13 +109,11 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
-    n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_samples
 
     data = get_data_loader(params, True, requirements)
     assert len(data.loader) == samples_per_member * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
-
 
 
 def test_xarray_loader(tmp_path):
