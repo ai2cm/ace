@@ -68,3 +68,9 @@ def test_dynamic_histogram_extends_as_expected():
     # double in size twice to the right, length becomes 32, from -3 to 29.0
     np.testing.assert_approx_equal(histogram.bin_edges[0], -3.0)
     np.testing.assert_approx_equal(histogram.bin_edges[-1], 29.0)
+
+
+def test_histogram_handles_uniform_field():
+    histogram = DynamicHistogram(n_times=1, n_bins=200)
+    histogram.add(np.array([[1.0, 1.0, 1.0]]))  # has zero range
+    histogram.add(np.array([[1.0, 2.0, 3.0]]))  # has non-zero range
