@@ -91,6 +91,31 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
+def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1):
+    """Tests that the ensemble loader returns the correct number of samples
+    when n_samples is set in params.
+    """
+
+    # Create a dataset for each ensemble member. We assume that each member
+    # corresponds to an initial condition.
+    netcdfs: List[pathlib.Path] = []
+    for i in range(num_ensemble_members):
+        ic_path = tmp_path / f"ic{i}"
+        ic_path.mkdir()
+        _create_dataset_on_disk(ic_path)
+        netcdfs.append(ic_path / "data")
+
+    params = DataLoaderParams(tmp_path, "ensemble_xarray", 1, 0, 1, n_samples)
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+
+    samples_per_member = n_samples
+
+    data = get_data_loader(params, True, requirements)
+    assert len(data.loader) == samples_per_member * num_ensemble_members
+    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+
+
 def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
