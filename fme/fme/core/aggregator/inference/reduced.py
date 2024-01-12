@@ -178,12 +178,16 @@ class MeanAggregator:
         if self._variable_metrics is None:
             self._variable_metrics = {
                 "weighted_rmse": {},
-                "weighted_grad_mag_percent_diff": {},
                 "weighted_mean_gen": {},
                 "weighted_mean_target": {},
                 "weighted_bias": {},
                 "weighted_std_gen": {},
             }
+
+            if self._target == "denorm":
+                # redundant for the "norm" case
+                self._variable_metrics["weighted_grad_mag_percent_diff"] = {}
+
             device = get_device()
             area_weights = self._area_weights
             for key in gen_data:
@@ -195,14 +199,15 @@ class MeanAggregator:
                     compute_metric=metrics.root_mean_squared_error,
                     n_timesteps=self._n_timesteps,
                 )
-                self._variable_metrics["weighted_grad_mag_percent_diff"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.gradient_magnitude_percent_diff,
-                    n_timesteps=self._n_timesteps,
-                )
+                if self._target == "denorm":
+                    self._variable_metrics["weighted_grad_mag_percent_diff"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=metrics.gradient_magnitude_percent_diff,
+                        n_timesteps=self._n_timesteps,
+                    )
                 self._variable_metrics["weighted_mean_gen"][
                     key
                 ] = AreaWeightedReducedMetric(
