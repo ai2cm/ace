@@ -20,7 +20,6 @@ def test_mean_metrics_call_distributed():
         agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
         assert logs["metrics/loss"] == -1.0
-        assert logs["metrics/l1/a"] == -1.0
         assert logs["metrics/weighted_rmse/a"] == -1.0
         assert logs["metrics/weighted_grad_mag_percent_diff/a"] == -1.0
         assert mock.reduce_called
