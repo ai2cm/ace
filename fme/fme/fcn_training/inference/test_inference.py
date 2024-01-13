@@ -2,6 +2,7 @@ import dataclasses
 import pathlib
 from typing import List, Tuple
 
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -10,10 +11,13 @@ import yaml
 
 from fme.core import metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.params import DataLoaderParams
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
+from fme.fcn_training.inference.data_writer import DataWriterConfig
+from fme.fcn_training.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.fcn_training.inference.derived_variables import (
     compute_stepped_derived_quantities,
 )
@@ -158,8 +162,10 @@ def inference_helper(
         validation_data=data.data_loader_params,
         prediction_data=prediction_data,
         log_video=True,
-        save_prediction_files=True,
-        log_extended_video_netcdfs=True,
+        data_writer=DataWriterConfig(
+            save_prediction_files=True,
+            log_extended_video_netcdfs=True,
+        ),
         forward_steps_in_memory=1,
     )
     config_filename = tmp_path / "config.yaml"
@@ -282,7 +288,10 @@ def test_inference_writer_boundaries(
         ),
         validation_data=data.data_loader_params,
         log_video=True,
-        save_prediction_files=True,
+        data_writer=DataWriterConfig(
+            save_prediction_files=True,
+            time_coarsen=None,
+        ),
         forward_steps_in_memory=forward_steps_in_memory,
     )
     config_filename = tmp_path / "config.yaml"
@@ -378,6 +387,67 @@ def test_inference_writer_boundaries(
                 lead_da.sel(source="prediction").values,
                 lead_da.sel(source="target").values,
             )
+
+
+def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
+    forward_steps_in_memory = 4
+    coarsen_factor = 2
+    in_names = ["var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    dim_sizes = DimSizes(
+        n_time=9,
+        n_lat=16,
+        n_lon=32,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+    )
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=8,
+        forward_steps_in_memory=forward_steps_in_memory,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=False,
+        ),
+        validation_data=data.data_loader_params,
+        data_writer=DataWriterConfig(
+            save_prediction_files=True,
+            log_extended_video_netcdfs=True,
+            time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
+        ),
+        log_video=False,
+    )
+    config_filename = tmp_path / "config.yaml"
+    with open(config_filename, "w") as f:
+        yaml.dump(dataclasses.asdict(config), f)
+    main(yaml_config=str(config_filename))
+    # check that the outputs all have the intended time dimension size
+    prediction_ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
+    n_coarsened_timesteps = (config.n_forward_steps // coarsen_factor) + 1
+    assert (
+        len(prediction_ds["lead"]) == n_coarsened_timesteps
+    ), "raw predictions time dimension size"
+    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    assert (
+        metric_ds.sizes["timestep"] == n_coarsened_timesteps
+    ), "reduced predictions time dimension size"
+    histograms = xr.open_dataset(tmp_path / "histograms.nc")
+    assert (
+        histograms.sizes["time"] == n_coarsened_timesteps
+    ), "histograms time dimension size"
 
 
 @pytest.mark.parametrize("has_required_fields", [True, False])
@@ -486,4 +556,38 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     with mock_wandb() as _:
         _ = main(
             yaml_config=str(config_filename),
+        )
+
+
+@pytest.mark.parametrize(
+    ["forward_steps_in_memory", "time_coarsen"],
+    [
+        pytest.param(5, 1, id="invalid_steps_in_memory"),
+        pytest.param(4, 3, id="non_factor_time_coarsen"),
+        pytest.param(4, -1, id="invalid_time_coarsen"),
+    ],
+)
+def test_inference_config_raises_incompatible_timesteps(
+    forward_steps_in_memory, time_coarsen
+):
+    n_forward_steps = 12
+    base_config_dict = dict(
+        experiment_dir="./some_dir",
+        n_forward_steps=n_forward_steps,
+        checkpoint_path="./some_dir",
+        logging=LoggingConfig(),
+        validation_data=DataLoaderParams(
+            data_path="./some_data",
+            data_type="xarray",
+            batch_size=1,
+            num_data_workers=1,
+        ),
+    )
+    base_config_dict["forward_steps_in_memory"] = forward_steps_in_memory
+    base_config_dict["data_writer"] = {"time_coarsen": {"coarsen_factor": time_coarsen}}
+    with pytest.raises(ValueError):
+        dacite.from_dict(
+            data_class=InferenceConfig,
+            data=base_config_dict,
+            config=dacite.Config(strict=True),
         )

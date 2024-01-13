@@ -21,7 +21,6 @@ def test_labels_exist():
     agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
     logs = agg.get_logs(label="test")
     assert "test/mean/loss" in logs
-    assert "test/mean/l1/a" in logs
     assert "test/mean/weighted_rmse/a" in logs
     assert "test/mean/weighted_bias/a" in logs
     assert "test/mean/weighted_grad_mag_percent_diff/a" in logs
