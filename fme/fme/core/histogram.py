@@ -2,6 +2,8 @@ from typing import Optional
 
 import numpy as np
 
+EPSILON = 1.0e-6
+
 
 class DynamicHistogram:
     """
@@ -27,6 +29,7 @@ class DynamicHistogram:
         self._n_bins = n_bins
         self.bin_edges: Optional[np.ndarray] = None
         self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
+        self._epsilon: float = EPSILON
 
     def add(self, value: np.ndarray, i_time_start: int = 0):
         """
@@ -38,6 +41,10 @@ class DynamicHistogram:
         """
         vmin = np.min(value)
         vmax = np.max(value)
+        if vmin == vmax:
+            # if all values are the same, add a small amount to vmin and vmax
+            vmin -= self._epsilon
+            vmax += self._epsilon
         if self.bin_edges is None:
             self.bin_edges = np.linspace(vmin, vmax, self._n_bins + 1)
         else:

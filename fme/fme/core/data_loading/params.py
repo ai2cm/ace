@@ -31,7 +31,8 @@ class DataLoaderParams:
         num_data_workers: Number of parallel data workers.
         n_repeats: Number of times to repeat the dataset (in time).
         n_samples: Number of samples to load, starting at the beginning of the data.
-            If None, load all samples.
+            If None, load all samples. If data_type=="ensemble_xarray", this is the
+            number of samples per ensemble member dataset.
         window_starts: Slice indicating the set of indices to consider for initial
             conditions of windows of data. Values following the initial condition will
             still come from the full dataset. By default load all initial conditions.

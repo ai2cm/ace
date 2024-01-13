@@ -2,7 +2,6 @@ from typing import Dict, Mapping, Optional, Union
 
 import torch
 import xarray as xr
-from torch import nn
 
 from fme.core import metrics
 from fme.core.device import get_device
@@ -14,20 +13,6 @@ from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
     for name in gen_data:
         return gen_data[name].shape
-
-
-class L1Loss:
-    def __init__(self, device: torch.device):
-        self._total = torch.tensor(0.0, device=device)
-
-    def record(self, target: torch.Tensor, gen: torch.Tensor):
-        self._total += nn.functional.l1_loss(
-            gen,
-            target,
-        )
-
-    def get(self) -> torch.Tensor:
-        return self._total
 
 
 class MeanAggregator:
@@ -61,14 +46,12 @@ class MeanAggregator:
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
             self._variable_metrics = {
-                "l1": {},
                 "weighted_rmse": {},
                 "weighted_bias": {},
                 "weighted_grad_mag_percent_diff": {},
             }
             device = get_device()
             for key in gen_data:
-                self._variable_metrics["l1"][key] = L1Loss(device=device)
                 self._variable_metrics["weighted_rmse"][
                     key
                 ] = AreaWeightedReducedMetric(
