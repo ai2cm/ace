@@ -11,7 +11,6 @@ from typing import (
     Protocol,
     Tuple,
     Union,
-    cast,
 )
 
 import dacite
@@ -75,13 +74,13 @@ class SingleModuleStepperConfig:
 
     def get_stepper(
         self,
-        shapes: Dict[str, Tuple[int, ...]],
+        img_shape: Tuple[int, int],
         area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
     ):
         return SingleModuleStepper(
             config=self,
-            data_shapes=shapes,
+            img_shape=img_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
         )
@@ -118,8 +117,8 @@ class ExistingStepperConfig:
             self._load_checkpoint()["stepper"]["config"]
         ).get_data_requirements(n_forward_steps)
 
-    def get_stepper(self, shapes, area, sigma_coordinates):
-        del shapes  # unused
+    def get_stepper(self, img_shape, area, sigma_coordinates):
+        del img_shape  # unused
         return SingleModuleStepper.from_state(
             self._load_checkpoint()["stepper"],
             area=area,
@@ -179,14 +178,14 @@ class SingleModuleStepper:
     def __init__(
         self,
         config: SingleModuleStepperConfig,
-        data_shapes: Dict[str, Tuple[int, ...]],
+        img_shape: Tuple[int, int],
         area: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
     ):
         """
         Args:
             config: The configuration.
-            data_shapes: Shapes of the module inputs.
+            img_shape: Shape of domain as (n_lat, n_lon).
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
             sigma_coordinates: The sigma coordinates.
@@ -201,13 +200,12 @@ class SingleModuleStepper:
             self.prescriber = config.prescriber.build(config.in_names, config.out_names)
         else:
             self.prescriber = NullPrescriber()
-        example_name = list(data_shapes.keys())[0]
         self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            img_shape=cast(Tuple[int, int], tuple(data_shapes[example_name][-2:])),
+            img_shape=img_shape,
         ).to(get_device())
-        self.data_shapes = data_shapes
+        self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
@@ -306,7 +304,7 @@ class SingleModuleStepper:
             "normalizer": self.normalizer.get_state(),
             "in_packer": self.in_packer.get_state(),
             "out_packer": self.out_packer.get_state(),
-            "data_shapes": self.data_shapes,
+            "img_shape": self._img_shape,
             "config": self._config.get_state(),
             "prescriber": self.prescriber.get_state(),
             "area": self.area,
@@ -351,9 +349,16 @@ class SingleModuleStepper:
                 data=state["sigma_coordinates"],
                 config=dacite.Config(strict=True),
             )
+        if "img_shape" in state:
+            img_shape = state["img_shape"]
+        else:
+            # this is for backwards compatibility with old checkpoints
+            for v in state["data_shapes"].values():
+                img_shape = v[-2:]
+                break
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
-            data_shapes=state["data_shapes"],
+            img_shape=img_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
         )

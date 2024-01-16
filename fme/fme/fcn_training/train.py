@@ -119,10 +119,13 @@ class Trainer:
 
         for batch in self.train_data.loader:
             shapes = {k: v.shape for k, v in batch.data.items()}
+            for value in shapes.values():
+                img_shape = value[-2:]
+                break
             break
         logging.info("Starting model initialization")
         self.stepper = config.stepper.get_stepper(
-            shapes,
+            img_shape=img_shape,
             area=self.train_data.area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
         )
