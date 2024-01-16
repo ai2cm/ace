@@ -278,7 +278,7 @@ def test_reloaded_stepper_gives_same_prediction():
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
-        shapes=shapes,
+        img_shape=shapes["a"][-2:],
         area=area,
         sigma_coordinates=sigma_coordinates,
     )
@@ -539,7 +539,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
         corrector=corrector_config,
     )
     stepper = stepper_config.get_stepper(
-        shapes={key: value.shape for key, value in data.items()},
+        img_shape=data["PRESsfc"].shape[2:],
         area=area_weights,
         sigma_coordinates=sigma_coordinates,
     )
