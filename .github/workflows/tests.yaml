@@ -1,4 +1,4 @@
-name: fme-unit-tests
+name: tests
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
           make install_local_packages
       - name: Run pytest
         run: |
-          make test_fme_unit_tests
+          make test
   build-gpu:
     # These steps run on our self-hosted k8s GPU runners. See below for setup notes
     # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
@@ -57,5 +57,5 @@ jobs:
         run: |
             export PATH=/usr/local/nvidia/bin:${PATH}
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
-            pytest --durations 10 fme/
+            make test
 
