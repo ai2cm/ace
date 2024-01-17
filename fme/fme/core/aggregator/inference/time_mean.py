@@ -67,7 +67,6 @@ class TimeMeanAggregator:
         self,
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"] = "denorm",
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         log_individual_channels: bool = True,
     ):
@@ -76,7 +75,6 @@ class TimeMeanAggregator:
             area_weights: Area weights for each grid cell.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
-            dist: Distributed object to use for communication.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             log_individual_channels: Whether to log individual channels.
@@ -84,15 +82,11 @@ class TimeMeanAggregator:
         self._area_weights = area_weights
         self._target = target
         self._log_individual_channels = log_individual_channels
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._metadata = metadata
-
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None

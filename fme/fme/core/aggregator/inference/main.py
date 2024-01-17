@@ -5,7 +5,6 @@ import xarray as xr
 from wandb import Table
 
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
-from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
@@ -55,7 +54,6 @@ class InferenceAggregator:
         log_video: bool = False,
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
@@ -69,7 +67,6 @@ class InferenceAggregator:
                 metrics of state evolution
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
-            dist: Distributed object to use for metric aggregation.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
@@ -78,44 +75,38 @@ class InferenceAggregator:
                 area_weights,
                 target="denorm",
                 n_timesteps=n_timesteps,
-                dist=dist,
                 metadata=metadata,
             ),
             "mean_norm": MeanAggregator(
                 area_weights,
                 target="norm",
                 n_timesteps=n_timesteps,
-                dist=dist,
                 metadata=metadata,
             ),
             "time_mean": TimeMeanAggregator(
                 area_weights,
-                dist=dist,
                 metadata=metadata,
             ),
             "time_mean_norm": TimeMeanAggregator(
                 area_weights,
                 target="norm",
-                dist=dist,
                 metadata=metadata,
                 log_individual_channels=False,
             ),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
-                area_weights, target_time=20, dist=dist
+                area_weights, target_time=20
             )
         if log_video:
             self._aggregators["video"] = VideoAggregator(
                 n_timesteps=n_timesteps,
                 enable_extended_videos=enable_extended_videos,
-                dist=dist,
                 metadata=metadata,
             )
         if log_zonal_mean_images:
             self._aggregators["zonal_mean"] = ZonalMeanAggregator(
                 n_timesteps=n_timesteps,
-                dist=dist,
                 metadata=metadata,
             )
 
