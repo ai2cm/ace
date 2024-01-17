@@ -63,21 +63,16 @@ class ZonalMeanAggregator:
     def __init__(
         self,
         n_timesteps: int,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
             n_timesteps: Number of timesteps of inference that will be run.
-            dist: Distributed object to use for communication.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
         self._n_timesteps = n_timesteps
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
