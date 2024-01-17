@@ -60,7 +60,7 @@ import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.distributed import Distributed, NotDistributed
+from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.fcn_training.inference import run_inference
@@ -146,21 +146,15 @@ class Trainer:
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
         def get_inference_data_loader(window_time_slice: Optional[slice] = None):
-            if self.config.inference.parallel:
-                dist = self.dist
-            else:
-                dist = NotDistributed(is_root=self.dist.is_root())
             with logging_utils.log_level(logging.WARNING):
                 return get_data_loader(
                     config.inference.data,
                     train=False,
                     requirements=inference_data_requirements,
                     window_time_slice=window_time_slice,
-                    dist=dist,
                 )
 
         self._inference_data_loader_factory = get_inference_data_loader
-
         self._ema = self.config.ema.build(self.stepper.modules)
 
     def switch_off_grad(self, model):
@@ -343,36 +337,26 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        if self.config.inference.parallel:
-            dist = self.dist
-        else:
-            dist = NotDistributed(is_root=self.dist.is_root())
-        if self.config.inference.parallel or self.dist.is_root():
-            record_step_20 = self.config.inference.n_forward_steps >= 20
-            aggregator = InferenceAggregator(
-                self.train_data.area_weights.to(fme.get_device()),
-                self.train_data.sigma_coordinates,
-                record_step_20=record_step_20,
-                log_video=False,
-                log_zonal_mean_images=True,
-                n_timesteps=self.config.inference.n_forward_steps + 1,
-                enable_extended_videos=False,
-                dist=dist,
-                metadata=self.train_data.metadata,
+        record_step_20 = self.config.inference.n_forward_steps >= 20
+        aggregator = InferenceAggregator(
+            self.train_data.area_weights.to(fme.get_device()),
+            self.train_data.sigma_coordinates,
+            record_step_20=record_step_20,
+            log_video=False,
+            log_zonal_mean_images=True,
+            n_timesteps=self.config.inference.n_forward_steps + 1,
+            enable_extended_videos=False,
+            metadata=self.train_data.metadata,
+        )
+        with torch.no_grad(), self._validation_context():
+            run_inference(
+                aggregator=aggregator,
+                stepper=self.stepper,
+                data_loader_factory=self._inference_data_loader_factory,
+                n_forward_steps=self.config.inference.n_forward_steps,
+                forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
             )
-            with torch.no_grad(), self._validation_context():
-                run_inference(
-                    aggregator=aggregator,
-                    stepper=self.stepper,
-                    data_loader_factory=self._inference_data_loader_factory,
-                    n_forward_steps=self.config.inference.n_forward_steps,
-                    forward_steps_in_memory=(
-                        self.config.inference.forward_steps_in_memory
-                    ),
-                )
-            logs = aggregator.get_logs(label="inference")
-        else:
-            logs = {}
+        logs = aggregator.get_logs(label="inference")
         return logs
 
     def save_checkpoint(self, checkpoint_path):
