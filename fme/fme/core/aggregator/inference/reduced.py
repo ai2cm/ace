@@ -155,7 +155,6 @@ class MeanAggregator:
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"],
         n_timesteps: int,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._area_weights = area_weights
@@ -165,10 +164,7 @@ class MeanAggregator:
         self._target = target
         self._n_timesteps = n_timesteps
 
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
