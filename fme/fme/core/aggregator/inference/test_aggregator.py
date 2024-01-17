@@ -1,13 +1,13 @@
 import torch
 
-from fme.core.aggregator.inference.time_mean import TimeMeanScalarMetricAggregator
+from fme.core.aggregator.inference.time_mean import TimeMeanAggregator
 from fme.core.device import get_device
 
 
-def test_time_mean_scalar_metrics_aggregator():
+def test_rmse_of_time_mean_all_channels():
     torch.manual_seed(0)
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanScalarMetricAggregator(area_weights, target="norm")
+    agg = TimeMeanAggregator(area_weights, target="norm")
     target_data_norm = {
         "a": torch.ones([2, 3, 4, 4], device=get_device()),
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
