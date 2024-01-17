@@ -29,7 +29,6 @@ class MeanAggregator:
         self,
         area_weights: torch.Tensor,
         target_time: int = 1,
-        dist: Optional[Distributed] = None,
     ):
         self._area_weights = area_weights
         self._shape_x = None
@@ -38,10 +37,7 @@ class MeanAggregator:
         self._loss = torch.tensor(0.0, device=get_device())
         self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
         self._target_time = target_time
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
 
     def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
         if self._variable_metrics is None:
