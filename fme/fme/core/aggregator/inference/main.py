@@ -10,7 +10,7 @@ from fme.core.wandb import WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .reduced import MeanAggregator
-from .time_mean import TimeMeanAggregator, TimeMeanScalarMetricAggregator
+from .time_mean import TimeMeanAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
 
@@ -93,11 +93,12 @@ class InferenceAggregator:
                 dist=dist,
                 metadata=metadata,
             ),
-            "scalar_time_mean": TimeMeanScalarMetricAggregator(
+            "time_mean_norm": TimeMeanAggregator(
                 area_weights,
                 target="norm",
                 dist=dist,
                 metadata=metadata,
+                log_individual_channels=False,
             ),
         }
         if record_step_20:
