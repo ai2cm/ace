@@ -1,10 +1,7 @@
 import torch
 
 from fme.core.aggregator.inference.reduced import MeanAggregator
-from fme.core.aggregator.inference.time_mean import (
-    TimeMeanAggregator,
-    TimeMeanScalarMetricAggregator,
-)
+from fme.core.aggregator.inference.time_mean import TimeMeanAggregator
 from fme.core.device import get_device
 from fme.core.testing import mock_distributed
 
@@ -52,37 +49,5 @@ def test_time_mean_metrics_call_distributed():
         # different data above.
         assert logs["metrics/rmse/a"] == 0.0
         assert logs["metrics/bias/a"] == 0.0
-        assert mock.reduce_called
-
-
-def test_time_mean_scalar_metrics_call_distributed():
-    """
-    All time-mean metrics should be reduced across processes using Distributed.
-
-    This tests that functionality by modifying the Distributed singleton.
-    """
-    torch.manual_seed(0)
-    with mock_distributed(0.0) as mock:
-        area_weights = torch.ones(1).to(get_device())
-        agg = TimeMeanScalarMetricAggregator(area_weights, target="norm")
-        target_data_norm = {
-            "a": torch.ones([2, 3, 4, 4], device=get_device()),
-            "b": torch.ones([2, 3, 4, 4], device=get_device()),
-        }
-        gen_data_norm = {
-            "a": torch.randn([2, 3, 4, 4], device=get_device()),
-            "b": torch.randn([2, 3, 4, 4], device=get_device()),
-        }
-        agg.record_batch(
-            loss=1.0,
-            target_data=target_data_norm,
-            gen_data=gen_data_norm,
-            target_data_norm=target_data_norm,
-            gen_data_norm=gen_data_norm,
-        )
-        logs = agg.get_logs(label="metrics")
-        # the reduction happens on the time-means, so the gen and target data should
-        # be filled identically and all errors will be zero, even though we gave them
-        # different data above.
         assert logs["metrics/rmse/all_channels"] == 0.0
         assert mock.reduce_called
