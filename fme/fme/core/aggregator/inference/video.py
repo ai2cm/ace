@@ -30,15 +30,13 @@ class _ErrorVideoData:
     Record batches of video data and compute statistics on the error.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
+    def __init__(self, n_timesteps: int):
         self._mse_data: Optional[Dict[str, torch.Tensor]] = None
         self._min_err_data: Optional[Dict[str, torch.Tensor]] = None
         self._max_err_data: Optional[Dict[str, torch.Tensor]] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
@@ -112,14 +110,12 @@ class _MeanVideoData:
     Record batches of video data and compute the mean.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
+    def __init__(self, n_timesteps: int):
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
@@ -172,16 +168,14 @@ class _VarianceVideoData:
     Record batches of video data and compute the variance.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
+    def __init__(self, n_timesteps: int):
         self._target_means: Optional[Dict[str, torch.Tensor]] = None
         self._gen_means: Optional[Dict[str, torch.Tensor]] = None
         self._target_squares: Optional[Dict[str, torch.Tensor]] = None
         self._gen_squares: Optional[Dict[str, torch.Tensor]] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
@@ -292,7 +286,6 @@ class VideoAggregator:
         self,
         n_timesteps: int,
         enable_extended_videos: bool,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
@@ -300,7 +293,6 @@ class VideoAggregator:
             n_timesteps: Number of timesteps of inference that will be run.
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
-            dist: Distributed object to use for metric aggregation.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged video captions.
         """
@@ -308,13 +300,13 @@ class VideoAggregator:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._metadata = metadata
-        self._mean_data = _MeanVideoData(n_timesteps=n_timesteps, dist=dist)
+        self._mean_data = _MeanVideoData(n_timesteps=n_timesteps)
         if enable_extended_videos:
             self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps
             )
             self._variance_data: Optional[_VarianceVideoData] = _VarianceVideoData(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps
             )
             self._enable_extended_videos = True
         else:
