@@ -66,21 +66,16 @@ class TimeMeanAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
             area_weights: Area weights for each grid cell.
-            dist: Distributed object to use for communication.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
         self._area_weights = area_weights
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:

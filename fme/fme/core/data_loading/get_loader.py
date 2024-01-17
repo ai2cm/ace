@@ -70,7 +70,6 @@ def get_data_loader(
     train: bool,
     requirements: DataRequirements,
     window_time_slice: Optional[slice] = None,
-    dist: Optional[Distributed] = None,
 ) -> GriddedData:
     """
     Args:
@@ -80,10 +79,8 @@ def get_data_loader(
         window_time_slice: Time slice within each window to use for the data loader,
             if given the loader will only return data from this time slice.
             By default it will return the full windows.
-        dist: Distributed object to use for distributed training.
     """
-    if dist is None:
-        dist = Distributed.get_instance()
+    dist = Distributed.get_instance()
     if params.data_type == "xarray":
         dataset = XarrayDataset(
             params, requirements=requirements, window_time_slice=window_time_slice
