@@ -19,26 +19,12 @@ class MockWandB:
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
 
-    def init(
-        self,
-        config: Mapping[str, Any],
-        project: str,
-        entity: str,
-        resume: bool,
-        dir: str,
-    ):
+    def init(self, **kwargs):
         if not self._configured:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
-            # wandb.init(
-            #     config=config,
-            #     project=project,
-            #     entity=entity,
-            #     resume=resume,
-            #     dir=dir,
-            # )
             pass
 
     def watch(self, modules):
