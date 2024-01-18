@@ -360,9 +360,6 @@ class Trainer:
         return logs
 
     def save_checkpoint(self, checkpoint_path):
-        """We intentionally require a checkpoint_dir to be passed
-        in order to allow Ray Tune to use this function"""
-
         torch.save(
             {
                 "num_batches_seen": self.num_batches_seen,
@@ -374,8 +371,6 @@ class Trainer:
         )
 
     def restore_checkpoint(self, checkpoint_path):
-        """We intentionally require a checkpoint_dir to be passed
-        in order to allow Ray Tune to use this function"""
         _restore_checkpoint(self, checkpoint_path)
 
 
@@ -391,9 +386,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer.startEpoch = checkpoint["epoch"]
 
 
-def main(
-    yaml_config: str,
-):
+def main(yaml_config: str):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
@@ -410,11 +403,11 @@ def main(
     with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     train_config.configure_logging(log_filename="out.log")
-    train_config.configure_wandb(resume=True)
+    env_vars = logging_utils.retrieve_env_vars()
     gcs_utils.authenticate()
     logging_utils.log_versions()
-    logging_utils.log_beaker_url()
-    logging_utils.log_slurm_info()
+    beaker_url = logging_utils.log_beaker_url()
+    train_config.configure_wandb(env_vars=env_vars, resume=True, notes=beaker_url)
     trainer = Trainer(train_config)
     trainer.train()
     logging.info("DONE ---- rank %d" % dist.rank)

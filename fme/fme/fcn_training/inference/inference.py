@@ -125,10 +125,13 @@ class InferenceConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self):
-        self.logging.configure_wandb(
-            config=to_flat_dict(dataclasses.asdict(self)), resume=False
-        )
+    def configure_wandb(self, env_vars: Optional[dict] = None, **kwargs):
+        config = to_flat_dict(dataclasses.asdict(self))
+        if "environment" in config:
+            logging.warning("Not recording env vars since 'environment' is in config.")
+        elif env_vars is not None:
+            config["environment"] = env_vars
+        self.logging.configure_wandb(config=config, resume=False, **kwargs)
 
     def configure_gcs(self):
         self.logging.configure_gcs()
@@ -187,14 +190,14 @@ def main(
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     config.configure_logging(log_filename="inference_out.log")
-    config.configure_wandb()
+    env_vars = logging_utils.retrieve_env_vars()
+    beaker_url = logging_utils.log_beaker_url()
+    config.configure_wandb(env_vars=env_vars, notes=beaker_url)
     gcs_utils.authenticate()
 
     torch.backends.cudnn.benchmark = True
 
     logging_utils.log_versions()
-    logging_utils.log_beaker_url()
-    logging_utils.log_slurm_info()
 
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
