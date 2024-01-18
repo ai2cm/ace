@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Mapping, MutableMapping, Optional, Union
+from typing import Dict, List, Literal, Mapping, MutableMapping, Optional, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -66,21 +66,27 @@ class TimeMeanAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
+        target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        log_individual_channels: bool = True,
     ):
         """
         Args:
             area_weights: Area weights for each grid cell.
+            target: Whether to compute metrics on the normalized or denormalized data,
+                defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            log_individual_channels: Whether to log individual channels.
         """
         self._area_weights = area_weights
+        self._target = target
+        self._log_individual_channels = log_individual_channels
         self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._metadata = metadata
-
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_data: Optional[Dict[str, torch.Tensor]] = None
         self._gen_data: Optional[Dict[str, torch.Tensor]] = None
@@ -121,6 +127,9 @@ class TimeMeanAggregator:
         gen_data_norm: Mapping[str, torch.Tensor],
         i_time_start: int = 0,
     ):
+        if self._target == "norm":
+            target_data = target_data_norm
+            gen_data = gen_data_norm
         ignore_initial = i_time_start == 0
         self._target_data = self._add_or_initialize_time_mean(
             self._target_data, target_data, ignore_initial
@@ -150,6 +159,7 @@ class TimeMeanAggregator:
         logs = {}
         preds = self._get_target_gen_pairs()
         bias_map_key, gen_map_key = "bias_map", "gen_map"
+        rmse_all_channels = {}
         for pred in preds:
             bias_data = pred.bias().cpu().numpy()
             vmin_bias, vmax_bias = get_cmap_limits(bias_data, diverging=True)
@@ -168,16 +178,24 @@ class TimeMeanAggregator:
                 caption=self._get_caption(gen_map_key, pred.name, vmin_pred, vmax_pred),
             )
             plt.close("all")
-            logs.update(
-                {
-                    f"{bias_map_key}/{pred.name}": bias_image,
-                    f"{gen_map_key}/{pred.name}": prediction_image,
-                    f"rmse/{pred.name}": pred.rmse(weights=self._area_weights),
-                    f"bias/{pred.name}": pred.weighted_mean_bias(
-                        weights=self._area_weights
-                    ),
-                }
-            )
+            rmse_all_channels[pred.name] = pred.rmse(weights=self._area_weights)
+            if self._log_individual_channels:
+                logs.update(
+                    {
+                        f"{bias_map_key}/{pred.name}": bias_image,
+                        f"{gen_map_key}/{pred.name}": prediction_image,
+                        f"rmse/{pred.name}": rmse_all_channels[pred.name],
+                        f"bias/{pred.name}": pred.weighted_mean_bias(
+                            weights=self._area_weights
+                        ),
+                    }
+                )
+        logs.update(
+            {
+                f"rmse/channel_mean": sum(rmse_all_channels.values())
+                / len(rmse_all_channels),
+            }
+        )
 
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
