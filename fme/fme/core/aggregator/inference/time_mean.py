@@ -192,7 +192,7 @@ class TimeMeanAggregator:
                 )
         logs.update(
             {
-                f"rmse/all_channels": sum(rmse_all_channels.values())
+                f"rmse/channel_mean": sum(rmse_all_channels.values())
                 / len(rmse_all_channels),
             }
         )
