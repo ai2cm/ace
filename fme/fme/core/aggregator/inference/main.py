@@ -87,6 +87,12 @@ class InferenceAggregator:
                 area_weights,
                 metadata=metadata,
             ),
+            "time_mean_norm": TimeMeanAggregator(
+                area_weights,
+                target="norm",
+                metadata=metadata,
+                log_individual_channels=False,
+            ),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
