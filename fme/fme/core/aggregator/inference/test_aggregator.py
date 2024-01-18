@@ -24,4 +24,4 @@ def test_rmse_of_time_mean_all_channels():
         gen_data_norm=gen_data_norm,
     )
     logs = agg.get_logs(label="metrics")
-    assert logs["metrics/rmse/all_channels"] == 1.5
+    assert logs["metrics/rmse/channel_mean"] == 1.5
