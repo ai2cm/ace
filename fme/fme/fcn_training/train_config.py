@@ -49,7 +49,7 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def configure_wandb(self, config: Mapping[str, Any], resume: bool):
+    def configure_wandb(self, config: Mapping[str, Any], **kwargs):
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
@@ -57,8 +57,8 @@ class LoggingConfig:
             config=config,
             project=self.project,
             entity=self.entity,
-            resume=resume,
             dir=config["experiment_dir"],
+            **kwargs,
         )
 
 
@@ -213,10 +213,13 @@ class TrainConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self, resume: bool):
-        self.logging.configure_wandb(
-            config=to_flat_dict(dataclasses.asdict(self)), resume=resume
-        )
+    def configure_wandb(self, env_vars: Optional[Mapping[str, str]] = None, **kwargs):
+        config = to_flat_dict(dataclasses.asdict(self))
+        if "environment" in config:
+            logging.warning("Not recording env vars since 'environment' is in config.")
+        elif env_vars is not None:
+            config["environment"] = env_vars
+        self.logging.configure_wandb(config=config, **kwargs)
 
     def log(self):
         logging.info("------------------ Configuration ------------------")
