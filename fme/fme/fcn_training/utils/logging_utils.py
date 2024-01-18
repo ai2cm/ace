@@ -1,6 +1,18 @@
 import contextlib
 import logging
 import os
+from typing import Dict
+
+ENV_VAR_NAMES = (
+    "BEAKER_EXPERIMENT_ID",
+    "SLURM_JOB_ID",
+    "SLURM_JOB_USER",
+    "FME_TRAIN_DIR",
+    "FME_VALID_DIR",
+    "FME_STATS_DIR",
+    "FME_CHECKPOINT_DIR",
+    "FME_OUTPUT_DIR",
+)
 
 
 def log_versions():
@@ -11,13 +23,27 @@ def log_versions():
     logging.info("----------------------------------------")
 
 
+def retrieve_env_vars(names=ENV_VAR_NAMES) -> Dict[str, str]:
+    """Return a dictionary of specific environmental variables."""
+    output = {}
+    for name in names:
+        try:
+            value = os.environ[name]
+        except KeyError:
+            logging.warning(f"Environmental variable {name} not found.")
+        else:
+            output[name] = value
+            logging.info(f"Environmental variable {name}={value}.")
+    return output
+
+
 def log_beaker_url(beaker_id=None):
     """Log the Beaker ID and URL for the current experiment.
 
     beaker_id: The Beaker ID of the experiment. If None, uses the env variable
     `BEAKER_EXPERIMENT_ID`.
 
-    Returns the Beaker ID.
+    Returns the Beaker URL.
     """
     if beaker_id is None:
         try:
@@ -29,24 +55,7 @@ def log_beaker_url(beaker_id=None):
     beaker_url = f"https://beaker.org/ex/{beaker_id}"
     logging.info(f"Beaker ID: {beaker_id}")
     logging.info(f"Beaker URL: {beaker_url}")
-    return beaker_id
-
-
-def log_slurm_info():
-    """Log information about the SLURM environment."""
-    try:
-        job_id = os.environ["SLURM_JOB_ID"]
-    except KeyError:
-        logging.warning("SLURM_JOB_ID not found.")
-    else:
-        logging.info(f"SLURM job ID: {job_id}")
-
-    try:
-        job_user = os.environ["SLURM_JOB_USER"]
-    except KeyError:
-        logging.warning("SLURM_JOB_USER not found.")
-    else:
-        logging.info(f"SLURM job user: {job_user}")
+    return beaker_url
 
 
 @contextlib.contextmanager
