@@ -39,6 +39,9 @@ class MockWandB:
     def get_logs(self) -> Dict[int, Dict[str, Any]]:
         return self._logs
 
+    def clean_wandb_dir(self, experiment_dir: str):
+        pass
+
     @property
     def Image(self):
         return upstream_wandb.Image

@@ -238,6 +238,8 @@ class Trainer:
                 all_logs["epoch_inference_seconds"] = inference_end - valid_end
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
+        if segment_max_epochs == self.config.max_epochs:
+            self.config.clean_wandb()
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
