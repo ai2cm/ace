@@ -1,6 +1,6 @@
 VERSION ?= $(shell git rev-parse --short HEAD)
 IMAGE ?= fme
-REGISTRY ?= registry.nersc.gov/m4331/ai2cm
+REGISTRY ?= registry.nersc.gov/m4492/ai2cm
 ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 
