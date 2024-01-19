@@ -133,6 +133,9 @@ class InferenceConfig:
             config["environment"] = env_vars
         self.logging.configure_wandb(config=config, resume=False, **kwargs)
 
+    def clean_wandb(self):
+        self.logging.clean_wandb(self.experiment_dir)
+
     def configure_gcs(self):
         self.logging.configure_gcs()
 
@@ -287,6 +290,9 @@ def main(
         coords = {k: v for k, v in validation.coords.items() if k in ds.dims}
         ds = ds.assign_coords(coords)
         ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
+
+    config.clean_wandb()
+
     return step_logs
 
 

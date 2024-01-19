@@ -1,3 +1,6 @@
+import glob
+import os
+import shutil
 from typing import Any, Mapping, Optional
 
 import numpy as np
@@ -55,6 +58,14 @@ class WandB:
 
         return wandb.Image(data_or_path, *args, **kwargs)
 
+    def clean_wandb_dir(self, experiment_dir: str):
+        # this is necessary because wandb does not remove run media directories
+        # after a run is synced; see https://github.com/wandb/wandb/issues/3564
+        if self._enabled:
+            wandb.run.finish()  # necessary to ensure the run directory is synced
+            wandb_dir = os.path.join(experiment_dir, "wandb")
+            remove_media_dirs(wandb_dir)
+
     @property
     def Video(self):
         return wandb.Video
@@ -78,3 +89,14 @@ def scale_image(
     image_data = np.maximum(image_data, 0)
     image_data[np.isnan(image_data)] = 0
     return image_data
+
+
+def remove_media_dirs(wandb_dir: str, media_dir_pattern: str = "run-*-*/files/media"):
+    """
+    Remove the media directories in the wandb run directories.
+    """
+    glob_pattern = os.path.join(wandb_dir, media_dir_pattern)
+    media_dirs = glob.glob(glob_pattern)
+    for media_dir in media_dirs:
+        if os.path.isdir(media_dir):
+            shutil.rmtree(media_dir)
