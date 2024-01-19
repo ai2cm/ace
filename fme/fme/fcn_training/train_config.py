@@ -83,6 +83,7 @@ class InlineInferenceConfig:
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
+    parallel: Optional[bool] = None
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -96,6 +97,19 @@ class InlineInferenceConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
+        if self.parallel is not None:
+            if self.parallel:
+                warnings.warn(
+                    (
+                        "The 'parallel' argument is deprecated and will be ignored. "
+                        "Inline inference is now always performed in parallel. "
+                        "There's no need to specify this argument in future uses "
+                        "of this function."
+                    ),
+                    category=DeprecationWarning,
+                )
+            elif not self.parallel:
+                raise ValueError("parallel=False is no longer supported")
 
 
 @dataclasses.dataclass
@@ -153,7 +167,6 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     checkpoint_every_n_epochs: Optional[int] = None
-    parallel: Optional[bool] = None
 
     def __post_init__(self):
         if self.checkpoint_every_n_epochs is not None:
@@ -167,19 +180,6 @@ class TrainConfig:
                 stop=self.max_epochs,
                 step=self.checkpoint_every_n_epochs,
             )
-        if self.parallel is not None:
-            if self.parallel:
-                warnings.warn(
-                    (
-                        "The 'parallel' argument is deprecated and will be ignored. "
-                        "Inline inference is now always performed in parallel. "
-                        "There's no need to specify this argument in future uses "
-                        "of this function."
-                    ),
-                    category=DeprecationWarning,
-                )
-            elif not self.parallel:
-                raise ValueError("parallel=False is no longer supported")
 
     @property
     def checkpoint_dir(self) -> str:
