@@ -61,6 +61,10 @@ class LoggingConfig:
             **kwargs,
         )
 
+    def clean_wandb(self, experiment_dir: str):
+        wandb = WandB.get_instance()
+        wandb.clean_wandb_dir(experiment_dir=experiment_dir)
+
 
 @dataclasses.dataclass
 class InlineInferenceConfig:
@@ -225,6 +229,9 @@ class TrainConfig:
         logging.info("------------------ Configuration ------------------")
         logging.info(str(self))
         logging.info("---------------------------------------------------")
+
+    def clean_wandb(self):
+        self.logging.clean_wandb(experiment_dir=self.experiment_dir)
 
 
 def epoch_checkpoint_enabled(
