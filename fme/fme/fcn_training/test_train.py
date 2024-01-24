@@ -258,6 +258,14 @@ def test_train_and_inference_inline(tmp_path, nettype):
     assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
     netcdf_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     assert netcdf_output_path.exists()
+    best_checkpoint_path = (
+        tmp_path / "output" / "training_checkpoints" / "best_ckpt.tar"
+    )
+    assert best_checkpoint_path.exists()
+    best_inference_checkpoint_path = (
+        tmp_path / "output" / "training_checkpoints" / "best_inference_ckpt.tar"
+    )
+    assert best_inference_checkpoint_path.exists()
     ds = xr.open_dataset(netcdf_output_path)
     assert np.sum(np.isnan(ds["foo"].values)) == 0
     assert np.sum(np.isnan(ds["bar"].values)) == 0

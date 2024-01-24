@@ -165,6 +165,7 @@ class Trainer:
         logging.info("Starting Training Loop...")
 
         best_valid_loss = torch.inf
+        best_inference_error = torch.inf
         self._model_epoch = self.startEpoch
         inference_epochs = list(range(0, self.config.max_epochs))[
             self.config.inference.epochs.slice
@@ -199,6 +200,9 @@ class Trainer:
 
             train_loss = train_logs["train/mean/loss"]
             valid_loss = valid_logs["val/mean/loss"]
+            inference_error = inference_logs.get(
+                "inference/time_mean_norm/rmse/channel_mean", None
+            )
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
             self.optimization.step_scheduler(valid_loss)
@@ -211,9 +215,21 @@ class Trainer:
                         self.save_checkpoint(
                             self.config.epoch_checkpoint_path(self._model_epoch)
                         )
-                    if valid_loss <= best_valid_loss:
-                        self.save_checkpoint(self.config.best_checkpoint_path)
-                        best_valid_loss = valid_loss
+                    if self.config.validate_using_ema:
+                        best_checkpoint_context = self._ema_context
+                    else:
+                        best_checkpoint_context = contextlib.nullcontext
+                    with best_checkpoint_context():
+                        if valid_loss <= best_valid_loss:
+                            self.save_checkpoint(self.config.best_checkpoint_path)
+                            best_valid_loss = valid_loss
+                        if inference_error is not None and (
+                            inference_error <= best_inference_error
+                        ):
+                            self.save_checkpoint(
+                                self.config.best_inference_checkpoint_path
+                            )
+                            best_inference_error = inference_error
                     with self._ema_context():
                         self.save_checkpoint(self.config.ema_checkpoint_path)
 

@@ -197,6 +197,10 @@ class TrainConfig:
         return os.path.join(self.checkpoint_dir, "best_ckpt.tar")
 
     @property
+    def best_inference_checkpoint_path(self) -> str:
+        return os.path.join(self.checkpoint_dir, "best_inference_ckpt.tar")
+
+    @property
     def ema_checkpoint_path(self) -> str:
         return os.path.join(self.checkpoint_dir, "ema_ckpt.tar")
 
