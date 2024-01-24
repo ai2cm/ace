@@ -460,7 +460,7 @@ def construct_lazy_dataset(
         ds_dirs = [dataset_dirs[INSTANT]]
     ds = ds.chunk(CHUNKS).astype(np.float32)
     ds.attrs["history"] = (
-        "Dataset computed by full-model/projects/e3smv2_data_process"
+        "Dataset computed by full-model/scripts/e3smv2_data_process"
         "/compute_dataset_e3smv2.py"
         f" script, using inputs from the following directories: {ds_dirs}."
     )

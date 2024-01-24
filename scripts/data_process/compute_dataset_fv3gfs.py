@@ -399,7 +399,7 @@ def construct_lazy_dataset(
     ds = xr.merge([ds, ak_bk_ds])
     ds = ds.chunk(CHUNKS)
     ds.attrs["history"] = (
-        "Dataset computed by full-model/projects/data_process"
+        "Dataset computed by full-model/scripts/data_process"
         "/compute_dataset_fv3gfs.py"
         f" script, using following input zarrs: {dataset_urls_for_ic}."
     )

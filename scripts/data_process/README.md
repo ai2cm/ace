@@ -8,10 +8,10 @@ The first step in the process to create intermediate datasets (e.g. `make fv3gfs
 See the vcm-workflow-control repo for instructions on how to install and run argo.
 
 The second step, which produces monthly netCDF files locally (e.g. `make fv3gfs_AMIP_monthly_netcdfs`), can be run on cirrascale in an interactive session.
-To create an interactive session, run the following command from the `projects/data_process` directory:
+To create an interactive session, run the following command from the `scripts/data_process` directory:
 
 ```
-beaker session create --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/projects/data_process
+beaker session create --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process
 ```
 
 Doing so will require that your current working directory is a mountable path (e.g. something in /data).
