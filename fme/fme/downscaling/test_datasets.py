@@ -7,9 +7,9 @@ import xarray as xr
 
 import fme.core.data_loading.params
 from fme.core.data_loading.requirements import DataRequirements
+from fme.core.typing_ import TensorMapping
 
 from .datasets import BatchData, DataLoaderParams, PairedDataset
-from .typing_ import NamedTensor
 
 
 def random_named_tensor(var_names, shape):
@@ -96,7 +96,7 @@ def test_downscaling_dataset_validate(
         PairedDataset(highres_data, lowres_data)
 
 
-def mock_xarray_dataset_instance(data: Sequence[Tuple[NamedTensor, xr.DataArray]]):
+def mock_xarray_dataset_instance(data: Sequence[Tuple[TensorMapping, xr.DataArray]]):
     mock_dataset_instance = MagicMock()
     mock_dataset_instance.__getitem__.side_effect = lambda idx: data[idx]
     mock_dataset_instance.__len__.return_value = len(data)
