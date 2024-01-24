@@ -13,8 +13,7 @@ from fme.core.data_loading._xarray import XarrayDataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
-
-from .typing_ import NamedTensor
+from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
@@ -26,7 +25,7 @@ class BatchData:
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[Tuple[NamedTensor, NamedTensor, xr.DataArray]],
+        samples: Sequence[Tuple[TensorMapping, TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
     ) -> "BatchData":
         highres, lowres, times = zip(*samples)
@@ -40,8 +39,8 @@ class BatchData:
 class PairedDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        dataset1: Sequence[Tuple[NamedTensor, xr.DataArray]],
-        dataset2: Sequence[Tuple[NamedTensor, xr.DataArray]],
+        dataset1: Sequence[Tuple[TensorMapping, xr.DataArray]],
+        dataset2: Sequence[Tuple[TensorMapping, xr.DataArray]],
     ):
         self.dataset1 = dataset1
         self.dataset2 = dataset2
