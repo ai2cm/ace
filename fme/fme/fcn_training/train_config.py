@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
+from fme.core.data_loading.inference import InferenceDataLoaderParams
 from fme.core.data_loading.params import DataLoaderParams, Slice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -70,7 +71,7 @@ class LoggingConfig:
 class InlineInferenceConfig:
     """
     Attributes:
-        data: configuration for the data loader used during inference
+        loader: configuration for the data loader used during inference
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
             re-reading data from disk
@@ -79,7 +80,7 @@ class InlineInferenceConfig:
             from 1). By default runs inference every epoch.
     """
 
-    data: DataLoaderParams
+    loader: InferenceDataLoaderParams
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
@@ -92,7 +93,7 @@ class InlineInferenceConfig:
                 f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
             )
         dist = Distributed.get_instance()
-        if self.data.batch_size % dist.world_size != 0:
+        if self.loader.n_samples % dist.world_size != 0:
             raise ValueError(
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
@@ -133,8 +134,8 @@ class TrainConfig:
     Configuration for training a model.
 
     Attributes:
-        train_data: configuration for the training data loader
-        validation_data: configuration for the validation data loader
+        train_loader: configuration for the training data loader
+        validation_loader: configuration for the validation data loader
         stepper: configuration for the stepper
         optimization: configuration for the optimization
         logging: configuration for logging
@@ -151,8 +152,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
     """
 
-    train_data: DataLoaderParams
-    validation_data: DataLoaderParams
+    train_loader: DataLoaderParams
+    validation_loader: DataLoaderParams
     stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig]
     optimization: OptimizationConfig
     logging: LoggingConfig

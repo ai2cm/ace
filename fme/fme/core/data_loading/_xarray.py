@@ -20,7 +20,7 @@ from .data_typing import (
 )
 from .params import DataLoaderParams
 from .requirements import DataRequirements
-from .utils import apply_slice, get_lons_and_lats, get_times, load_series_data
+from .utils import get_lons_and_lats, get_times, load_series_data
 
 VariableNames = namedtuple(
     "VariableNames",
@@ -131,19 +131,16 @@ class XarrayDataset(Dataset):
         self,
         params: DataLoaderParams,
         requirements: DataRequirements,
-        window_time_slice: Optional[slice] = None,
     ):
         self.params = params
         self.names = requirements.names
         self.path = params.data_path
-        self.n_workers = params.num_data_workers
         self.engine = "netcdf4" if params.engine is None else params.engine
         # assume that filenames include time ordering
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
-        self.full_paths *= self.params.n_repeats
+        self.full_paths *= params.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
-        self.window_time_slice = window_time_slice
         first_dataset = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
@@ -293,14 +290,12 @@ class XarrayDataset(Dataset):
         """
         # transform sample index to timestep index
         idx = self._initial_conditions[idx]
-        if self.window_time_slice is not None:
-            time_slice = apply_slice(
-                outer_slice=slice(idx, idx + self.n_steps),
-                inner_slice=self.window_time_slice,
-            )
-        else:
-            time_slice = slice(idx, idx + self.n_steps)
+        time_slice = slice(idx, idx + self.n_steps)
+        return self.get_sample_by_time_slice(time_slice)
 
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
         input_file_idx, input_local_idx = get_file_local_index(
             time_slice.start, self.start_indices
         )

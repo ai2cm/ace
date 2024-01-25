@@ -60,6 +60,7 @@ import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.inference import InferenceDataLoader
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
@@ -94,12 +95,12 @@ class Trainer:
         )
         logging.info("rank %d, begin data loader init" % self.dist.rank)
         self.train_data = get_data_loader(
-            config.train_data,
+            config.train_loader,
             requirements=data_requirements,
             train=True,
         )
         self.valid_data = get_data_loader(
-            config.validation_data,
+            config.validation_loader,
             requirements=data_requirements,
             train=False,
         )
@@ -145,16 +146,12 @@ class Trainer:
         inference_data_requirements = dataclasses.replace(data_requirements)
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
-        def get_inference_data_loader(window_time_slice: Optional[slice] = None):
-            with logging_utils.log_level(logging.WARNING):
-                return get_data_loader(
-                    config.inference.data,
-                    train=False,
-                    requirements=inference_data_requirements,
-                    window_time_slice=window_time_slice,
-                )
+        self._inference_data_loader = InferenceDataLoader(
+            params=config.inference.loader,
+            forward_steps_in_memory=config.inference.forward_steps_in_memory,
+            requirements=inference_data_requirements,
+        )
 
-        self._inference_data_loader_factory = get_inference_data_loader
         self._ema = self.config.ema.build(self.stepper.modules)
 
     def switch_off_grad(self, model):
@@ -370,7 +367,7 @@ class Trainer:
             run_inference(
                 aggregator=aggregator,
                 stepper=self.stepper,
-                data_loader_factory=self._inference_data_loader_factory,
+                data_loader=self._inference_data_loader,
                 n_forward_steps=self.config.inference.n_forward_steps,
                 forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
             )

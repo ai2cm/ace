@@ -73,14 +73,16 @@ def _get_test_yaml_files(
         stepper_config = new_stepper_config
 
     train_string = f"""
-train_data:
-  data_path: '{train_data_path}'
+train_loader:
   data_type: "xarray"
+  dataset:
+    data_path: '{train_data_path}'
   batch_size: 2
   num_data_workers: 1
-validation_data:
-  data_path: '{valid_data_path}'
+validation_loader:
   data_type: "xarray"
+  dataset:
+    data_path: '{valid_data_path}'
   batch_size: 2
   num_data_workers: 1
 optimization:
@@ -94,13 +96,15 @@ optimization:
 stepper:
 {stepper_config}
 inference:
-    data:
-        data_path: '{valid_data_path}'
-        data_type: "xarray"
-        batch_size: 2
-        num_data_workers: 1
-    n_forward_steps: 2
-    forward_steps_in_memory: 2
+  loader:
+    dataset:
+      data_path: '{valid_data_path}'
+    start_indices:
+      first: 0
+      n_initial_conditions: 2
+      interval: 1
+  n_forward_steps: 2
+  forward_steps_in_memory: 2
 n_forward_steps: {n_forward_steps}
 max_epochs: {max_epochs}
 segment_epochs: {segment_epochs}
@@ -126,12 +130,13 @@ logging:
   log_to_file: false
   project: fme
   entity: ai2cm
-validation_data:
-  data_path: '{valid_data_path}'
-  data_type: "xarray"
-  batch_size: 1
-  num_data_workers: 1
-  n_samples: 3
+validation_loader:
+  dataset:
+    data_path: '{valid_data_path}'
+  start_indices:
+    first: 0
+    n_initial_conditions: 2
+    interval: 1
     """  # noqa: E501
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:

@@ -14,9 +14,11 @@ import yaml
 import fme
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
-from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.inference import (
+    InferenceDataLoader,
+    InferenceDataLoaderParams,
+)
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
@@ -54,8 +56,8 @@ class InferenceConfig:
             by forward_steps_in_memory.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
-        validation_data: Configuration for validation data.
-        prediction_data: Configuration for prediction data to evaluate. If given,
+        validation_loader: Configuration for validation data.
+        prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
         log_video: Whether to log videos of the state evolution.
@@ -77,8 +79,8 @@ class InferenceConfig:
     n_forward_steps: int
     checkpoint_path: str
     logging: LoggingConfig
-    validation_data: DataLoaderParams
-    prediction_data: Optional[DataLoaderParams] = None
+    validation_loader: InferenceDataLoaderParams
+    prediction_loader: Optional[InferenceDataLoaderParams] = None
     log_video: bool = True
     log_extended_video: bool = False
     log_extended_video_netcdfs: Optional[bool] = None
@@ -159,22 +161,14 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return _load_stepper_config(self.checkpoint_path)
 
-    def get_data_writer(self, validation_data: GriddedData) -> DataWriter:
-        n_samples = get_n_samples(validation_data.loader)
+    def get_data_writer(self, loader: InferenceDataLoader) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
-            n_samples=n_samples,
+            n_samples=loader.n_samples,  # we do inference on one batch
             n_timesteps=self.n_forward_steps + 1,
-            metadata=validation_data.metadata,
-            coords=validation_data.coords,
+            metadata=loader.metadata,
+            coords=loader.coords,
         )
-
-
-def get_n_samples(data_loader):
-    n_samples = 0
-    for batch in data_loader:
-        n_samples += next(iter(batch.data.values())).shape[0]
-    return n_samples
 
 
 def main(
@@ -208,60 +202,42 @@ def main(
         n_forward_steps=config.n_forward_steps
     )
 
-    def _get_data_loader(window_time_slice: Optional[slice] = None):
-        """
-        Helper function to keep the data loader configuration static,
-        ensuring we get the same batches each time a data loader is
-        retrieved, other than the choice of window_time_slice.
-        """
-        return get_data_loader(
-            config.validation_data,
-            requirements=data_requirements,
-            train=False,
-            window_time_slice=window_time_slice,
-        )
-
-    # use window_time_slice to avoid loading a large number of timesteps
-    validation = _get_data_loader(window_time_slice=slice(0, 1))
+    data_loader = InferenceDataLoader(
+        params=config.validation_loader,
+        forward_steps_in_memory=config.forward_steps_in_memory,
+        requirements=data_requirements,
+    )
 
     stepper = config.load_stepper(
-        validation.area_weights.to(fme.get_device()),
-        sigma_coordinates=validation.sigma_coordinates.to(fme.get_device()),
+        data_loader.area_weights.to(fme.get_device()),
+        sigma_coordinates=data_loader.sigma_coordinates.to(fme.get_device()),
     )
 
     aggregator = InferenceAggregator(
-        validation.area_weights.to(fme.get_device()),
-        sigma_coordinates=validation.sigma_coordinates,
+        data_loader.area_weights.to(fme.get_device()),
+        sigma_coordinates=data_loader.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
         enable_extended_videos=config.log_extended_video,
         log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
-        metadata=validation.metadata,
+        metadata=data_loader.metadata,
     )
-    writer = config.get_data_writer(validation)
-
-    def data_loader_factory(window_time_slice: Optional[slice] = None):
-        with logging_utils.log_level(logging.WARNING):
-            return _get_data_loader(window_time_slice=window_time_slice)
+    writer = config.get_data_writer(data_loader)
 
     logging.info("Starting inference")
-    if config.prediction_data is not None:
-        # define data loader factory for prediction data
-        def prediction_data_loader_factory(window_time_slice: Optional[slice] = None):
-            with logging_utils.log_level(logging.WARNING):
-                return get_data_loader(
-                    config.prediction_data,
-                    requirements=data_requirements,
-                    train=False,
-                    window_time_slice=window_time_slice,
-                )
+    if config.prediction_loader is not None:
+        prediction_data_loader = InferenceDataLoader(
+            params=config.prediction_loader,
+            forward_steps_in_memory=config.forward_steps_in_memory,
+            requirements=data_requirements,
+        )
 
         run_dataset_inference(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
-            prediction_data_loader_factory=prediction_data_loader_factory,
-            target_data_loader_factory=data_loader_factory,
+            prediction_data_loader=prediction_data_loader,
+            target_data_loader=data_loader,
             n_forward_steps=config.n_forward_steps,
             forward_steps_in_memory=config.forward_steps_in_memory,
             writer=writer,
@@ -271,7 +247,7 @@ def main(
             aggregator=aggregator,
             writer=writer,
             stepper=stepper,
-            data_loader_factory=data_loader_factory,
+            data_loader=data_loader,
             n_forward_steps=config.n_forward_steps,
             forward_steps_in_memory=config.forward_steps_in_memory,
         )
@@ -287,7 +263,7 @@ def main(
 
     logging.info("Writing reduced metrics to disk in netcdf format.")
     for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
-        coords = {k: v for k, v in validation.coords.items() if k in ds.dims}
+        coords = {k: v for k, v in data_loader.coords.items() if k in ds.dims}
         ds = ds.assign_coords(coords)
         ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
 
