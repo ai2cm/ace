@@ -53,7 +53,7 @@ def test_prescriber_interpolate():
         "a": torch.ones(2, 4, 4) * 4.0,
         "b": torch.zeros(2, 4, 4),
     }
-    prescribed_gen = prescriber(data=data, gen_norm=data, target_norm=target)
+    prescribed_gen = prescriber(data, data, target)
     torch.testing.assert_close(prescribed_gen["a"], torch.ones(2, 4, 4))
     # check that the other variable is not changed
     torch.testing.assert_close(prescribed_gen["b"], torch.ones(2, 4, 4) * 4.0)

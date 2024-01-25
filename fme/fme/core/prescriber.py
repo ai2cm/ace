@@ -10,7 +10,7 @@ class PrescriberConfig:
     Configuration for overwriting predictions of 'prescribed_name' by target values.
 
     If interpolate is False, the data is overwritten in the region where
-    'mask_name' == 'mask_value' after values are cast to integer. If interpolate
+    'mask_name' == 'mask_value' after values are rounded to integer. If interpolate
     is True, the data is interpolated between the predicted value at 0 and the
     target value at 1 based on the mask variable, and it is assumed the mask variable
     lies in the range from 0 to 1.
@@ -53,7 +53,7 @@ class PrescriberConfig:
 
 class Prescriber:
     """
-    Responsible for overwriting model predictions by target data in masked regions.
+    Class to overwrite 'prescribed_name' by target values in masked regions.
     """
 
     def __init__(
@@ -70,17 +70,21 @@ class Prescriber:
 
     def __call__(
         self,
-        data: Dict[str, torch.Tensor],
-        gen_norm: Dict[str, torch.Tensor],
-        target_norm: Dict[str, torch.Tensor],
-    ):
+        mask_data: Dict[str, torch.Tensor],
+        gen: Dict[str, torch.Tensor],
+        target: Dict[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
         """
         Args:
             data: Dictionary of data containing the mask variable.
-            gen_norm: Dictionary of generated data.
-            target_norm: Dictionary of target data.
+            gen: Dictionary of data to use outside of mask region.
+            target: Dictionary of data to use in mask region.
+
+        Returns:
+            Dictionary of data with the prescribed variable overwritten in the mask
+            region and other variables unmodified from gen.
         """
-        for name, named_tensors in [("gen", gen_norm), ("target", target_norm)]:
+        for name, named_tensors in [("gen", gen), ("target", target)]:
             if self.prescribed_name not in named_tensors:
                 raise ValueError(
                     (
@@ -90,20 +94,21 @@ class Prescriber:
                 )
 
         if self.interpolate:
-            mask = data[self.mask_name]
-            # 0 keeps the generated values, 1 replaces completely with the target values
-            prescribed_gen = (
-                mask * target_norm[self.prescribed_name]
-                + (1 - mask) * gen_norm[self.prescribed_name]
+            mask = mask_data[self.mask_name]
+            # 1 keeps the target values, 0 replaces with the gen values
+            output = (
+                mask * target[self.prescribed_name]
+                + (1 - mask) * gen[self.prescribed_name]
             )
         else:
-            # overwrite specified generated variable in given mask region
-            prescribed_gen = torch.where(
-                torch.round(data[self.mask_name]).to(int) == self.mask_value,
-                target_norm[self.prescribed_name],
-                gen_norm[self.prescribed_name],
+            # overwrite specified target variable in given mask region
+            rounded_mask = torch.round(mask_data[self.mask_name]).to(int)
+            output = torch.where(
+                condition=rounded_mask == self.mask_value,
+                input=target[self.prescribed_name],
+                other=gen[self.prescribed_name],
             )
-        return {**gen_norm, self.prescribed_name: prescribed_gen}
+        return {**gen, self.prescribed_name: output}
 
     def get_state(self):
         return {
