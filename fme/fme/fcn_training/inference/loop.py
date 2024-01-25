@@ -1,12 +1,12 @@
 import logging
-from typing import Dict, Mapping, Optional, Protocol, Union
+from typing import Dict, Mapping, Optional, Union
 
 import torch
 import xarray as xr
 
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
+from fme.core.data_loading.inference import InferenceDataLoader
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
@@ -19,14 +19,21 @@ from .derived_variables import (
 )
 
 
-class EnsembleBatch:
+class WindowStitcher:
+    """
+    Handles stitching together the windows of data from the inference loop.
+
+    For example, handles passing in windows to data writers which combine
+    them together into a continuous series, and handles storing prognostic
+    variables from the end of a window to use as the initial condition for
+    the next window.
+    """
+
     def __init__(
         self,
-        i_batch: int,
         n_forward_steps: int,
         writer: Union[DataWriter, NullDataWriter],
     ):
-        self.i_batch = i_batch
         self.i_time = 0
         self.n_forward_steps = n_forward_steps
         self.writer = writer
@@ -50,12 +57,11 @@ class EnsembleBatch:
             batch_times: Time coordinates for each sample in the batch.
         """
         tensor_shape = next(data.values().__iter__()).shape
-        batch_size = tensor_shape[0]
         self.writer.append_batch(
             target=data,
             prediction=gen_data,
             start_timestep=self.i_time,
-            start_sample=self.i_batch * batch_size,
+            start_sample=0,
             batch_times=batch_times,
         )
         self.i_time += tensor_shape[1]
@@ -91,17 +97,11 @@ class EnsembleBatch:
                 value[:, 0] = self._initial_condition[key].to(value.device)
 
 
-class DataLoaderFactory(Protocol):
-    def __call__(self, window_time_slice: Optional[slice] = None) -> GriddedData:
-        ...
-
-
 def _inference_internal_loop(
     stepped: SteppedData,
     i_time: int,
-    sigma_coords: SigmaCoordinates,
     aggregator: InferenceAggregator,
-    batch_manager: EnsembleBatch,
+    stitcher: WindowStitcher,
     batch_times: xr.DataArray,
 ):
     """Do operations that need to be done on each time step of the inference loop.
@@ -119,7 +119,7 @@ def _inference_internal_loop(
         i_time_aggregator = i_time
     # record raw data for the batch, and store the final state
     # for the next segment
-    batch_manager.append(stepped.target_data, stepped.gen_data, batch_times)
+    stitcher.append(stepped.target_data, stepped.gen_data, batch_times)
     # record metrics
     aggregator.record_batch(
         loss=float(stepped.metrics["loss"]),
@@ -134,72 +134,56 @@ def _inference_internal_loop(
 def run_inference(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
-    data_loader_factory: DataLoaderFactory,
+    data_loader: InferenceDataLoader,
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
 ):
     if writer is None:
         writer = NullDataWriter()
-    example_valid_data_loader = data_loader_factory(window_time_slice=slice(0, 1))
-    batch_managers = [
-        EnsembleBatch(i_batch=i_batch, n_forward_steps=n_forward_steps, writer=writer)
-        for i_batch in range(len(example_valid_data_loader.loader))
-    ]
-    if len(batch_managers) == 0:
-        raise ValueError("Data loader must have at least one batch")
+    batch_manager = WindowStitcher(n_forward_steps, writer)
 
     with torch.no_grad():
         # We have data batches with long windows, where all data for a
         # given batch does not fit into memory at once, so we window it in time
         # and run the model on each window in turn.
         #
-        # All batches for a given time also may not fit in memory.
-        #
-        # For each time window, we process it for each batch, and keep track of the
-        # final state of each batch. We then use this as the initial condition
+        # We process each time window and keep track of the
+        # final state. We then use this as the initial condition
         # for the next time window.
         device = get_device()
 
-        for i_time in range(0, n_forward_steps, forward_steps_in_memory):
-            # need one more timestep for initial condition
-            time_slice = slice(i_time, i_time + forward_steps_in_memory + 1)
+        for i, window_batch_data in enumerate(data_loader):
+            i_time = i * forward_steps_in_memory
             logging.info(
-                f"Inference: starting window spanning {time_slice.start}"
-                f" to {time_slice.stop} steps, out of total {n_forward_steps}."
+                f"Inference: starting window spanning {i_time}"
+                f" to {i_time + forward_steps_in_memory} steps, "
+                f"out of total {n_forward_steps}."
             )
-            # data loader is a sequence of batches, so we need a new one for each
-            # time window
-            valid_data_loader = data_loader_factory(window_time_slice=time_slice)
-            sigma_coords = valid_data_loader.sigma_coordinates
-            for batch, batch_manager in zip(valid_data_loader.loader, batch_managers):
-                data = {
-                    key: value.to(device, dtype=torch.float)
-                    for key, value in batch.data.items()
-                }
-                # must compute derived targets before applying initial condition
-                # so that time differencing is still valid
-                target_data = compute_derived_quantities(data, sigma_coords)
-                # overwrite the first timestep with the last generated timestep
-                # from the previous segment
-                batch_manager.apply_initial_condition(data)
-                stepped = stepper.run_on_batch(
-                    data,
-                    NullOptimization(),
-                    n_forward_steps=forward_steps_in_memory,
-                )
-                stepped.target_data = target_data
-                stepped.gen_data = compute_derived_quantities(
-                    stepped.gen_data, sigma_coords
-                )
-                _inference_internal_loop(
-                    stepped,
-                    i_time,
-                    sigma_coords,
-                    aggregator,
-                    batch_manager,
-                    batch.times,
-                )
+            window_data = {
+                key: value.to(device, dtype=torch.float)
+                for key, value in window_batch_data.data.items()
+            }
+            target_data = compute_derived_quantities(
+                window_data, data_loader.sigma_coordinates
+            )
+            batch_manager.apply_initial_condition(window_data)
+            stepped = stepper.run_on_batch(
+                window_data,
+                NullOptimization(),
+                n_forward_steps=forward_steps_in_memory,
+            )
+            stepped.target_data = target_data
+            stepped.gen_data = compute_derived_quantities(
+                stepped.gen_data, data_loader.sigma_coordinates
+            )
+            _inference_internal_loop(
+                stepped,
+                i_time,
+                aggregator,
+                batch_manager,
+                window_batch_data.times,
+            )
 
 
 def remove_initial_condition(
@@ -211,23 +195,15 @@ def remove_initial_condition(
 def run_dataset_inference(
     aggregator: InferenceAggregator,
     normalizer: StandardNormalizer,
-    prediction_data_loader_factory: DataLoaderFactory,
-    target_data_loader_factory: DataLoaderFactory,
+    prediction_data_loader: InferenceDataLoader,
+    target_data_loader: InferenceDataLoader,
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
 ):
     if writer is None:
         writer = NullDataWriter()
-    example_valid_data_loader = target_data_loader_factory(
-        window_time_slice=slice(0, 1)
-    )
-    batch_managers = [
-        EnsembleBatch(i_batch, n_forward_steps, writer)
-        for i_batch in range(len(example_valid_data_loader.loader))
-    ]
-    if len(batch_managers) == 0:
-        raise ValueError("Data loader must have at least one batch")
+    batch_manager = WindowStitcher(n_forward_steps, writer)
 
     device = get_device()
     with torch.no_grad():
@@ -235,47 +211,40 @@ def run_dataset_inference(
         # given batch does not fit into memory at once, so we window it in time
         # and run the model on each window in turn.
         #
-        # All batches for a given time also may not fit in memory.
-        #
-        # For each time window, we process it for each batch, and keep track of the
-        # final state of each batch. We then use this as the initial condition
+        # We process each time window and keep track of the
+        # final state. We then use this as the initial condition
         # for the next time window.
-        for i_time in range(0, n_forward_steps, forward_steps_in_memory):
-            # need one more timestep for initial condition
-            time_slice = slice(i_time, i_time + forward_steps_in_memory + 1)
+        for i, (pred, target) in enumerate(
+            zip(prediction_data_loader, target_data_loader)
+        ):
+            i_time = i * forward_steps_in_memory
             logging.info(
-                f"Inference: starting window spanning {time_slice.start}"
-                f" to {time_slice.stop} steps, out of total {n_forward_steps}."
+                f"Inference: starting window spanning {i_time}"
+                f" to {i_time + forward_steps_in_memory} steps,"
+                f" out of total {n_forward_steps}."
             )
-            # data loader is a sequence of batches, so we need a new one for each
-            # time window
-            valid_data_loader = target_data_loader_factory(window_time_slice=time_slice)
-            predicted_data_loader = prediction_data_loader_factory(
-                window_time_slice=time_slice
+            pred_data = {
+                key: value.to(device, dtype=torch.float)
+                for key, value in pred.data.items()
+            }
+            target_data = {
+                key: value.to(device, dtype=torch.float)
+                for key, value in target.data.items()
+            }
+            stepped = SteppedData(
+                {"loss": torch.tensor(float("nan"))},
+                pred_data,
+                target_data,
+                normalizer.normalize(pred_data),
+                normalizer.normalize(target_data),
             )
-            sigma_coords = valid_data_loader.sigma_coordinates
-            for valid_batch, predicted_batch, batch_manager in zip(
-                valid_data_loader.loader, predicted_data_loader.loader, batch_managers
-            ):
-                valid_data = {
-                    key: value.to(device) for key, value in valid_batch.data.items()
-                }
-                predicted_data = {
-                    key: value.to(device) for key, value in predicted_batch.data.items()
-                }
-                stepped = SteppedData(
-                    {"loss": torch.tensor(float("nan"))},
-                    predicted_data,
-                    valid_data,
-                    normalizer.normalize(predicted_data),
-                    normalizer.normalize(valid_data),
-                )
-                stepped = compute_stepped_derived_quantities(stepped, sigma_coords)
-                _inference_internal_loop(
-                    stepped,
-                    i_time,
-                    sigma_coords,
-                    aggregator,
-                    batch_manager,
-                    valid_batch.times,
-                )
+            stepped = compute_stepped_derived_quantities(
+                stepped, target_data_loader.sigma_coordinates
+            )
+            _inference_internal_loop(
+                stepped,
+                i_time,
+                aggregator,
+                batch_manager,
+                target.times,
+            )

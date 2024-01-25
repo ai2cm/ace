@@ -22,33 +22,55 @@ class Slice:
 
 
 @dataclasses.dataclass
-class DataLoaderParams:
+class XarrayDataParams:
     """
     Attributes:
         data_path: Path to the data.
-        data_type: Type of data to load.
-        batch_size: Batch size.
-        num_data_workers: Number of parallel data workers.
         n_repeats: Number of times to repeat the dataset (in time).
-        n_samples: Number of samples to load, starting at the beginning of the data.
-            If None, load all samples. If data_type=="ensemble_xarray", this is the
-            number of samples per ensemble member dataset.
-        window_starts: Slice indicating the set of indices to consider for initial
-            conditions of windows of data. Values following the initial condition will
-            still come from the full dataset. By default load all initial conditions.
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
     """
 
     data_path: str
-    data_type: Literal["xarray", "ensemble_xarray"]
+    n_repeats: int = 1
+    engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
+
+
+@dataclasses.dataclass
+class DataLoaderParams:
+    """
+    Attributes:
+        dataset: Parameters to define the dataset.
+        batch_size: Number of samples per batch.
+        num_data_workers: Number of parallel workers to use for data loading.
+        data_type: Type of data to load.
+        n_samples: Number of samples to load, starting at the beginning of the data.
+            If None, load all samples. If data_type=="ensemble_xarray", this is the
+            number of samples per ensemble member dataset.
+        window_starts: Slice indicating the set of indices to consider for initial
+            conditions of windows of data. Values following the initial condition will
+            still come from the full dataset. By default load all initial conditions.
+    """
+
+    dataset: XarrayDataParams
     batch_size: int
     num_data_workers: int
-    n_repeats: int = 1
+    data_type: Literal["xarray", "ensemble_xarray"]
     n_samples: Optional[int] = None
     window_starts: Slice = dataclasses.field(default_factory=Slice)
-    engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
+
+    @property
+    def data_path(self) -> str:
+        return self.dataset.data_path
+
+    @property
+    def n_repeats(self) -> int:
+        return self.dataset.n_repeats
+
+    @property
+    def engine(self) -> Optional[Literal["netcdf4", "h5netcdf"]]:
+        return self.dataset.engine
 
     def __post_init__(self):
         if self.n_samples is not None and self.batch_size > self.n_samples:

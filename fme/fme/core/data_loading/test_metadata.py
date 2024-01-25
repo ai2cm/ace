@@ -10,7 +10,7 @@ import xarray as xr
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 
 METADATA = [
@@ -111,7 +111,10 @@ def test_metadata(metadata, data_type):
         _create_data(path, metadata, data_type)
 
         params = DataLoaderParams(
-            data_path=str(path), data_type=data_type, batch_size=1, num_data_workers=0
+            XarrayDataParams(data_path=str(path)),
+            batch_size=1,
+            num_data_workers=0,
+            data_type=data_type,
         )
         var_names = list(metadata.keys())
         requirements = DataRequirements(names=var_names, n_timesteps=2)
