@@ -92,10 +92,12 @@ class DataLoaderParams:
         dataset_highres, dataset_lowres = [
             XarrayDataset(
                 fme.core.data_loading.params.DataLoaderParams(
-                    path,
-                    self.data_type,
-                    self.batch_size,
-                    self.num_data_workers,
+                    dataset=fme.core.data_loading.params.XarrayDataParams(
+                        data_path=path,
+                    ),
+                    data_type=self.data_type,
+                    batch_size=self.batch_size,
+                    num_data_workers=self.num_data_workers,
                 ),
                 DataRequirements(self.var_names, 1),
             )

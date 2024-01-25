@@ -1,6 +1,5 @@
 import dataclasses
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import torch.utils.data
@@ -29,7 +28,6 @@ def _all_same(iterable, cmp=lambda x, y: x == y):
 def _get_ensemble_dataset(
     params: DataLoaderParams,
     requirements: DataRequirements,
-    window_time_slice: Optional[slice] = None,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -37,10 +35,11 @@ def _get_ensemble_dataset(
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
     datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
-        params_curr_member = dataclasses.replace(params, data_path=path)
-        dataset = XarrayDataset(
-            params_curr_member, requirements, window_time_slice=window_time_slice
+        data_params_curr_member = dataclasses.replace(params.dataset, data_path=path)
+        params_curr_member = dataclasses.replace(
+            params, dataset=data_params_curr_member
         )
+        dataset = XarrayDataset(params_curr_member, requirements)
 
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
@@ -69,7 +68,6 @@ def get_data_loader(
     params: DataLoaderParams,
     train: bool,
     requirements: DataRequirements,
-    window_time_slice: Optional[slice] = None,
 ) -> GriddedData:
     """
     Args:
@@ -82,13 +80,9 @@ def get_data_loader(
     """
     dist = Distributed.get_instance()
     if params.data_type == "xarray":
-        dataset = XarrayDataset(
-            params, requirements=requirements, window_time_slice=window_time_slice
-        )
+        dataset = XarrayDataset(params, requirements=requirements)
     elif params.data_type == "ensemble_xarray":
-        dataset = _get_ensemble_dataset(
-            params, requirements, window_time_slice=window_time_slice
-        )
+        dataset = _get_ensemble_dataset(params, requirements)
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"

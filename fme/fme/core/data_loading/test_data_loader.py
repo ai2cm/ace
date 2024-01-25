@@ -12,9 +12,14 @@ import xarray as xr
 
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.get_loader import get_data_loader
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.inference import (
+    InferenceDataLoader,
+    InferenceDataLoaderParams,
+    InferenceInitialConditionIndices,
+)
+from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData, apply_slice, get_times
+from fme.core.data_loading.utils import BatchData, get_times
 
 
 def _get_coords(dim_sizes, calendar):
@@ -51,7 +56,7 @@ def _save_netcdf(filename, dim_sizes, variable_names, calendar):
 
 
 def _create_dataset_on_disk(
-    data_dir: pathlib.Path, calendar: str = "proleptic_gregorian"
+    data_dir: pathlib.Path, calendar: str = "proleptic_gregorian", n_times: int = 3
 ) -> pathlib.Path:
     seed = 0
     np.random.seed(seed)
@@ -59,7 +64,7 @@ def _create_dataset_on_disk(
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
-    data_dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    data_dim_sizes = {"time": n_times, "grid_yt": 16, "grid_xt": 32}
 
     data_path = data_dir / "data.nc"
     _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar)
@@ -79,7 +84,12 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(tmp_path, "ensemble_xarray", 1, 0, 1)
+    params = DataLoaderParams(
+        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+        batch_size=1,
+        num_data_workers=0,
+        data_type="ensemble_xarray",
+    )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
@@ -105,7 +115,13 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(tmp_path, "ensemble_xarray", 1, 0, 1, n_samples)
+    params = DataLoaderParams(
+        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+        batch_size=1,
+        num_data_workers=0,
+        data_type="ensemble_xarray",
+        n_samples=n_samples,
+    )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
@@ -119,11 +135,51 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
-    params = DataLoaderParams(tmp_path, "xarray", 1, 0, 1)
+    params = DataLoaderParams(
+        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+        batch_size=1,
+        num_data_workers=0,
+        data_type="xarray",
+    )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(params, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+
+
+def test_inference_data_loader(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 2
+    step = 7
+    params = InferenceDataLoaderParams(
+        XarrayDataParams(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    requirements = DataRequirements(["foo"], n_timesteps=7)
+    data_loader = InferenceDataLoader(
+        params,
+        forward_steps_in_memory=n_forward_steps_in_memory,
+        requirements=requirements,
+    )
+    batch_data = next(iter(data_loader))
+    assert isinstance(batch_data, BatchData)
+    assert isinstance(batch_data.data["foo"], torch.Tensor)
+    assert batch_data.data["foo"].shape[0] == batch_size
+    assert batch_data.data["foo"].shape[1] == n_forward_steps_in_memory + 1
+    assert batch_data.data["foo"].shape[2] == 16
+    assert batch_data.data["foo"].shape[3] == 32
+    assert isinstance(batch_data.times, xr.DataArray)
+    assert list(batch_data.times.dims) == ["sample", "time"]
+    assert batch_data.times.sizes["sample"] == batch_size
+    assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
+    assert batch_data.times.dt.calendar == "proleptic_gregorian"
+    assert len(data_loader) == 2
 
 
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
@@ -143,10 +199,12 @@ def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
     params = DataLoaderParams(
-        data_path=tmp_path,
-        data_type="xarray",
+        XarrayDataParams(
+            data_path=tmp_path,
+        ),
         batch_size=n_samples,
         num_data_workers=0,
+        data_type="xarray",
         n_samples=n_samples,
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
@@ -176,49 +234,3 @@ def test_get_times_non_cftime():
     )
     with pytest.raises(AssertionError):
         get_times(ds, 0, 1)
-
-
-@pytest.mark.parametrize(
-    "outer_slice, inner_slice, expected",
-    [
-        pytest.param(
-            slice(0, 2),
-            slice(0, 2),
-            slice(0, 2),
-            id="slice_0_2",
-        ),
-        pytest.param(
-            slice(0, 2),
-            slice(0, 1),
-            slice(0, 1),
-            id="slice_0_1",
-        ),
-        pytest.param(
-            slice(0, 2),
-            slice(1, 2),
-            slice(1, 2),
-            id="slice_1_2",
-        ),
-        pytest.param(
-            slice(1, 3),
-            slice(0, 5),
-            slice(1, 3),
-            id="slice_inner_past_end",
-        ),
-        pytest.param(
-            slice(5, 10),
-            slice(1, 3),
-            slice(6, 8),
-            id="slice_5_10_1_3",
-        ),
-        pytest.param(
-            slice(5, 10),
-            slice(7, 9),
-            slice(10, 10),
-            id="slice_out_of_range",
-        ),
-    ],
-)
-def test_apply_slice(outer_slice, inner_slice, expected):
-    result = apply_slice(outer_slice, inner_slice)
-    assert result == expected

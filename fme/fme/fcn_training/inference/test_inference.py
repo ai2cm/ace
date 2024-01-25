@@ -11,7 +11,11 @@ import yaml
 
 from fme.core import metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.params import DataLoaderParams
+from fme.core.data_loading.inference import (
+    InferenceDataLoaderParams,
+    InferenceInitialConditionIndices,
+)
+from fme.core.data_loading.params import XarrayDataParams
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
@@ -147,7 +151,7 @@ def inference_helper(
         time_varying_values=time_varying_values,
     )
     if use_prediction_data:
-        prediction_data = data.data_loader_params
+        prediction_data = data.inference_data_loader_params
     else:
         prediction_data = None
     config = InferenceConfig(
@@ -159,8 +163,8 @@ def inference_helper(
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_data=data.data_loader_params,
-        prediction_data=prediction_data,
+        validation_loader=data.inference_data_loader_params,
+        prediction_loader=prediction_data,
         log_video=True,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
@@ -184,7 +188,9 @@ def inference_helper(
         assert log["inference/mean/weighted_rmse/var"] == 0.0
         assert log["inference/mean/weighted_bias/var"] == 0.0
     prediction_ds = xr.open_dataset(
-        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+        tmp_path / "autoregressive_predictions.nc",
+        decode_timedelta=False,
+        decode_times=False,
     )
     assert len(prediction_ds["lead"]) == config.n_forward_steps + 1
     for i in range(config.n_forward_steps):
@@ -192,6 +198,7 @@ def inference_helper(
             prediction_ds["var"].isel(lead=i).values + 1,
             prediction_ds["var"].isel(lead=i + 1).values,
         )
+        assert not np.any(np.isnan(prediction_ds["var"].isel(lead=i + 1).values))
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
@@ -286,7 +293,7 @@ def test_inference_writer_boundaries(
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_data=data.data_loader_params,
+        validation_loader=data.inference_data_loader_params,
         log_video=True,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
@@ -420,7 +427,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_file=False,
             log_to_wandb=False,
         ),
-        validation_data=data.data_loader_params,
+        validation_loader=data.inference_data_loader_params,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
@@ -543,8 +550,8 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_data=data.data_loader_params,
-        prediction_data=None,
+        validation_loader=data.inference_data_loader_params,
+        prediction_loader=None,
         log_video=True,
         save_prediction_files=True,
         forward_steps_in_memory=1,
@@ -576,11 +583,13 @@ def test_inference_config_raises_incompatible_timesteps(
         n_forward_steps=n_forward_steps,
         checkpoint_path="./some_dir",
         logging=LoggingConfig(),
-        validation_data=DataLoaderParams(
-            data_path="./some_data",
-            data_type="xarray",
-            batch_size=1,
-            num_data_workers=1,
+        validation_loader=InferenceDataLoaderParams(
+            XarrayDataParams(
+                data_path="./some_data",
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                first=0, n_initial_conditions=1, interval=1
+            ),
         ),
     )
     base_config_dict["forward_steps_in_memory"] = forward_steps_in_memory

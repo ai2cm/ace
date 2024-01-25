@@ -1,10 +1,11 @@
 import abc
 import dataclasses
 from collections import namedtuple
-from typing import Mapping, Optional
+from typing import Dict, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
+import xarray as xr
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
@@ -57,6 +58,41 @@ class HorizontalCoordinates:
         return {"lat": self.lat.cpu().numpy(), "lon": self.lon.cpu().numpy()}
 
 
+class Dataset(torch.utils.data.Dataset, abc.ABC):
+    @abc.abstractproperty
+    def metadata(self) -> Mapping[str, VariableMetadata]:
+        ...
+
+    @abc.abstractproperty
+    def area_weights(self) -> torch.Tensor:
+        ...
+
+    @abc.abstractproperty
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        ...
+
+    @abc.abstractproperty
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        ...
+
+    @abc.abstractmethod
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
+        """
+        Returns a sample of data for the given time slice.
+
+        Args:
+            time_slice: The time slice to return data for.
+
+        Returns:
+            A tuple whose first item is a mapping from variable
+            name to tensor of shape [n_time, n_lat, n_lon] and
+            whose second item is a time coordinate array.
+        """
+        ...
+
+
 @dataclasses.dataclass
 class GriddedData:
     """
@@ -88,26 +124,12 @@ class GriddedData:
     sampler: Optional[torch.utils.data.Sampler] = None
 
     @property
+    def dataset(self) -> Dataset:
+        return self.loader.dataset
+
+    @property
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
             **self.sigma_coordinates.coords,
         }
-
-
-class Dataset(torch.utils.data.Dataset, abc.ABC):
-    @abc.abstractproperty
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        ...
-
-    @abc.abstractproperty
-    def area_weights(self) -> torch.Tensor:
-        ...
-
-    @abc.abstractproperty
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        ...
-
-    @abc.abstractproperty
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        ...
