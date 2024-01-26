@@ -110,30 +110,6 @@ class Prescriber:
             )
         return {**gen, self.prescribed_name: output}
 
-    def get_state(self):
-        return {
-            "prescribed_name": self.prescribed_name,
-            "mask_name": self.mask_name,
-            "mask_value": self.mask_value,
-            "interpolate": self.interpolate,
-        }
-
-    def load_state(self, state):
-        self.prescribed_name = state["prescribed_name"]
-        self.mask_name = state["mask_name"]
-        self.mask_value = state["mask_value"]
-        interpolate = state.get("interpolate", False)
-        self.interpolate = interpolate
-
-    @classmethod
-    def from_state(cls, state) -> "Prescriber":
-        return Prescriber(
-            state["prescribed_name"],
-            state["mask_name"],
-            state["mask_value"],
-            state.get("interpolate", False),
-        )
-
     @property
     def prescribed_names(self) -> List[str]:
         return [self.prescribed_name]
