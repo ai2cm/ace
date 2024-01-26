@@ -302,11 +302,8 @@ class SingleModuleStepper:
         return {
             "module": self.module.state_dict(),
             "normalizer": self.normalizer.get_state(),
-            "in_packer": self.in_packer.get_state(),
-            "out_packer": self.out_packer.get_state(),
             "img_shape": self._img_shape,
             "config": self._config.get_state(),
-            "prescriber": self.prescriber.get_state(),
             "area": self.area,
             "sigma_coordinates": self.sigma_coordinates.as_dict(),
         }
@@ -320,9 +317,6 @@ class SingleModuleStepper:
         """
         if "module" in state:
             self.module.load_state_dict(state["module"])
-        self.in_packer = Packer.from_state(state["in_packer"])
-        self.out_packer = Packer.from_state(state["out_packer"])
-        self.prescriber.load_state(state["prescriber"])
 
     @classmethod
     def from_state(
