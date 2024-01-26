@@ -43,19 +43,6 @@ class Packer:
     def unpack(self, tensor: torch.Tensor, axis=0) -> Dict[str, torch.Tensor]:
         return _unpack(tensor, self.names, axis=axis)
 
-    def get_state(self):
-        """
-        Returns state as a serializable data structure.
-        """
-        return {"names": self.names}
-
-    @classmethod
-    def from_state(self, state) -> "Packer":
-        """
-        Loads state from a serializable data structure.
-        """
-        return Packer(state["names"])
-
 
 @torch.jit.script
 def _pack(
