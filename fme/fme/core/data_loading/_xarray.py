@@ -138,6 +138,8 @@ class XarrayDataset(Dataset):
         self.engine = "netcdf4" if params.engine is None else params.engine
         # assume that filenames include time ordering
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
+        if len(self.full_paths) == 0:
+            raise ValueError(f"No netCDF files found in '{self.path}'.")
         self.full_paths *= params.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
