@@ -56,7 +56,7 @@ def _get_test_yaml_files(
   builder:
     type: {nettype}
     config:
-      num_blocks: 2
+      num_layers: 2
       embed_dim: 12
   prescriber:
     prescribed_name: {in_variable_names[0]}
