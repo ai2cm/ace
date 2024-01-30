@@ -13,9 +13,14 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "surface_pressure": ["PRESsfc", "PS"],
         "tendency_of_total_water_path_due_to_advection": [
             "tendency_of_total_water_path_due_to_advection"
-        ],  # noqa: E501
+        ],
         "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
+        "sensible_heat_flux": ["SHTFLsfc"],
         "precipitation_rate": ["PRATEsfc", "PRECT"],
+        "sfc_down_sw_radiative_flux": ["DSWRFsfc"],
+        "sfc_up_sw_radiative_flux": ["USWRFsfc"],
+        "sfc_down_lw_radiative_flux": ["DLWRFsfc"],
+        "sfc_up_lw_radiative_flux": ["ULWRFsfc"],
     }
 )
 
@@ -119,6 +124,17 @@ class ClimateData:
             self.surface_pressure,
             sigma_coordinates.ak,
             sigma_coordinates.bk,
+        )
+
+    @property
+    def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:
+        return metrics.net_surface_energy_flux(
+            self._get("sfc_down_lw_radiative_flux"),
+            self._get("sfc_up_lw_radiative_flux"),
+            self._get("sfc_down_sw_radiative_flux"),
+            self._get("sfc_up_sw_radiative_flux"),
+            self._get("latent_heat_flux"),
+            self._get("sensible_heat_flux"),
         )
 
     @property
