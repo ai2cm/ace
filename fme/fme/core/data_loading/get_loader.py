@@ -33,6 +33,11 @@ def _get_ensemble_dataset(
     ensemble member.
     """
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
+    if len(paths) == 0:
+        raise ValueError(
+            f"No directories found in {params.data_path}. "
+            "Check path and whether you meant to use 'ensemble_xarray' data_type."
+        )
     datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
         data_params_curr_member = dataclasses.replace(params.dataset, data_path=path)
