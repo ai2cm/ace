@@ -3,7 +3,11 @@ import pytest
 import torch
 
 import fme
-from fme.core.metrics import surface_pressure_due_to_dry_air, vertical_integral
+from fme.core.metrics import (
+    net_surface_energy_flux,
+    surface_pressure_due_to_dry_air,
+    vertical_integral,
+)
 
 
 def _get_lats(num_lat: int):
@@ -307,3 +311,22 @@ def test_single_level_dry_air_some_water():
     np.testing.assert_allclose(
         dry_air.cpu().numpy(), target_dry_air.cpu().numpy(), rtol=1e-5
     )
+
+
+def test_net_surface_energy_flux():
+    sfc_down_lw_radiative_flux = torch.tensor([100.0])
+    sfc_up_lw_radiative_flux = torch.tensor([50.0])
+    sfc_down_sw_radiative_flux = torch.tensor([25.0])
+    sfc_up_sw_radiative_flux = torch.tensor([10.0])
+    latent_heat_flux = torch.tensor([5.0])
+    sensible_heat_flux = torch.tensor([2.5])
+    expected_net_surface_energy_flux = torch.tensor([57.5])
+    result = net_surface_energy_flux(
+        sfc_down_lw_radiative_flux,
+        sfc_up_lw_radiative_flux,
+        sfc_down_sw_radiative_flux,
+        sfc_up_sw_radiative_flux,
+        latent_heat_flux,
+        sensible_heat_flux,
+    )
+    torch.testing.assert_close(result, expected_net_surface_energy_flux)
