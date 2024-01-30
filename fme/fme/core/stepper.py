@@ -30,8 +30,9 @@ from fme.core.normalizer import (
     NormalizationConfig,
     StandardNormalizer,
 )
+from fme.core.ocean import Ocean, OceanConfig
 from fme.core.packer import DataShapesNotUniform, Packer
-from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
+from fme.core.prescriber import PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
@@ -44,7 +45,7 @@ class SingleModuleStepperConfig:
     out_names: List[str]
     normalization: Union[NormalizationConfig, FromStateNormalizer]
     optimization: Optional[DisabledOptimizationConfig] = None
-    prescriber: Optional[PrescriberConfig] = None
+    ocean: Optional[OceanConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
     conserve_dry_air: Optional[bool] = None
     corrector: CorrectorConfig = dataclasses.field(
@@ -53,6 +54,7 @@ class SingleModuleStepperConfig:
     conservation_loss: ConservationLossConfig = dataclasses.field(
         default_factory=lambda: ConservationLossConfig()
     )
+    prescriber: Optional[PrescriberConfig] = None
 
     def __post_init__(self):
         if self.conserve_dry_air is not None:
@@ -62,6 +64,20 @@ class SingleModuleStepperConfig:
                 category=DeprecationWarning,
             )
             self.corrector.conserve_dry_air = self.conserve_dry_air
+        if self.prescriber is not None:
+            warnings.warn(
+                "Directly configuring prescriber is deprecated, "
+                "use 'ocean' option instead.",
+                category=DeprecationWarning,
+            )
+            if self.ocean is not None:
+                raise ValueError("Cannot specify both prescriber and ocean.")
+            self.ocean = OceanConfig(
+                surface_temperature_name=self.prescriber.prescribed_name,
+                ocean_fraction_name=self.prescriber.mask_name,
+                interpolate=self.prescriber.interpolate,
+            )
+            del self.prescriber
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -93,15 +109,16 @@ class SingleModuleStepperConfig:
 
     @property
     def all_names(self):
-        if self.prescriber is not None:
-            mask_name = [self.prescriber.mask_name]
-        else:
-            mask_name = []
-        all_names = list(set(self.in_names).union(self.out_names).union(mask_name))
+        """Names of all variables required, including auxiliary ones."""
+        extra_names = []
+        if self.ocean is not None:
+            extra_names.extend(self.ocean.names)
+        all_names = list(set(self.in_names).union(self.out_names).union(extra_names))
         return all_names
 
     @property
     def normalize_names(self):
+        """Names of variables which require normalization. I.e. inputs/outputs."""
         return list(set(self.in_names).union(self.out_names))
 
 
@@ -196,10 +213,10 @@ class SingleModuleStepper:
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
         self.normalizer = config.normalization.build(config.normalize_names)
-        if config.prescriber is not None:
-            self.prescriber = config.prescriber.build(config.in_names, config.out_names)
+        if config.ocean is not None:
+            self.ocean = config.ocean.build(config.in_names, config.out_names)
         else:
-            self.prescriber = NullPrescriber()
+            self.ocean = None
         self.module = config.builder.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
@@ -288,7 +305,7 @@ class SingleModuleStepper:
             optimization=optimization,
             loss_obj=self.loss_obj,
             n_forward_steps=n_forward_steps,
-            prescriber=self.prescriber,
+            ocean=self.ocean,
             aggregator=non_none_aggregator,
             corrector=self._corrector,
             conservation_loss=self._conservation_loss,
@@ -413,7 +430,7 @@ def run_on_batch(
     out_packer: Packer,
     optimization: Union[Optimization, NullOptimization],
     loss_obj: nn.Module,
-    prescriber: Union[Prescriber, NullPrescriber],
+    ocean: Optional[Ocean],
     aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
     corrector: Optional[Corrector],  # Optional so we can skip code when unused
     conservation_loss: ConservationLoss,
@@ -436,7 +453,7 @@ def run_on_batch(
         optimization: The optimization object. If it is NullOptimization,
             then the model is not trained.
         loss_obj: The loss object.
-        prescriber: Overwrite an output with target value in specified region.
+        ocean: Determines sea surface temperatures.
         aggregator: The data aggregator.
         corrector: The post-step corrector.
         conservation_loss: Computes conservation-related losses, if any.
@@ -477,15 +494,18 @@ def run_on_batch(
             gen_tensor_norm = module(input_tensor_norm).to(
                 get_device(), dtype=torch.float
             )
+            gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+            gen_data = normalizer.denormalize(gen_norm)
+            input_data = normalizer.denormalize(input_data_norm)
             if corrector is not None:
-                gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
-                gen_data = normalizer.denormalize(gen_norm)
-                input_data = normalizer.denormalize(input_data_norm)
                 gen_data = corrector(input_data, gen_data)
-                gen_norm = normalizer.normalize(gen_data)
-                gen_tensor_norm = out_packer.pack(gen_norm, axis=channel_dim).to(
-                    get_device(), dtype=torch.float
-                )
+            if ocean is not None:
+                target_data = get_input_data(ocean.target_names, step + 1, "denorm")
+                gen_data = ocean(target_data, input_data, gen_data)
+            gen_norm = normalizer.normalize(gen_data)
+            gen_tensor_norm = out_packer.pack(gen_norm, axis=channel_dim).to(
+                get_device(), dtype=torch.float
+            )
             if target_tensor_norm is None:
                 step_loss = torch.tensor(torch.nan)
             else:
@@ -493,16 +513,6 @@ def run_on_batch(
             loss += step_loss
             metrics[f"loss_step_{step}"] = step_loss.detach()
         gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
-
-        gen_norm = prescriber(
-            get_input_data(
-                prescriber.mask_names, time_index=step + 1, norm_mode="denorm"
-            ),
-            gen_norm,
-            get_input_data(
-                prescriber.prescribed_names, time_index=step + 1, norm_mode="norm"
-            ),
-        )
 
         gen_data_norm_list.append(gen_norm)
         # update input data with generated outputs, and forcings for missing outputs

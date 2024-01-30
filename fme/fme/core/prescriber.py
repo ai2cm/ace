@@ -117,29 +117,3 @@ class Prescriber:
     @property
     def mask_names(self) -> List[str]:
         return [self.mask_name]
-
-
-class NullPrescriber:
-    """Dummy prescriber that does nothing."""
-
-    def __call__(
-        self,
-        data: Dict[str, torch.Tensor],
-        gen_norm: Dict[str, torch.Tensor],
-        target_norm: Dict[str, torch.Tensor],
-    ):
-        return gen_norm
-
-    def get_state(self):
-        return {}
-
-    def load_state(self, state):
-        return
-
-    @property
-    def prescribed_names(self) -> List[str]:
-        return []
-
-    @property
-    def mask_names(self) -> List[str]:
-        return []

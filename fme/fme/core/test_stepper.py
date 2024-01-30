@@ -15,9 +15,9 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import ConservationLoss, ConservationLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.ocean import Ocean, OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.packer import Packer
-from fme.core.prescriber import NullPrescriber, Prescriber, PrescriberConfig
 from fme.core.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
@@ -52,25 +52,41 @@ def get_scalar_data(names, value):
 
 
 @pytest.mark.parametrize(
-    "in_names,out_names,prescriber_config,expected_all_names",
+    "in_names,out_names,ocean_config,expected_all_names",
     [
         (["a"], ["b"], None, ["a", "b"]),
         (["a"], ["a", "b"], None, ["a", "b"]),
         (["a", "b"], ["b"], None, ["a", "b"]),
         (["a", "b"], ["a", "b"], None, ["a", "b"]),
-        (["a", "b"], ["a", "b"], PrescriberConfig("a", "mask", 0), ["a", "b", "mask"]),
-        (["a", "b"], ["a", "b"], PrescriberConfig("a", "b", 0), ["a", "b"]),
+        (
+            ["a", "b"],
+            ["a", "b"],
+            OceanConfig("a", "mask"),
+            ["a", "b", "mask"],
+        ),
+        (
+            ["a", "b"],
+            ["a", "b"],
+            OceanConfig("a", "b"),
+            ["a", "b"],
+        ),
+        (
+            ["a", "b"],
+            ["a", "b"],
+            OceanConfig("a", "of", False, SlabOceanConfig("c", "d")),
+            ["a", "b", "of", "c", "d"],
+        ),
     ],
 )
 def test_stepper_config_all_names_property(
-    in_names, out_names, prescriber_config, expected_all_names
+    in_names, out_names, ocean_config, expected_all_names
 ):
     config = SingleModuleStepperConfig(
         builder=MagicMock(),
         in_names=in_names,
         out_names=out_names,
         normalization=MagicMock(),
-        prescriber=prescriber_config,
+        ocean=ocean_config,
     )
     # check there are no duplications
     assert len(config.all_names) == len(set(config.all_names))
@@ -99,7 +115,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
-        prescriber=NullPrescriber(),
+        ocean=None,
         n_forward_steps=1,
         aggregator=MagicMock(),
         corrector=None,
@@ -119,7 +135,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
-        prescriber=NullPrescriber(),
+        ocean=None,
         n_forward_steps=1,
         aggregator=MagicMock(),
         corrector=None,
@@ -168,7 +184,7 @@ def test_run_on_batch_addition_series():
         out_packer=Packer(["a", "b"]),
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
-        prescriber=NullPrescriber(),
+        ocean=None,
         n_forward_steps=n_steps,
         aggregator=MagicMock(),
         corrector=None,
@@ -200,7 +216,7 @@ def test_run_on_batch_addition_series():
     )
 
 
-def test_run_on_batch_with_prescriber():
+def test_run_on_batch_with_prescribed_ocean():
     torch.manual_seed(0)
 
     class AddOne(torch.nn.Module):
@@ -235,7 +251,7 @@ def test_run_on_batch_with_prescriber():
         optimization=MagicMock(),
         loss_obj=torch.nn.MSELoss(),
         n_forward_steps=n_steps,
-        prescriber=Prescriber("b", "mask", 1),
+        ocean=Ocean(OceanConfig("b", "mask")),
         aggregator=MagicMock(),
         corrector=None,
         conservation_loss=conservation_loss,
@@ -344,7 +360,7 @@ def _setup_and_run_on_batch(
     data: Dict[str, torch.Tensor],
     in_names,
     out_names,
-    prescriber_config: Optional[PrescriberConfig],
+    ocean_config: Optional[OceanConfig],
     n_forward_steps,
     optimization_config: Optional[OptimizationConfig],
     aggregator: Union[NullAggregator, InferenceAggregator],
@@ -360,10 +376,10 @@ def _setup_and_run_on_batch(
     if aggregator is None:
         aggregator = NullAggregator()
 
-    if prescriber_config is None:
-        prescriber = NullPrescriber()
+    if ocean_config is None:
+        ocean = None
     else:
-        prescriber = prescriber_config.build(in_names, out_names)
+        ocean = ocean_config.build(in_names, out_names)
 
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
@@ -384,7 +400,7 @@ def _setup_and_run_on_batch(
         optimization=optimization,
         loss_obj=torch.nn.MSELoss(),
         n_forward_steps=n_forward_steps,
-        prescriber=prescriber,
+        ocean=ocean,
         aggregator=aggregator,
         corrector=None,
         conservation_loss=conservation_loss,
@@ -426,9 +442,9 @@ def test_run_on_batch(
         mask_name = "mask"
         all_names.append(mask_name)
         in_names.append(mask_name)
-        prescriber = PrescriberConfig("b", mask_name, 0)
+        ocean_config = OceanConfig("b", mask_name)
     else:
-        prescriber = None
+        ocean_config = None
 
     data, area_weights, sigma_coords = get_data(all_names, 3, n_forward_steps + 1)
     time_dim = 1
@@ -459,7 +475,7 @@ def test_run_on_batch(
             data,
             in_names,
             out_names,
-            prescriber,
+            ocean_config,
             n_forward_steps,
             optimization,
             aggregator,
