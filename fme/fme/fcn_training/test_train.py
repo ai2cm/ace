@@ -58,10 +58,9 @@ def _get_test_yaml_files(
     config:
       num_layers: 2
       embed_dim: 12
-  prescriber:
-    prescribed_name: {in_variable_names[0]}
-    mask_name: {mask_name}
-    mask_value: 0
+  ocean:
+    surface_temperature_name: {in_variable_names[0]}
+    ocean_fraction_name: {mask_name}
 """
     existing_stepper_config = f"""
   checkpoint_file: {stepper_checkpoint_file}

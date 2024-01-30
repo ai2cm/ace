@@ -289,3 +289,37 @@ def surface_pressure_due_to_dry_air(
     )
     dry_air = surface_pressure - GRAVITY * total_water_path
     return dry_air
+
+
+def net_surface_energy_flux(
+    lw_rad_down,
+    lw_rad_up,
+    sw_rad_down,
+    sw_rad_up,
+    latent_heat_flux,
+    sensible_heat_flux,
+    frozen_precipitation_rate=None,
+) -> torch.Tensor:
+    """
+    Compute the net surface energy flux from individual terms in budget.
+
+    Args:
+        lw_rad_down: Downward longwave surface radiation in W/m^2.
+        lw_rad_up: Upward longwave surface radiation in W/m^2.
+        sw_rad_down: Downward shortwave surface radiation in W/m^2.
+        sw_rad_up: Upward shortwave surface radiation in W/m^2.
+        latent_heat_flux: Latent heat flux in W/m^2.
+        sensible_heat_flux: Sensible heat flux in W/m^2.
+        frozen_precipitation_rate (optional): Frozen precipitation rate in kg/m^2/s.
+
+    Returns:
+        Net surface energy flux in W/m^2. Positive values indicate energy flowing
+        from atmosphere to surface.
+    """
+    if frozen_precipitation_rate is not None:
+        raise NotImplementedError(
+            "Computing net surface energy flux with frozen precipitation is "
+            "not implemented."
+        )
+    net_surface_radiative_flux = sw_rad_down - sw_rad_up + lw_rad_down - lw_rad_up
+    return net_surface_radiative_flux - latent_heat_flux - sensible_heat_flux
