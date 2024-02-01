@@ -12,7 +12,27 @@ from . import piq
 def map_tensor_mapping(
     fun: Callable[..., torch.Tensor]
 ) -> Callable[..., TensorMapping]:
-    """Map a function over TensorMapping."""
+    """
+    Closure over a list comprehension that applies the given function `fun` to
+    each value in a TensorMapping, returning a TensorMapping mapping the same
+    keys to the each corresponding result, e.g.
+
+        {k: fun(v) for k, v in x.items()}
+
+    Note that the function `fun` can take any number of arguments so this also
+    works:
+
+        {k: fun(x[k], y[k]) for k in x.keys()}
+
+    where `x` and `y` are both TensorMappings with the same keys.
+
+    Args:
+        fun: The function to apply to each corresponding key-value pair.
+
+    Returns:
+        A function that applies the given function to each corresponding
+        key-value pair of multiple TensorMappings.
+    """
 
     def ret(*args: TensorMapping):
         if not all(args[0].keys() == named_tensor.keys() for named_tensor in args):
