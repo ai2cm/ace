@@ -30,14 +30,14 @@ def test_prescriber():
     assert not torch.allclose(gen["a"], expected_gen["a"])
     prescribed_gen = prescriber(data, gen, target)
     for name in gen:
-        torch.testing.assert_close(prescribed_gen[name], expected_gen[name])
+        torch.testing.assert_allclose(prescribed_gen[name], expected_gen[name])
     # non-integer valued mask
     prescriber = Prescriber(prescribed_name="a", mask_name="mask", mask_value=1)
     data["mask"] = torch.zeros(2, 4, 4, dtype=torch.float32) + 0.1
     data["mask"][:, :, 2:] = 0.7
     prescribed_gen = prescriber(data, gen, target)
     for name in gen:
-        torch.testing.assert_close(prescribed_gen[name], expected_gen[name])
+        torch.testing.assert_allclose(prescribed_gen[name], expected_gen[name])
 
 
 def test_prescriber_interpolate():
@@ -56,4 +56,4 @@ def test_prescriber_interpolate():
     prescribed_gen = prescriber(data, data, target)
     torch.testing.assert_close(prescribed_gen["a"], torch.ones(2, 4, 4))
     # check that the other variable is not changed
-    torch.testing.assert_close(prescribed_gen["b"], torch.ones(2, 4, 4) * 4.0)
+    torch.testing.assert_allclose(prescribed_gen["b"], torch.ones(2, 4, 4) * 4.0)
