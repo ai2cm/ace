@@ -48,13 +48,13 @@ def test_ocean_slab():
         "qf": torch.tensor([40.0]),
     }
     input_data = {"sst": torch.tensor([20.0])}
-    gen_data = fluxes | {"sst": torch.tensor([25.0])}
+    gen_data = {**fluxes, "sst": torch.tensor([25.0])}
     output_data = ocean(target_data, input_data, gen_data)
     expected_sst_tendency = mixed_layer_temperature_tendency(
         expected_net_surface_energy_flux, target_data["qf"], target_data["mld"]
     )
     expected_sst = input_data["sst"] + TIMESTEP_SECONDS * expected_sst_tendency
-    expected_output = fluxes | {"sst": expected_sst}
+    expected_output = {**fluxes, "sst": expected_sst}
     assert set(output_data) == set(expected_output)
     for name in output_data:
         torch.testing.assert_close(output_data[name], expected_output[name])
