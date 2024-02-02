@@ -1,6 +1,6 @@
 """The registry also performs configuration set up so it needs to be tested."""
 import copy
-from typing import Iterable, Tuple
+from typing import Mapping
 
 import pytest
 import torch
@@ -9,36 +9,7 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.fcn_training import registry
-
-
-class MockModule(torch.nn.Module):
-    def __init__(self, param_shapes: Iterable[Tuple[int, ...]]):
-        super().__init__()
-        for i, shape in enumerate(param_shapes):
-            setattr(self, f"param{i}", torch.nn.Parameter(torch.randn(shape)))
-
-
-class MockModuleBuilder:
-    def __init__(self, param_shapes: Iterable[Tuple[int, ...]]):
-        self.param_shapes = param_shapes
-
-    def build(self, n_in_channels, n_out_channels, img_shape):
-        return MockModule(self.param_shapes)
-
-
-def test_sfno_builder():
-    """Make sure that the monkey patch is going through. Note that this is not
-    testing whether the modulus code runs the code correctly."""
-
-    builder = registry.NET_REGISTRY["SphericalFourierNeuralOperatorNet"]()
-
-    sfno_net = builder.build(1, 1, (16, 32))
-
-    assert (
-        sfno_net.trans_down.grid == "legendre-gauss"
-        and sfno_net.itrans_up.grid == "legendre-gauss"
-    ), "The grid should be set to legendre-gauss"
+from fme.fcn_training.registry import with_weights
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
@@ -109,7 +80,12 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     )
 
 
-def assert_same_state(state1, state2, allow_larger: bool, same_keys: bool = True):
+def assert_same_state(
+    state1: Mapping[str, torch.Tensor],
+    state2: Mapping[str, torch.Tensor],
+    allow_larger: bool,
+    same_keys: bool = True,
+):
     """
     Assert that two states are the same.
 
@@ -126,7 +102,6 @@ def assert_same_state(state1, state2, allow_larger: bool, same_keys: bool = True
     if same_keys:
         assert state1.keys() == state2.keys()
     same_state = []
-    zero_state = []
     different_state = []
     for key in state1:
         if key in state2:
@@ -138,57 +113,18 @@ def assert_same_state(state1, state2, allow_larger: bool, same_keys: bool = True
             else:
                 s = [slice(0, None) for _ in state1[key].shape]
             if torch.allclose(state1[key][s], state2[key][s]):
-                if torch.all(state1[key] == 0):
-                    zero_state.append(key)
-                else:
+                if not torch.all(state1[key] == 0):
                     same_state.append(key)
             else:
                 different_state.append(key)
-    assert len(same_state) > 0, "No parameters were the same between the two states."
+    assert len(same_state) > 0, (
+        "No parameters were the same between the two states, "
+        "or all parameters were uninitialized."
+    )
     assert len(different_state) == 0, (
         f"Parameters {different_state} were different between "
         f"the two states, only {same_state} had the same non-zero state."
     )
-
-
-@pytest.mark.parametrize(
-    "shape",
-    [
-        pytest.param((8, 16)),
-    ],
-)
-def test_sfno_init(shape):
-    num_layers = 2
-    sfno_config_data = {
-        "type": "SphericalFourierNeuralOperatorNet",
-        "config": {
-            "num_layers": num_layers,
-            "embed_dim": 3,
-            "scale_factor": 1.0,
-        },
-    }
-    stepper_config_data = {
-        "builder": sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
-            }
-        ),
-    }
-    area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
-    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
-    stepper = stepper_config.get_stepper(
-        img_shape=shape,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    assert len(stepper.module.module.blocks) == num_layers
 
 
 @pytest.mark.parametrize(
@@ -208,7 +144,7 @@ def test_builder_with_weights_sfno_init(
         "config": {
             "num_layers": 2,
             "embed_dim": 3,
-            "scale_factor": 1.0,
+            "scale_factor": 1,
         },
     }
     stepper_config_data = {
@@ -348,9 +284,9 @@ class NestedModule(torch.nn.Module):
 def test_overwrite_weights(from_module, to_module, expected_exception):
     if expected_exception:
         with pytest.raises(expected_exception):
-            registry._overwrite_weights(from_module, to_module)
+            with_weights._overwrite_weights(from_module, to_module)
     else:
-        registry._overwrite_weights(from_module, to_module)
+        with_weights._overwrite_weights(from_module, to_module)
         for from_param, to_param in zip(
             from_module.parameters(), to_module.parameters()
         ):
