@@ -1,8 +1,9 @@
 """Derived metrics take the global state as input and usually output a new
 variable, e.g. dry air mass."""
 
+import abc
 from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Protocol, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
 
@@ -21,13 +22,15 @@ class _TargetGenPair:
     gen: torch.Tensor
 
 
-class DerivedMetric(Protocol):
+class DerivedMetric(abc.ABC):
     """Derived metrics are computed from the global state and usually output a
     new variable, e.g. dry air tendencies."""
 
+    @abc.abstractmethod
     def record(self, target: ClimateData, gen: ClimateData) -> None:
         ...
 
+    @abc.abstractmethod
     def get(self) -> _TargetGenPair:
         """Returns the derived metric applied to the target and data generated
         by the model."""
