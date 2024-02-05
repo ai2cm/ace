@@ -164,21 +164,27 @@ class InferenceAggregator:
             return metrics.root_mean_squared_error(truth, pred, area_weights)
 
         def _compute_zonal_power_spectrum(x):
-            return compute_zonal_power_spectrum(x, latitudes).mean(
-                axis=-3
-            )  # output is [batch, time, wavenumber] so this is a batch mean
+            assert (
+                len(x.shape) == 3
+            ), f"Expected input (batch, height, width) but received {x.shape}"
+            return compute_zonal_power_spectrum(x, latitudes).mean(  # type: ignore
+                axis=-2
+            )  # [batch, latitude, wavenumber] -> [batch, wavenumber]
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
 
         def _compute_ssim(x, y):
-            return compute_ssim(x, y, **ssim_kwargs)
+            return compute_ssim(x, y, add_channel_dim=True, **ssim_kwargs)
+
+        def _compute_psnr(x, y):
+            return compute_psnr(x, y, add_channel_dim=True)
 
         self._comparisons = {
             "rmse": Mean(metrics.root_mean_squared_error),
             "weighted_rmse": Mean(_area_weighted_rmse),
-            "psnr": Mean(compute_psnr),
             "ssim": Mean(_compute_ssim),
+            "psnr": Mean(_compute_psnr),
         }
         self._intrinsics = {
             input_type: {
@@ -245,3 +251,17 @@ class InferenceAggregator:
         self,
     ) -> Mapping[str, Union[float, np.ndarray, wandb.Histogram, wandb.Image]]:
         return self._get(getter="get_wandb")
+
+
+class NullInferenceAggregator:
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ) -> None:
+        del args, kwargs
+
+    def record_batch(
+        self, loss: torch.Tensor, target: TensorMapping, pred: TensorMapping
+    ) -> None:
+        del loss, target, pred

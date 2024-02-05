@@ -87,8 +87,7 @@ def test_snapshot_records_first_value():
 def test_dynamic_histogram():
     n_bins = 300
     histogram = DynamicHistogram(n_bins)
-
-    shape = batch_size, _, height, width = 2, 1, 8, 16
+    shape = (2, 1, 8, 16)  # [batch, sample, height, width]
     data = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
     histogram.record_batch(data)
     result = histogram.get()
@@ -98,7 +97,7 @@ def test_dynamic_histogram():
 
 
 def test_performance_metrics():
-    shape = batch_size, n_timesteps, n_lat, n_lon = 2, 1, 16, 32
+    shape = batch_size, n_lat, n_lon = 2, 16, 32  # no time dim for MappedTensors
     del batch_size  # unused
     area_weights = torch.ones(n_lon)
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
@@ -125,7 +124,7 @@ def test_performance_metrics():
 
     for instrinsic_name, expected_shape in zip(
         ["spectrum", "snapshot", "histogram"],
-        [(n_timesteps, n_lon // 2 + 1), shape, (1, n_bins)],
+        [(n_lon // 2 + 1,), shape, (1, n_bins)],
     ):
         for input_type in ["target", "pred"]:
             num_metrics += 1
