@@ -1,6 +1,6 @@
 """Pure functions, e.g. metrics and math functions that are useful for downscaling."""
 
-from typing import Callable, Tuple
+from typing import Callable, Collection, Tuple
 
 import torch
 
@@ -45,6 +45,17 @@ def map_tensor_mapping(
     return ret
 
 
+def filter_tensor_mapping(x: TensorMapping, keys: Collection[str]) -> TensorMapping:
+    """
+    Filters a tensor mapping based on a set of keys.
+
+    Args:
+        x: The input tensor mapping.
+        keys: The set of keys to filter the tensor mapping.
+    """
+    return {k: v for (k, v) in x.items() if k in keys}
+
+
 def min_max_normalization(
     x: torch.Tensor, min_: torch.Tensor, max_: torch.Tensor
 ) -> torch.Tensor:
@@ -73,17 +84,42 @@ def _normalize_tensors(
     return min_max_normalization(x, min_, max_), min_max_normalization(x, min_, max_)
 
 
-def compute_psnr(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """Normalize data to unit range and compute piq.psnr."""
-    pred_norm, target_norm = _normalize_tensors(pred, target)
+def compute_psnr(
+    prediction: torch.Tensor, target: torch.Tensor, add_channel_dim: bool
+) -> torch.Tensor:
+    """
+    Compute Peak Signal-to-Noise Ratio between the predicted and target tensors.
+
+    Args:
+        prediction: The prediction
+        target: The target (groundtruth) tensor.
+        add_channel_dim: Add a channel dim if it is missing from the inputs.
+    """
+    pred_norm, target_norm = _normalize_tensors(prediction, target)
+    if add_channel_dim:
+        channel_dim = -3
+        pred_norm, target_norm = pred_norm.unsqueeze(
+            channel_dim
+        ), target_norm.unsqueeze(channel_dim)
     return piq.psnr(pred_norm, target_norm)
 
 
 def compute_ssim(
-    pred: torch.Tensor, target: torch.Tensor, *args, **kwargs
+    pred: torch.Tensor, target: torch.Tensor, add_channel_dim: bool, *args, **kwargs
 ) -> torch.Tensor:
-    """Normalize data to unit range and compute piq.ssim."""
+    """Normalize data to unit range and compute piq.ssim.
+
+    Args:
+        prediction: The prediction
+        target: The target (groundtruth) tensor.
+        add_channel_dim: Add a channel dim if it is missing from the inputs.
+    """
     pred_norm, target_norm = _normalize_tensors(pred, target)
+    if add_channel_dim:
+        channel_dim = -3
+        pred_norm, target_norm = pred_norm.unsqueeze(
+            channel_dim
+        ), target_norm.unsqueeze(channel_dim)
     return piq.ssim(pred_norm, target_norm, *args, **kwargs)  # type: ignore
 
 
