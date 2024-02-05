@@ -5,6 +5,7 @@ from fme.downscaling.metrics_and_maths import (
     compute_psnr,
     compute_ssim,
     compute_zonal_power_spectrum,
+    filter_tensor_mapping,
     map_tensor_mapping,
     min_max_normalization,
 )
@@ -60,21 +61,27 @@ def test_normalize_to_unit_range(tensor, expected):
 
 
 @pytest.mark.parametrize("constant", [0, 1, -1])
-def test_psnr_between_constants(constant):
+@pytest.mark.parametrize(
+    "shape,add_channel_dim", [((1, 1, 4, 4), None), ((1, 4, 4), -3)]
+)
+def test_psnr_between_constants(constant, shape, add_channel_dim):
     error = 2.0
-    target = torch.full((1, 1, 4, 4), constant, dtype=torch.float32)
-    pred = torch.full((1, 1, 4, 4), constant) + error
+    target = torch.full(shape, constant, dtype=torch.float32)
+    pred = torch.full(shape, constant) + error
     expected = 80.0  # -10.0 * log10(ε), where ε = 1e-8
-    actual = compute_psnr(pred, target)
+    actual = compute_psnr(pred, target, add_channel_dim=add_channel_dim)
     assert torch.isclose(actual, torch.tensor(expected))
 
 
-@pytest.mark.parametrize("shape", [(1, 1, 16, 16), (2, 3, 16, 16)])
+@pytest.mark.parametrize(
+    "shape,add_channel_dim",
+    [((1, 1, 16, 16), None), ((2, 3, 16, 16), None), ((2, 16, 16), -3)],
+)
 @pytest.mark.parametrize("metric", (compute_psnr, compute_ssim))
-def test_shapes(shape, metric):
+def test_shapes(shape, add_channel_dim, metric):
     target = torch.randn(shape)
     pred = torch.randn(shape)
-    actual_shape = metric(pred, target).shape
+    actual_shape = metric(pred, target, add_channel_dim=add_channel_dim).shape
     assert actual_shape == torch.Size([]), f"Expected scalar, got {actual_shape}"
 
 
@@ -92,3 +99,31 @@ def test_compute_zonal_power_spectrum_constant_value(const):
 
     assert torch.all(spectrum[:, :, 0] != 0)
     assert torch.all(spectrum[:, :, 1:] == 0.0)
+
+
+def test_filter_tensor_mapping():
+    tensor_mapping = {
+        "a": torch.tensor(1.0),
+        "b": torch.tensor(2.0),
+        "c": torch.tensor(3.0),
+        "d": torch.tensor(4.0),
+    }
+    keys = {"a", "c"}
+
+    result = filter_tensor_mapping(tensor_mapping, keys)
+
+    assert len(result) == 2
+    for k in ("a", "c"):
+        assert k in result
+    for k in ("b", "d"):
+        assert k not in result
+
+    # Test with empty keys set
+    empty_keys = set()
+    result = filter_tensor_mapping(tensor_mapping, empty_keys)
+    assert len(result) == 0
+
+    # Test with non-existent keys
+    non_existent_keys = {"e", "f"}
+    result = filter_tensor_mapping(tensor_mapping, non_existent_keys)
+    assert len(result) == 0
