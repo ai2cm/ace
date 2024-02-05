@@ -1,20 +1,22 @@
+import abc
 import dataclasses
-from typing import Any, Callable, Dict, Mapping, Protocol, Tuple, Type
+from typing import Any, Callable, Dict, Mapping, Tuple, Type
 
 import dacite
 from torch import nn
 
 
 @dataclasses.dataclass
-class ModuleConfig(Protocol):
+class ModuleConfig(abc.ABC):
     """
-    A protocol for a class that can build a nn.Module given information about the input
+    Builds a nn.Module given information about the input
     and output channels and the image shape.
 
     This is a "Config" as in practice it is a dataclass loaded directly from yaml,
     allowing us to specify details of the network architecture in a config file.
     """
 
+    @abc.abstractmethod
     def build(
         self,
         n_in_channels: int,
@@ -104,7 +106,7 @@ class ModuleSelector:
 
     def __post_init__(self):
         try:
-            self._config = NET_REGISTRY[self.type].from_state(self.config)
+            self._config = get_from_registry(self.type).from_state(self.config)
         except KeyError:
             raise ValueError(
                 f"unknown module type {self.type}, "
