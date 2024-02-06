@@ -4,16 +4,19 @@ import dataclasses
 from typing import List, Literal, Mapping, Optional, Sequence, Tuple
 
 import torch
+import torch.utils.data
 import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 import fme.core.data_loading.params
 from fme.core.data_loading._xarray import XarrayDataset
+from fme.core.data_loading.data_typing import HorizontalCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.typing_ import HighResLowResPair
 
 
 @dataclasses.dataclass
@@ -70,8 +73,10 @@ class PairedDataset(torch.utils.data.Dataset):
 
 @dataclasses.dataclass
 class DownscalingDataLoader:
-    # Introduce a level of indirection now as this will likely be useful later
     loader: torch.utils.data.DataLoader
+    area_weights: HighResLowResPair[torch.Tensor]
+    horizontal_coordinates: HighResLowResPair[HorizontalCoordinates]
+    img_shape: HighResLowResPair[Tuple[int, int]]
 
 
 @dataclasses.dataclass
@@ -123,4 +128,20 @@ class DataLoaderParams:
             collate_fn=BatchData.from_sample_tuples,
         )
 
-        return DownscalingDataLoader(dataloader)
+        area_weights = HighResLowResPair(
+            dataset_highres.area_weights, dataset_lowres.area_weights
+        )
+        horizontal_coordinates = HighResLowResPair(
+            highres=dataset_highres.horizontal_coordinates,
+            lowres=dataset_lowres.horizontal_coordinates,
+        )
+
+        example_highres, _ = dataset_highres[0]
+        example_lowres, _ = dataset_lowres[0]
+        highres_shape = next(iter(example_highres.values())).shape[-2:]
+        lowres_shape = next(iter(example_lowres.values())).shape[-2:]
+        img_shape = HighResLowResPair(highres_shape, lowres_shape)
+
+        return DownscalingDataLoader(
+            dataloader, area_weights, horizontal_coordinates, img_shape
+        )
