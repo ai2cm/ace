@@ -1,7 +1,8 @@
+import contextlib
+
 import pytest
 import torch
 
-import fme.core.histogram
 from fme.core import metrics
 from fme.core.typing_ import TensorMapping
 from fme.downscaling import metrics_and_maths
@@ -84,21 +85,30 @@ def test_snapshot_records_first_value():
     assert_tensor_mapping_all_close(snapshot.get(), values)
 
 
-def test_dynamic_histogram():
+@pytest.mark.parametrize(
+    "shape,err",
+    [
+        pytest.param((2, 8, 16), contextlib.nullcontext(), id="no_time_dim"),
+        pytest.param((2, 1, 8, 16), pytest.raises(AssertionError), id="no_time_dim"),
+    ],
+)
+def test_dynamic_histogram(shape, err):
     n_bins = 300
     histogram = DynamicHistogram(n_bins)
-    shape = (2, 1, 8, 16)  # [batch, sample, height, width]
     data = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
-    histogram.record_batch(data)
-    result = histogram.get()
-    assert sorted(list(result.keys())) == ["x", "y"]
-    for var_name in ["x", "y"]:
-        assert result[var_name].counts.shape == (1, n_bins)
+    with err:
+        histogram.record_batch(data)
+        result = histogram.get()
+        assert sorted(list(result.keys())) == ["x", "y"]
+        for var_name in ["x", "y"]:
+            counts, bin_edges = result[var_name]
+            assert counts.shape == (n_bins,)
+            assert bin_edges.shape == (n_bins + 1,)
 
 
 def test_performance_metrics():
-    shape = batch_size, n_lat, n_lon = 2, 16, 32  # no time dim for MappedTensors
-    del batch_size  # unused
+    shape = (2, 16, 32)
+    _, n_lat, n_lon = shape
     area_weights = torch.ones(n_lon)
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
@@ -122,9 +132,9 @@ def test_performance_metrics():
         assert f"{metric_name}/x" in wandb_metrics
         assert all_metrics[f"{metric_name}/x"].shape == (), f"{metric_name}/x"
 
+    expected_shapes = ((n_lon // 2 + 1,), shape, (n_bins,))
     for instrinsic_name, expected_shape in zip(
-        ["spectrum", "snapshot", "histogram"],
-        [(n_lon // 2 + 1,), shape, (1, n_bins)],
+        ("spectrum", "snapshot", "histogram"), expected_shapes
     ):
         for input_type in ["target", "pred"]:
             num_metrics += 1
@@ -132,8 +142,9 @@ def test_performance_metrics():
             assert key in all_metrics
             assert key in wandb_metrics
             value = all_metrics[key]
-            if isinstance(value, fme.core.histogram.DynamicHistogram):
-                shape = value.counts.shape
+            if instrinsic_name == "histogram":
+                counts, _ = value
+                shape = counts.shape
             else:
                 shape = value.shape
             assert shape == expected_shape

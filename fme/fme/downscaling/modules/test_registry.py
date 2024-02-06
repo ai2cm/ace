@@ -52,10 +52,11 @@ def test_module_registry_selector_build():
         ),
     ],
 )
+@pytest.mark.parametrize("n_channels", [2, 3, 4])
 @pytest.mark.parametrize("window_size", [1, 4])
-def test_swinir_output_shapes(lowres_shape, upscale_factor, highres_shape, window_size):
-    n_channels = 3
-
+def test_swinir_output_shapes(
+    lowres_shape, upscale_factor, highres_shape, n_channels, window_size
+):
     swinir = SwinirConfig(
         depths=(6,),
         window_size=window_size,
