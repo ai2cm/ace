@@ -18,6 +18,7 @@ from fme.downscaling.typing_ import HighResLowResPair
 class ModelOutputs:
     prediction: TensorMapping
     target: TensorMapping
+    loss: torch.Tensor
 
 
 def _tensor_mapping_to_device(
@@ -71,7 +72,7 @@ class Model:
         prediction = self.normalizer.highres.denormalize(
             self.out_packer.unpack(predicted_norm, axis=channel_axis)
         )
-        return ModelOutputs(prediction=prediction, target=target)
+        return ModelOutputs(prediction=prediction, target=target, loss=loss)
 
 
 @dataclasses.dataclass
