@@ -1,3 +1,6 @@
+"""Registry for downscaling modules. Note that all modules should accept and
+return tensors of shape (batch, channel, height, width)."""
+
 import dataclasses
 from typing import Any, Mapping, Protocol, Sequence, Tuple, Type
 
