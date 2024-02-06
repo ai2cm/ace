@@ -108,17 +108,14 @@ class Snapshot:
 
 
 class DynamicHistogram:
-    """Wrapper of DynamicHistogram for multiple histograms, one per variable.
-
-    Assumes that the time dimension is of shape (1,) since this is the case for
-    downscaling.
-    """
+    """Wrapper of DynamicHistogram for multiple histograms, one per variable."""
 
     def __init__(self, n_bins) -> None:
         self.n_bins = n_bins
         self.histograms: Optional[
             Mapping[str, fme.core.histogram.DynamicHistogram]
         ] = None
+        self._time_dim = -2
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
@@ -129,18 +126,21 @@ class DynamicHistogram:
             }
 
         for k, v in data.items():
+            assert (
+                len(v.shape) == 3
+            ), f"Expected input (batch, height, width) but got {v.shape}"
             self.histograms[k].add(v.flatten().unsqueeze(0).numpy())
 
     def get(self):
         if self.histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return self.histograms
+        return {
+            k: (v.counts.squeeze(self._time_dim), v.bin_edges)
+            for k, v in self.histograms.items()
+        }
 
     def get_wandb(self) -> Mapping[str, wandb.Histogram]:
-        return {
-            k: wandb.Histogram(np_histogram=(v.counts.squeeze(axis=0), v.bin_edges))
-            for k, v in self.get().items()
-        }
+        return {k: wandb.Histogram(np_histogram=v) for k, v in self.get().items()}
 
 
 class InferenceAggregator:
@@ -169,7 +169,7 @@ class InferenceAggregator:
             ), f"Expected input (batch, height, width) but received {x.shape}"
             return compute_zonal_power_spectrum(x, latitudes).mean(  # type: ignore
                 axis=-2
-            )  # [batch, latitude, wavenumber] -> [batch, wavenumber]
+            )  # (batch, wavenumber) -> (wavenumber,)
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
@@ -198,7 +198,7 @@ class InferenceAggregator:
 
     @torch.no_grad()
     def record_batch(
-        self, loss: torch.Tensor, target: TensorMapping, pred: TensorMapping
+        self, loss: torch.Tensor, target: TensorMapping, prediction: TensorMapping
     ) -> None:
         """
         Records a batch of target and prediction tensors for metric computation.
@@ -208,9 +208,9 @@ class InferenceAggregator:
             pred: Model outputs
         """
         for _, agg in self._comparisons.items():
-            agg.record_batch(target, pred)
+            agg.record_batch(target, prediction)
 
-        for input, input_type in zip((target, pred), ("target", "pred")):
+        for input, input_type in zip((target, prediction), ("target", "pred")):
             for _, agg in self._intrinsics[input_type].items():  # type: ignore
                 agg.record_batch(input)
 

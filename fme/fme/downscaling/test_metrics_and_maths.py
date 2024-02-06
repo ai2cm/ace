@@ -60,9 +60,16 @@ def test_normalize_to_unit_range(tensor, expected):
     assert all(torch.isclose(normalized_tensor, expected))
 
 
-@pytest.mark.parametrize("constant", [0, 1, -1])
 @pytest.mark.parametrize(
-    "shape,add_channel_dim", [((1, 1, 4, 4), None), ((1, 4, 4), -3)]
+    "constant",
+    [pytest.param(0, id="c=0"), pytest.param(1, id="c=1"), pytest.param(-1, id="c=-1")],
+)
+@pytest.mark.parametrize(
+    "shape,add_channel_dim",
+    [
+        pytest.param((1, 1, 4, 4), None, id="b,c,h,w"),
+        pytest.param((1, 4, 4), True, id="b,h,w"),
+    ],
 )
 def test_psnr_between_constants(constant, shape, add_channel_dim):
     error = 2.0
@@ -75,7 +82,7 @@ def test_psnr_between_constants(constant, shape, add_channel_dim):
 
 @pytest.mark.parametrize(
     "shape,add_channel_dim",
-    [((1, 1, 16, 16), None), ((2, 3, 16, 16), None), ((2, 16, 16), -3)],
+    [((1, 1, 16, 16), False), ((2, 3, 16, 16), False), ((2, 16, 16), True)],
 )
 @pytest.mark.parametrize("metric", (compute_psnr, compute_ssim))
 def test_shapes(shape, add_channel_dim, metric):
@@ -87,18 +94,15 @@ def test_shapes(shape, add_channel_dim, metric):
 
 @pytest.mark.parametrize("const", (1.0, 2.0))
 def test_compute_zonal_power_spectrum_constant_value(const):
-    batch_size, time_steps, nlat, nlon = 2, 1, 8, 16
-    tensor = torch.full((2, 1, nlat, nlon), const, dtype=torch.float32)
+    batch_size, nlat, nlon = 2, 8, 16
+    tensor = torch.full((2, nlat, nlon), const, dtype=torch.float32)
 
     lats = torch.linspace(-89.5, 89.5, nlat)
     spectrum = compute_zonal_power_spectrum(tensor, lats)
 
-    assert spectrum.shape == torch.Size((batch_size, time_steps, nlon // 2 + 1))
-
-    spectrum[:, :, 0, ...]
-
-    assert torch.all(spectrum[:, :, 0] != 0)
-    assert torch.all(spectrum[:, :, 1:] == 0.0)
+    assert spectrum.shape == torch.Size((batch_size, nlon // 2 + 1))
+    assert torch.all(spectrum[:, 0] != 0)
+    assert torch.all(spectrum[:, 1:] == 0.0)
 
 
 def test_filter_tensor_mapping():

@@ -91,36 +91,43 @@ def compute_psnr(
     Compute Peak Signal-to-Noise Ratio between the predicted and target tensors.
 
     Args:
-        prediction: The prediction
-        target: The target (groundtruth) tensor.
-        add_channel_dim: Add a channel dim if it is missing from the inputs.
+        prediction: tensor either of shape (batch, channel, height, width)
+            or (batch, height, width)
+        target: tensor of shape (batch, channel, height, width)
+            or (batch, height, width)
+        add_channel_dim: Add a channel dim if it is missing.
     """
-    pred_norm, target_norm = _normalize_tensors(prediction, target)
+    prediction_norm, target_norm = _normalize_tensors(prediction, target)
     if add_channel_dim:
         channel_dim = -3
-        pred_norm, target_norm = pred_norm.unsqueeze(
-            channel_dim
-        ), target_norm.unsqueeze(channel_dim)
-    return piq.psnr(pred_norm, target_norm)
+        prediction_norm = prediction_norm.unsqueeze(channel_dim)
+        target_norm = target_norm.unsqueeze(channel_dim)
+    return piq.psnr(prediction_norm, target_norm)
 
 
 def compute_ssim(
-    pred: torch.Tensor, target: torch.Tensor, add_channel_dim: bool, *args, **kwargs
+    prediction: torch.Tensor,
+    target: torch.Tensor,
+    add_channel_dim: bool,
+    *args,
+    **kwargs
 ) -> torch.Tensor:
     """Normalize data to unit range and compute piq.ssim.
 
     Args:
-        prediction: The prediction
-        target: The target (groundtruth) tensor.
-        add_channel_dim: Add a channel dim if it is missing from the inputs.
+        prediction: tensor either of shape (batch, channel, height, width)
+            or (batch, height, width)
+        target: tensor of shape (batch, channel, height, width)
+            or (batch, height, width)
+        add_channel_dim: Add a channel dim if it is missing.
     """
-    pred_norm, target_norm = _normalize_tensors(pred, target)
+    prediction_norm, target_norm = _normalize_tensors(prediction, target)
     if add_channel_dim:
         channel_dim = -3
-        pred_norm, target_norm = pred_norm.unsqueeze(
-            channel_dim
-        ), target_norm.unsqueeze(channel_dim)
-    return piq.ssim(pred_norm, target_norm, *args, **kwargs)  # type: ignore
+        prediction_norm = prediction_norm.unsqueeze(channel_dim)
+        target_norm = target_norm.unsqueeze(channel_dim)
+    # ssim does not return a list despite the type hint
+    return piq.ssim(prediction_norm, target_norm, *args, **kwargs)  # type: ignore
 
 
 def compute_zonal_power_spectrum(
