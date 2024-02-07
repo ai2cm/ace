@@ -145,12 +145,11 @@ def test_downscaling_dataloader(mock_xarray_dataset, n_examples, batch_size):
     params = DataLoaderParams(
         "/path/to/nowhere/highres",
         "/path/to/nowhere/lowres",
-        ["x"],
         "xarray",
         batch_size,
         1,
     )
-    loader = params.build(True)
+    loader = params.build(True, ["x"])
 
     assert len(loader.loader) == n_examples // batch_size
     assert len(loader.loader.dataset) == n_examples
