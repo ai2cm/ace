@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Union
 
 import netCDF4
 import numpy as np
@@ -135,16 +135,38 @@ def _denormalize(
 def get_normalizer(
     global_means_path, global_stds_path, names: List[str]
 ) -> StandardNormalizer:
-    means = load_Dict_from_netcdf(global_means_path, names)
+    means = load_dict_from_netcdf(
+        global_means_path, names, defaults={"x": 0.0, "y": 0.0, "z": 0.0}
+    )
     means = {k: torch.as_tensor(v, dtype=torch.float) for k, v in means.items()}
-    stds = load_Dict_from_netcdf(global_stds_path, names)
+    stds = load_dict_from_netcdf(
+        global_stds_path, names, defaults={"x": 1.0, "y": 1.0, "z": 1.0}
+    )
     stds = {k: torch.as_tensor(v, dtype=torch.float) for k, v in stds.items()}
     return StandardNormalizer(means=means, stds=stds)
 
 
-def load_Dict_from_netcdf(path, names) -> Dict[str, np.ndarray]:
+def load_dict_from_netcdf(
+    path: str, names: Iterable[str], defaults: Mapping[str, Union[float, np.ndarray]]
+) -> Dict[str, Union[float, np.ndarray]]:
+    """
+    Load a dictionary of variables from a netCDF file.
+
+    Args:
+        path: Path to the netCDF file.
+        names: List of variable names to load.
+        defaults: Dictionary of default values for each variable, if not found
+            in the netCDF file.
+    """
     ds = netCDF4.Dataset(path)
     ds.set_auto_mask(False)
-    Dict = {c: ds.variables[c][:] for c in names}
+    result = {}
+    for c in names:
+        if c in ds.variables:
+            result[c] = ds.variables[c][:]
+        elif c in defaults:
+            result[c] = defaults[c]
+        else:
+            raise ValueError(f"Variable {c} not found in {path}")
     ds.close()
-    return Dict
+    return result
