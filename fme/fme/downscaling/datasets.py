@@ -83,13 +83,12 @@ class DownscalingDataLoader:
 class DataLoaderParams:
     path_highres: str
     path_lowres: str
-    var_names: List[str]
     data_type: Literal["xarray", "ensemble_xarray"]
     batch_size: int
     num_data_workers: int
 
     def build(
-        self, train: bool, dist: Optional[Distributed] = None
+        self, train: bool, var_names: List[str], dist: Optional[Distributed] = None
     ) -> DownscalingDataLoader:
         if dist is None:
             dist = Distributed.get_instance()
@@ -104,7 +103,7 @@ class DataLoaderParams:
                     batch_size=self.batch_size,
                     num_data_workers=self.num_data_workers,
                 ),
-                DataRequirements(self.var_names, 1),
+                DataRequirements(var_names, 1),
             )
             for path in (self.path_highres, self.path_lowres)
         ]
