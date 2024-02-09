@@ -104,6 +104,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            enable_histogram_netcdfs=True,
             save_names=None,
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -260,6 +261,7 @@ class TestDataWriter:
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
             save_names=save_names,
+            enable_histogram_netcdfs=True,
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -276,7 +278,7 @@ class TestDataWriter:
             start_sample=0,
             batch_times=batch_times,
         )
-        # Open the file again and check the data
+        writer.flush()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         expected_variables = (
             set(save_names)
@@ -286,6 +288,13 @@ class TestDataWriter:
         assert set(dataset.variables.keys()) == expected_variables.union(
             {"source", "init", "lead", "lat", "lon", "valid_time"}
         )
+        histograms = xr.open_dataset(tmp_path / "histograms.nc")
+        if save_names is None:
+            expected_names = set(sample_target_data)
+        else:
+            expected_names = set(save_names)
+        expected_bin_edge_names = {f"{name}_bin_edges" for name in expected_names}
+        assert set(histograms) == expected_names.union(expected_bin_edge_names)
 
     def test_append_batch_past_end_of_samples(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
@@ -300,6 +309,7 @@ class TestDataWriter:
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
             save_names=None,
+            enable_histogram_netcdfs=True,
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -345,6 +355,7 @@ class TestDataWriter:
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
             save_names=None,
+            enable_histogram_netcdfs=True,
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
