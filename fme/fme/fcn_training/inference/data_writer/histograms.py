@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional, Sequence
 
 import numpy as np
 import torch
@@ -10,10 +10,11 @@ from fme.core.histogram import DynamicHistogram
 
 
 class _HistogramAggregator:
-    def __init__(self, n_times: int):
+    def __init__(self, n_times: int, names: Optional[Sequence[str]] = None):
         self._prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self._target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self._n_times = n_times
+        self._names = names
 
     def record_batch(
         self,
@@ -22,14 +23,22 @@ class _HistogramAggregator:
         i_time_start: int,
     ):
         if self._target_histograms is None:
+            if self._names is not None:
+                target_names = [k for k in target_data if k in self._names]
+            else:
+                target_names = list(target_data)
             self._target_histograms = {
                 var_name: DynamicHistogram(n_times=self._n_times)
-                for var_name in target_data.keys()
+                for var_name in target_names
             }
         if self._prediction_histograms is None:
+            if self._names is not None:
+                prediction_names = [k for k in prediction_data if k in self._names]
+            else:
+                prediction_names = list(prediction_data)
             self._prediction_histograms = {
                 var_name: DynamicHistogram(n_times=self._n_times)
-                for var_name in prediction_data.keys()
+                for var_name in prediction_names
             }
         for var_name, histogram in self._prediction_histograms.items():
             # go from [n_samples, n_timesteps, n_lat, n_lon] to
@@ -114,6 +123,7 @@ class HistogramDataWriter:
         path: str,
         n_timesteps: int,
         metadata: Mapping[str, VariableMetadata],
+        save_names: Optional[Sequence[str]],
     ):
         """
         Args:
@@ -124,7 +134,7 @@ class HistogramDataWriter:
         self.path = path
         self._metrics_filename = str(Path(path) / "histograms.nc")
         self.metadata = metadata
-        self._histogram = _HistogramAggregator(n_times=n_timesteps)
+        self._histogram = _HistogramAggregator(n_times=n_timesteps, names=save_names)
 
     def append_batch(
         self,
