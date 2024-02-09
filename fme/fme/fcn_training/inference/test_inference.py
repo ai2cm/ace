@@ -169,6 +169,7 @@ def inference_helper(
         data_writer=DataWriterConfig(
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
+            save_histogram_files=True,
         ),
         forward_steps_in_memory=1,
     )
@@ -432,6 +433,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
             time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
+            save_histogram_files=True,
         ),
         log_video=False,
     )

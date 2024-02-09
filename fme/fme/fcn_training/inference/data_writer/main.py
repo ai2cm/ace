@@ -29,12 +29,14 @@ class DataWriterConfig:
             containing the predictions.
         save_raw_prediction_names: Names of variables to save in the predictions
             netcdf file.
+        save_histogram_files: Enable writing of netCDF files containing histograms.
         time_coarsen: Configuration for time coarsening of written outputs.
     """
 
     log_extended_video_netcdfs: bool = False
     save_prediction_files: bool = True
     save_raw_prediction_names: Optional[Sequence[str]] = None
+    save_histogram_files: bool = False
     time_coarsen: Optional[TimeCoarsenConfig] = None
 
     def __post_init__(self):
@@ -61,8 +63,9 @@ class DataWriterConfig:
             metadata=metadata,
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
-            save_names=self.save_raw_prediction_names,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
+            save_names=self.save_raw_prediction_names,
+            enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
         )
 
@@ -78,6 +81,7 @@ class DataWriter:
         enable_prediction_netcdfs: bool,
         enable_video_netcdfs: bool,
         save_names: Optional[Sequence[str]],
+        enable_histogram_netcdfs: bool,
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
         """
@@ -91,7 +95,9 @@ class DataWriter:
                 containing the predictions.
             enable_video_netcdfs: Whether to enable writing of netCDF files
                 containing video metrics.
-            save_names: Names of variables to save in the predictions netcdf file.
+            save_names: Names of variables to save in the prediction and histogram
+                netCDF files.
+            enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
         self._writers: List[Subwriter] = []
@@ -128,15 +134,17 @@ class DataWriter:
                     )
                 )
             )
-        self._writers.append(
-            _time_coarsen_builder(
-                HistogramDataWriter(
-                    path=path,
-                    n_timesteps=n_timesteps,
-                    metadata=metadata,
+        if enable_histogram_netcdfs:
+            self._writers.append(
+                _time_coarsen_builder(
+                    HistogramDataWriter(
+                        path=path,
+                        n_timesteps=n_timesteps,
+                        metadata=metadata,
+                        save_names=save_names,
+                    )
                 )
             )
-        )
 
     def append_batch(
         self,
