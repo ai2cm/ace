@@ -235,7 +235,10 @@ class SimpleLinearModule(torch.nn.Module):
     def __init__(self, in_features, out_features):
         super().__init__()
         self.linear = torch.nn.Linear(in_features, out_features)
-        self.custom_param = torch.nn.Parameter(torch.randn(5, 5))
+        self.custom_param = torch.nn.Parameter(torch.randn(out_features))
+
+    def forward(self, x):
+        return self.linear(x) + self.custom_param
 
 
 class NestedModule(torch.nn.Module):
@@ -299,3 +302,94 @@ def test_overwrite_weights(from_module, to_module, expected_exception):
                     from_param.data,
                     to_param.data[: from_param.data.size(0), : from_param.data.size(1)],
                 )
+
+
+def test_overwrite_weights_exclude():
+    from_module = NestedModule(10, 20)
+    to_module = NestedModule(10, 20)
+    with_weights._overwrite_weights(
+        from_module, to_module, exclude_parameters=["linear1.*"]
+    )
+    assert not torch.allclose(
+        from_module.linear1.linear.weight, to_module.linear1.linear.weight
+    )
+    assert not torch.allclose(
+        from_module.linear1.custom_param, to_module.linear1.custom_param
+    )
+    assert torch.allclose(
+        from_module.linear2.linear.weight, to_module.linear2.linear.weight
+    )
+    assert torch.allclose(
+        from_module.linear2.custom_param, to_module.linear2.custom_param
+    )
+    assert torch.allclose(from_module.custom_param, to_module.custom_param)
+
+
+class ComplexModule(torch.nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.linear1 = SimpleLinearModule(in_features, out_features)
+        self.linear2 = SimpleLinearModule(out_features, in_features)
+        self.custom_param = torch.nn.Parameter(torch.randn(in_features))
+
+    def forward(self, x):
+        return self.linear2(self.linear1(x)) + self.custom_param
+
+
+@pytest.mark.parametrize(
+    "apply_config",
+    [
+        pytest.param(True, id="frozen"),
+        pytest.param(False, id="unfrozen"),
+    ],
+)
+def test_frozen_parameter_config(apply_config: bool):
+    module = ComplexModule(10, 20)
+    config = with_weights.FrozenParameterConfig(
+        include=[
+            "linear2.*",
+            "custom_param",
+            "linear1.custom_param",
+            "linear1.linear.bias",
+        ],
+        exclude=["linear1.linear.weight"],
+    )
+    if apply_config:
+        config.apply(module)
+    # do some optimization and check only unfrozen parameters change
+    original_state = copy.deepcopy(module.state_dict())
+    optimizer = torch.optim.Adam(module.parameters())
+    for _ in range(10):
+        optimizer.zero_grad()
+        loss = torch.sum(module(torch.randn(10, 10)))
+        loss.backward()
+        optimizer.step()
+    for name, param in module.named_parameters():
+        if name in config.exclude:
+            assert not torch.allclose(param.data, original_state[name])
+        else:
+            if apply_config:
+                assert torch.allclose(param.data, original_state[name])
+            else:
+                assert not torch.allclose(param.data, original_state[name])
+
+
+@pytest.mark.parametrize(
+    "include, exclude, expect_exception",
+    [
+        pytest.param(["*"], ["*"], True, id="both"),
+        pytest.param(["*"], [], False, id="include"),
+        pytest.param([], ["*"], False, id="exclude"),
+        pytest.param(["linear1.*"], ["linear1.*"], True, id="both_same"),
+        pytest.param(["linear1.*"], ["linear2.*"], False, id="both_different"),
+        pytest.param(["linear1.*"], [], False, id="include"),
+        pytest.param([], ["linear1.*"], False, id="exclude"),
+        pytest.param(["linear1.*.weight"], ["linear1.*"], True, id="internal_wildcard"),
+    ],
+)
+def test_frozen_parameter_config_no_overlaps(include, exclude, expect_exception):
+    if expect_exception:
+        with pytest.raises(ValueError):
+            with_weights.FrozenParameterConfig(include=include, exclude=exclude)
+    else:
+        with_weights.FrozenParameterConfig(include=include, exclude=exclude)
