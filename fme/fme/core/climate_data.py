@@ -16,7 +16,7 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         ],
         "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
         "sensible_heat_flux": ["SHTFLsfc"],
-        "precipitation_rate": ["PRATEsfc", "PRECT"],
+        "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
         "sfc_down_sw_radiative_flux": ["DSWRFsfc"],
         "sfc_up_sw_radiative_flux": ["USWRFsfc"],
         "sfc_down_lw_radiative_flux": ["DLWRFsfc"],
