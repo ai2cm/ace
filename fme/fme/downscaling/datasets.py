@@ -77,6 +77,7 @@ class DownscalingDataLoader:
     area_weights: HighResLowResPair[torch.Tensor]
     horizontal_coordinates: HighResLowResPair[HorizontalCoordinates]
     img_shape: HighResLowResPair[Tuple[int, int]]
+    downscale_factor: int
 
 
 @dataclasses.dataclass
@@ -141,6 +142,27 @@ class DataLoaderParams:
         lowres_shape = next(iter(example_lowres.values())).shape[-2:]
         img_shape = HighResLowResPair(highres_shape, lowres_shape)
 
+        highres_height, highres_width = highres_shape
+        lowres_height, lowres_width = lowres_shape
+
+        assert (
+            highres_height % lowres_height == 0
+        ), "Highres height must be divisible by lowres height"
+        assert (
+            highres_width % lowres_width == 0
+        ), "Highres width must be divisible by lowres width"
+
+        downscale_factor_height = highres_height // lowres_height
+        downscale_factor_width = highres_width // lowres_width
+
+        assert (
+            downscale_factor_height == downscale_factor_width
+        ), "Aspect ratio must match"
+
         return DownscalingDataLoader(
-            dataloader, area_weights, horizontal_coordinates, img_shape
+            dataloader,
+            area_weights,
+            horizontal_coordinates,
+            img_shape,
+            downscale_factor_height,
         )

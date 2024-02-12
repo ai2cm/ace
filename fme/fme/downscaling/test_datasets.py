@@ -156,3 +156,4 @@ def test_downscaling_dataloader(mock_xarray_dataset, n_examples, batch_size):
     batch = next(iter(loader.loader))
     assert batch.highres["x"].shape == torch.Size((batch_size,) + highres_shape)
     assert batch.lowres["x"].shape == torch.Size((batch_size,) + lowres_shape)
+    assert loader.downscale_factor == 2
