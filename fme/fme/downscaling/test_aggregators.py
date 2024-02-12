@@ -106,7 +106,13 @@ def test_dynamic_histogram(shape, err):
             assert bin_edges.shape == (n_bins + 1,)
 
 
-@pytest.mark.parametrize("prefix, expected_prefix", [("", ""), ("foo", "foo/")])
+@pytest.mark.parametrize(
+    "prefix, expected_prefix",
+    [
+        pytest.param("", "", id="no_prefix"),
+        pytest.param("foo", "foo/", id="prefix=foo"),
+    ],
+)
 def test_performance_metrics(prefix, expected_prefix):
     shape = (2, 16, 32)
     _, n_lat, n_lon = shape
@@ -121,7 +127,9 @@ def test_performance_metrics(prefix, expected_prefix):
 
     all_metrics = aggregator.get(prefix=prefix)
     wandb_metrics = aggregator.get_wandb(prefix=prefix)
-    num_metrics = 0
+
+    assert "loss" in all_metrics and "loss" in wandb_metrics
+    num_metrics = 1  # loss
     for metric_name in [
         "rmse",
         "weighted_rmse",
