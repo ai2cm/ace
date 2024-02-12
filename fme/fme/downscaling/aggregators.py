@@ -226,7 +226,7 @@ class InferenceAggregator:
         if prefix != "":
             prefix += "/"
 
-        ret = {}
+        ret = {"loss": self.loss.get()["loss"]}
         for metric_name, agg in self._comparisons.items():
             ret.update(
                 {
