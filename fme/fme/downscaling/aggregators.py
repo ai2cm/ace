@@ -216,28 +216,37 @@ class InferenceAggregator:
 
         self.loss.record_batch({"loss": loss})
 
-    def _get(self, getter: Literal["get", "get_wandb"]) -> Mapping[str, Any]:
+    def _get(
+        self, getter: Literal["get", "get_wandb"], prefix: str = ""
+    ) -> Mapping[str, Any]:
         """Helper methods for accumulating all metrics into a single mapping
         with consistent keys. Values depend on the specified `getter`
         function."""
+
+        if prefix != "":
+            prefix += "/"
+
         ret = {}
         for metric_name, agg in self._comparisons.items():
             ret.update(
-                {f"{metric_name}/{k}": v for (k, v) in getattr(agg, getter)().items()}
+                {
+                    f"{prefix}{metric_name}/{k}": v
+                    for (k, v) in getattr(agg, getter)().items()
+                }
             )
 
         for input_type, aggs in self._intrinsics.items():
             for metric_name, agg in aggs.items():  # type: ignore
                 ret.update(
                     {
-                        f"{metric_name}/{var_name}_{input_type}": v
+                        f"{prefix}{metric_name}/{var_name}_{input_type}": v
                         for (var_name, v) in getattr(agg, getter)().items()
                     }
                 )
 
         return ret
 
-    def get(self) -> Mapping[str, torch.Tensor]:
+    def get(self, prefix: str = "") -> Mapping[str, torch.Tensor]:
         """
         Returns a mapping of aggregated metrics and statistics.
 
@@ -245,12 +254,13 @@ class InferenceAggregator:
             Mapping of aggregated metrics and statistics with keys corresponding
             to the metric and variable name (e.g. for passing to wandb).
         """
-        return self._get(getter="get")
+        return self._get(getter="get", prefix=prefix)
 
     def get_wandb(
         self,
+        prefix: str = "",
     ) -> Mapping[str, Union[float, np.ndarray, wandb.Histogram, wandb.Image]]:
-        return self._get(getter="get_wandb")
+        return self._get(getter="get_wandb", prefix=prefix)
 
 
 class NullInferenceAggregator:

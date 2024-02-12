@@ -106,7 +106,8 @@ def test_dynamic_histogram(shape, err):
             assert bin_edges.shape == (n_bins + 1,)
 
 
-def test_performance_metrics():
+@pytest.mark.parametrize("prefix, expected_prefix", [("", ""), ("foo", "foo/")])
+def test_performance_metrics(prefix, expected_prefix):
     shape = (2, 16, 32)
     _, n_lat, n_lon = shape
     area_weights = torch.ones(n_lon)
@@ -118,8 +119,8 @@ def test_performance_metrics():
     pred = {"x": torch.ones(*shape)}
     aggregator.record_batch(torch.tensor(0.0), target, pred)
 
-    all_metrics = aggregator.get()
-    wandb_metrics = aggregator.get_wandb()
+    all_metrics = aggregator.get(prefix=prefix)
+    wandb_metrics = aggregator.get_wandb(prefix=prefix)
     num_metrics = 0
     for metric_name in [
         "rmse",
@@ -128,9 +129,13 @@ def test_performance_metrics():
         "ssim",
     ]:
         num_metrics += 1
-        assert f"{metric_name}/x" in all_metrics
-        assert f"{metric_name}/x" in wandb_metrics
-        assert all_metrics[f"{metric_name}/x"].shape == (), f"{metric_name}/x"
+        assert (
+            f"{expected_prefix}{metric_name}/x" in all_metrics
+        ), f"{expected_prefix}{metric_name}/x, {all_metrics.keys()}"
+        assert f"{expected_prefix}{metric_name}/x" in wandb_metrics
+        assert (
+            all_metrics[f"{expected_prefix}{metric_name}/x"].shape == ()
+        ), f"{metric_name}/x"
 
     expected_shapes = ((n_lon // 2 + 1,), shape, (n_bins,))
     for instrinsic_name, expected_shape in zip(
@@ -138,7 +143,7 @@ def test_performance_metrics():
     ):
         for input_type in ["target", "pred"]:
             num_metrics += 1
-            key = f"{instrinsic_name}/x_{input_type}"
+            key = f"{expected_prefix}{instrinsic_name}/x_{input_type}"
             assert key in all_metrics
             assert key in wandb_metrics
             value = all_metrics[key]
