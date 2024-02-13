@@ -6,7 +6,11 @@ import torch
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, OptimizationConfig
 from fme.downscaling.losses import LossConfig
-from fme.downscaling.models import DownscalingModelConfig, Model
+from fme.downscaling.models import (
+    DownscalingModelConfig,
+    Model,
+    PairedNormalizationConfig,
+)
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import HighResLowResPair
 
@@ -58,12 +62,23 @@ def test_run_on_batch(use_opt):
         assert outputs.prediction[k].shape == outputs.target[k].shape
 
 
-def test_build_downscaling_model_config_runs():
-    normalizer = HighResLowResPair[NormalizationConfig](
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+@pytest.mark.parametrize(
+    "in_names, out_names",
+    [
+        pytest.param(["x"], ["x"], id="in_names = out_names"),
+        pytest.param(["x", "y"], ["x"], id="in_names > out_names"),
+        pytest.param(["x"], ["x", "y"], id="in_names < out_names"),
+    ],
+)
+def test_build_downscaling_model_config_runs(in_names, out_names):
+    normalizer = PairedNormalizationConfig(
+        highres=NormalizationConfig(
+            means={n: 0.0 for n in out_names}, stds={n: 1.0 for n in out_names}
+        ),
+        lowres=NormalizationConfig(
+            means={n: 0.0 for n in in_names}, stds={n: 1.0 for n in in_names}
+        ),
     )
-
     model_config = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": LinearUpscaling(4, (4, 8))}),
         LossConfig("L1Loss"),

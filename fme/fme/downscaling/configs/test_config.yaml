@@ -1,0 +1,45 @@
+experiment_dir: /will/be/overwritten
+num_epochs: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
+optimization:
+  lr: 0.0001
+train_data:
+  path_highres: /will/be/overwritten
+  path_lowres: /will/be/overwritten
+  data_type: "xarray"
+  batch_size: 2
+  num_data_workers: 2
+validation_data:
+  path_highres: /will/be/overwritten
+  path_lowres: /will/be/overwritten
+  data_type: "xarray"
+  batch_size: 2
+  num_data_workers: 2
+model:
+  loss:
+    type: "L1Loss"
+  module:
+    type: swinir
+    config:
+      depths: [6]
+      window_size: 1
+      embed_dim: 30
+      num_heads: [6]
+  normalization:
+    highres:
+      global_means_path: /will/be/overwritten
+      global_stds_path: /will/be/overwritten
+    lowres:
+      global_means_path: /will/be/overwritten
+      global_stds_path: /will/be/overwritten
+  in_names:
+    - "x"
+    - "y"
+  out_names:
+    - "x"
+    - "y"
