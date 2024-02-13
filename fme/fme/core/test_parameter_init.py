@@ -1,15 +1,16 @@
 """The registry also performs configuration set up so it needs to be tested."""
 import copy
-from typing import Mapping
+from pathlib import Path
+from typing import Mapping, Tuple
 
 import pytest
 import torch
 
+from fme.core import parameter_init
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.fcn_training.registry import with_weights
+from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
@@ -47,16 +48,12 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         },
         str(tmpdir / "weights.ckpt"),
     )
-    with_builder_config = {
-        "type": "BuilderWithWeights",
-        "config": {
-            "module": sfno_config_data,
-            "weights_path": str(tmpdir / "weights.ckpt"),
-            "allow_missing_parameters": False,
-        },
+    parameter_init_config = {
+        "weights_path": str(tmpdir / "weights.ckpt"),
     }
     with_builder_stepper_config_data = {
-        "builder": with_builder_config,
+        "builder": sfno_config_data,
+        "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
@@ -139,63 +136,12 @@ def assert_same_state(
 def test_builder_with_weights_sfno_init(
     tmpdir, loaded_shape, built_shape, extra_built_layer: bool, expect_exception: bool
 ):
-    sfno_config_data = {
-        "type": "SphericalFourierNeuralOperatorNet",
-        "config": {
-            "num_layers": 2,
-            "embed_dim": 3,
-            "scale_factor": 1,
-        },
-    }
-    stepper_config_data = {
-        "builder": sfno_config_data,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
-            }
-        ),
-    }
-    area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
+    """
+    Integration test for the BuilderWithWeights stepper with a SFNO.
+    """
+    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+        loaded_shape, extra_built_layer, tmpdir
     )
-    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
-    stepper = stepper_config.get_stepper(
-        img_shape=loaded_shape,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    built_sfno_config_data = copy.deepcopy(sfno_config_data)
-    if extra_built_layer:
-        built_sfno_config_data["config"]["num_layers"] += 1  # type: ignore
-    torch.save(
-        {
-            "stepper": stepper.get_state(),
-        },
-        str(tmpdir / "weights.ckpt"),
-    )
-    with_builder_config = {
-        "type": "BuilderWithWeights",
-        "config": {
-            "module": built_sfno_config_data,
-            "weights_path": str(tmpdir / "weights.ckpt"),
-            "allow_missing_parameters": False,
-        },
-    }
-    with_builder_stepper_config_data = {
-        "builder": with_builder_config,
-        "in_names": ["x"],
-        "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
-            }
-        ),
-    }
     if expect_exception:
         with pytest.raises(ValueError):
             with_builder_stepper = SingleModuleStepperConfig.from_state(
@@ -213,8 +159,6 @@ def test_builder_with_weights_sfno_init(
             area=area,
             sigma_coordinates=sigma_coordinates,
         )
-        print(with_builder_stepper.module.state_dict().keys())
-        print(stepper.module.state_dict().keys())
         if extra_built_layer:
             with pytest.raises(AssertionError):
                 assert_same_state(
@@ -287,9 +231,9 @@ class NestedModule(torch.nn.Module):
 def test_overwrite_weights(from_module, to_module, expected_exception):
     if expected_exception:
         with pytest.raises(expected_exception):
-            with_weights._overwrite_weights(from_module, to_module)
+            parameter_init._overwrite_weights(from_module, to_module)
     else:
-        with_weights._overwrite_weights(from_module, to_module)
+        parameter_init._overwrite_weights(from_module, to_module)
         for from_param, to_param in zip(
             from_module.parameters(), to_module.parameters()
         ):
@@ -304,10 +248,88 @@ def test_overwrite_weights(from_module, to_module, expected_exception):
                 )
 
 
+def get_config(loaded_shape: Tuple[int, int], extra_built_layer: bool, tmpdir: Path):
+    sfno_config_data = {
+        "type": "SphericalFourierNeuralOperatorNet",
+        "config": {
+            "num_layers": 2,
+            "embed_dim": 3,
+            "scale_factor": 1,
+        },
+    }
+    stepper_config_data = {
+        "builder": sfno_config_data,
+        "in_names": ["x"],
+        "out_names": ["x"],
+        "normalization": FromStateNormalizer(
+            state={
+                "means": {"x": torch.randn(1)},
+                "stds": {"x": torch.randn(1)},
+            }
+        ),
+    }
+    area = torch.ones((1, 16, 32)).to(get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
+        get_device()
+    )
+    stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
+    stepper = stepper_config.get_stepper(
+        img_shape=loaded_shape,
+        area=area,
+        sigma_coordinates=sigma_coordinates,
+    )
+    built_sfno_config_data = copy.deepcopy(sfno_config_data)
+    if extra_built_layer:
+        built_sfno_config_data["config"]["num_layers"] += 1  # type: ignore
+    torch.save(
+        {
+            "stepper": stepper.get_state(),
+        },
+        str(tmpdir / "weights.ckpt"),
+    )
+    parameter_init_config = {
+        "weights_path": str(tmpdir / "weights.ckpt"),
+    }
+    with_builder_stepper_config_data = {
+        "builder": built_sfno_config_data,
+        "parameter_init": parameter_init_config,
+        "in_names": ["x"],
+        "out_names": ["x"],
+        "normalization": FromStateNormalizer(
+            state={
+                "means": {"x": torch.randn(1)},
+                "stds": {"x": torch.randn(1)},
+            }
+        ),
+    }
+    return with_builder_stepper_config_data, area, sigma_coordinates, stepper
+
+
+def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
+    img_shape = (16, 32)
+    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+        loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
+    )
+    with_builder_stepper = SingleModuleStepperConfig.from_state(
+        with_builder_stepper_config_data
+    ).get_stepper(
+        img_shape=img_shape,
+        area=area,
+        sigma_coordinates=sigma_coordinates,
+    )
+    stepper_state = with_builder_stepper.get_state()
+    # should be able to initialize stepper from its state without the untuned weights
+    (tmpdir / "weights.ckpt").remove()
+    stepper = SingleModuleStepper.from_state(
+        stepper_state, area=area, sigma_coordinates=sigma_coordinates
+    )
+    assert isinstance(stepper, SingleModuleStepper)
+
+
 def test_overwrite_weights_exclude():
     from_module = NestedModule(10, 20)
     to_module = NestedModule(10, 20)
-    with_weights._overwrite_weights(
+    parameter_init._overwrite_weights(
         from_module, to_module, exclude_parameters=["linear1.*"]
     )
     assert not torch.allclose(
@@ -345,7 +367,7 @@ class ComplexModule(torch.nn.Module):
 )
 def test_frozen_parameter_config(apply_config: bool):
     module = ComplexModule(10, 20)
-    config = with_weights.FrozenParameterConfig(
+    config = parameter_init.FrozenParameterConfig(
         include=[
             "linear2.*",
             "custom_param",
@@ -390,6 +412,6 @@ def test_frozen_parameter_config(apply_config: bool):
 def test_frozen_parameter_config_no_overlaps(include, exclude, expect_exception):
     if expect_exception:
         with pytest.raises(ValueError):
-            with_weights.FrozenParameterConfig(include=include, exclude=exclude)
+            parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
     else:
-        with_weights.FrozenParameterConfig(include=include, exclude=exclude)
+        parameter_init.FrozenParameterConfig(include=include, exclude=exclude)

@@ -1,12 +1,12 @@
 import dataclasses
 import re
-from typing import Any, List, Mapping, Optional, Tuple
+from typing import Any, List, Mapping, Optional
 
 import torch
 from torch import nn
 
 from fme.core.device import get_device
-from fme.fcn_training.registry.registry import ModuleConfig, ModuleSelector, register
+from fme.fcn_training.registry.registry import ModuleSelector
 
 
 @dataclasses.dataclass
@@ -54,9 +54,15 @@ class FrozenParameterConfig:
                         f"Parameter {name} is included in both include "
                         f"{self.include} and exclude {self.exclude}"
                     )
-                model.get_parameter(name).requires_grad = False
+                try:
+                    model.get_parameter(name).requires_grad = False
+                except AttributeError:  # non-parameter state
+                    pass
             elif any(wildcard_match(pattern, name) for pattern in self.exclude):
-                model.get_parameter(name).requires_grad = True
+                try:
+                    model.get_parameter(name).requires_grad = True
+                except AttributeError:  # non-parameter state
+                    pass
             else:
                 missing_parameters.append(name)
         if len(missing_parameters) > 0:
@@ -81,33 +87,20 @@ def wildcard_match(pattern: str, name: str) -> bool:
     return bool(re.match(pattern, name))
 
 
-@register("BuilderWithWeights")
 @dataclasses.dataclass
-class BuilderWithWeights(ModuleConfig):
+class ParameterInitializationConfig:
     """
-    A builder which initializes a model from another builder and loads weights
-    from disk, and then initializes each parameter in the built model with
-    the corresponding parameter in the loaded model.
+    A class which applies custom initialization to module parameters.
 
-    When the built model has a larger number of parameters than the loaded model,
-    only the initial slice is initialized. For example, if the loaded model has
-    a parameter `a` of shape [10, 10], and the built model has a parameter `a`
-    of shape [20, 10], then only the first 10 rows of `a` will be initialized
-    from the weights on disk.
+    Assumes the module weights have already been randomly initialized.
 
-    This is particularly helpful for fine-tuning a model, as it allows us to
-    initialize a model with weights from a pre-trained model and then train
-    the model on a new dataset potentially with new weights. For example, these
-    weights could correspond to new inputs or output variables, or
-    increased model resolution.
+    Supports overwriting the weights of the built model with weights from a
+    pre-trained model. If the built model has larger weights than the
+    pre-trained model, only the initial slice of the weights is overwritten.
 
     Attributes:
-        module: configuration to build the model
-        weights_path: path to a SingleModuleStepper checkpoint
+        weight_path: path to a SingleModuleStepper checkpoint
             containing weights to load
-        allow_missing_parameters: if True, allow the built model to have new
-            parameters not defined in the loaded model. The built model is still
-            not allowed to be missing parameters defined in the loaded model.
         exclude_parameters: list of parameter names to exclude from the loaded
             weights. Used for example to keep the random initialization for
             final layer(s) of a model, and only overwrite the weights for
@@ -115,82 +108,29 @@ class BuilderWithWeights(ModuleConfig):
         frozen_parameters: configuration for freezing parameters in the built model
     """
 
-    module: ModuleSelector
-    weights_path: str
-    allow_missing_parameters: bool = False
+    weights_path: Optional[str] = None
     exclude_parameters: List[str] = dataclasses.field(default_factory=list)
     frozen_parameters: FrozenParameterConfig = dataclasses.field(
         default_factory=lambda: FrozenParameterConfig(exclude=["*"])
     )
 
-    def build(
-        self,
-        n_in_channels: int,
-        n_out_channels: int,
-        img_shape: Tuple[int, int],
-    ) -> nn.Module:
+    def apply(self, module: nn.Module, init_weights: bool) -> nn.Module:
         """
-        Build a nn.Module given information about the input and output channels
-        and the image shape.
+        Apply the weight initialization to a module.
 
         Args:
-            n_in_channels: number of input channels
-            n_out_channels: number of output channels
-            img_shape: last two dimensions of data, corresponding to lat and lon
+            module: a nn.Module to initialize
+            init_weights: whether to initialize the weight values
 
         Returns:
-            a nn.Module
+            a nn.Module with initialization applied
         """
-        model = self.module.build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            img_shape=img_shape,
-        )
-        checkpoint = torch.load(self.weights_path, map_location=get_device())
-        loaded_builder = ModuleSelector.from_state(
-            checkpoint["stepper"]["config"]["builder"]
-        )
-        if "data_shapes" in checkpoint["stepper"]:
-            # included for backwards compatibility
-            data_shapes = checkpoint["stepper"]["data_shapes"]
-            loaded_img_shape = data_shapes[list(data_shapes.keys())[0]][-2:]
-        else:
-            loaded_img_shape = checkpoint["stepper"]["img_shape"]
-        loaded_model = loaded_builder.build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
-            img_shape=loaded_img_shape,
-        )
-        state_dict = _strip_leading_module(checkpoint["stepper"]["module"])
-        loaded_model.load_state_dict(state_dict)
-
-        _overwrite_weights(
-            loaded_model, model, exclude_parameters=self.exclude_parameters
-        )
-
-        self.frozen_parameters.apply(model)
-
-        return model
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "ModuleConfig":
-        """
-        Create a ModuleSelector from a dictionary containing all the information
-        needed to build a ModuleConfig.
-        """
-        state = dict(state)  # make a copy so we can modify it
-        if "builder" in state and "module" not in state:
-            module_selector = ModuleSelector.from_state(state.pop("builder"))
-        else:
-            module_selector = ModuleSelector.from_state(state.pop("module"))
-        if "frozen_parameters" in state:
-            state["frozen_parameters"] = FrozenParameterConfig(
-                **state.pop("frozen_parameters")
+        if init_weights and self.weights_path is not None:
+            return _overwrite_weights_from_stepper_path(
+                module, self.weights_path, exclude_parameters=self.exclude_parameters
             )
-        return cls(
-            module=module_selector,
-            **state,
-        )
+        self.frozen_parameters.apply(module)
+        return module
 
 
 def _strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -214,6 +154,36 @@ def set_nested_parameter(module, param_name, new_param):
     if not isinstance(new_param, nn.Parameter):
         new_param = nn.Parameter(new_param)
     setattr(module, name, new_param)
+
+
+def _overwrite_weights_from_stepper_path(
+    module: nn.Module, weights_path: str, exclude_parameters: Optional[List[str]] = None
+):
+    """
+    Overwrite the weights in module with the weights in the SingleModuleStepper
+    checkpoint at weights_path.
+    """
+    checkpoint = torch.load(weights_path, map_location=get_device())
+    loaded_builder = ModuleSelector.from_state(
+        checkpoint["stepper"]["config"]["builder"]
+    )
+    if "data_shapes" in checkpoint["stepper"]:
+        # included for backwards compatibility
+        data_shapes = checkpoint["stepper"]["data_shapes"]
+        loaded_img_shape = data_shapes[list(data_shapes.keys())[0]][-2:]
+    else:
+        loaded_img_shape = checkpoint["stepper"]["img_shape"]
+    loaded_model = loaded_builder.build(
+        n_in_channels=len(checkpoint["stepper"]["config"]["in_names"]),
+        n_out_channels=len(checkpoint["stepper"]["config"]["in_names"]),
+        img_shape=loaded_img_shape,
+    )
+    state_dict = _strip_leading_module(checkpoint["stepper"]["module"])
+    loaded_model.load_state_dict(state_dict)
+
+    _overwrite_weights(loaded_model, module)
+
+    return module
 
 
 def _overwrite_weights(
