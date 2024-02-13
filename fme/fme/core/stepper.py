@@ -36,6 +36,7 @@ from fme.core.prescriber import PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
+from .parameter_init import ParameterInitializationConfig
 
 
 @dataclasses.dataclass
@@ -44,6 +45,9 @@ class SingleModuleStepperConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: Union[NormalizationConfig, FromStateNormalizer]
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
     optimization: Optional[DisabledOptimizationConfig] = None
     ocean: Optional[OceanConfig] = None
     loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
@@ -198,6 +202,7 @@ class SingleModuleStepper:
         img_shape: Tuple[int, int],
         area: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
+        init_weights: bool = True,
     ):
         """
         Args:
@@ -206,6 +211,8 @@ class SingleModuleStepper:
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
             sigma_coordinates: The sigma coordinates.
+            init_weights: Whether to initialize the weights. Should pass False if
+                the weights are about to be overwritten by a checkpoint.
         """
         dist = Distributed.get_instance()
         n_in_channels = len(config.in_names)
@@ -221,7 +228,11 @@ class SingleModuleStepper:
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             img_shape=img_shape,
+        )
+        self.module = config.parameter_init.apply(
+            self.module, init_weights=init_weights
         ).to(get_device())
+
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -372,6 +383,8 @@ class SingleModuleStepper:
             img_shape=img_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
+            # don't need to initialize weights, we're about to load_state
+            init_weights=False,
         )
         stepper.load_state(state)
         return stepper
