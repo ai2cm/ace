@@ -18,6 +18,10 @@ from fme.downscaling.metrics_and_maths import (
 )
 
 
+def _detach_and_to_cpu(x: TensorMapping) -> TensorMapping:
+    return {k: v.detach().cpu() for k, v in x.items()}
+
+
 class Mean:
     """
     Tracks a running average of a metric over multiple batches.
@@ -45,12 +49,14 @@ class Mean:
                 `torch.Tensor` arguments of the `metric` used to initialize this
                 object.
         """
-        metric = self._mapped_metric(*values)
+        values_list = [_detach_and_to_cpu(v) for v in list(values)]
+        del values  # Avoid accidental use of the original values
+        metric = self._mapped_metric(*values_list)
 
         if self._sum is None:
             self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
 
-        self._sum = self._add(self._sum, self._mapped_metric(*values))
+        self._sum = self._add(self._sum, self._mapped_metric(*values_list))
         self._count += 1
 
     def get(self) -> TensorMapping:
@@ -88,7 +94,7 @@ class Snapshot:
     def record_batch(self, values: TensorMapping) -> None:
         """Creates a snapshot if one has not yet been set."""
         if self.snapshot is None:
-            self.snapshot = values
+            self.snapshot = _detach_and_to_cpu(values)
 
     def get(self) -> TensorMapping:
         """
@@ -119,6 +125,7 @@ class DynamicHistogram:
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
+        data = _detach_and_to_cpu(data)
         if self.histograms is None:
             self.histograms = {
                 k: fme.core.histogram.DynamicHistogram(1, n_bins=self.n_bins)
@@ -143,7 +150,7 @@ class DynamicHistogram:
         return {k: wandb.Histogram(np_histogram=v) for k, v in self.get().items()}
 
 
-class InferenceAggregator:
+class Aggregator:
     """
     Class for aggregating inference metrics and intrinsic statistics.
 
@@ -226,7 +233,7 @@ class InferenceAggregator:
         if prefix != "":
             prefix += "/"
 
-        ret = {"loss": self.loss.get()["loss"]}
+        ret = {f"{prefix}loss": self.loss.get()["loss"]}
         for metric_name, agg in self._comparisons.items():
             ret.update(
                 {

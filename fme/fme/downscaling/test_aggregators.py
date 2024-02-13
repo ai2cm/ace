@@ -6,12 +6,7 @@ import torch
 from fme.core import metrics
 from fme.core.typing_ import TensorMapping
 from fme.downscaling import metrics_and_maths
-from fme.downscaling.aggregators import (
-    DynamicHistogram,
-    InferenceAggregator,
-    Mean,
-    Snapshot,
-)
+from fme.downscaling.aggregators import Aggregator, DynamicHistogram, Mean, Snapshot
 
 
 def assert_tensor_mapping_all_close(x: TensorMapping, y: TensorMapping):
@@ -119,7 +114,7 @@ def test_performance_metrics(prefix, expected_prefix):
     area_weights = torch.ones(n_lon)
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
-    aggregator = InferenceAggregator(area_weights, latitudes, n_histogram_bins=n_bins)
+    aggregator = Aggregator(area_weights, latitudes, n_histogram_bins=n_bins)
 
     target = {"x": torch.zeros(*shape)}
     pred = {"x": torch.ones(*shape)}
@@ -128,7 +123,8 @@ def test_performance_metrics(prefix, expected_prefix):
     all_metrics = aggregator.get(prefix=prefix)
     wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
-    assert "loss" in all_metrics and "loss" in wandb_metrics
+    assert f"{expected_prefix}loss" in all_metrics
+    assert f"{expected_prefix}loss" in wandb_metrics
     num_metrics = 1  # loss
     for metric_name in [
         "rmse",

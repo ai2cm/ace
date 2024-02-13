@@ -76,20 +76,31 @@ class Model:
 
 
 @dataclasses.dataclass
+class PairedNormalizationConfig:
+    highres: NormalizationConfig
+    lowres: NormalizationConfig
+
+    def build(
+        self, in_names: List[str], out_names: List[str]
+    ) -> HighResLowResPair[StandardNormalizer]:
+        return HighResLowResPair[StandardNormalizer](
+            lowres=self.lowres.build(in_names),
+            highres=self.highres.build(out_names),
+        )
+
+
+@dataclasses.dataclass
 class DownscalingModelConfig:
     module: ModuleRegistrySelector
     loss: LossConfig
     in_names: List[str]
     out_names: List[str]
-    normalization: HighResLowResPair[NormalizationConfig]
+    normalization: PairedNormalizationConfig
 
-    def build(self, lowres_shape: Tuple[int, int], upscale_factor: int) -> Model:
+    def build(self, lowres_shape: Tuple[int, int], downscale_factor: int) -> Model:
         module = self.module.build(
-            len(self.in_names), len(self.out_names), lowres_shape, upscale_factor
+            len(self.in_names), len(self.out_names), lowres_shape, downscale_factor
         )
-        normalizer = HighResLowResPair[StandardNormalizer](
-            self.normalization.lowres.build(self.in_names),
-            self.normalization.highres.build(self.out_names),
-        )
+        normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build()
         return Model(module, normalizer, loss, self.in_names, self.out_names)
