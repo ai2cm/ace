@@ -16,7 +16,7 @@ from fme.core.data_loading._xarray import (
     get_file_local_index,
 )
 from fme.core.data_loading.data_typing import GriddedData
-from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.getters import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams, Slice, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 

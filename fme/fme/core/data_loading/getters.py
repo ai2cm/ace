@@ -69,6 +69,20 @@ def _get_ensemble_dataset(
     return ensemble
 
 
+def get_dataset(
+    params: DataLoaderParams,
+    requirements: DataRequirements,
+) -> Dataset:
+    if params.data_type == "xarray":
+        return XarrayDataset(params, requirements)
+    elif params.data_type == "ensemble_xarray":
+        return _get_ensemble_dataset(params, requirements)
+    else:
+        raise NotImplementedError(
+            f"{params.data_type} does not have an implemented data loader"
+        )
+
+
 def get_data_loader(
     params: DataLoaderParams,
     train: bool,
@@ -83,16 +97,8 @@ def get_data_loader(
             if given the loader will only return data from this time slice.
             By default it will return the full windows.
     """
+    dataset = get_dataset(params, requirements)
     dist = Distributed.get_instance()
-    if params.data_type == "xarray":
-        dataset = XarrayDataset(params, requirements=requirements)
-    elif params.data_type == "ensemble_xarray":
-        dataset = _get_ensemble_dataset(params, requirements)
-    else:
-        raise NotImplementedError(
-            f"{params.data_type} does not have an implemented data loader"
-        )
-
     sampler = (
         DistributedSampler(dataset, shuffle=train) if dist.is_distributed() else None
     )
