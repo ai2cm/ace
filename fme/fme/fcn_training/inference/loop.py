@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 import torch
 import xarray as xr
@@ -131,6 +131,12 @@ def _inference_internal_loop(
     )
 
 
+def _to_device(
+    data: Mapping[str, torch.Tensor], device: torch.device
+) -> Dict[str, Any]:
+    return {key: value.to(device) for key, value in data.items()}
+
+
 def run_inference(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
@@ -151,7 +157,6 @@ def run_inference(
         # We process each time window and keep track of the
         # final state. We then use this as the initial condition
         # for the next time window.
-        device = get_device()
 
         for i, window_batch_data in enumerate(data_loader):
             i_time = i * forward_steps_in_memory
@@ -160,10 +165,9 @@ def run_inference(
                 f" to {i_time + forward_steps_in_memory} steps, "
                 f"out of total {n_forward_steps}."
             )
-            window_data = {
-                key: value.to(device, dtype=torch.float)
-                for key, value in window_batch_data.data.items()
-            }
+            device = get_device()
+            window_data = _to_device(window_batch_data.data, device)
+
             target_data = compute_derived_quantities(
                 window_data, data_loader.sigma_coordinates
             )
@@ -223,14 +227,9 @@ def run_dataset_inference(
                 f" to {i_time + forward_steps_in_memory} steps,"
                 f" out of total {n_forward_steps}."
             )
-            pred_data = {
-                key: value.to(device, dtype=torch.float)
-                for key, value in pred.data.items()
-            }
-            target_data = {
-                key: value.to(device, dtype=torch.float)
-                for key, value in target.data.items()
-            }
+            pred_data = _to_device(pred.data, device)
+            target_data = _to_device(target.data, device)
+
             stepped = SteppedData(
                 {"loss": torch.tensor(float("nan"))},
                 pred_data,
