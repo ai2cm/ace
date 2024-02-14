@@ -1,6 +1,6 @@
 import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Set
+from typing import Dict, Iterable, Mapping, Optional, Sequence
 
 import cftime
 import numpy as np
@@ -10,6 +10,7 @@ import xarray as xr
 from netCDF4 import Dataset
 
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.fcn_training.inference.data_writer.utils import get_all_names
 
 LEAD_TIME_DIM = "lead"
 LEAD_TIME_UNITS = "microseconds"
@@ -37,19 +38,11 @@ class PredictionDataWriter:
             filename: Path to write netCDF file(s).
             n_samples: Number of samples to write to the file. This might correspond
                 to a number of initial conditions, or some other grouping of samples.
-            n_timesteps: Number of timesteps to write to the file. Note that the
-                timesteps dimensions is encoded as "lead" time, i.e., time since
-                initialization. See
-                https://climpred.readthedocs.io/en/stable/setting-up-data.html
-                for the justification of the "lead" dim name and units.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
-
-
         """
-        self.path = path
         filename = str(Path(path) / "autoregressive_predictions.nc")
         self._save_names = save_names
         self.metadata = metadata
@@ -72,13 +65,7 @@ class PredictionDataWriter:
     def _get_variable_names_to_save(
         self, *data_varnames: Iterable[str]
     ) -> Iterable[str]:
-        variables: Set[str] = set()
-        for varnames in data_varnames:
-            variables = variables.union(set(varnames))
-        if self._save_names is None:
-            return variables
-        else:
-            return variables.intersection(set(self._save_names))
+        return get_all_names(*data_varnames, allowlist=self._save_names)
 
     def append_batch(
         self,
@@ -267,7 +254,9 @@ def get_batch_lead_times_microseconds(
     # ~292 years. See
     # https://numpy.org/doc/stable/reference/arrays.datetime.html#datetime-units
     # for more details on the limits of various precision timedeltas.
-    lead_times: npt.NDArray[datetime.timedelta] = batch_times - init_times[:, None]
+    lead_times: npt.NDArray[datetime.timedelta] = (  # type: ignore
+        batch_times - init_times[:, None]
+    )
     lead_times_microseconds: npt.NDArray[np.int64] = (
         lead_times // datetime.timedelta(microseconds=1)
     ).astype(np.int64)
