@@ -54,6 +54,10 @@ class MockWandB:
     def Table(self):
         return upstream_wandb.Table
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
 
 @contextlib.contextmanager
 def mock_wandb():
