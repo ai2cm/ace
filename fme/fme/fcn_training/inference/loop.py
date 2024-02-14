@@ -1,4 +1,6 @@
 import logging
+import time
+from collections import defaultdict
 from typing import Any, Dict, Mapping, Optional, Union
 
 import torch
@@ -144,10 +146,10 @@ def run_inference(
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
-):
+) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
-    batch_manager = WindowStitcher(n_forward_steps, writer)
+    stitcher = WindowStitcher(n_forward_steps, writer)
 
     with torch.no_grad():
         # We have data batches with long windows, where all data for a
@@ -158,7 +160,11 @@ def run_inference(
         # final state. We then use this as the initial condition
         # for the next time window.
 
+        timers: Dict[str, float] = defaultdict(float)
+        current_time = time.time()
         for i, window_batch_data in enumerate(data_loader):
+            timers["data_loading"] += time.time() - current_time
+            current_time = time.time()
             i_time = i * forward_steps_in_memory
             logging.info(
                 f"Inference: starting window spanning {i_time}"
@@ -171,7 +177,7 @@ def run_inference(
             target_data = compute_derived_quantities(
                 window_data, data_loader.sigma_coordinates
             )
-            batch_manager.apply_initial_condition(window_data)
+            stitcher.apply_initial_condition(window_data)
             stepped = stepper.run_on_batch(
                 window_data,
                 NullOptimization(),
@@ -181,13 +187,21 @@ def run_inference(
             stepped.gen_data = compute_derived_quantities(
                 stepped.gen_data, data_loader.sigma_coordinates
             )
+            timers["run_on_batch"] += time.time() - current_time
+            current_time = time.time()
             _inference_internal_loop(
                 stepped,
                 i_time,
                 aggregator,
-                batch_manager,
+                stitcher,
                 window_batch_data.times,
             )
+            timers["writer_and_aggregator"] += time.time() - current_time
+            current_time = time.time()
+
+        for name, duration in timers.items():
+            logging.info(f"{name} duration: {duration:.2f}s")
+    return timers
 
 
 def remove_initial_condition(
@@ -204,46 +218,53 @@ def run_dataset_inference(
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
-):
+) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
-    batch_manager = WindowStitcher(n_forward_steps, writer)
+    stitcher = WindowStitcher(n_forward_steps, writer)
 
     device = get_device()
-    with torch.no_grad():
-        # We have data batches with long windows, where all data for a
-        # given batch does not fit into memory at once, so we window it in time
-        # and run the model on each window in turn.
-        #
-        # We process each time window and keep track of the
-        # final state. We then use this as the initial condition
-        # for the next time window.
-        for i, (pred, target) in enumerate(
-            zip(prediction_data_loader, target_data_loader)
-        ):
-            i_time = i * forward_steps_in_memory
-            logging.info(
-                f"Inference: starting window spanning {i_time}"
-                f" to {i_time + forward_steps_in_memory} steps,"
-                f" out of total {n_forward_steps}."
-            )
-            pred_data = _to_device(pred.data, device)
-            target_data = _to_device(target.data, device)
-
-            stepped = SteppedData(
-                {"loss": torch.tensor(float("nan"))},
-                pred_data,
-                target_data,
-                normalizer.normalize(pred_data),
-                normalizer.normalize(target_data),
-            )
-            stepped = compute_stepped_derived_quantities(
-                stepped, target_data_loader.sigma_coordinates
-            )
-            _inference_internal_loop(
-                stepped,
-                i_time,
-                aggregator,
-                batch_manager,
-                target.times,
-            )
+    # We have data batches with long windows, where all data for a
+    # given batch does not fit into memory at once, so we window it in time
+    # and run the model on each window in turn.
+    #
+    # We process each time window and keep track of the
+    # final state. We then use this as the initial condition
+    # for the next time window.
+    timers: Dict[str, float] = defaultdict(float)
+    current_time = time.time()
+    for i, (pred, target) in enumerate(zip(prediction_data_loader, target_data_loader)):
+        timers["data_loading"] += time.time() - current_time
+        current_time = time.time()
+        i_time = i * forward_steps_in_memory
+        logging.info(
+            f"Inference: starting window spanning {i_time}"
+            f" to {i_time + forward_steps_in_memory} steps,"
+            f" out of total {n_forward_steps}."
+        )
+        pred_data = _to_device(pred.data, device)
+        target_data = _to_device(target.data, device)
+        stepped = SteppedData(
+            {"loss": torch.tensor(float("nan"))},
+            pred_data,
+            target_data,
+            normalizer.normalize(pred_data),
+            normalizer.normalize(target_data),
+        )
+        stepped = compute_stepped_derived_quantities(
+            stepped, target_data_loader.sigma_coordinates
+        )
+        timers["run_on_batch"] += time.time() - current_time
+        current_time = time.time()
+        _inference_internal_loop(
+            stepped,
+            i_time,
+            aggregator,
+            stitcher,
+            target.times,
+        )
+        timers["writer_and_aggregator"] += time.time() - current_time
+        current_time = time.time()
+    for name, duration in timers.items():
+        logging.info(f"{name} duration: {duration:.2f}s")
+    return timers
