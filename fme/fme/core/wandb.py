@@ -74,6 +74,10 @@ class WandB:
     def Table(self):
         return wandb.Table
 
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
 
 def scale_image(
     image_data: np.ndarray,

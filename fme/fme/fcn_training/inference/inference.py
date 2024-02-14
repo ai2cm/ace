@@ -196,6 +196,7 @@ def main(
 
     logging_utils.log_versions()
 
+    start_time = time.time()
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
     data_requirements = stepper_config.get_data_requirements(
@@ -233,7 +234,7 @@ def main(
             requirements=data_requirements,
         )
 
-        run_dataset_inference(
+        timers = run_dataset_inference(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
             prediction_data_loader=prediction_data_loader,
@@ -243,7 +244,7 @@ def main(
             writer=writer,
         )
     else:
-        run_inference(
+        timers = run_inference(
             aggregator=aggregator,
             writer=writer,
             stepper=stepper,
@@ -252,13 +253,25 @@ def main(
             forward_steps_in_memory=config.forward_steps_in_memory,
         )
 
-    logging.info("Starting logging of metrics to wandb")
+    duration = time.time() - start_time
+    total_steps = config.n_forward_steps * config.validation_loader.n_samples
+    total_steps_per_second = total_steps / duration
+    logging.info(f"Inference duration: {duration:.2f} seconds")
+    logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
+
     step_logs = aggregator.get_inference_logs(label="inference")
     wandb = WandB.get_instance()
-    for i, log in enumerate(step_logs):
-        wandb.log(log, step=i)
-        # wandb.log cannot be called more than "a few times per second"
-        time.sleep(0.3)
+    if wandb.enabled:
+        logging.info("Starting logging of metrics to wandb")
+        duration_logs = {
+            "duration_seconds": duration,
+            "total_steps_per_second": total_steps_per_second,
+        }
+        wandb.log({**timers, **duration_logs}, step=0)
+        for i, log in enumerate(step_logs):
+            wandb.log(log, step=i)
+            # wandb.log cannot be called more than "a few times per second"
+            time.sleep(0.3)
     writer.flush()
 
     logging.info("Writing reduced metrics to disk in netcdf format.")
