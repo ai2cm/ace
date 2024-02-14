@@ -104,6 +104,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            enable_monthly_netcdfs=True,
             enable_histogram_netcdfs=True,
             save_names=None,
         )
@@ -236,6 +237,15 @@ class TestDataWriter:
         )
         assert same_count_each_timestep
 
+        with xr.open_dataset(tmp_path / "monthly_binned_predictions.nc") as ds:
+            assert ds.counts.sum() == n_samples * n_timesteps
+            assert np.sum(np.isnan(ds["precipitation"])) == 0
+            assert np.sum(np.isnan(ds["temp"])) == 0
+            assert np.sum(np.isnan(ds["pressure"])) == 0
+            assert np.all(ds.init.dt.year.values > 0)
+            assert np.all(ds.init.dt.year.values >= 0)
+            assert np.all(ds.valid_time.dt.month.values >= 0)
+
     @pytest.mark.parametrize(
         ["save_names"],
         [
@@ -260,6 +270,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            enable_monthly_netcdfs=True,
             save_names=save_names,
             enable_histogram_netcdfs=True,
         )
@@ -288,6 +299,27 @@ class TestDataWriter:
         assert set(dataset.variables.keys()) == expected_variables.union(
             {"source", "init", "lead", "lat", "lon", "valid_time"}
         )
+        expected_prediction_variables = set(sample_prediction_data.keys())
+        if save_names is not None:
+            expected_prediction_variables = expected_prediction_variables.intersection(
+                save_names
+            )
+        dataset = Dataset(tmp_path / "monthly_binned_predictions.nc", "r")
+        expected_variables = (
+            set(save_names)
+            if save_names is not None
+            else set(sample_target_data.keys())
+        )
+        assert set(dataset.variables.keys()) == expected_prediction_variables.union(
+            {
+                "init",
+                "lead",
+                "valid_time",
+                "counts",
+                "lat",
+                "lon",
+            }
+        )
         histograms = xr.open_dataset(tmp_path / "histograms.nc")
         if save_names is None:
             expected_names = set(sample_target_data)
@@ -308,6 +340,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            enable_monthly_netcdfs=True,
             save_names=None,
             enable_histogram_netcdfs=True,
         )
@@ -354,6 +387,7 @@ class TestDataWriter:
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
+            enable_monthly_netcdfs=True,
             save_names=None,
             enable_histogram_netcdfs=True,
         )

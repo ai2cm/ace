@@ -8,12 +8,17 @@ import xarray as xr
 from fme.core.data_loading.data_typing import VariableMetadata
 
 from .histograms import HistogramDataWriter
+from .monthly import PairedMonthlyDataWriter
 from .prediction import PredictionDataWriter
 from .time_coarsen import TimeCoarsen, TimeCoarsenConfig
 from .video import VideoDataWriter
 
 Subwriter = Union[
-    PredictionDataWriter, VideoDataWriter, HistogramDataWriter, TimeCoarsen
+    PredictionDataWriter,
+    VideoDataWriter,
+    HistogramDataWriter,
+    TimeCoarsen,
+    PairedMonthlyDataWriter,
 ]
 
 
@@ -27,6 +32,8 @@ class DataWriterConfig:
             containing video metrics.
         save_prediction_files: Whether to enable writing of netCDF files
             containing the predictions.
+        save_monthly_files: Whether to enable writing of netCDF files
+            containing the monthly predictions and target values.
         save_raw_prediction_names: Names of variables to save in the predictions
             netcdf file.
         save_histogram_files: Enable writing of netCDF files containing histograms.
@@ -35,6 +42,7 @@ class DataWriterConfig:
 
     log_extended_video_netcdfs: bool = False
     save_prediction_files: bool = True
+    save_monthly_files: bool = True
     save_raw_prediction_names: Optional[Sequence[str]] = None
     save_histogram_files: bool = False
     time_coarsen: Optional[TimeCoarsenConfig] = None
@@ -63,6 +71,7 @@ class DataWriterConfig:
             metadata=metadata,
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
+            enable_monthly_netcdfs=self.save_monthly_files,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
             save_names=self.save_raw_prediction_names,
             enable_histogram_netcdfs=self.save_histogram_files,
@@ -79,6 +88,7 @@ class DataWriter:
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         enable_prediction_netcdfs: bool,
+        enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
         save_names: Optional[Sequence[str]],
         enable_histogram_netcdfs: bool,
@@ -92,11 +102,13 @@ class DataWriter:
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
-                containing the predictions.
+                containing the predictions and target values.
+            enable_monthly_netcdfs: Whether to enable writing of netCDF files
+                containing the monthly predictions and target values.
             enable_video_netcdfs: Whether to enable writing of netCDF files
                 containing video metrics.
-            save_names: Names of variables to save in the prediction and histogram
-                netCDF files.
+            save_names: Names of variables to save in the prediction, histogram,
+                and monthly netCDF files.
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
@@ -108,8 +120,7 @@ class DataWriter:
         def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
             if time_coarsen is not None:
                 return time_coarsen.build(data_writer)
-            else:
-                return data_writer
+            return data_writer
 
         if enable_prediction_netcdfs:
             self._writers.append(
@@ -121,6 +132,17 @@ class DataWriter:
                         metadata=metadata,
                         coords=coords,
                     )
+                )
+            )
+        if enable_monthly_netcdfs:
+            self._writers.append(
+                PairedMonthlyDataWriter(
+                    path=path,
+                    n_samples=n_samples,
+                    n_timesteps=n_timesteps,
+                    save_names=save_names,
+                    metadata=metadata,
+                    coords=coords,
                 )
             )
         if enable_video_netcdfs:
