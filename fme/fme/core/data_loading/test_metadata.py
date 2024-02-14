@@ -9,7 +9,7 @@ import pytest
 import xarray as xr
 
 from fme.core.data_loading.data_typing import VariableMetadata
-from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.getters import get_data_loader
 from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 

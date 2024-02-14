@@ -59,7 +59,7 @@ import yaml
 import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.aggregator.null import NullAggregator
-from fme.core.data_loading.get_loader import get_data_loader
+from fme.core.data_loading.getters import get_data_loader
 from fme.core.data_loading.inference import InferenceDataLoader
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
