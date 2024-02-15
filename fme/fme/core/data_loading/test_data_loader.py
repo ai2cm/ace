@@ -11,9 +11,8 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.getters import get_data_loader
+from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.inference import (
-    InferenceDataLoader,
     InferenceDataLoaderParams,
     InferenceInitialConditionIndices,
 )
@@ -162,11 +161,11 @@ def test_inference_data_loader(tmp_path):
     )
     n_forward_steps_in_memory = 3
     requirements = DataRequirements(["foo"], n_timesteps=7)
-    data_loader = InferenceDataLoader(
+    data_loader = get_inference_data(
         params,
         forward_steps_in_memory=n_forward_steps_in_memory,
         requirements=requirements,
-    )
+    ).loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
