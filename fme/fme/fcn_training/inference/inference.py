@@ -14,11 +14,9 @@ import yaml
 import fme
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.inference import (
-    InferenceDataLoader,
-    InferenceDataLoaderParams,
-)
+from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
+from fme.core.data_loading.getters import get_inference_data
+from fme.core.data_loading.inference import InferenceDataLoaderParams
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
@@ -161,13 +159,13 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return _load_stepper_config(self.checkpoint_path)
 
-    def get_data_writer(self, loader: InferenceDataLoader) -> DataWriter:
+    def get_data_writer(self, data: GriddedData) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
-            n_samples=loader.n_samples,  # we do inference on one batch
+            n_samples=self.validation_loader.n_samples,
             n_timesteps=self.n_forward_steps + 1,
-            metadata=loader.metadata,
-            coords=loader.coords,
+            metadata=data.metadata,
+            coords=data.coords,
         )
 
 
@@ -203,42 +201,42 @@ def main(
         n_forward_steps=config.n_forward_steps
     )
 
-    data_loader = InferenceDataLoader(
-        params=config.validation_loader,
-        forward_steps_in_memory=config.forward_steps_in_memory,
-        requirements=data_requirements,
+    data = get_inference_data(
+        config.validation_loader,
+        config.forward_steps_in_memory,
+        data_requirements,
     )
 
     stepper = config.load_stepper(
-        data_loader.area_weights.to(fme.get_device()),
-        sigma_coordinates=data_loader.sigma_coordinates.to(fme.get_device()),
+        data.area_weights.to(fme.get_device()),
+        sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
 
     aggregator = InferenceAggregator(
-        data_loader.area_weights.to(fme.get_device()),
-        sigma_coordinates=data_loader.sigma_coordinates,
+        data.area_weights.to(fme.get_device()),
+        sigma_coordinates=data.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
         enable_extended_videos=config.log_extended_video,
         log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
-        metadata=data_loader.metadata,
+        metadata=data.metadata,
     )
-    writer = config.get_data_writer(data_loader)
+    writer = config.get_data_writer(data)
 
     logging.info("Starting inference")
     if config.prediction_loader is not None:
-        prediction_data_loader = InferenceDataLoader(
-            params=config.prediction_loader,
-            forward_steps_in_memory=config.forward_steps_in_memory,
-            requirements=data_requirements,
+        prediction_data = get_inference_data(
+            config.prediction_loader,
+            config.forward_steps_in_memory,
+            data_requirements,
         )
 
         timers = run_dataset_inference(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
-            prediction_data_loader=prediction_data_loader,
-            target_data_loader=data_loader,
+            prediction_data=prediction_data,
+            target_data=data,
             n_forward_steps=config.n_forward_steps,
             forward_steps_in_memory=config.forward_steps_in_memory,
             writer=writer,
@@ -248,7 +246,7 @@ def main(
             aggregator=aggregator,
             writer=writer,
             stepper=stepper,
-            data_loader=data_loader,
+            data=data,
             n_forward_steps=config.n_forward_steps,
             forward_steps_in_memory=config.forward_steps_in_memory,
         )
@@ -276,7 +274,7 @@ def main(
 
     logging.info("Writing reduced metrics to disk in netcdf format.")
     for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
-        coords = {k: v for k, v in data_loader.coords.items() if k in ds.dims}
+        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
         ds = ds.assign_coords(coords)
         ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
 

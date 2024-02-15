@@ -1,11 +1,11 @@
 import dataclasses
-from typing import Mapping
 
 import numpy as np
+import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
 from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
@@ -45,11 +45,12 @@ class InferenceDataLoaderParams:
         start_indices: Slice indicating the set of indices to consider for initial
             conditions of inference series of data. Values following the initial
             condition will still come from the full dataset.
-            By default load all initial conditions.
+        num_data_workers: Number of parallel workers to use for data loading.
     """
 
     dataset: XarrayDataParams
     start_indices: InferenceInitialConditionIndices
+    num_data_workers: int = 0
 
     def __post_init__(self):
         dist = Distributed.get_instance()
@@ -69,7 +70,7 @@ class InferenceDataLoaderParams:
         return self._data_loader_params
 
 
-class InferenceDataLoader:
+class InferenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         params: InferenceDataLoaderParams,
@@ -81,10 +82,7 @@ class InferenceDataLoader:
         self._sigma_coordinates = dataset.sigma_coordinates
         self._metadata = dataset.metadata
         self._area_weights = dataset.area_weights
-        self._coords = {
-            **dataset.horizontal_coordinates.coords,
-            **dataset.sigma_coordinates.coords,
-        }
+        self._horizontal_coordinates = dataset.horizontal_coordinates
         self._forward_steps_in_memory = forward_steps_in_memory
         self._total_steps = requirements.n_timesteps - 1
         if self._total_steps % self._forward_steps_in_memory != 0:
@@ -118,10 +116,6 @@ class InferenceDataLoader:
     def __len__(self) -> int:
         return self._total_steps // self._forward_steps_in_memory
 
-    def __iter__(self):
-        for i in range(len(self)):
-            yield self[i]
-
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
         return self._sigma_coordinates
@@ -135,5 +129,5 @@ class InferenceDataLoader:
         return self._area_weights
 
     @property
-    def coords(self) -> Mapping[str, np.ndarray]:
-        return self._coords
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._horizontal_coordinates
