@@ -8,7 +8,7 @@ import xarray as xr
 
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.data_loading.inference import InferenceDataLoader
+from fme.core.data_loading.data_typing import GriddedData
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
@@ -142,7 +142,7 @@ def _to_device(
 def run_inference(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
-    data_loader: InferenceDataLoader,
+    data: GriddedData,
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
@@ -162,7 +162,7 @@ def run_inference(
 
         timers: Dict[str, float] = defaultdict(float)
         current_time = time.time()
-        for i, window_batch_data in enumerate(data_loader):
+        for i, window_batch_data in enumerate(data.loader):
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
             i_time = i * forward_steps_in_memory
@@ -175,7 +175,7 @@ def run_inference(
             window_data = _to_device(window_batch_data.data, device)
 
             target_data = compute_derived_quantities(
-                window_data, data_loader.sigma_coordinates
+                window_data, data.sigma_coordinates
             )
             stitcher.apply_initial_condition(window_data)
             stepped = stepper.run_on_batch(
@@ -185,7 +185,7 @@ def run_inference(
             )
             stepped.target_data = target_data
             stepped.gen_data = compute_derived_quantities(
-                stepped.gen_data, data_loader.sigma_coordinates
+                stepped.gen_data, data.sigma_coordinates
             )
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
@@ -213,8 +213,8 @@ def remove_initial_condition(
 def run_dataset_inference(
     aggregator: InferenceAggregator,
     normalizer: StandardNormalizer,
-    prediction_data_loader: InferenceDataLoader,
-    target_data_loader: InferenceDataLoader,
+    prediction_data: GriddedData,
+    target_data: GriddedData,
     n_forward_steps: int,
     forward_steps_in_memory: int,
     writer: Optional[Union[DataWriter, NullDataWriter]] = None,
@@ -233,7 +233,7 @@ def run_dataset_inference(
     # for the next time window.
     timers: Dict[str, float] = defaultdict(float)
     current_time = time.time()
-    for i, (pred, target) in enumerate(zip(prediction_data_loader, target_data_loader)):
+    for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
         timers["data_loading"] += time.time() - current_time
         current_time = time.time()
         i_time = i * forward_steps_in_memory
@@ -242,17 +242,17 @@ def run_dataset_inference(
             f" to {i_time + forward_steps_in_memory} steps,"
             f" out of total {n_forward_steps}."
         )
-        pred_data = _to_device(pred.data, device)
-        target_data = _to_device(target.data, device)
+        pred_window_data = _to_device(pred.data, device)
+        target_window_data = _to_device(target.data, device)
         stepped = SteppedData(
             {"loss": torch.tensor(float("nan"))},
-            pred_data,
-            target_data,
-            normalizer.normalize(pred_data),
-            normalizer.normalize(target_data),
+            pred_window_data,
+            target_window_data,
+            normalizer.normalize(pred_window_data),
+            normalizer.normalize(target_window_data),
         )
         stepped = compute_stepped_derived_quantities(
-            stepped, target_data_loader.sigma_coordinates
+            stepped, target_data.sigma_coordinates
         )
         timers["run_on_batch"] += time.time() - current_time
         current_time = time.time()

@@ -11,6 +11,7 @@ from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset
 from .data_typing import Dataset, GriddedData
+from .inference import InferenceDataLoaderParams, InferenceDataset
 from .params import DataLoaderParams
 from .requirements import DataRequirements
 from .utils import BatchData
@@ -119,6 +120,38 @@ def get_data_loader(
         metadata=dataset.metadata,
         area_weights=dataset.area_weights,
         sampler=sampler,
+        sigma_coordinates=dataset.sigma_coordinates,
+        horizontal_coordinates=dataset.horizontal_coordinates,
+    )
+
+
+def get_inference_data(
+    config: InferenceDataLoaderParams,
+    forward_steps_in_memory: int,
+    requirements: DataRequirements,
+) -> GriddedData:
+    """
+    Args:
+        config: Parameters for the data loader.
+        forward_steps_in_memory: Number of forward steps to keep in memory at once.
+        requirements: Data requirements for the model.
+
+    Returns:
+        A data loader for inference with coordinates and metadata.
+    """
+    dataset = InferenceDataset(config, forward_steps_in_memory, requirements)
+    # we roll our own batching in InferenceDataset, which is why batch_size=None below
+    loader = DataLoader(
+        dataset,
+        batch_size=None,
+        num_workers=config.num_data_workers,
+        shuffle=False,
+        pin_memory=using_gpu(),
+    )
+    return GriddedData(
+        loader=loader,
+        metadata=dataset.metadata,
+        area_weights=dataset.area_weights,
         sigma_coordinates=dataset.sigma_coordinates,
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
