@@ -59,8 +59,7 @@ import yaml
 import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
 from fme.core.aggregator.null import NullAggregator
-from fme.core.data_loading.getters import get_data_loader
-from fme.core.data_loading.inference import InferenceDataLoader
+from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
@@ -146,10 +145,10 @@ class Trainer:
         inference_data_requirements = dataclasses.replace(data_requirements)
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
-        self._inference_data_loader = InferenceDataLoader(
-            params=config.inference.loader,
-            forward_steps_in_memory=config.inference.forward_steps_in_memory,
-            requirements=inference_data_requirements,
+        self._inference_data = get_inference_data(
+            config.inference.loader,
+            config.inference.forward_steps_in_memory,
+            inference_data_requirements,
         )
 
         self._ema = self.config.ema.build(self.stepper.modules)
@@ -367,7 +366,7 @@ class Trainer:
             run_inference(
                 aggregator=aggregator,
                 stepper=self.stepper,
-                data_loader=self._inference_data_loader,
+                data=self._inference_data,
                 n_forward_steps=self.config.inference.n_forward_steps,
                 forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
             )
