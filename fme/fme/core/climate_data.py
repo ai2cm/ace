@@ -1,5 +1,6 @@
+import re
 from types import MappingProxyType
-from typing import Dict, List, Mapping
+from typing import Dict, List, Mapping, Union
 
 import torch
 
@@ -23,6 +24,26 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "sfc_up_lw_radiative_flux": ["ULWRFsfc"],
     }
 )
+
+
+def natural_sort(alist: List[str]) -> List[str]:
+    """Sort to alphabetical order but with numbers sorted
+    numerically, e.g. a11 comes after a2. See [1] and [2].
+
+    [1] https://stackoverflow.com/questions/11150239/natural-sorting
+    [2] https://en.wikipedia.org/wiki/Natural_sort_order
+    """
+
+    def convert(text: str) -> Union[str, int]:
+        if text.isdigit():
+            return int(text)
+        else:
+            return text.lower()
+
+    def alphanum_key(item: str) -> List[Union[str, int]]:
+        return [convert(c) for c in re.split("([0-9]+)", item)]
+
+    return sorted(alist, key=alphanum_key)
 
 
 class ClimateData:
@@ -63,10 +84,8 @@ class ClimateData:
 
         if len(names) == 0:
             raise KeyError(prefix)
-        elif len(names) > 10:
-            raise NotImplementedError("No support for > 10 vertical levels.")
 
-        names = sorted(names)
+        names = natural_sort(names)
         return torch.stack([self._data[name] for name in names], dim=-1)
 
     def _get(self, name):
