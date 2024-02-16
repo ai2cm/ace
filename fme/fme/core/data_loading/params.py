@@ -46,8 +46,7 @@ class DataLoaderParams:
         num_data_workers: Number of parallel workers to use for data loading.
         data_type: Type of data to load.
         n_samples: Number of samples to load, starting at the beginning of the data.
-            If None, load all samples. If data_type=="ensemble_xarray", this is the
-            number of samples per ensemble member dataset.
+            If None, load all samples.
         window_starts: Slice indicating the set of indices to consider for initial
             conditions of windows of data. Values following the initial condition will
             still come from the full dataset. By default load all initial conditions.
@@ -59,18 +58,6 @@ class DataLoaderParams:
     data_type: Literal["xarray", "ensemble_xarray"]
     n_samples: Optional[int] = None
     window_starts: Slice = dataclasses.field(default_factory=Slice)
-
-    @property
-    def data_path(self) -> str:
-        return self.dataset.data_path
-
-    @property
-    def n_repeats(self) -> int:
-        return self.dataset.n_repeats
-
-    @property
-    def engine(self) -> Optional[Literal["netcdf4", "h5netcdf"]]:
-        return self.dataset.engine
 
     def __post_init__(self):
         if self.n_samples is not None and self.batch_size > self.n_samples:
@@ -93,5 +80,5 @@ class DataLoaderParams:
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
 
-        if self.n_repeats != 1 and self.data_type == "ensemble_xarray":
+        if self.dataset.n_repeats != 1 and self.data_type == "ensemble_xarray":
             raise ValueError("n_repeats must be 1 when using ensemble_xarray")
