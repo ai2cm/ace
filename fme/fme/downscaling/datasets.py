@@ -10,8 +10,8 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 import fme.core.data_loading.params
-from fme.core.data_loading._xarray import XarrayDataset
 from fme.core.data_loading.data_typing import HorizontalCoordinates
+from fme.core.data_loading.getters import get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -95,7 +95,7 @@ class DataLoaderParams:
             dist = Distributed.get_instance()
 
         dataset_highres, dataset_lowres = [
-            XarrayDataset(
+            get_dataset(
                 fme.core.data_loading.params.DataLoaderParams(
                     dataset=fme.core.data_loading.params.XarrayDataParams(
                         data_path=path,
