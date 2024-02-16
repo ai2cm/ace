@@ -16,13 +16,10 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.8"
-          cache: "pip"
-          cache-dependency-path: |
-            requirements_except_torch.txt
-            requirements_outside_of_docker.txt
-            requirements_no_deps.txt
-            fme/dev-requirements.txt
-
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.pythonLocation }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements_except_torch.txt') }}-${{ hashFiles('requirements_outside_of_docker.txt') }}-${{ hashFiles('requirements_no_deps.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -40,12 +37,10 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.8"
-          cache: "pip"
-          cache-dependency-path: |
-            requirements_except_torch.txt`
-            requirements_outside_of_docker.txt
-            fme/dev-requirements.txt
-
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.pythonLocation }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements_except_torch.txt') }}-${{ hashFiles('requirements_outside_of_docker.txt') }}-${{ hashFiles('requirements_no_deps.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
