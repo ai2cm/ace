@@ -1,11 +1,11 @@
 import dataclasses
-import re
 from typing import Any, List, Mapping, Optional
 
 import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.wildcard import apply_by_wildcard, wildcard_match
 from fme.fcn_training.registry.registry import ModuleSelector
 
 
@@ -17,15 +17,14 @@ class FrozenParameterConfig:
     Parameter names can include wildcards, e.g. "encoder.*" will select
     all parameters in the encoder, while "encoder.*.bias" will select all
     bias parameters in the encoder. All parameters must be specified
-    in either the frozen_parameters or unfrozen_parameters list, or
+    in either the include or exclude list, or
     an exception will be raised.
 
     An exception is raised if a parameter is included by both lists.
 
     Attributes:
-        include: list of parameter names to freeze
-        exclude: list of parameter names to unfreeze, taking
-            priority over frozen_parameters
+        include: list of parameter names to freeze (set requires_grad = False)
+        exclude: list of parameter names to ignore
     """
 
     include: List[str] = dataclasses.field(default_factory=list)
@@ -46,45 +45,14 @@ class FrozenParameterConfig:
                 )
 
     def apply(self, model: nn.Module):
-        missing_parameters = []
-        for name in model.state_dict().keys():
-            if any(wildcard_match(pattern, name) for pattern in self.include):
-                if any(wildcard_match(pattern, name) for pattern in self.exclude):
-                    raise ValueError(
-                        f"Parameter {name} is included in both include "
-                        f"{self.include} and exclude {self.exclude}"
-                    )
-                try:
-                    model.get_parameter(name).requires_grad = False
-                except AttributeError:  # non-parameter state
-                    pass
-            elif any(wildcard_match(pattern, name) for pattern in self.exclude):
-                try:
-                    model.get_parameter(name).requires_grad = True
-                except AttributeError:  # non-parameter state
-                    pass
-            else:
-                missing_parameters.append(name)
-        if len(missing_parameters) > 0:
-            raise ValueError(
-                f"Model has parameters {missing_parameters} which are not "
-                f"specified in either include {self.include} "
-                f"or exclude {self.exclude}"
-            )
-        return model
+        apply_by_wildcard(model, _freeze_weight, self.include, self.exclude)
 
 
-def wildcard_match(pattern: str, name: str) -> bool:
-    """
-    Check if a name matches a wildcard pattern.
-
-    A wildcard pattern can include "*" to match any number of characters.
-    """
-    # use regex
-    pattern = pattern.replace(".", r"\.")
-    pattern = pattern.replace("*", ".*")
-    pattern = f"^{pattern}$"
-    return bool(re.match(pattern, name))
+def _freeze_weight(module: nn.Module, name: str):
+    try:
+        module.get_parameter(name).requires_grad = False
+    except AttributeError:  # non-parameter state
+        pass
 
 
 @dataclasses.dataclass
