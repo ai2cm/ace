@@ -12,7 +12,7 @@ from fme.core.distributed import Distributed
 from ._xarray import XarrayDataset
 from .data_typing import Dataset, GriddedData
 from .inference import InferenceDataLoaderParams, InferenceDataset
-from .params import DataLoaderParams
+from .params import DataLoaderParams, XarrayDataParams
 from .requirements import DataRequirements
 from .utils import BatchData
 
@@ -27,7 +27,7 @@ def _all_same(iterable, cmp=lambda x, y: x == y):
 
 
 def _get_ensemble_dataset(
-    params: DataLoaderParams,
+    params: XarrayDataParams,
     requirements: DataRequirements,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
@@ -41,10 +41,7 @@ def _get_ensemble_dataset(
         )
     datasets, metadatas, sigma_coords = [], [], []
     for path in paths:
-        data_params_curr_member = dataclasses.replace(params.dataset, data_path=path)
-        params_curr_member = dataclasses.replace(
-            params, dataset=data_params_curr_member
-        )
+        params_curr_member = dataclasses.replace(params, data_path=path)
         dataset = XarrayDataset(params_curr_member, requirements)
 
         datasets.append(dataset)
@@ -75,13 +72,21 @@ def get_dataset(
     requirements: DataRequirements,
 ) -> Dataset:
     if params.data_type == "xarray":
-        return XarrayDataset(params, requirements)
+        dataset = XarrayDataset(params.dataset, requirements)
     elif params.data_type == "ensemble_xarray":
-        return _get_ensemble_dataset(params, requirements)
+        dataset = _get_ensemble_dataset(params.dataset, requirements)
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"
         )
+    if params.n_samples is not None:
+        subset = torch.utils.data.Subset(dataset, range(params.n_samples))
+        subset.metadata = dataset.metadata
+        subset.area_weights = dataset.area_weights
+        subset.sigma_coordinates = dataset.sigma_coordinates
+        subset.horizontal_coordinates = dataset.horizontal_coordinates
+        dataset = subset
+    return dataset
 
 
 def get_data_loader(
