@@ -89,3 +89,16 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
 
     img_shape, upscale_factor = (4, 8), 4
     model_config.build(img_shape, upscale_factor)
+
+
+def test_count_parameters():
+    highres_shape = (16, 32)
+    module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
+    normalizer = HighResLowResPair[StandardNormalizer](
+        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
+        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
+    )
+    model = Model(module, normalizer, torch.nn.MSELoss(), ["x"], ["x"])
+    num_parameters = model.count_parameters()
+    # Linear layer has 16 * 32 // 2**2 input features and 16 * 32 output features
+    assert num_parameters == (16 * 32 // 2) ** 2

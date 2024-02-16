@@ -50,6 +50,14 @@ class Model:
         """
         return torch.nn.ModuleList([self.module])
 
+    def count_parameters(self) -> int:
+        """Counts the number of differentiable parameters in the model."""
+        num_parameters = 0
+        for parameter in self.module.parameters():
+            if parameter.requires_grad:
+                num_parameters += parameter.numel()
+        return num_parameters
+
     def run_on_batch(
         self,
         batch: HighResLowResPair[TensorMapping],
