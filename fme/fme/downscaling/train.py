@@ -157,6 +157,7 @@ def main(config_path: str):
 
     logging.info("Starting training")
     trainer = train_config.build()
+    logging.info(f"Number of parameters: {trainer.model.count_parameters()}")
     trainer.train()
 
 
