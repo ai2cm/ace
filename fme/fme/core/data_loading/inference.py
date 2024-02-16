@@ -6,7 +6,7 @@ import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
 from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
-from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
+from fme.core.data_loading.params import XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
@@ -52,22 +52,9 @@ class InferenceDataLoaderParams:
     start_indices: InferenceInitialConditionIndices
     num_data_workers: int = 0
 
-    def __post_init__(self):
-        dist = Distributed.get_instance()
-        self._data_loader_params = DataLoaderParams(
-            dataset=self.dataset,
-            data_type="xarray",
-            batch_size=dist.world_size,  # not used for inference
-            num_data_workers=0,  # not used for inference
-        )
-
     @property
     def n_samples(self) -> int:
         return self.start_indices.n_initial_conditions
-
-    @property
-    def data_loader_params(self) -> DataLoaderParams:
-        return self._data_loader_params
 
 
 class InferenceDataset(torch.utils.data.Dataset):
@@ -77,7 +64,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         forward_steps_in_memory: int,
         requirements: DataRequirements,
     ):
-        dataset = XarrayDataset(params.data_loader_params, requirements=requirements)
+        dataset = XarrayDataset(params.dataset, requirements=requirements)
         self._dataset = dataset
         self._sigma_coordinates = dataset.sigma_coordinates
         self._metadata = dataset.metadata

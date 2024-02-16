@@ -18,7 +18,7 @@ from .data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
-from .params import DataLoaderParams
+from .params import XarrayDataParams
 from .requirements import DataRequirements
 from .utils import get_lons_and_lats, get_times, load_series_data
 
@@ -27,7 +27,6 @@ VariableNames = namedtuple(
     (
         "time_dependent_names",
         "time_invariant_names",
-        "initial_condition_names",
         "static_derived_names",
     ),
 )
@@ -129,10 +128,9 @@ class XarrayDataset(Dataset):
 
     def __init__(
         self,
-        params: DataLoaderParams,
+        params: XarrayDataParams,
         requirements: DataRequirements,
     ):
-        self.params = params
         self.names = requirements.names
         self.path = params.data_path
         self.engine = "netcdf4" if params.engine is None else params.engine
@@ -152,7 +150,6 @@ class XarrayDataset(Dataset):
         (
             self.time_dependent_names,
             self.time_invariant_names,
-            self.initial_condition_names,
             self.static_derived_names,
         ) = self._group_variable_names_by_time_type()
         self._area_weights = metrics.spherical_area_weights(lats, len(lons))
@@ -165,24 +162,6 @@ class XarrayDataset(Dataset):
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         return self._horizontal_coordinates
-
-    def _get_samples_and_initial_conditions(self, ds):
-        if "initial_condition" in ds.dims:
-            n_candidate_ics = 1
-        else:
-            n_candidate_ics = self.total_timesteps - self.n_steps + 1
-        self._initial_conditions = list(range(n_candidate_ics))[
-            self.params.window_starts.slice
-        ]
-        self._n_initial_conditions = len(self._initial_conditions)
-        if self.params.n_samples is not None:
-            if self.params.n_samples > self._n_initial_conditions:
-                raise ValueError(
-                    f"Requested {self.params.n_samples} samples, but only "
-                    f"{self._n_initial_conditions} initial conditions "
-                    "are available."
-                )
-            self._n_initial_conditions = self.params.n_samples
 
     def _get_metadata(self, ds):
         result = {}
@@ -201,10 +180,10 @@ class XarrayDataset(Dataset):
         cum_num_timesteps = get_cumulative_timesteps(self.full_paths)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
+        self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
         del cum_num_timesteps
 
         ds = self._open_file(0)
-        self._get_samples_and_initial_conditions(ds)
         self._get_metadata(ds)
 
         for i in range(len(self.names)):
@@ -227,9 +206,8 @@ class XarrayDataset(Dataset):
         (
             time_dependent_names,
             time_invariant_names,
-            initial_condition_names,
             static_derived_names,
-        ) = ([], [], [], [])
+        ) = ([], [], [])
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
@@ -241,14 +219,11 @@ class XarrayDataset(Dataset):
                     dims = ds[name].dims
                     if "time" in dims:
                         time_dependent_names.append(name)
-                    elif "initial_condition" in dims:
-                        initial_condition_names.append(name)
                     else:
                         time_invariant_names.append(name)
         return VariableNames(
             time_dependent_names,
             time_invariant_names,
-            initial_condition_names,
             static_derived_names,
         )
 
@@ -290,8 +265,6 @@ class XarrayDataset(Dataset):
             Tuple of a sample's data (a mapping from names to data, for use in
                 training and inference) and its corresponding time coordinates.
         """
-        # transform sample index to timestep index
-        idx = self._initial_conditions[idx]
         time_slice = slice(idx, idx + self.n_steps)
         return self.get_sample_by_time_slice(time_slice)
 
@@ -340,8 +313,5 @@ class XarrayDataset(Dataset):
         for name in self.static_derived_names:
             tensor = self._static_derived_data[name]
             tensors[name] = tensor.repeat((total_steps, 1, 1))
-
-        for name in self.initial_condition_names:
-            tensors[name] = torch.as_tensor(ds[name].values)
 
         return tensors, times

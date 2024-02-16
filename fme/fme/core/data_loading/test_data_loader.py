@@ -124,10 +124,8 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
-    samples_per_member = n_samples
-
     data = get_data_loader(params, True, requirements)
-    assert len(data.loader) == samples_per_member * num_ensemble_members
+    assert len(data.loader) == n_samples
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
