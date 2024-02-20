@@ -47,21 +47,27 @@ class Trainer:
     def train_one_epoch(self) -> None:
         train_aggregator = Aggregator(self.area_weights, self.latitudes)
         batch: BatchData
+        wandb = WandB.get_instance()
         for batch in self.train_loader.loader:
             inputs = HighResLowResPair(
                 _squeeze_time_dim(batch.highres), _squeeze_time_dim(batch.lowres)
             )
             outputs = self.model.run_on_batch(inputs, self.optimization)
+            self._num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
                 )
-                self._num_batches_seen += 1
-                wandb = WandB.get_instance()
                 wandb.log(
-                    train_aggregator.get_wandb(prefix="train"),
+                    {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
                     step=self._num_batches_seen,
                 )
+
+        with torch.no_grad():
+            wandb.log(
+                train_aggregator.get_wandb(prefix="train"),
+                step=self._num_batches_seen,
+            )
 
     def valid_one_epoch(self) -> None:
         with torch.no_grad():
@@ -84,8 +90,9 @@ class Trainer:
 
     def train(self) -> None:
         for epoch in range(self.num_epochs):
-            logging.info(f"Epoch: {epoch+1}")
+            logging.info("Running metrics on validation data.")
             self.valid_one_epoch()
+            logging.info(f"Training, epoch: {epoch+1}")
             self.train_one_epoch()
 
         self.valid_one_epoch()

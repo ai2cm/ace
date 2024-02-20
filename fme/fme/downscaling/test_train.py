@@ -1,7 +1,7 @@
 import datetime
 import os
 import unittest.mock
-from typing import Any, Dict
+from typing import Dict, Set
 from unittest.mock import MagicMock
 
 import cftime
@@ -145,28 +145,27 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
     return outpath
 
 
-def _assert_log_keys(prefix: str, logs: Dict[str, Any], num_expected_logs: int):
-    assert f"{prefix}/loss" in logs
-    assert len(logs) == num_expected_logs
+def _get_aggregator_keys(prefix: str) -> Set[str]:
+    keys = [f"{prefix}/loss"]
     for metric_name in ("rmse", "weighted_rmse", "ssim", "psnr"):
         for var_name in ("x", "y"):
-            assert f"{prefix}/{metric_name}/{var_name}" in logs
+            keys.append(f"{prefix}/{metric_name}/{var_name}")
 
     for instrinsic_name in ("histogram", "snapshot", "spectrum"):
         for var_name in ("x", "y"):
             for data_type in ("target", "pred"):
-                assert f"{prefix}/{instrinsic_name}/{var_name}_{data_type}" in logs
+                keys.append(f"{prefix}/{instrinsic_name}/{var_name}_{data_type}")
+    return set(keys)
 
 
 def test_train_main(trainer_config):
     """Check that training loop records the appropriate logs."""
     with mock_wandb() as wandb:
         main(trainer_config)
+        logs = wandb.get_logs()
 
     with open(trainer_config, "r") as f:
         trainer_config_dict = yaml.safe_load(f)
-
-    logs = wandb.get_logs()
 
     num_gradient_descent_updates_per_epoch = (
         NUM_TIMESTEPS // trainer_config_dict["train_data"]["batch_size"]
@@ -178,13 +177,21 @@ def test_train_main(trainer_config):
         + trainer_config_dict["num_epochs"] * num_gradient_descent_updates_per_epoch
     )
 
-    # Check that the zeroth epoch only has validation logs. The rest of the logs
-    # should train logs and validation logs only every epoch.
-    _assert_log_keys("validation", logs[0], 21)
+    validation_keys = _get_aggregator_keys("validation")
+    all_epoch_keys = validation_keys.union(_get_aggregator_keys("train"))
+    batch_loss_key = "train/batch_loss"
+    assert validation_keys == set(logs[0].keys())
     for step in range(1, len(logs)):
+        keys = set(logs[step].keys())
+        assert (
+            batch_loss_key in keys
+        ), "batch_loss should be logged at each training step."
         if step % num_gradient_descent_updates_per_epoch == 0:
-            num_expected_logs = 42
-            _assert_log_keys("validation", logs[step], num_expected_logs)
+            assert (
+                all_epoch_keys & keys == all_epoch_keys
+            ), "All train and validation metrics should be logged each epoch."
+            assert (
+                len(keys) == len(all_epoch_keys) + 1
+            ), "batch_loss should also be logged each epoch."
         else:
-            num_expected_logs = 21
-        _assert_log_keys("train", logs[step], num_expected_logs)
+            assert len(keys) == 1, "Within an epoch, only batch_loss should be logged."
