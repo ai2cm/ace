@@ -175,79 +175,6 @@ def test_builder_with_weights_sfno_init(
         )
 
 
-class SimpleLinearModule(torch.nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.linear = torch.nn.Linear(in_features, out_features)
-        self.custom_param = torch.nn.Parameter(torch.randn(out_features))
-
-    def forward(self, x):
-        return self.linear(x) + self.custom_param
-
-
-class NestedModule(torch.nn.Module):
-    def __init__(self, in_features, out_features):
-        super().__init__()
-        self.linear1 = SimpleLinearModule(in_features, out_features)
-        self.linear2 = SimpleLinearModule(out_features, in_features)
-        self.custom_param = torch.nn.Parameter(torch.randn(5, 5))
-
-
-@pytest.mark.parametrize(
-    "from_module, to_module, expected_exception",
-    [
-        pytest.param(
-            SimpleLinearModule(10, 10),
-            SimpleLinearModule(10, 10),
-            None,
-            id="Matching sizes",
-        ),
-        pytest.param(
-            SimpleLinearModule(10, 10),
-            SimpleLinearModule(20, 10),
-            None,
-            id="to_module larger weights",
-        ),
-        pytest.param(
-            SimpleLinearModule(20, 10),
-            SimpleLinearModule(10, 10),
-            ValueError,
-            id="from_module larger weights",
-        ),
-        pytest.param(
-            NestedModule(10, 20),
-            NestedModule(10, 20),
-            None,
-            id="Complex modules matching sizes",
-        ),
-        pytest.param(
-            NestedModule(10, 20),
-            SimpleLinearModule(10, 20),
-            ValueError,
-            id="Nested modules, mismatched structure",
-        ),
-    ],
-)
-def test_overwrite_weights(from_module, to_module, expected_exception):
-    if expected_exception:
-        with pytest.raises(expected_exception):
-            parameter_init._overwrite_weights(from_module, to_module)
-    else:
-        parameter_init._overwrite_weights(from_module, to_module)
-        for from_param, to_param in zip(
-            from_module.parameters(), to_module.parameters()
-        ):
-            if len(from_param.shape) == 1:
-                assert torch.allclose(
-                    from_param.data, to_param.data[: from_param.data.size(0)]
-                )
-            else:
-                assert torch.allclose(
-                    from_param.data,
-                    to_param.data[: from_param.data.size(0), : from_param.data.size(1)],
-                )
-
-
 def get_config(loaded_shape: Tuple[int, int], extra_built_layer: bool, tmpdir: Path):
     sfno_config_data = {
         "type": "SphericalFourierNeuralOperatorNet",
@@ -326,25 +253,14 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     assert isinstance(stepper, SingleModuleStepper)
 
 
-def test_overwrite_weights_exclude():
-    from_module = NestedModule(10, 20)
-    to_module = NestedModule(10, 20)
-    parameter_init._overwrite_weights(
-        from_module, to_module, exclude_parameters=["linear1.*"]
-    )
-    assert not torch.allclose(
-        from_module.linear1.linear.weight, to_module.linear1.linear.weight
-    )
-    assert not torch.allclose(
-        from_module.linear1.custom_param, to_module.linear1.custom_param
-    )
-    assert torch.allclose(
-        from_module.linear2.linear.weight, to_module.linear2.linear.weight
-    )
-    assert torch.allclose(
-        from_module.linear2.custom_param, to_module.linear2.custom_param
-    )
-    assert torch.allclose(from_module.custom_param, to_module.custom_param)
+class SimpleLinearModule(torch.nn.Module):
+    def __init__(self, in_features, out_features):
+        super().__init__()
+        self.linear = torch.nn.Linear(in_features, out_features)
+        self.custom_param = torch.nn.Parameter(torch.randn(out_features))
+
+    def forward(self, x):
+        return self.linear(x) + self.custom_param
 
 
 class ComplexModule(torch.nn.Module):
