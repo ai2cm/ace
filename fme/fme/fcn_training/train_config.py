@@ -13,6 +13,7 @@ from fme.core.ema import EMATracker
 from fme.core.optimization import OptimizationConfig
 from fme.core.stepper import ExistingStepperConfig
 from fme.core.wandb import WandB
+from fme.core.weight_ops import CopyWeightsConfig
 
 
 @dataclasses.dataclass
@@ -143,6 +144,14 @@ class TrainConfig:
         save_checkpoint: whether to save checkpoints
         experiment_dir: directory where checkpoints and logs are saved
         inference: configuration for inline inference
+        n_forward_steps: number of forward steps to take gradient over
+        copy_weights_after_batch: Configuration for copying weights from the
+            base model to the training model after each batch. This is used
+            to achieve an effect of freezing model parameters that can freeze
+            a subset of each weight that comes from a smaller base weight.
+            This is less efficient than true parameter freezing, but layer
+            freezing is all-or-nothing for each parameter. By default, no
+            weights are copied.
         checkpoint_save_epochs: how often to save epoch-based checkpoints,
             if save_checkpoint is True. If None, checkpoints are only saved
             for the most recent epoch and the best epoch.
@@ -162,6 +171,9 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
+    copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
+        default_factory=lambda: CopyWeightsConfig(exclude=["*"])
+    )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
     checkpoint_save_epochs: Optional[Slice] = None
