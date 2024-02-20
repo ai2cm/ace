@@ -92,6 +92,19 @@ class SingleModuleStepperConfig:
     def get_state(self):
         return dataclasses.asdict(self)
 
+    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+        """
+        If the model is being initialized from another model's weights for fine-tuning,
+        returns those weights. Otherwise, returns None.
+
+        The list mirrors the order of `modules` in the `SingleModuleStepper` class.
+        """
+        base_weights = self.parameter_init.get_base_weights()
+        if base_weights is not None:
+            return [base_weights]
+        else:
+            return None
+
     def get_stepper(
         self,
         img_shape: Tuple[int, int],
@@ -137,6 +150,11 @@ class ExistingStepperConfig:
         return SingleModuleStepperConfig.from_state(
             self._load_checkpoint()["stepper"]["config"]
         ).get_data_requirements(n_forward_steps)
+
+    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+        return SingleModuleStepperConfig.from_state(
+            self._load_checkpoint()["stepper"]["config"]
+        ).get_base_weights()
 
     def get_stepper(self, img_shape, area, sigma_coordinates):
         del img_shape  # unused
