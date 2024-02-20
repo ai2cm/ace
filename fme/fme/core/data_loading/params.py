@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from typing import Literal, Optional
 
 from fme.core.distributed import Distributed
@@ -45,34 +46,30 @@ class DataLoaderParams:
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         data_type: Type of data to load.
-        n_samples: Number of samples to load, starting at the beginning of the data.
-            If None, load all samples.
-        window_starts: Slice indicating the set of indices to consider for initial
-            conditions of windows of data. Values following the initial condition will
-            still come from the full dataset. By default load all initial conditions.
+        subset: Slice defining a subset of the XarrayDataset to load. For
+            data_type="ensemble_xarray" case this will be applied to each ensemble
+            member before concatenation.
     """
 
     dataset: XarrayDataParams
     batch_size: int
     num_data_workers: int
     data_type: Literal["xarray", "ensemble_xarray"]
+    subset: Slice = dataclasses.field(default_factory=Slice)
     n_samples: Optional[int] = None
-    window_starts: Slice = dataclasses.field(default_factory=Slice)
 
     def __post_init__(self):
-        if self.n_samples is not None and self.batch_size > self.n_samples:
-            raise ValueError(
-                f"batch_size ({self.batch_size}) must be less than or equal to "
-                f"n_samples ({self.n_samples}) or no batches would be produced"
-            )
-        if self.data_type not in ["xarray", "ensemble_xarray"]:
-            if self.engine is not None:
+        if self.n_samples is not None:
+            if self.subset.stop is not None:
                 raise ValueError(
-                    f"Got engine={self.engine}, but "
-                    f"engine is unused for data_type {self.data_type}. "
-                    "Did you mean to use data_type "
-                    '"xarray" or "ensemble_xarray"?'
+                    "Both 'n_samples' and 'subset.stop' are specified. "
+                    "Only one of them can be used."
                 )
+            warnings.warn(
+                "Specifying 'n_samples' is deprecated. Use 'subset.stop' instead.",
+                category=DeprecationWarning,
+            )
+            self.subset.stop = self.n_samples
         dist = Distributed.get_instance()
         if self.batch_size % dist.world_size != 0:
             raise ValueError(
