@@ -15,7 +15,7 @@ from fme.core.data_loading._xarray import (
     get_file_local_index,
 )
 from fme.core.data_loading.getters import get_data_loader, get_dataset
-from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
+from fme.core.data_loading.params import DataLoaderParams, Slice, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 
 
@@ -258,7 +258,11 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     if len(mock_data.var_names.initial_condition_names) != 0:
         return
     params = DataLoaderParams(
-        XarrayDataParams(data_path=mock_data.tmpdir), 1, 0, "xarray", n_samples
+        XarrayDataParams(data_path=mock_data.tmpdir),
+        1,
+        0,
+        "xarray",
+        Slice(stop=n_samples),
     )
     n_forward_steps = 4
     requirements = DataRequirements(

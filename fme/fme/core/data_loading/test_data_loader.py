@@ -16,7 +16,7 @@ from fme.core.data_loading.inference import (
     InferenceDataLoaderParams,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import DataLoaderParams, XarrayDataParams
+from fme.core.data_loading.params import DataLoaderParams, Slice, XarrayDataParams
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData, get_times
 
@@ -119,13 +119,13 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         batch_size=1,
         num_data_workers=0,
         data_type="ensemble_xarray",
-        n_samples=n_samples,
+        subset=Slice(stop=n_samples),
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
     data = get_data_loader(params, True, requirements)
-    assert len(data.loader) == n_samples
+    assert len(data.loader) == n_samples * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
@@ -202,7 +202,7 @@ def test_data_loader_outputs(tmp_path, calendar):
         batch_size=n_samples,
         num_data_workers=0,
         data_type="xarray",
-        n_samples=n_samples,
+        subset=Slice(stop=n_samples),
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)

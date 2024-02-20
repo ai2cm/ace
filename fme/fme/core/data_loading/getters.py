@@ -26,9 +26,21 @@ def _all_same(iterable, cmp=lambda x, y: x == y):
     return all(cmp(first, rest) for rest in it)
 
 
+def _subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
+    """Returns a subset of the dataset and propagates other properties."""
+    indices = range(len(dataset))[subset]
+    subsetted_dataset = torch.utils.data.Subset(dataset, indices)
+    subsetted_dataset.metadata = dataset.metadata
+    subsetted_dataset.area_weights = dataset.area_weights
+    subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
+    subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
+    return subsetted_dataset
+
+
 def _get_ensemble_dataset(
     params: XarrayDataParams,
     requirements: DataRequirements,
+    subset: slice,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -43,6 +55,7 @@ def _get_ensemble_dataset(
     for path in paths:
         params_curr_member = dataclasses.replace(params, data_path=path)
         dataset = XarrayDataset(params_curr_member, requirements)
+        dataset = _subset_dataset(dataset, subset)
 
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
@@ -73,19 +86,15 @@ def get_dataset(
 ) -> Dataset:
     if params.data_type == "xarray":
         dataset = XarrayDataset(params.dataset, requirements)
+        dataset = _subset_dataset(dataset, params.subset.slice)
     elif params.data_type == "ensemble_xarray":
-        dataset = _get_ensemble_dataset(params.dataset, requirements)
+        dataset = _get_ensemble_dataset(
+            params.dataset, requirements, params.subset.slice
+        )
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"
         )
-    if params.n_samples is not None:
-        subset = torch.utils.data.Subset(dataset, range(params.n_samples))
-        subset.metadata = dataset.metadata
-        subset.area_weights = dataset.area_weights
-        subset.sigma_coordinates = dataset.sigma_coordinates
-        subset.horizontal_coordinates = dataset.horizontal_coordinates
-        dataset = subset
     return dataset
 
 
