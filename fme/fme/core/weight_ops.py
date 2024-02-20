@@ -1,9 +1,75 @@
+import dataclasses
 from typing import Any, List, Mapping, Optional
 
 import torch
 from torch import nn
 
-from .wildcard import wildcard_match
+from .wildcard import apply_by_wildcard, wildcard_match
+
+
+@dataclasses.dataclass
+class CopyWeightsConfig:
+    """
+    Configuration for copying weights from a base model to a target model.
+
+    Used during training to overwrite weights after every batch of data,
+    to have the effect of "freezing" the overwritten weights. When the
+    target parameters have longer dimensions than the base model, only
+    the initial slice is overwritten.
+
+    All parameters must be covered by either the include or exclude list,
+    but not both.
+
+    Args:
+        include: list of wildcard patterns to overwrite
+        exclude: list of wildcard patterns to exclude from overwriting
+    """
+
+    include: List[str] = dataclasses.field(default_factory=list)
+    exclude: List[str] = dataclasses.field(default_factory=list)
+
+    def __post_init__(self):
+        for pattern in self.include:
+            if any(wildcard_match(pattern, exclude) for exclude in self.exclude):
+                raise ValueError(
+                    f"Parameter {pattern} is included in both include "
+                    f"{self.include} and exclude {self.exclude}"
+                )
+        for pattern in self.exclude:
+            if any(wildcard_match(pattern, include) for include in self.include):
+                raise ValueError(
+                    f"Parameter {pattern} is included in both include "
+                    f"{self.include} and exclude {self.exclude}"
+                )
+
+    @torch.no_grad()
+    def apply(self, weights: List[Mapping[str, Any]], modules: List[nn.Module]):
+        """
+        Apply base weights to modules according to the include/exclude lists
+        of this instance.
+
+        In order to "freeze" the weights during training, this must be called after
+        each time the weights are updated in the training loop.
+
+        Args:
+            weights: list of base weights to apply
+            modules: list of modules to apply the weights to
+        """
+        if len(modules) > 1:
+            # We can support multiple modules by having this configuration take a list
+            # of include/exclude for each module. Not implemented right now because it
+            # is not needed, and would make the configuration more confusing for the
+            # single-module case (especially when it's only ever single-module).
+            raise NotImplementedError("only one module currently supported")
+        if len(modules) != len(weights):
+            raise ValueError("number of modules and weights must match")
+        for module, weight in zip(modules, weights):
+
+            def func(module, name):
+                overwrite_weight_initial_slice(module, name, weight[name])
+
+            apply_by_wildcard(module, func, self.include, self.exclude)
+        return module
 
 
 def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:

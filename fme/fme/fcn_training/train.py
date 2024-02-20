@@ -132,6 +132,8 @@ class Trainer:
         self.optimization = config.optimization.build(
             self.stepper.module.parameters(), config.max_epochs
         )
+        self._base_weights = self.config.stepper.get_base_weights()
+        self._copy_after_batch = config.copy_weights_after_batch
         self._no_optimization = NullOptimization()
 
         if config.resuming:
@@ -281,6 +283,10 @@ class Trainer:
                 n_forward_steps=self.config.n_forward_steps,
                 aggregator=aggregator,
             )
+            if self._base_weights is not None:
+                self._copy_after_batch.apply(
+                    weights=self._base_weights, modules=self.stepper.modules
+                )
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
             if (
