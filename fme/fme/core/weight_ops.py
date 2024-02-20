@@ -26,14 +26,14 @@ def overwrite_weights(
     exclude_parameters: Optional[List[str]] = None,
 ):
     """
-    Overwrite the weights in to_module with the weights in from_module.
+    Overwrite the weights in to_module with the weights in from_state.
 
-    When an axis is larger in to_module than in from_module, only the initial
+    When an axis is larger in to_module than in from_state, only the initial
     slice is overwritten. For example, if the from module has a parameter `a`
     of shape [10, 10], and the to module has a parameter `a` of shape [20, 10],
     then only the first 10 rows of `a` will be overwritten.
 
-    If an axis is larger in from_module than in to_module, an exception is raised.
+    If an axis is larger in from_state than in to_module, an exception is raised.
 
     Args:
         from_state: module state dict containing weights to be copied
@@ -65,12 +65,12 @@ def overwrite_weight_initial_slice(module, name, from_param):
     """
     Overwrite the initial slice of a parameter in module with from_param.
 
-    When an axis is larger in to_module than in from_module, only the initial
-    slice is overwritten. For example, if the from module has a parameter `a`
-    of shape [10, 10], and the to module has a parameter `a` of shape [20, 10],
-    then only the first 10 rows of `a` will be overwritten.
+    When an axis is larger in the module's param than in from_param,
+    only the initial slice is overwritten. For example, if the from module
+    has a parameter `a` of shape [10, 10], and the to module has a parameter
+    `a` of shape [20, 10], then only the first 10 rows of `a` will be overwritten.
 
-    If an axis is larger in from_module than in to_module, an exception is raised.
+    If an axis is larger in from_param, an exception is raised.
 
     Args:
         module: module whose parameter will be overwritten
