@@ -1,15 +1,17 @@
 """Contains classes for aggregating inference metrics and various statistics."""
 
-from typing import Any, Callable, Literal, Mapping, Optional, Union
+from typing import Any, Callable, Dict, Literal, Mapping, Optional
 
+import matplotlib.figure
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import wandb
 
 import fme.core.histogram
 from fme.core import metrics
 from fme.core.aggregator.plotting import plot_imshow
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
     compute_psnr,
     compute_ssim,
@@ -33,7 +35,10 @@ class Mean:
         ValueError: If no values have been added to the running average.
     """
 
-    def __init__(self, metric: Callable[..., torch.Tensor]) -> None:
+    def __init__(
+        self,
+        metric: Callable[..., torch.Tensor],
+    ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
         self._sum: Optional[TensorMapping] = None
         self._count: int = 0
@@ -74,8 +79,42 @@ class Mean:
             raise ValueError("No values have been added to the running average")
         return {k: self._sum[k] / self._count for k in self._sum}
 
-    def get_wandb(self) -> Mapping[str, np.ndarray]:
+    def get_wandb(self) -> Mapping[str, Any]:
         return {k: v.numpy() for k, v in self.get().items()}
+
+
+class ZonalPowerSpectrum:
+    def __init__(self, latitudes: torch.Tensor) -> None:
+        def _compute_zonal_power_spectrum(x):
+            assert (
+                len(x.shape) == 3
+            ), f"Expected input (batch, height, width) but received {x.shape}"
+            return compute_zonal_power_spectrum(x, latitudes).mean(  # type: ignore
+                axis=-2
+            )  # (batch, wavenumber) -> (wavenumber,)
+
+        self._mean_aggregator = Mean(_compute_zonal_power_spectrum)
+
+    @torch.no_grad()
+    def record_batch(self, x: TensorMapping) -> None:
+        x = _detach_and_to_cpu(x)
+        self._mean_aggregator.record_batch(x)
+
+    def get(self) -> TensorMapping:
+        return self._mean_aggregator.get()
+
+    def _plot_spectrum(self, spectrum: np.ndarray) -> matplotlib.figure.Figure:
+        fig = plt.figure()
+        plt.loglog(spectrum)
+        plt.grid()
+        return fig
+
+    def get_wandb(self) -> Mapping[str, Any]:
+        aggregated = self._mean_aggregator.get_wandb()
+        ret = {}
+        for name, values in aggregated.items():
+            ret[name] = self._plot_spectrum(values)
+        return ret
 
 
 class Snapshot:
@@ -107,7 +146,7 @@ class Snapshot:
             raise ValueError("No values have been added to the snapshot")
         return self.snapshot
 
-    def get_wandb(self) -> Mapping[str, wandb.Image]:
+    def get_wandb(self) -> Mapping[str, Any]:
         return {
             k: plot_imshow(v.squeeze(dim=-3)[0].numpy()) for k, v in self.get().items()
         }
@@ -146,7 +185,8 @@ class DynamicHistogram:
             for k, v in self.histograms.items()
         }
 
-    def get_wandb(self) -> Mapping[str, wandb.Histogram]:
+    def get_wandb(self) -> Mapping[str, Any]:
+        wandb = WandB.get_instance()
         return {k: wandb.Histogram(np_histogram=v) for k, v in self.get().items()}
 
 
@@ -170,14 +210,6 @@ class Aggregator:
         def _area_weighted_rmse(truth, pred):
             return metrics.root_mean_squared_error(truth, pred, area_weights)
 
-        def _compute_zonal_power_spectrum(x):
-            assert (
-                len(x.shape) == 3
-            ), f"Expected input (batch, height, width) but received {x.shape}"
-            return compute_zonal_power_spectrum(x, latitudes).mean(  # type: ignore
-                axis=-2
-            )  # (batch, wavenumber) -> (wavenumber,)
-
         if ssim_kwargs is None:
             ssim_kwargs = {}
 
@@ -197,9 +229,9 @@ class Aggregator:
             input_type: {
                 "histogram": DynamicHistogram(n_bins=n_histogram_bins),
                 "snapshot": Snapshot(),
-                "spectrum": Mean(_compute_zonal_power_spectrum),
+                "spectrum": ZonalPowerSpectrum(latitudes),
             }
-            for input_type in ("target", "pred")
+            for input_type in ("target", "prediction")
         }
         self.loss = Mean(torch.mean)
 
@@ -217,7 +249,7 @@ class Aggregator:
         for _, agg in self._comparisons.items():
             agg.record_batch(target, prediction)
 
-        for input, input_type in zip((target, prediction), ("target", "pred")):
+        for input, input_type in zip((target, prediction), ("target", "prediction")):
             for _, agg in self._intrinsics[input_type].items():  # type: ignore
                 agg.record_batch(input)
 
@@ -233,7 +265,7 @@ class Aggregator:
         if prefix != "":
             prefix += "/"
 
-        ret = {f"{prefix}loss": self.loss.get()["loss"]}
+        ret: Dict[str, Any] = {f"{prefix}loss": self.loss.get()["loss"]}
         for metric_name, agg in self._comparisons.items():
             ret.update(
                 {
@@ -242,14 +274,14 @@ class Aggregator:
                 }
             )
 
-        for input_type, aggs in self._intrinsics.items():
-            for metric_name, agg in aggs.items():  # type: ignore
-                ret.update(
-                    {
-                        f"{prefix}{metric_name}/{var_name}_{input_type}": v
-                        for (var_name, v) in getattr(agg, getter)().items()
-                    }
-                )
+        for data_role in ("target", "prediction"):
+            _aggregators = self._intrinsics[data_role]
+            for metric_name, agg in _aggregators.items():  # type: ignore
+                _metric_values = {
+                    f"{prefix}{metric_name}/{var_name}_{data_role}": v
+                    for (var_name, v) in getattr(agg, getter)().items()
+                }
+                ret.update(_metric_values)
 
         return ret
 
@@ -266,7 +298,7 @@ class Aggregator:
     def get_wandb(
         self,
         prefix: str = "",
-    ) -> Mapping[str, Union[float, np.ndarray, wandb.Histogram, wandb.Image]]:
+    ) -> Mapping[str, Any]:
         return self._get(getter="get_wandb", prefix=prefix)
 
 
@@ -279,6 +311,6 @@ class NullInferenceAggregator:
         del args, kwargs
 
     def record_batch(
-        self, loss: torch.Tensor, target: TensorMapping, pred: TensorMapping
+        self, loss: torch.Tensor, target: TensorMapping, prediction: TensorMapping
     ) -> None:
-        del loss, target, pred
+        del loss, target, prediction

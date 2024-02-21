@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from fme.core import metrics
+from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 from fme.downscaling import metrics_and_maths
 from fme.downscaling.aggregators import Aggregator, DynamicHistogram, Mean, Snapshot
@@ -114,14 +115,14 @@ def test_performance_metrics(prefix, expected_prefix):
     area_weights = torch.ones(n_lon)
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
-    aggregator = Aggregator(area_weights, latitudes, n_histogram_bins=n_bins)
-
     target = {"x": torch.zeros(*shape)}
-    pred = {"x": torch.ones(*shape)}
-    aggregator.record_batch(torch.tensor(0.0), target, pred)
+    prediction = {"x": torch.ones(*shape)}
 
-    all_metrics = aggregator.get(prefix=prefix)
-    wandb_metrics = aggregator.get_wandb(prefix=prefix)
+    with mock_wandb():
+        aggregator = Aggregator(area_weights, latitudes, n_histogram_bins=n_bins)
+        aggregator.record_batch(torch.tensor(0.0), target, prediction)
+        all_metrics = aggregator.get(prefix=prefix)
+        wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
     assert f"{expected_prefix}loss" in all_metrics
     assert f"{expected_prefix}loss" in wandb_metrics
@@ -145,7 +146,7 @@ def test_performance_metrics(prefix, expected_prefix):
     for instrinsic_name, expected_shape in zip(
         ("spectrum", "snapshot", "histogram"), expected_shapes
     ):
-        for input_type in ["target", "pred"]:
+        for input_type in ["target", "prediction"]:
             num_metrics += 1
             key = f"{expected_prefix}{instrinsic_name}/x_{input_type}"
             assert key in all_metrics
@@ -156,6 +157,7 @@ def test_performance_metrics(prefix, expected_prefix):
                 shape = counts.shape
             else:
                 shape = value.shape
+
             assert shape == expected_shape
 
     assert len(all_metrics) == len(wandb_metrics) == num_metrics
