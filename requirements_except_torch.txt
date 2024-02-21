@@ -17,3 +17,4 @@ zarr==2.16.1
 torch-harmonics@git+https://github.com/NVIDIA/torch-harmonics.git@8826246cacf6c37b600cdd63fde210815ba238fd
 tensorly@git+https://github.com/tensorly/tensorly.git@b648944fe94548765537a10cedd621871f7a2ffd
 tensorly-torch@git+https://github.com/tensorly/torch.git@d27d58f16101b7ecc431372eb218ceda59d8b043
+plotly==5.19.0

@@ -153,7 +153,7 @@ def _get_aggregator_keys(prefix: str) -> Set[str]:
 
     for instrinsic_name in ("histogram", "snapshot", "spectrum"):
         for var_name in ("x", "y"):
-            for data_type in ("target", "pred"):
+            for data_type in ("target", "prediction"):
                 keys.append(f"{prefix}/{instrinsic_name}/{var_name}_{data_type}")
     return set(keys)
 
