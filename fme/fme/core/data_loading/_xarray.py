@@ -188,7 +188,7 @@ class XarrayDataset(Dataset):
 
         for i in range(len(self.names)):
             if self.names[i] in ds.variables:
-                img_shape = ds[self.names[0]].shape[-2:]
+                img_shape = ds[self.names[i]].shape[-2:]
                 break
         else:
             raise ValueError(
