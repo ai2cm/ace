@@ -7,7 +7,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.fcn_training.inference.data_writer import DataWriter
+from fme.fcn_training.inference.data_writer import DataWriter, DataWriterConfig
 from fme.fcn_training.inference.data_writer.prediction import (
     get_batch_lead_times_microseconds,
 )
@@ -20,6 +20,25 @@ CALENDAR_CFTIME = {
 
 SECONDS_PER_HOUR = 3600
 MICROSECONDS_PER_SECOND = 1_000_000
+
+
+def test_data_writer_config_save_names():
+    variable_names = ["temp", "humidity"]
+    kwargs = dict(
+        save_prediction_files=False,
+        save_monthly_files=False,
+        save_histogram_files=False,
+    )
+    with pytest.warns():
+        DataWriterConfig(save_raw_prediction_names=variable_names, **kwargs)
+    for save_writer in [
+        "save_prediction_files",
+        "save_monthly_files",
+        "save_histogram_files",
+    ]:
+        kwargs_copy = kwargs.copy()
+        kwargs_copy.update({save_writer: True})
+        DataWriterConfig(save_raw_prediction_names=variable_names, **kwargs_copy)
 
 
 class TestDataWriter:
