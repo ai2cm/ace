@@ -75,6 +75,10 @@ class WandB:
         return wandb.Table
 
     @property
+    def Histogram(self):
+        return wandb.Histogram
+
+    @property
     def enabled(self) -> bool:
         return self._enabled
 
