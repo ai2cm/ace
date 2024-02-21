@@ -1,4 +1,5 @@
 import dataclasses
+import warnings
 from typing import Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
@@ -31,11 +32,11 @@ class DataWriterConfig:
         log_extended_video_netcdfs: Whether to enable writing of netCDF files
             containing video metrics.
         save_prediction_files: Whether to enable writing of netCDF files
-            containing the predictions.
+            containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
-        save_raw_prediction_names: Names of variables to save in the predictions
-            netcdf file.
+        save_raw_prediction_names: Names of variables to save in the prediction,
+            histogram, and monthly netCDF files.
         save_histogram_files: Enable writing of netCDF files containing histograms.
         time_coarsen: Configuration for time coarsening of written outputs.
     """
@@ -49,11 +50,18 @@ class DataWriterConfig:
 
     def __post_init__(self):
         if (
-            not self.save_prediction_files
+            not any(
+                [
+                    self.save_prediction_files,
+                    self.save_monthly_files,
+                    self.save_histogram_files,
+                ]
+            )
             and self.save_raw_prediction_names is not None
         ):
-            raise ValueError(
-                "save_raw_prediction_names provided but save_prediction_files is False"
+            warnings.warn(
+                "save_raw_prediction_names provided but all options to "
+                "save subsettable output files are False."
             )
 
     def build(
