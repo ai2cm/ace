@@ -89,13 +89,13 @@ class Trainer:
         )
 
     def train(self) -> None:
+        logging.info("Running metrics on validation data.")
+        self.valid_one_epoch()
         for epoch in range(self.num_epochs):
+            logging.info(f"Training epoch: {epoch+1}")
+            self.train_one_epoch()
             logging.info("Running metrics on validation data.")
             self.valid_one_epoch()
-            logging.info(f"Training, epoch: {epoch+1}")
-            self.train_one_epoch()
-
-        self.valid_one_epoch()
 
 
 @dataclasses.dataclass
