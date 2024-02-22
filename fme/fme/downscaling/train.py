@@ -39,7 +39,7 @@ class Trainer:
         self.validation_loader = validation_loader
         self.num_epochs = num_epochs
         self.area_weights = self.train_loader.area_weights.highres.cpu()
-        self.latitudes = self.validation_loader.horizontal_coordinates.highres.lat.cpu()
+        self.latitudes = self.train_loader.horizontal_coordinates.highres.lat.cpu()
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self._num_batches_seen = 0
