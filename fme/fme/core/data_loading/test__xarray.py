@@ -15,7 +15,7 @@ from fme.core.data_loading._xarray import (
     get_file_local_index,
 )
 from fme.core.data_loading.getters import get_data_loader, get_dataset
-from fme.core.data_loading.params import DataLoaderParams, Slice, XarrayDataParams
+from fme.core.data_loading.params import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 
 
@@ -215,7 +215,7 @@ def _test_monthly_values(
 ):
     """Runs shape and length checks on the dataset."""
     var_names: VariableNames = mock_data.var_names
-    params = XarrayDataParams(data_path=mock_data.tmpdir)
+    params = XarrayDataConfig(data_path=mock_data.tmpdir)
     requirements = DataRequirements(names=var_names.all_names, n_timesteps=2)
     dataset = XarrayDataset(params=params, requirements=requirements)
     if expected_n_samples is None:
@@ -257,8 +257,8 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     mock_data: MockData = mock_monthly_netcdfs
     if len(mock_data.var_names.initial_condition_names) != 0:
         return
-    params = DataLoaderParams(
-        XarrayDataParams(data_path=mock_data.tmpdir),
+    params = DataLoaderConfig(
+        XarrayDataConfig(data_path=mock_data.tmpdir),
         1,
         0,
         "xarray",
@@ -313,7 +313,7 @@ def test_yearly_file_local_index(
 )
 def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     mock_data: MockData = mock_yearly_netcdfs
-    params = XarrayDataParams(data_path=mock_data.tmpdir)
+    params = XarrayDataConfig(data_path=mock_data.tmpdir)
     with xr.open_mfdataset(mock_data.tmpdir.glob("*.nc"), use_cftime=True) as ds:
         for n_steps in [3, 2 * 365]:
             requirements = DataRequirements(
@@ -338,8 +338,8 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
 
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
-    params = DataLoaderParams(
-        XarrayDataParams(
+    params = DataLoaderConfig(
+        XarrayDataConfig(
             data_path=mock_data.tmpdir,
         ),
         batch_size=1,
@@ -355,7 +355,7 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
 def _get_repeat_dataset(
     mock_data: MockData, n_timesteps: int, n_repeats: int
 ) -> XarrayDataset:
-    params = XarrayDataParams(data_path=mock_data.tmpdir, n_repeats=n_repeats)
+    params = XarrayDataConfig(data_path=mock_data.tmpdir, n_repeats=n_repeats)
     requirements = DataRequirements(
         names=mock_data.var_names.all_names, n_timesteps=n_timesteps
     )
