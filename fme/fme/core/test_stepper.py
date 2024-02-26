@@ -10,19 +10,16 @@ import torch
 import fme
 from fme.core import ClimateData, metrics
 from fme.core.aggregator.inference.main import InferenceAggregator
-from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.loss import ConservationLoss, ConservationLossConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
-from fme.core.ocean import Ocean, OceanConfig, SlabOceanConfig
+from fme.core.loss import LossConfig
+from fme.core.normalizer import NormalizationConfig
+from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.packer import Packer
 from fme.core.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
-    run_on_batch,
 )
 from fme.fcn_training.inference.derived_variables import (
     compute_stepped_derived_quantities,
@@ -99,48 +96,24 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
-    conservation_loss = ConservationLoss(
-        config=ConservationLossConfig(),
-        area_weights=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    stepped = run_on_batch(
-        data=data,
-        module=torch.nn.Identity(),
-        normalizer=StandardNormalizer(
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NormalizationConfig(
             means=get_scalar_data(["a", "b"], 0.0),
             stds=get_scalar_data(["a", "b"], 1.0),
         ),
-        in_packer=Packer(["a", "b"]),
-        out_packer=Packer(["a", "b"]),
-        optimization=MagicMock(),
-        loss_obj=torch.nn.MSELoss(),
-        ocean=None,
-        n_forward_steps=1,
-        aggregator=MagicMock(),
-        corrector=None,
-        conservation_loss=conservation_loss,
+        loss=LossConfig(type="MSE"),
     )
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
     )  # as std=1, mean=0, no change
-    stepped_double_std = run_on_batch(
-        data=data,
-        module=torch.nn.Identity(),
-        normalizer=StandardNormalizer(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=get_scalar_data(["a", "b"], 2.0),
-        ),
-        in_packer=Packer(["a", "b"]),
-        out_packer=Packer(["a", "b"]),
-        optimization=MagicMock(),
-        loss_obj=torch.nn.MSELoss(),
-        ocean=None,
-        n_forward_steps=1,
-        aggregator=MagicMock(),
-        corrector=None,
-        conservation_loss=conservation_loss,
-    )
+    config.normalization.stds = get_scalar_data(["a", "b"], 2.0)
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepped_double_std = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
     )
@@ -168,27 +141,19 @@ def test_run_on_batch_addition_series():
     data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
-    conservation_loss = ConservationLoss(
-        config=ConservationLossConfig(),
-        area_weights=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    stepped = run_on_batch(
-        data=data,
-        module=AddOne(),
-        normalizer=StandardNormalizer(
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NormalizationConfig(
             means=get_scalar_data(["a", "b"], 0.0),
             stds=get_scalar_data(["a", "b"], 1.0),
         ),
-        in_packer=Packer(["a", "b"]),
-        out_packer=Packer(["a", "b"]),
-        optimization=MagicMock(),
-        loss_obj=torch.nn.MSELoss(),
-        ocean=None,
-        n_forward_steps=n_steps,
-        aggregator=MagicMock(),
-        corrector=None,
-        conservation_loss=conservation_loss,
+        loss=LossConfig(type="MSE"),
+    )
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepped = stepper.run_on_batch(
+        data=data, optimization=MagicMock(), n_forward_steps=n_steps
     )
     assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
     for i in range(n_steps - 1):
@@ -234,27 +199,19 @@ def test_run_on_batch_with_prescribed_ocean():
     }
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
-    conservation_loss = ConservationLoss(
-        config=ConservationLossConfig(),
-        area_weights=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    stepped = run_on_batch(
-        data=data,
-        module=AddOne(),
-        normalizer=StandardNormalizer(
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NormalizationConfig(
             means=get_scalar_data(["a", "b", "mask"], 0.0),
             stds=stds,
         ),
-        in_packer=Packer(["a", "b"]),
-        out_packer=Packer(["a", "b"]),
-        optimization=MagicMock(),
-        loss_obj=torch.nn.MSELoss(),
-        n_forward_steps=n_steps,
-        ocean=Ocean(OceanConfig("b", "mask")),
-        aggregator=MagicMock(),
-        corrector=None,
-        conservation_loss=conservation_loss,
+        ocean=OceanConfig("b", "mask"),
+    )
+    stepper = config.get_stepper(area.shape, area, sigma_coordinates)
+    stepped = stepper.run_on_batch(
+        data, optimization=MagicMock(), n_forward_steps=n_steps
     )
     for i in range(n_steps):
         # "a" should be increasing by 1 according to AddOne
@@ -363,7 +320,7 @@ def _setup_and_run_on_batch(
     ocean_config: Optional[OceanConfig],
     n_forward_steps,
     optimization_config: Optional[OptimizationConfig],
-    aggregator: Union[NullAggregator, InferenceAggregator],
+    aggregator: Optional[InferenceAggregator],
 ):
     """Sets up the requisite classes to run run_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
@@ -373,40 +330,25 @@ def _setup_and_run_on_batch(
     else:
         optimization = optimization_config.build(module.parameters(), 2)
 
-    if aggregator is None:
-        aggregator = NullAggregator()
-
-    if ocean_config is None:
-        ocean = None
-    else:
-        ocean = ocean_config.build(in_names, out_names)
-
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
-    conservation_loss = ConservationLoss(
-        config=ConservationLossConfig(),
-        area_weights=area,
-        sigma_coordinates=sigma_coordinates,
-    )
-    stepped = run_on_batch(
-        data=data,
-        module=module,
-        normalizer=StandardNormalizer(
-            means=get_scalar_data(in_names, 0.0),
-            stds=get_scalar_data(in_names, 1.0),
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": module}),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=NormalizationConfig(
+            means=get_scalar_data(set(in_names + out_names), 0.0),
+            stds=get_scalar_data(set(in_names + out_names), 1.0),
         ),
-        in_packer=Packer(in_names),
-        out_packer=Packer(out_names),
-        optimization=optimization,
-        loss_obj=torch.nn.MSELoss(),
-        n_forward_steps=n_forward_steps,
-        ocean=ocean,
-        aggregator=aggregator,
-        corrector=None,
-        conservation_loss=conservation_loss,
+        ocean=ocean_config,
     )
-
-    return stepped
+    stepper = config.get_stepper(area.shape, area, sigma_coordinates)
+    return stepper.run_on_batch(
+        data,
+        optimization=optimization,
+        n_forward_steps=n_forward_steps,
+        aggregator=aggregator,
+    )
 
 
 @pytest.mark.parametrize(
@@ -454,11 +396,11 @@ def test_run_on_batch(
         data["b"] = data["b"].select(dim=time_dim, index=0).unsqueeze(time_dim)
 
     if use_aggregator:
-        aggregator: Union[InferenceAggregator, NullAggregator] = InferenceAggregator(
+        aggregator = InferenceAggregator(
             area_weights, sigma_coords, n_timesteps=n_forward_steps + 1
         )
     else:
-        aggregator = NullAggregator()
+        aggregator = None
 
     if is_train:
         optimization = OptimizationConfig()
