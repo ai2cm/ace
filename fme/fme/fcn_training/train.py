@@ -58,7 +58,6 @@ import yaml
 
 import fme
 from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
-from fme.core.aggregator.null import NullAggregator
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
@@ -342,7 +341,6 @@ class Trainer:
                     batch.data,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
-                    aggregator=NullAggregator(),
                 )
                 stepped = compute_stepped_derived_quantities(
                     stepped, self.valid_data.sigma_coordinates
