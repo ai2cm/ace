@@ -1,5 +1,4 @@
 import dataclasses
-import warnings
 from typing import Literal, Optional
 
 from fme.core.distributed import Distributed
@@ -60,16 +59,10 @@ class DataLoaderParams:
 
     def __post_init__(self):
         if self.n_samples is not None:
-            if self.subset.stop is not None:
-                raise ValueError(
-                    "Both 'n_samples' and 'subset.stop' are specified. "
-                    "Only one of them can be used."
-                )
-            warnings.warn(
-                "Specifying 'n_samples' is deprecated. Use 'subset.stop' instead.",
-                category=DeprecationWarning,
+            raise ValueError(
+                "n_samples is not a valid parameter for DataLoaderParams, "
+                "use subset.stop instead"
             )
-            self.subset.stop = self.n_samples
         dist = Distributed.get_instance()
         if self.batch_size % dist.world_size != 0:
             raise ValueError(
