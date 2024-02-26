@@ -55,12 +55,22 @@ class DimSizes:
         return (self.nz_interface,)
 
 
-def _save_2d_netcdf(
+def save_2d_netcdf(
     filename,
     dim_sizes: DimSizes,
     variable_names: List[str],
     time_varying_values: Optional[List[float]] = None,
 ):
+    """
+    Save a 2D netcdf file with random data for the given variable names and
+    dimensions.
+
+    Args:
+        filename: The filename to save the netcdf file to.
+        dim_sizes: The dimensions of the data.
+        variable_names: The names of the variables to save.
+        time_varying_values: If not None, the values to use for each time step.
+    """
     data_vars = {}
     for name in variable_names:
         data = np.random.randn(*dim_sizes.shape_2d).astype(np.float32)
@@ -133,7 +143,7 @@ class FV3GFSData:
                 f"Number of time-varying values ({len(self.time_varying_values)}) "
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
-        _save_2d_netcdf(
+        save_2d_netcdf(
             self._data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
