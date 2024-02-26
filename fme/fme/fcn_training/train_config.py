@@ -6,7 +6,7 @@ from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
 from fme.core.data_loading.inference import InferenceDataLoaderParams
-from fme.core.data_loading.params import DataLoaderParams, Slice
+from fme.core.data_loading.params import DataLoaderConfig, Slice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
@@ -161,8 +161,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
     """
 
-    train_loader: DataLoaderParams
-    validation_loader: DataLoaderParams
+    train_loader: DataLoaderConfig
+    validation_loader: DataLoaderConfig
     stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig]
     optimization: OptimizationConfig
     logging: LoggingConfig

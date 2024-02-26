@@ -18,7 +18,7 @@ from .data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
-from .params import XarrayDataParams
+from .params import XarrayDataConfig
 from .requirements import DataRequirements
 from .utils import get_lons_and_lats, get_times, load_series_data
 
@@ -128,7 +128,7 @@ class XarrayDataset(Dataset):
 
     def __init__(
         self,
-        params: XarrayDataParams,
+        params: XarrayDataConfig,
         requirements: DataRequirements,
     ):
         self.names = requirements.names

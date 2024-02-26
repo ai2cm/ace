@@ -6,7 +6,7 @@ import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
 from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
-from fme.core.data_loading.params import XarrayDataParams
+from fme.core.data_loading.params import XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
@@ -48,7 +48,7 @@ class InferenceDataLoaderParams:
         num_data_workers: Number of parallel workers to use for data loading.
     """
 
-    dataset: XarrayDataParams
+    dataset: XarrayDataConfig
     start_indices: InferenceInitialConditionIndices
     num_data_workers: int = 0
 
