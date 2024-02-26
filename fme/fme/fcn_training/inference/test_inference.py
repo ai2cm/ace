@@ -15,7 +15,7 @@ from fme.core.data_loading.inference import (
     InferenceDataLoaderParams,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import XarrayDataParams
+from fme.core.data_loading.params import XarrayDataConfig
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
@@ -586,7 +586,7 @@ def test_inference_config_raises_incompatible_timesteps(
         checkpoint_path="./some_dir",
         logging=LoggingConfig(),
         validation_loader=InferenceDataLoaderParams(
-            XarrayDataParams(
+            XarrayDataConfig(
                 data_path="./some_data",
             ),
             start_indices=InferenceInitialConditionIndices(

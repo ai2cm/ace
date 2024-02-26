@@ -96,8 +96,8 @@ class DataLoaderParams:
 
         dataset_highres, dataset_lowres = [
             get_dataset(
-                fme.core.data_loading.params.DataLoaderParams(
-                    dataset=fme.core.data_loading.params.XarrayDataParams(
+                fme.core.data_loading.params.DataLoaderConfig(
+                    dataset=fme.core.data_loading.params.XarrayDataConfig(
                         data_path=path,
                     ),
                     data_type=self.data_type,
