@@ -16,7 +16,7 @@ from fme.core.data_loading.inference import (
     InferenceDataLoaderParams,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import DataLoaderParams, Slice, XarrayDataParams
+from fme.core.data_loading.params import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData, get_times
 
@@ -83,8 +83,8 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(
-        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+    params = DataLoaderConfig(
+        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
         data_type="ensemble_xarray",
@@ -114,8 +114,8 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderParams(
-        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+    params = DataLoaderConfig(
+        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
         data_type="ensemble_xarray",
@@ -132,8 +132,8 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
-    params = DataLoaderParams(
-        XarrayDataParams(data_path=tmp_path, n_repeats=1),
+    params = DataLoaderConfig(
+        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
         data_type="xarray",
@@ -149,7 +149,7 @@ def test_inference_data_loader(tmp_path):
     batch_size = 2
     step = 7
     params = InferenceDataLoaderParams(
-        XarrayDataParams(
+        XarrayDataConfig(
             data_path=tmp_path,
             n_repeats=1,
         ),
@@ -195,8 +195,8 @@ def calendar(request):
 def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
-    params = DataLoaderParams(
-        XarrayDataParams(
+    params = DataLoaderConfig(
+        XarrayDataConfig(
             data_path=tmp_path,
         ),
         batch_size=n_samples,

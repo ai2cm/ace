@@ -22,7 +22,7 @@ class Slice:
 
 
 @dataclasses.dataclass
-class XarrayDataParams:
+class XarrayDataConfig:
     """
     Attributes:
         data_path: Path to the data.
@@ -38,7 +38,7 @@ class XarrayDataParams:
 
 
 @dataclasses.dataclass
-class DataLoaderParams:
+class DataLoaderConfig:
     """
     Attributes:
         dataset: Parameters to define the dataset.
@@ -50,7 +50,7 @@ class DataLoaderParams:
             member before concatenation.
     """
 
-    dataset: XarrayDataParams
+    dataset: XarrayDataConfig
     batch_size: int
     num_data_workers: int
     data_type: Literal["xarray", "ensemble_xarray"]

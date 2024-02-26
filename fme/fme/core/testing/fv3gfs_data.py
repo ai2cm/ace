@@ -11,7 +11,7 @@ from fme.core.data_loading.inference import (
     InferenceDataLoaderParams,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import XarrayDataParams
+from fme.core.data_loading.params import XarrayDataConfig
 
 
 def _coord_value(name, size):
@@ -152,7 +152,7 @@ class FV3GFSData:
     @property
     def inference_data_loader_params(self) -> InferenceDataLoaderParams:
         return InferenceDataLoaderParams(
-            XarrayDataParams(
+            XarrayDataConfig(
                 str(self._data_path),
             ),
             start_indices=InferenceInitialConditionIndices(

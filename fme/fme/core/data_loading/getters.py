@@ -12,7 +12,7 @@ from fme.core.distributed import Distributed
 from ._xarray import XarrayDataset
 from .data_typing import Dataset, GriddedData
 from .inference import InferenceDataLoaderParams, InferenceDataset
-from .params import DataLoaderParams, XarrayDataParams
+from .params import DataLoaderConfig, XarrayDataConfig
 from .requirements import DataRequirements
 from .utils import BatchData
 
@@ -38,7 +38,7 @@ def _subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
 
 
 def _get_ensemble_dataset(
-    params: XarrayDataParams,
+    params: XarrayDataConfig,
     requirements: DataRequirements,
     subset: slice,
 ) -> Dataset:
@@ -81,7 +81,7 @@ def _get_ensemble_dataset(
 
 
 def get_dataset(
-    params: DataLoaderParams,
+    params: DataLoaderConfig,
     requirements: DataRequirements,
 ) -> Dataset:
     if params.data_type == "xarray":
@@ -99,7 +99,7 @@ def get_dataset(
 
 
 def get_data_loader(
-    params: DataLoaderParams,
+    params: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
 ) -> GriddedData:
