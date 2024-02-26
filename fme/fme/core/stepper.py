@@ -18,19 +18,15 @@ import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
-from fme.core.aggregator import InferenceAggregator, NullAggregator, OneStepAggregator
-from fme.core.corrector import Corrector, CorrectorConfig
+from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
+from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
-from fme.core.loss import ConservationLoss, ConservationLossConfig, LossConfig
-from fme.core.normalizer import (
-    FromStateNormalizer,
-    NormalizationConfig,
-    StandardNormalizer,
-)
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.loss import ConservationLossConfig, LossConfig
+from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.packer import DataShapesNotUniform, Packer
 from fme.core.prescriber import PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
@@ -298,7 +294,9 @@ class SingleModuleStepper:
         data: Dict[str, torch.Tensor],
         optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
-        aggregator: Optional[OneStepAggregator] = None,
+        aggregator: Optional[
+            Union[OneStepAggregator, InferenceAggregator, TrainAggregator]
+        ] = None,
     ) -> SteppedData:
         """
         Step the model forward on a batch of data.
@@ -314,30 +312,104 @@ class SingleModuleStepper:
             The loss, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        if aggregator is None:
-            non_none_aggregator: Union[
-                OneStepAggregator, InferenceAggregator, NullAggregator
-            ] = NullAggregator()
-        else:
-            non_none_aggregator = aggregator
-
         device = get_device()
-        device_data = {
+        data = {
             name: value.to(device, dtype=torch.float) for name, value in data.items()
         }
-        return run_on_batch(
-            data=device_data,
-            module=self.module,
-            normalizer=self.normalizer,
-            in_packer=self.in_packer,
-            out_packer=self.out_packer,
-            optimization=optimization,
-            loss_obj=self.loss_obj,
-            n_forward_steps=n_forward_steps,
-            ocean=self.ocean,
-            aggregator=non_none_aggregator,
-            corrector=self._corrector,
-            conservation_loss=self._conservation_loss,
+        channel_dim = -3
+        time_dim = 1
+        full_data_norm = self.normalizer.normalize(data)
+        get_input_data = get_name_and_time_query_fn(data, full_data_norm, time_dim)
+
+        full_target_tensor_norm = _pack_data_if_available(
+            self.out_packer,
+            full_data_norm,
+            channel_dim,
+        )
+
+        loss = torch.tensor(0.0, device=get_device())
+        metrics = {}
+        input_data_norm = get_input_data(
+            self.in_packer.names, time_index=0, norm_mode="norm"
+        )
+        gen_data_norm_list = []
+        optimization.set_mode(self.module)
+        for step in range(n_forward_steps):
+            input_tensor_norm = self.in_packer.pack(input_data_norm, axis=channel_dim)
+
+            if full_target_tensor_norm is None:
+                target_tensor_norm: Optional[torch.Tensor] = None
+            else:
+                target_tensor_norm = full_target_tensor_norm.select(
+                    dim=time_dim, index=step + 1
+                )
+
+            with optimization.autocast():
+                gen_tensor_norm = self.module(input_tensor_norm).to(
+                    get_device(), dtype=torch.float
+                )
+                gen_norm = self.out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+                gen_data = self.normalizer.denormalize(gen_norm)
+                input_data = self.normalizer.denormalize(input_data_norm)
+                if self._corrector is not None:
+                    gen_data = self._corrector(input_data, gen_data)
+                if self.ocean is not None:
+                    target_data = get_input_data(
+                        self.ocean.target_names, step + 1, "denorm"
+                    )
+                    gen_data = self.ocean(target_data, input_data, gen_data)
+                gen_norm = self.normalizer.normalize(gen_data)
+                gen_tensor_norm = self.out_packer.pack(gen_norm, axis=channel_dim).to(
+                    get_device(), dtype=torch.float
+                )
+                if target_tensor_norm is None:
+                    step_loss = torch.tensor(torch.nan)
+                else:
+                    step_loss = self.loss_obj(gen_tensor_norm, target_tensor_norm)
+                loss += step_loss
+                metrics[f"loss_step_{step}"] = step_loss.detach()
+            gen_norm = self.out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+
+            gen_data_norm_list.append(gen_norm)
+            # update input data with generated outputs, and forcings for missing outputs
+            forcing_names = list(set(self.in_packer.names).difference(gen_norm.keys()))
+            forcing_data_norm = get_input_data(
+                forcing_names, time_index=step + 1, norm_mode="norm"
+            )
+            input_data_norm = {**forcing_data_norm, **gen_norm}
+
+        # prepend the initial (pre-first-timestep) output data to the generated data
+        initial = get_input_data(self.out_packer.names, time_index=0, norm_mode="norm")
+        gen_data_norm_list = [initial] + gen_data_norm_list
+        gen_data_norm_timeseries = {}
+        for name in self.out_packer.names:
+            gen_data_norm_timeseries[name] = torch.stack(
+                [x[name] for x in gen_data_norm_list], dim=time_dim
+            )
+        gen_data = self.normalizer.denormalize(gen_data_norm_timeseries)
+
+        conservation_metrics, conservation_loss = self._conservation_loss(gen_data)
+        metrics.update(conservation_metrics)
+        loss += conservation_loss
+
+        metrics["loss"] = loss.detach()
+        optimization.step_weights(loss)
+
+        if aggregator is not None:
+            aggregator.record_batch(
+                float(loss),
+                target_data=data,
+                gen_data=gen_data,
+                target_data_norm=full_data_norm,
+                gen_data_norm=gen_data_norm_timeseries,
+            )
+
+        return SteppedData(
+            metrics=metrics,
+            gen_data=gen_data,
+            target_data=data,
+            gen_data_norm=gen_data_norm_timeseries,
+            target_data_norm=full_data_norm,
         )
 
     def get_state(self):
@@ -451,137 +523,3 @@ def _pack_data_if_available(
         return packer.pack(data, axis=axis)
     except DataShapesNotUniform:
         return None
-
-
-def run_on_batch(
-    data: Dict[str, torch.Tensor],
-    module: nn.Module,
-    normalizer: StandardNormalizer,
-    in_packer: Packer,
-    out_packer: Packer,
-    optimization: Union[Optimization, NullOptimization],
-    loss_obj: nn.Module,
-    ocean: Optional[Ocean],
-    aggregator: Union[OneStepAggregator, InferenceAggregator, NullAggregator],
-    corrector: Optional[Corrector],  # Optional so we can skip code when unused
-    conservation_loss: ConservationLoss,
-    n_forward_steps: int = 1,
-) -> SteppedData:
-    """
-    Run the model on a batch of data.
-
-    The module is assumed to require packed (concatenated into a tensor with
-    a channel dimension) and normalized data, as provided by the given packer
-    and normalizer.
-
-    Args:
-        data: The denormalized batch data. The second dimension of each tensor
-            should be the time dimension.
-        module: The module to run.
-        normalizer: The normalizer.
-        in_packer: The packer for the input data.
-        out_packer: The packer for the output data.
-        optimization: The optimization object. If it is NullOptimization,
-            then the model is not trained.
-        loss_obj: The loss object.
-        ocean: Determines sea surface temperatures.
-        aggregator: The data aggregator.
-        corrector: The post-step corrector.
-        conservation_loss: Computes conservation-related losses, if any.
-        n_forward_steps: The number of timesteps to run the model for.
-
-    Returns:
-        The loss, the generated data, the normalized generated data,
-            and the normalized batch data. The generated data contains
-            the initial input data as its first timestep.
-    """
-    channel_dim = -3
-    time_dim = 1
-    full_data_norm = normalizer.normalize(data)
-    get_input_data = get_name_and_time_query_fn(data, full_data_norm, time_dim)
-
-    full_target_tensor_norm = _pack_data_if_available(
-        out_packer,
-        full_data_norm,
-        channel_dim,
-    )
-
-    loss = torch.tensor(0.0, device=get_device())
-    metrics = {}
-    input_data_norm = get_input_data(in_packer.names, time_index=0, norm_mode="norm")
-    gen_data_norm_list = []
-    optimization.set_mode(module)
-    for step in range(n_forward_steps):
-        input_tensor_norm = in_packer.pack(input_data_norm, axis=channel_dim)
-
-        if full_target_tensor_norm is None:
-            target_tensor_norm: Optional[torch.Tensor] = None
-        else:
-            target_tensor_norm = full_target_tensor_norm.select(
-                dim=time_dim, index=step + 1
-            )
-
-        with optimization.autocast():
-            gen_tensor_norm = module(input_tensor_norm).to(
-                get_device(), dtype=torch.float
-            )
-            gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
-            gen_data = normalizer.denormalize(gen_norm)
-            input_data = normalizer.denormalize(input_data_norm)
-            if corrector is not None:
-                gen_data = corrector(input_data, gen_data)
-            if ocean is not None:
-                target_data = get_input_data(ocean.target_names, step + 1, "denorm")
-                gen_data = ocean(target_data, input_data, gen_data)
-            gen_norm = normalizer.normalize(gen_data)
-            gen_tensor_norm = out_packer.pack(gen_norm, axis=channel_dim).to(
-                get_device(), dtype=torch.float
-            )
-            if target_tensor_norm is None:
-                step_loss = torch.tensor(torch.nan)
-            else:
-                step_loss = loss_obj(gen_tensor_norm, target_tensor_norm)
-            loss += step_loss
-            metrics[f"loss_step_{step}"] = step_loss.detach()
-        gen_norm = out_packer.unpack(gen_tensor_norm, axis=channel_dim)
-
-        gen_data_norm_list.append(gen_norm)
-        # update input data with generated outputs, and forcings for missing outputs
-        forcing_names = list(set(in_packer.names).difference(gen_norm.keys()))
-        forcing_data_norm = get_input_data(
-            forcing_names, time_index=step + 1, norm_mode="norm"
-        )
-        input_data_norm = {**forcing_data_norm, **gen_norm}
-
-    # prepend the initial (pre-first-timestep) output data to the generated data
-    initial = get_input_data(out_packer.names, time_index=0, norm_mode="norm")
-    gen_data_norm_list = [initial] + gen_data_norm_list
-    gen_data_norm_timeseries = {}
-    for name in out_packer.names:
-        gen_data_norm_timeseries[name] = torch.stack(
-            [x[name] for x in gen_data_norm_list], dim=time_dim
-        )
-    gen_data = normalizer.denormalize(gen_data_norm_timeseries)
-
-    conservation_metrics, conservation_loss = conservation_loss(gen_data)
-    metrics.update(conservation_metrics)
-    loss += conservation_loss
-
-    metrics["loss"] = loss.detach()
-    optimization.step_weights(loss)
-
-    aggregator.record_batch(
-        float(loss),
-        target_data=data,
-        gen_data=gen_data,
-        target_data_norm=full_data_norm,
-        gen_data_norm=gen_data_norm_timeseries,
-    )
-
-    return SteppedData(
-        metrics=metrics,
-        gen_data=gen_data,
-        target_data=data,
-        gen_data_norm=gen_data_norm_timeseries,
-        target_data_norm=full_data_norm,
-    )
