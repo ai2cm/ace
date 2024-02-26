@@ -1,7 +1,3 @@
-import dataclasses
-from pathlib import Path
-
-import numpy as np
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -9,7 +5,7 @@ from torch.utils.data.distributed import DistributedSampler
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import XarrayDataset
+from ._xarray import XarrayDataset, get_datasets_at_path, subset_dataset
 from .data_typing import Dataset, GriddedData
 from .inference import InferenceDataLoaderParams, InferenceDataset
 from .params import DataLoaderConfig, XarrayDataConfig
@@ -17,27 +13,7 @@ from .requirements import DataRequirements
 from .utils import BatchData
 
 
-def _all_same(iterable, cmp=lambda x, y: x == y):
-    it = iter(iterable)
-    try:
-        first = next(it)
-    except StopIteration:
-        return True
-    return all(cmp(first, rest) for rest in it)
-
-
-def _subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
-    """Returns a subset of the dataset and propagates other properties."""
-    indices = range(len(dataset))[subset]
-    subsetted_dataset = torch.utils.data.Subset(dataset, indices)
-    subsetted_dataset.metadata = dataset.metadata
-    subsetted_dataset.area_weights = dataset.area_weights
-    subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
-    subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
-    return subsetted_dataset
-
-
-def _get_ensemble_dataset(
+def get_ensemble_dataset(
     params: XarrayDataConfig,
     requirements: DataRequirements,
     subset: slice,
@@ -45,35 +21,9 @@ def _get_ensemble_dataset(
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
     """
-    paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
-    if len(paths) == 0:
-        raise ValueError(
-            f"No directories found in {params.data_path}. "
-            "Check path and whether you meant to use 'ensemble_xarray' data_type."
-        )
-    datasets, metadatas, sigma_coords = [], [], []
-    for path in paths:
-        params_curr_member = dataclasses.replace(params, data_path=path)
-        dataset = XarrayDataset(params_curr_member, requirements)
-        dataset = _subset_dataset(dataset, subset)
-
-        datasets.append(dataset)
-        metadatas.append(dataset.metadata)
-        sigma_coords.append(dataset.sigma_coordinates)
-
-    if not _all_same(metadatas):
-        raise ValueError("Metadata for each ensemble member should be the same.")
-
-    ak, bk = list(
-        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
-    )
-    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
-        raise ValueError(
-            "Sigma coordinates for each ensemble member should be the same."
-        )
-
+    datasets = get_datasets_at_path(params, requirements, subset=subset)
     ensemble = torch.utils.data.ConcatDataset(datasets)
-    ensemble.metadata = metadatas[0]  # type: ignore
+    ensemble.metadata = datasets[0].metadata  # type: ignore
     ensemble.area_weights = datasets[0].area_weights  # type: ignore
     ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
     ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
@@ -86,11 +36,9 @@ def get_dataset(
 ) -> Dataset:
     if params.data_type == "xarray":
         dataset = XarrayDataset(params.dataset, requirements)
-        dataset = _subset_dataset(dataset, params.subset.slice)
+        dataset = subset_dataset(dataset, params.subset.slice)
     elif params.data_type == "ensemble_xarray":
-        dataset = _get_ensemble_dataset(
-            params.dataset, requirements, params.subset.slice
-        )
+        return get_ensemble_dataset(params.dataset, requirements, params.subset.slice)
     else:
         raise NotImplementedError(
             f"{params.data_type} does not have an implemented data loader"
