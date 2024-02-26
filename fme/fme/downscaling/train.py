@@ -1,6 +1,6 @@
+import argparse
 import dataclasses
 import logging
-import sys
 
 import dacite
 import torch
@@ -168,8 +168,12 @@ def main(config_path: str):
     trainer.train()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Downscaling train script")
+    parser.add_argument("config_path", type=str, help="Path to the config file")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python train.py <config_path>")
-        sys.exit(-1)
-    main(sys.argv[1])
+    args = parse_args()
+    main(args.config_path)
