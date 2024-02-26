@@ -1,7 +1,9 @@
+import dataclasses
 import logging
 import os
 from collections import namedtuple
 from glob import glob
+from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -30,6 +32,58 @@ VariableNames = namedtuple(
         "static_derived_names",
     ),
 )
+
+
+def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
+    """Returns a subset of the dataset and propagates other properties."""
+    indices = range(len(dataset))[subset]
+    subsetted_dataset = torch.utils.data.Subset(dataset, indices)
+    subsetted_dataset.metadata = dataset.metadata
+    subsetted_dataset.area_weights = dataset.area_weights
+    subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
+    subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
+    return subsetted_dataset
+
+
+def get_datasets_at_path(
+    params: XarrayDataConfig, requirements: DataRequirements, subset: slice
+) -> List[Dataset]:
+    paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
+    if len(paths) == 0:
+        raise ValueError(
+            f"No directories found in {params.data_path}. "
+            "Check path and whether you meant to use 'ensemble_xarray' data_type."
+        )
+    datasets, metadatas, sigma_coords = [], [], []
+    for path in paths:
+        params_curr_member = dataclasses.replace(params, data_path=path)
+        dataset = XarrayDataset(params_curr_member, requirements)
+
+        dataset = subset_dataset(dataset, subset)
+        datasets.append(dataset)
+        metadatas.append(dataset.metadata)
+        sigma_coords.append(dataset.sigma_coordinates)
+
+    if not _all_same(metadatas):
+        raise ValueError("Metadata for each ensemble member should be the same.")
+
+    ak, bk = list(
+        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
+    )
+    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
+        raise ValueError(
+            "Sigma coordinates for each ensemble member should be the same."
+        )
+    return datasets
+
+
+def _all_same(iterable, cmp=lambda x, y: x == y):
+    it = iter(iterable)
+    try:
+        first = next(it)
+    except StopIteration:
+        return True
+    return all(cmp(first, rest) for rest in it)
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
