@@ -177,8 +177,13 @@ class StaticDerivedData:
 
 
 class XarrayDataset(Dataset):
-    """Handles dataloading over multiple netcdf files using the xarray library.
-    Assumes that the netcdf filenames are time-ordered."""
+    """Load data from a directory of time-ordered netCDF files using xarray. The
+    number of contiguous timesteps to load for each sample is specified by
+    requirements.n_timesteps.
+
+    For example, if the concatenated netCDF files have the time coordinate
+    (t0, t1, t2, t3, t4) and requirements.n_timesteps=3, then this dataset will
+    provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4)."""
 
     def __init__(
         self,
@@ -306,18 +311,14 @@ class XarrayDataset(Dataset):
         )
 
     def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
-        """Open a time-ordered subset of the files which contain the input with
-        global index idx and its outputs. Get a starting index in the first file
-        (input_local_idx) and a final index in the last file (output_local_idx),
-        returning the time-ordered sequence of observations from input_local_idx
-        to output_local_idx (inclusive).
+        """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
 
         Args:
             idx: Index of the sample to retrieve.
 
         Returns:
-            Tuple of a sample's data (a mapping from names to data, for use in
-                training and inference) and its corresponding time coordinates.
+            Tuple of a sample's data (i.e. a mapping from names to torch.Tensors) and
+            its corresponding time coordinate.
         """
         time_slice = slice(idx, idx + self.n_steps)
         return self.get_sample_by_time_slice(time_slice)
