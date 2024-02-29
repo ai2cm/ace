@@ -23,7 +23,7 @@ from fme.core.wandb import WandB
 from fme.fcn_training.inference.data_writer import DataWriter, DataWriterConfig
 from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
 from fme.fcn_training.train_config import LoggingConfig
-from fme.fcn_training.utils import gcs_utils, logging_utils
+from fme.fcn_training.utils import logging_utils
 
 
 def _load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
@@ -188,7 +188,6 @@ def main(
     env_vars = logging_utils.retrieve_env_vars()
     beaker_url = logging_utils.log_beaker_url()
     config.configure_wandb(env_vars=env_vars, notes=beaker_url)
-    gcs_utils.authenticate()
 
     torch.backends.cudnn.benchmark = True
 

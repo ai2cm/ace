@@ -67,7 +67,7 @@ from fme.fcn_training.inference.derived_variables import (
     compute_stepped_derived_quantities,
 )
 from fme.fcn_training.train_config import TrainConfig
-from fme.fcn_training.utils import gcs_utils, logging_utils
+from fme.fcn_training.utils import logging_utils
 
 
 class Trainer:
@@ -422,7 +422,6 @@ def main(yaml_config: str):
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     train_config.configure_logging(log_filename="out.log")
     env_vars = logging_utils.retrieve_env_vars()
-    gcs_utils.authenticate()
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
     train_config.configure_wandb(env_vars=env_vars, resume=True, notes=beaker_url)
