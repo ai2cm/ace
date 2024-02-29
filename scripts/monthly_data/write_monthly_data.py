@@ -193,7 +193,7 @@ def main(
 
 
 def write_ensemble_dataset(
-    path: pathlib.Path, n_members: int, names: list[str], dim_sizes: DimSizes
+    path: pathlib.Path, n_members: int, names: List[str], dim_sizes: DimSizes
 ):
     if not path.exists():
         path.mkdir(parents=True)
