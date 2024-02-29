@@ -11,7 +11,7 @@ from fme.core.optimization import NullOptimization, Optimization, OptimizationCo
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import BatchData, DataLoaderParams, DownscalingDataLoader
+from fme.downscaling.datasets import BatchData, DataLoaderConfig, DownscalingDataLoader
 from fme.downscaling.models import DownscalingModelConfig, Model
 from fme.downscaling.typing_ import HighResLowResPair
 from fme.fcn_training.train_config import LoggingConfig
@@ -102,8 +102,8 @@ class Trainer:
 class TrainerConfig:
     model: DownscalingModelConfig
     optimization: OptimizationConfig
-    train_data: DataLoaderParams
-    validation_data: DataLoaderParams
+    train_data: DataLoaderConfig
+    validation_data: DataLoaderConfig
     num_epochs: int
     experiment_dir: str
     logging: LoggingConfig

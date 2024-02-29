@@ -5,8 +5,8 @@ import warnings
 from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
-from fme.core.data_loading.inference import InferenceDataLoaderParams
-from fme.core.data_loading.params import DataLoaderConfig, Slice
+from fme.core.data_loading.config import DataLoaderConfig, Slice
+from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
@@ -81,7 +81,7 @@ class InlineInferenceConfig:
             from 1). By default runs inference every epoch.
     """
 
-    loader: InferenceDataLoaderParams
+    loader: InferenceDataLoaderConfig
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)

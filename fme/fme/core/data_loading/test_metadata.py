@@ -8,9 +8,9 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.data_loading.getters import get_data_loader
-from fme.core.data_loading.params import DataLoaderConfig, XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 
 METADATA = [
@@ -110,7 +110,7 @@ def test_metadata(metadata, data_type):
         path = Path(tmpdir)
         _create_data(path, metadata, data_type)
 
-        params = DataLoaderConfig(
+        config = DataLoaderConfig(
             XarrayDataConfig(data_path=str(path)),
             batch_size=1,
             num_data_workers=0,
@@ -118,7 +118,7 @@ def test_metadata(metadata, data_type):
         )
         var_names = list(metadata.keys())
         requirements = DataRequirements(names=var_names, n_timesteps=2)
-        data = get_data_loader(params=params, train=True, requirements=requirements)
+        data = get_data_loader(config=config, train=True, requirements=requirements)
         target_metadata = {
             name: metadata[name] for name in metadata if metadata[name] is not None
         }
