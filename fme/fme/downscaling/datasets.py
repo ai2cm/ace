@@ -9,7 +9,7 @@ import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-import fme.core.data_loading.params
+import fme.core.data_loading.config
 from fme.core.data_loading.data_typing import HorizontalCoordinates
 from fme.core.data_loading.getters import get_dataset
 from fme.core.data_loading.requirements import DataRequirements
@@ -81,7 +81,7 @@ class DownscalingDataLoader:
 
 
 @dataclasses.dataclass
-class DataLoaderParams:
+class DataLoaderConfig:
     path_highres: str
     path_lowres: str
     data_type: Literal["xarray", "ensemble_xarray"]
@@ -96,8 +96,8 @@ class DataLoaderParams:
 
         dataset_highres, dataset_lowres = [
             get_dataset(
-                fme.core.data_loading.params.DataLoaderConfig(
-                    dataset=fme.core.data_loading.params.XarrayDataConfig(
+                fme.core.data_loading.config.DataLoaderConfig(
+                    dataset=fme.core.data_loading.config.XarrayDataConfig(
                         data_path=path,
                     ),
                     data_type=self.data_type,

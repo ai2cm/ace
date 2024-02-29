@@ -16,7 +16,7 @@ from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_inference_data
-from fme.core.data_loading.inference import InferenceDataLoaderParams
+from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
@@ -77,8 +77,8 @@ class InferenceConfig:
     n_forward_steps: int
     checkpoint_path: str
     logging: LoggingConfig
-    validation_loader: InferenceDataLoaderParams
-    prediction_loader: Optional[InferenceDataLoaderParams] = None
+    validation_loader: InferenceDataLoaderConfig
+    prediction_loader: Optional[InferenceDataLoaderConfig] = None
     log_video: bool = True
     log_extended_video: bool = False
     log_extended_video_netcdfs: Optional[bool] = None

@@ -4,7 +4,7 @@ import xarray as xr
 
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 
-from .datasets import BatchData, DataLoaderParams, PairedDataset
+from .datasets import BatchData, DataLoaderConfig, PairedDataset
 
 
 def random_named_tensor(var_names, shape):
@@ -121,7 +121,7 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
         )
     ]
     batch_size = 2
-    params = DataLoaderParams(
+    config = DataLoaderConfig(
         str(highres_data.path / path_extension),
         str(lowres_data.path / path_extension),
         data_type,
@@ -129,7 +129,7 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
         1,
     )
 
-    loader = params.build(True, all_names, None)
+    loader = config.build(True, all_names, None)
     assert len(loader.loader) == num_timesteps // batch_size
     assert len(loader.loader.dataset) == num_timesteps  # type: ignore
     assert loader.downscale_factor == 2

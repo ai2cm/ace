@@ -5,8 +5,8 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
+from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
-from fme.core.data_loading.params import XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
@@ -32,11 +32,11 @@ class InferenceInitialConditionIndices:
 
 
 @dataclasses.dataclass
-class InferenceDataLoaderParams:
+class InferenceDataLoaderConfig:
     """
     Configuration for inference data.
 
-    This is like the `DataLoaderParams` class, but with some additional
+    This is like the `DataLoaderConfig` class, but with some additional
     constraints. During inference, we have only one batch, so the number of
     samples directly determines the size of that batch.
 
@@ -60,11 +60,11 @@ class InferenceDataLoaderParams:
 class InferenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        params: InferenceDataLoaderParams,
+        config: InferenceDataLoaderConfig,
         forward_steps_in_memory: int,
         requirements: DataRequirements,
     ):
-        dataset = XarrayDataset(params.dataset, requirements=requirements)
+        dataset = XarrayDataset(config.dataset, requirements=requirements)
         self._dataset = dataset
         self._sigma_coordinates = dataset.sigma_coordinates
         self._metadata = dataset.metadata
@@ -77,8 +77,8 @@ class InferenceDataset(torch.utils.data.Dataset):
                 f"Total number of steps ({self._total_steps}) must be divisible by "
                 f"forward_steps_in_memory ({self._forward_steps_in_memory})."
             )
-        self.n_samples = params.n_samples  # public attribute
-        self._start_indices = params.start_indices.as_indices()
+        self.n_samples = config.n_samples  # public attribute
+        self._start_indices = config.start_indices.as_indices()
 
     def __getitem__(self, index) -> BatchData:
         dist = Distributed.get_instance()

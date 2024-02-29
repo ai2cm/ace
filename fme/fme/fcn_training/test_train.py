@@ -13,7 +13,7 @@ import pytest
 import xarray as xr
 import yaml
 
-from fme.core.data_loading.params import Slice
+from fme.core.data_loading.config import Slice
 from fme.core.testing.wandb import mock_wandb
 from fme.fcn_training.inference.inference import main as inference_main
 from fme.fcn_training.train import _restore_checkpoint
