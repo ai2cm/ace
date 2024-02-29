@@ -14,13 +14,13 @@ import fme
 from fme.core import metrics
 from fme.core.winds import lon_lat_to_xyz
 
+from .config import XarrayDataConfig
 from .data_typing import (
     Dataset,
     HorizontalCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
-from .params import XarrayDataConfig
 from .requirements import DataRequirements
 from .utils import get_lons_and_lats, get_times, load_series_data
 
@@ -187,17 +187,17 @@ class XarrayDataset(Dataset):
 
     def __init__(
         self,
-        params: XarrayDataConfig,
+        config: XarrayDataConfig,
         requirements: DataRequirements,
     ):
         self.names = requirements.names
-        self.path = params.data_path
-        self.engine = "netcdf4" if params.engine is None else params.engine
+        self.path = config.data_path
+        self.engine = "netcdf4" if config.engine is None else config.engine
         # assume that filenames include time ordering
         self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
         if len(self.full_paths) == 0:
             raise ValueError(f"No netCDF files found in '{self.path}'.")
-        self.full_paths *= params.n_repeats
+        self.full_paths *= config.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
         self._get_files_stats()
         first_dataset = xr.open_dataset(
