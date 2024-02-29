@@ -251,6 +251,19 @@ def main(
             forward_steps_in_memory=config.forward_steps_in_memory,
         )
 
+    final_flush_start_time = time.time()
+    logging.info("Starting final flush of data writer")
+    writer.flush()
+    logging.info("Writing reduced metrics to disk in netcdf format.")
+    for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
+        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
+        ds = ds.assign_coords(coords)
+        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
+
+    final_flush_duration = time.time() - final_flush_start_time
+    logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
+    timers["final_writer_flush"] = final_flush_duration
+
     duration = time.time() - start_time
     total_steps = config.n_forward_steps * config.validation_loader.n_samples
     total_steps_per_second = total_steps / duration
@@ -270,13 +283,6 @@ def main(
             wandb.log(log, step=i)
             # wandb.log cannot be called more than "a few times per second"
             time.sleep(0.3)
-    writer.flush()
-
-    logging.info("Writing reduced metrics to disk in netcdf format.")
-    for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
-        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
-        ds = ds.assign_coords(coords)
-        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
 
     config.clean_wandb()
 
