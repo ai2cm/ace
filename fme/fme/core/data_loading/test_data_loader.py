@@ -10,13 +10,13 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.inference import (
-    InferenceDataLoaderParams,
+    InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData, get_times
 
@@ -83,7 +83,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderConfig(
+    config = DataLoaderConfig(
         XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
@@ -95,14 +95,14 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     n_timesteps = 3  # hard coded to match `_create_dataset_on_disk`.
     samples_per_member = n_timesteps - window_timesteps + 1
 
-    data = get_data_loader(params, True, requirements)
+    data = get_data_loader(config, True, requirements)
     assert len(data.loader) == samples_per_member * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
 def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1):
     """Tests that the ensemble loader returns the correct number of samples
-    when n_samples is set in params.
+    when n_samples is set in config.
     """
 
     # Create a dataset for each ensemble member. We assume that each member
@@ -114,7 +114,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         _create_dataset_on_disk(ic_path)
         netcdfs.append(ic_path / "data")
 
-    params = DataLoaderConfig(
+    config = DataLoaderConfig(
         XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
@@ -124,7 +124,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
-    data = get_data_loader(params, True, requirements)
+    data = get_data_loader(config, True, requirements)
     assert len(data.loader) == n_samples * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
@@ -132,7 +132,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
-    params = DataLoaderConfig(
+    config = DataLoaderConfig(
         XarrayDataConfig(data_path=tmp_path, n_repeats=1),
         batch_size=1,
         num_data_workers=0,
@@ -140,7 +140,7 @@ def test_xarray_loader(tmp_path):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(params, True, requirements)  # type: ignore
+    data = get_data_loader(config, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
@@ -148,7 +148,7 @@ def test_inference_data_loader(tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2
     step = 7
-    params = InferenceDataLoaderParams(
+    config = InferenceDataLoaderConfig(
         XarrayDataConfig(
             data_path=tmp_path,
             n_repeats=1,
@@ -160,7 +160,7 @@ def test_inference_data_loader(tmp_path):
     n_forward_steps_in_memory = 3
     requirements = DataRequirements(["foo"], n_timesteps=7)
     data_loader = get_inference_data(
-        params,
+        config,
         forward_steps_in_memory=n_forward_steps_in_memory,
         requirements=requirements,
     ).loader
@@ -195,7 +195,7 @@ def calendar(request):
 def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
-    params = DataLoaderConfig(
+    config = DataLoaderConfig(
         XarrayDataConfig(
             data_path=tmp_path,
         ),
@@ -206,7 +206,7 @@ def test_data_loader_outputs(tmp_path, calendar):
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
-    data = get_data_loader(params, True, requirements)  # type: ignore
+    data = get_data_loader(config, True, requirements)  # type: ignore
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)

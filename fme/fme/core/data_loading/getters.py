@@ -2,13 +2,13 @@ import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset, get_datasets_at_path, subset_dataset
 from .data_typing import Dataset, GriddedData
-from .inference import InferenceDataLoaderParams, InferenceDataset
-from .params import DataLoaderConfig, XarrayDataConfig
+from .inference import InferenceDataLoaderConfig, InferenceDataset
 from .requirements import DataRequirements
 from .utils import BatchData
 
@@ -31,36 +31,36 @@ def get_ensemble_dataset(
 
 
 def get_dataset(
-    params: DataLoaderConfig,
+    config: DataLoaderConfig,
     requirements: DataRequirements,
 ) -> Dataset:
-    if params.data_type == "xarray":
-        dataset = XarrayDataset(params.dataset, requirements)
-        dataset = subset_dataset(dataset, params.subset.slice)
-    elif params.data_type == "ensemble_xarray":
-        return get_ensemble_dataset(params.dataset, requirements, params.subset.slice)
+    if config.data_type == "xarray":
+        dataset = XarrayDataset(config.dataset, requirements)
+        dataset = subset_dataset(dataset, config.subset.slice)
+    elif config.data_type == "ensemble_xarray":
+        return get_ensemble_dataset(config.dataset, requirements, config.subset.slice)
     else:
         raise NotImplementedError(
-            f"{params.data_type} does not have an implemented data loader"
+            f"{config.data_type} does not have an implemented data loader"
         )
     return dataset
 
 
 def get_data_loader(
-    params: DataLoaderConfig,
+    config: DataLoaderConfig,
     train: bool,
     requirements: DataRequirements,
 ) -> GriddedData:
     """
     Args:
-        params: Parameters for the data loader.
+        config: Parameters for the data loader.
         train: Whether to use the training or validation data.
         requirements: Data requirements for the model.
         window_time_slice: Time slice within each window to use for the data loader,
             if given the loader will only return data from this time slice.
             By default it will return the full windows.
     """
-    dataset = get_dataset(params, requirements)
+    dataset = get_dataset(config, requirements)
     dist = Distributed.get_instance()
     sampler = (
         DistributedSampler(dataset, shuffle=train) if dist.is_distributed() else None
@@ -68,8 +68,8 @@ def get_data_loader(
 
     dataloader = DataLoader(
         dataset,
-        batch_size=dist.local_batch_size(int(params.batch_size)),
-        num_workers=params.num_data_workers,
+        batch_size=dist.local_batch_size(int(config.batch_size)),
+        num_workers=config.num_data_workers,
         shuffle=(sampler is None) and train,
         sampler=sampler if train else None,
         drop_last=True,
@@ -88,7 +88,7 @@ def get_data_loader(
 
 
 def get_inference_data(
-    config: InferenceDataLoaderParams,
+    config: InferenceDataLoaderConfig,
     forward_steps_in_memory: int,
     requirements: DataRequirements,
 ) -> GriddedData:

@@ -7,11 +7,11 @@ import cftime
 import numpy as np
 import xarray as xr
 
+from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.inference import (
-    InferenceDataLoaderParams,
+    InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
-from fme.core.data_loading.params import XarrayDataConfig
 
 
 def _coord_value(name, size):
@@ -160,8 +160,8 @@ class FV3GFSData:
         return self._data_path / "data.nc"
 
     @property
-    def inference_data_loader_params(self) -> InferenceDataLoaderParams:
-        return InferenceDataLoaderParams(
+    def inference_data_loader_config(self) -> InferenceDataLoaderConfig:
+        return InferenceDataLoaderConfig(
             XarrayDataConfig(
                 str(self._data_path),
             ),
