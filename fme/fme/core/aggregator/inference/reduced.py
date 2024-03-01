@@ -10,9 +10,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import Dimension
-from fme.core.wandb import WandB
-
-wandb = WandB.get_instance()
+from fme.core.wandb import Table, WandB
 
 
 @dataclasses.dataclass
@@ -318,11 +316,12 @@ class MeanAggregator:
         return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
-def data_to_table(data: Dict[str, np.ndarray]):
+def data_to_table(data: Dict[str, np.ndarray]) -> Table:
     """
     Convert a dictionary of 1-dimensional timeseries data to a wandb Table.
     """
     keys = sorted(list(data.keys()))
+    wandb = WandB.get_instance()
     table = wandb.Table(columns=["forecast_step"] + keys)
     for i in range(len(data[keys[0]])):
         row = [i]

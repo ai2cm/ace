@@ -2,8 +2,6 @@ import collections
 import contextlib
 from typing import Any, Dict, Mapping
 
-import wandb as upstream_wandb
-
 from fme.core import wandb
 from fme.core.distributed import Distributed
 
@@ -42,21 +40,17 @@ class MockWandB:
     def clean_wandb_dir(self, experiment_dir: str):
         pass
 
-    @property
-    def Image(self):
-        return upstream_wandb.Image
+    def Image(self, *args, **kwargs) -> wandb.Image:
+        return wandb.Image(*args, direct_access=False, **kwargs)
 
-    @property
-    def Video(self):
-        return upstream_wandb.Video
+    def Video(self, *args, **kwargs) -> wandb.Video:
+        return wandb.Video(*args, direct_access=False, **kwargs)
 
-    @property
-    def Table(self):
-        return upstream_wandb.Table
+    def Table(self, *args, **kwargs) -> wandb.Table:
+        return wandb.Table(*args, direct_access=False, **kwargs)
 
-    @property
-    def Histogram(self):
-        return upstream_wandb.Histogram
+    def Histogram(self, *args, **kwargs) -> wandb.Histogram:
+        return wandb.Histogram(*args, direct_access=False, **kwargs)
 
     @property
     def enabled(self) -> bool:

@@ -8,11 +8,9 @@ import xarray as xr
 from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
-
-wandb = WandB.get_instance()
 
 
 @dataclasses.dataclass
@@ -155,11 +153,12 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor]]:
+    def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor, Image]]:
         logs = {}
         preds = self._get_target_gen_pairs()
         bias_map_key, gen_map_key = "bias_map", "gen_map"
         rmse_all_channels = {}
+        wandb = WandB.get_instance()
         for pred in preds:
             bias_data = pred.bias().cpu().numpy()
             vmin_bias, vmax_bias = get_cmap_limits(bias_data, diverging=True)

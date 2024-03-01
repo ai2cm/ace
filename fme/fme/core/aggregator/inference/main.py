@@ -2,10 +2,9 @@ from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
 import xarray as xr
-from wandb import Table
 
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
-from fme.core.wandb import WandB
+from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .reduced import MeanAggregator
@@ -187,13 +186,13 @@ def to_inference_logs(
     # dictionary.
     n_rows = 0
     for val in log.values():
-        if isinstance(val, wandb.Table):
+        if isinstance(val, Table):
             n_rows = max(n_rows, len(val.data))
     logs: List[Dict[str, Union[float, int]]] = []
     for i in range(n_rows):
         logs.append({})
     for key, val in log.items():
-        if isinstance(val, wandb.Table):
+        if isinstance(val, Table):
             for i, row in enumerate(val.data):
                 for j, col in enumerate(val.columns):
                     key_without_table_name = key[: key.rfind("/")]
