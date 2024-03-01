@@ -4,18 +4,14 @@ from typing import Dict, Mapping, Optional
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from wandb import Image
+import xarray as xr
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
-
-wandb = WandB.get_instance()
-
-import xarray as xr
 
 
 @dataclasses.dataclass
@@ -27,7 +23,7 @@ class _RawData:
     vmax: Optional[float] = None
     cmap: Optional[str] = None
 
-    def get_image(self):
+    def get_image(self) -> Image:
         # images are y, x from upper left corner
         # data is time, lat
         # we want lat on y-axis (increasing upward) and time on x-axis
@@ -36,6 +32,7 @@ class _RawData:
         fig = plot_imshow(
             datum, vmin=self.vmin, vmax=self.vmax, cmap=self.cmap, flip_lat=False
         )
+        wandb = WandB.get_instance()
         wandb_image = wandb.Image(fig, caption=self.caption)
         plt.close(fig)
         return wandb_image

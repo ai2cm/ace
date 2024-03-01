@@ -6,11 +6,9 @@ import torch
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
-
-wandb = WandB.get_instance()
 
 
 class MapAggregator:
@@ -65,7 +63,7 @@ class MapAggregator:
         self._n_batches += 1
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str) -> Dict[str, Image]:
         """
         Returns logs as can be reported to WandB.
 
@@ -76,6 +74,7 @@ class MapAggregator:
         time_dim = 0
         target_time = 1
         image_logs = {}
+        wandb = WandB.get_instance()
         for name in self._gen_data.keys():
             # use first sample in batch
             gen = (
