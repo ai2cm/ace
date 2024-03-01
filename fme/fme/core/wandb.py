@@ -11,6 +11,86 @@ from fme.core.distributed import Distributed
 singleton: Optional["WandB"] = None
 
 
+class DirectInitializationError(RuntimeError):
+    pass
+
+
+class Histogram(wandb.Histogram):
+    def __init__(
+        self,
+        *args,
+        direct_access=True,
+        **kwargs,
+    ):
+        if direct_access:
+            raise DirectInitializationError(
+                "must initialize from `wandb = WandB.get_instance()`, "
+                "not directly from `import fme.core.wandb`"
+            )
+        super().__init__(*args, **kwargs)
+
+
+Histogram.__doc__ = wandb.Histogram.__doc__
+Histogram.__init__.__doc__ = wandb.Histogram.__init__.__doc__
+
+
+class Table(wandb.Table):
+    def __init__(
+        self,
+        *args,
+        direct_access=True,
+        **kwargs,
+    ):
+        if direct_access:
+            raise DirectInitializationError(
+                "must initialize from `wandb = WandB.get_instance()`, "
+                "not directly from `import fme.core.wandb`"
+            )
+        super().__init__(*args, **kwargs)
+
+
+Table.__doc__ = wandb.Table.__doc__
+Table.__init__.__doc__ = wandb.Table.__init__.__doc__
+
+
+class Video(wandb.Video):
+    def __init__(
+        self,
+        *args,
+        direct_access=True,
+        **kwargs,
+    ):
+        if direct_access:
+            raise DirectInitializationError(
+                "must initialize from `wandb = WandB.get_instance()`, "
+                "not directly from `import fme.core.wandb`"
+            )
+        super().__init__(*args, **kwargs)
+
+
+Video.__doc__ = wandb.Video.__doc__
+Video.__init__.__doc__ = wandb.Video.__init__.__doc__
+
+
+class Image(wandb.Image):
+    def __init__(
+        self,
+        *args,
+        direct_access=True,
+        **kwargs,
+    ):
+        if direct_access:
+            raise DirectInitializationError(
+                "must initialize from `wandb = WandB.get_instance()`, "
+                "not directly from `import fme.core.wandb`"
+            )
+        super().__init__(*args, **kwargs)
+
+
+Image.__doc__ = wandb.Image.__doc__
+Image.__init__.__doc__ = wandb.Image.__init__.__doc__
+
+
 class WandB:
     """
     A singleton class to interface with Weights and Biases (WandB).
@@ -52,11 +132,11 @@ class WandB:
         if self._enabled:
             wandb.log(data, step=step)
 
-    def Image(self, data_or_path, *args, **kwargs):
+    def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
             data_or_path = scale_image(data_or_path)
 
-        return wandb.Image(data_or_path, *args, **kwargs)
+        return Image(data_or_path, *args, direct_access=False, **kwargs)
 
     def clean_wandb_dir(self, experiment_dir: str):
         # this is necessary because wandb does not remove run media directories
@@ -66,17 +146,14 @@ class WandB:
             wandb_dir = os.path.join(experiment_dir, "wandb")
             remove_media_dirs(wandb_dir)
 
-    @property
-    def Video(self):
-        return wandb.Video
+    def Video(self, *args, **kwargs) -> Video:
+        return Video(*args, direct_access=False, **kwargs)
 
-    @property
-    def Table(self):
-        return wandb.Table
+    def Table(self, *args, **kwargs) -> Table:
+        return Table(*args, direct_access=False, **kwargs)
 
-    @property
-    def Histogram(self):
-        return wandb.Histogram
+    def Histogram(self, *args, **kwargs) -> Histogram:
+        return Histogram(*args, direct_access=False, **kwargs)
 
     @property
     def enabled(self) -> bool:
