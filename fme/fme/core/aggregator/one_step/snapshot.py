@@ -1,15 +1,13 @@
-from typing import Mapping, Optional
+from typing import Dict, Mapping, Optional
 
 import matplotlib.pyplot as plt
 import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
-
-wandb = WandB.get_instance()
 
 
 class SnapshotAggregator:
@@ -59,7 +57,7 @@ class SnapshotAggregator:
         self._gen_data_norm = gen_data_norm
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str) -> Dict[str, Image]:
         """
         Returns logs as can be reported to WandB.
 
@@ -70,6 +68,7 @@ class SnapshotAggregator:
         input_time = 0
         target_time = 1
         image_logs = {}
+        wandb = WandB.get_instance()
         for name in self._gen_data.keys():
             # use first sample in batch
             gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0]
