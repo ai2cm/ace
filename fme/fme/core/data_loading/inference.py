@@ -80,6 +80,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         self.n_samples = config.n_samples  # public attribute
         self._start_indices = config.start_indices.as_indices()
 
+        self._validate_n_forward_steps()
+
     def __getitem__(self, index) -> BatchData:
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
@@ -118,3 +120,12 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         return self._horizontal_coordinates
+
+    def _validate_n_forward_steps(self):
+        max_steps = self._dataset.total_timesteps - self._start_indices[-1] - 1
+        if self._total_steps > max_steps:
+            raise ValueError(
+                f"The number of forward inference steps ({self._total_steps}) must "
+                f"be less than or equal to the number of possible steps ({max_steps})"
+                f"in dataset after the last initial condition's start index."
+            )

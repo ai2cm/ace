@@ -231,3 +231,63 @@ def test_get_times_non_cftime():
     )
     with pytest.raises(AssertionError):
         get_times(ds, 0, 1)
+
+
+@pytest.mark.parametrize(
+    (
+        "first_ic_index,"
+        "n_initial_conditions,"
+        "ic_interval,"
+        "num_forward_steps,"
+        "raises_error"
+    ),
+    [
+        (0, 1, 1, 9, False),
+        (0, 1, 1, 10, True),
+        (1, 1, 1, 8, False),
+        (1, 1, 1, 9, True),
+        (2, 3, 2, 3, False),
+        (2, 3, 2, 4, True),
+    ],
+)
+def test_inference_data_loader_validate_n_forward_steps(
+    tmp_path,
+    first_ic_index,
+    n_initial_conditions,
+    ic_interval,
+    num_forward_steps,
+    raises_error,
+):
+    """Check exception is raised if n_forward_steps exceeds number of
+    forward steps in dataset available after last initial condition."""
+
+    total_dataset_timesteps = 10
+    _create_dataset_on_disk(tmp_path, n_times=total_dataset_timesteps)
+    start_indices = InferenceInitialConditionIndices(
+        first=first_ic_index,
+        n_initial_conditions=n_initial_conditions,
+        interval=ic_interval,
+    )
+    config = InferenceDataLoaderConfig(
+        XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=start_indices,
+    )
+    n_forward_steps_in_memory = num_forward_steps
+    requirements = DataRequirements(["foo"], n_timesteps=num_forward_steps + 1)
+
+    if raises_error:
+        with pytest.raises(ValueError):
+            get_inference_data(
+                config,
+                forward_steps_in_memory=n_forward_steps_in_memory,
+                requirements=requirements,
+            )
+    else:
+        get_inference_data(
+            config,
+            forward_steps_in_memory=n_forward_steps_in_memory,
+            requirements=requirements,
+        )
