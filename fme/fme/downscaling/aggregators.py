@@ -1,6 +1,6 @@
 """Contains classes for aggregating inference metrics and various statistics."""
 
-from typing import Any, Callable, Dict, Literal, Mapping, Optional
+from typing import Any, Callable, Dict, Literal, Mapping, Optional, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -37,14 +37,69 @@ class Mean:
 
     def __init__(
         self,
-        metric: Callable[..., torch.Tensor],
+        metric: Callable[[torch.Tensor], torch.Tensor],
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
         self._sum: Optional[TensorMapping] = None
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
 
-    def record_batch(self, *values: TensorMapping) -> None:
+    def record_batch(self, data: TensorMapping) -> None:
+        """
+        Records the metric values of a batch.
+
+        Args:
+        """
+        data = _detach_and_to_cpu(data)
+        metric = self._mapped_metric(data)
+
+        if self._sum is None:
+            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
+
+        self._sum = self._add(self._sum, metric)
+        self._count += 1
+
+    def get(self) -> TensorMapping:
+        """
+        Calculates and returns the current mean of the metric values.
+
+        Returns:
+            TensorMapping corresponding to the current value of the metric on
+            each variable.
+
+        Raises:
+            ValueError: If no values have been added to the running average.
+        """
+        if self._sum is None:
+            raise ValueError("No values have been added to the running average")
+        return {k: self._sum[k] / self._count for k in self._sum}
+
+    def get_wandb(self) -> Mapping[str, Any]:
+        return {k: v.numpy() for k, v in self.get().items()}
+
+
+class MeanComparison:
+    """
+    Tracks a running average of a metric over multiple batches.
+
+    Args:
+        metric: The metric function to be calculated which compares two tensors
+        (e.g. target and prediction)
+
+    Raises:
+        ValueError: If no values have been added to the running average.
+    """
+
+    def __init__(
+        self,
+        metric: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    ) -> None:
+        self._mapped_metric = map_tensor_mapping(metric)
+        self._sum: Optional[TensorMapping] = None
+        self._count: int = 0
+        self._add = map_tensor_mapping(torch.add)
+
+    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         """
         Records the metric values of a batch.
 
@@ -54,14 +109,14 @@ class Mean:
                 `torch.Tensor` arguments of the `metric` used to initialize this
                 object.
         """
-        values_list = [_detach_and_to_cpu(v) for v in list(values)]
-        del values  # Avoid accidental use of the original values
-        metric = self._mapped_metric(*values_list)
+        target = _detach_and_to_cpu(target)
+        prediction = _detach_and_to_cpu(prediction)
+        metric = self._mapped_metric(target, prediction)
 
         if self._sum is None:
             self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
 
-        self._sum = self._add(self._sum, self._mapped_metric(*values_list))
+        self._sum = self._add(self._sum, metric)
         self._count += 1
 
     def get(self) -> TensorMapping:
@@ -96,9 +151,8 @@ class ZonalPowerSpectrum:
         self._mean_aggregator = Mean(_compute_zonal_power_spectrum)
 
     @torch.no_grad()
-    def record_batch(self, x: TensorMapping) -> None:
-        x = _detach_and_to_cpu(x)
-        self._mean_aggregator.record_batch(x)
+    def record_batch(self, data: TensorMapping) -> None:
+        self._mean_aggregator.record_batch(data)
 
     def get(self) -> TensorMapping:
         return self._mean_aggregator.get()
@@ -130,10 +184,10 @@ class Snapshot:
         self.snapshot: Optional[TensorMapping] = None
 
     @torch.no_grad()
-    def record_batch(self, values: TensorMapping) -> None:
+    def record_batch(self, data: TensorMapping) -> None:
         """Creates a snapshot if one has not yet been set."""
         if self.snapshot is None:
-            self.snapshot = _detach_and_to_cpu(values)
+            self.snapshot = _detach_and_to_cpu(data)
 
     def get(self) -> TensorMapping:
         """
@@ -155,7 +209,7 @@ class Snapshot:
 class DynamicHistogram:
     """Wrapper of DynamicHistogram for multiple histograms, one per variable."""
 
-    def __init__(self, n_bins) -> None:
+    def __init__(self, n_bins: int) -> None:
         self.n_bins = n_bins
         self.histograms: Optional[
             Mapping[str, fme.core.histogram.DynamicHistogram]
@@ -220,12 +274,14 @@ class Aggregator:
             return compute_psnr(x, y, add_channel_dim=True)
 
         self._comparisons = {
-            "rmse": Mean(metrics.root_mean_squared_error),
-            "weighted_rmse": Mean(_area_weighted_rmse),
-            "ssim": Mean(_compute_ssim),
-            "psnr": Mean(_compute_psnr),
+            "rmse": MeanComparison(metrics.root_mean_squared_error),
+            "weighted_rmse": MeanComparison(_area_weighted_rmse),
+            "ssim": MeanComparison(_compute_ssim),
+            "psnr": MeanComparison(_compute_psnr),
         }
-        self._intrinsics = {
+        self._intrinsics: Mapping[
+            str, Mapping[str, Union[DynamicHistogram, Snapshot, ZonalPowerSpectrum]]
+        ] = {
             input_type: {
                 "histogram": DynamicHistogram(n_bins=n_histogram_bins),
                 "snapshot": Snapshot(),
@@ -246,12 +302,12 @@ class Aggregator:
             target: Ground truth
             pred: Model outputs
         """
-        for _, agg in self._comparisons.items():
-            agg.record_batch(target, prediction)
+        for _, comparison_aggregator in self._comparisons.items():
+            comparison_aggregator.record_batch(target, prediction)
 
         for input, input_type in zip((target, prediction), ("target", "prediction")):
-            for _, agg in self._intrinsics[input_type].items():  # type: ignore
-                agg.record_batch(input)
+            for _, intrinsic_aggregator in self._intrinsics[input_type].items():
+                intrinsic_aggregator.record_batch(input)
 
         self.loss.record_batch({"loss": loss})
 
