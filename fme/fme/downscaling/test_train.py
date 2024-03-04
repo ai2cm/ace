@@ -22,8 +22,8 @@ def test_trainer():
     trainer = Trainer(
         model=MagicMock(),
         optimization=MagicMock(),
-        train_loader=MagicMock(),
-        validation_loader=MagicMock(),
+        train_data=MagicMock(),
+        validation_data=MagicMock(),
         num_epochs=2,
     )
 

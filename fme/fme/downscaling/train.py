@@ -11,7 +11,7 @@ from fme.core.optimization import NullOptimization, Optimization, OptimizationCo
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import BatchData, DataLoaderConfig, DownscalingDataLoader
+from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
 from fme.downscaling.models import DownscalingModelConfig, Model
 from fme.downscaling.typing_ import HighResLowResPair
 from fme.fcn_training.train_config import LoggingConfig
@@ -27,19 +27,19 @@ class Trainer:
         self,
         model: Model,
         optimization: Optimization,
-        train_loader: DownscalingDataLoader,
-        validation_loader: DownscalingDataLoader,
+        train_data: GriddedData,
+        validation_data: GriddedData,
         num_epochs: int,
     ) -> None:
         self.model = model
 
         self.optimization = optimization
         self.null_optimization = NullOptimization()
-        self.train_loader = train_loader
-        self.validation_loader = validation_loader
+        self.train_data = train_data
+        self.validation_data = validation_data
         self.num_epochs = num_epochs
-        self.area_weights = self.train_loader.area_weights.highres.cpu()
-        self.latitudes = self.train_loader.horizontal_coordinates.highres.lat.cpu()
+        self.area_weights = self.train_data.area_weights.highres.cpu()
+        self.latitudes = self.train_data.horizontal_coordinates.highres.lat.cpu()
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self._num_batches_seen = 0
@@ -48,7 +48,7 @@ class Trainer:
         train_aggregator = Aggregator(self.area_weights, self.latitudes)
         batch: BatchData
         wandb = WandB.get_instance()
-        for batch in self.train_loader.loader:
+        for batch in self.train_data.loader:
             inputs = HighResLowResPair(
                 _squeeze_time_dim(batch.highres), _squeeze_time_dim(batch.lowres)
             )
@@ -73,7 +73,7 @@ class Trainer:
         with torch.no_grad():
             validation_aggregator = Aggregator(self.area_weights, self.latitudes)
             batch: BatchData
-            for batch in self.validation_loader.loader:
+            for batch in self.validation_data.loader:
                 inputs = HighResLowResPair(
                     _squeeze_time_dim(batch.highres),
                     _squeeze_time_dim(batch.lowres),
@@ -110,16 +110,14 @@ class TrainerConfig:
 
     def build(self) -> Trainer:
         all_names = list(set(self.model.in_names).union(set(self.model.out_names)))
-        train_data_loader: DownscalingDataLoader = self.train_data.build(
-            train=True, var_names=all_names
-        )
-        valid_data_loader: DownscalingDataLoader = self.validation_data.build(
+        train_data: GriddedData = self.train_data.build(train=True, var_names=all_names)
+        validation_data: GriddedData = self.validation_data.build(
             train=False, var_names=all_names
         )
 
         downscaling_model = self.model.build(
-            train_data_loader.img_shape.lowres,
-            train_data_loader.downscale_factor,
+            train_data.img_shape.lowres,
+            train_data.downscale_factor,
         )
 
         optimization = self.optimization.build(
@@ -129,8 +127,8 @@ class TrainerConfig:
         return Trainer(
             downscaling_model,
             optimization,
-            train_data_loader,
-            valid_data_loader,
+            train_data,
+            validation_data,
             self.num_epochs,
         )
 

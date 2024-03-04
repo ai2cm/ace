@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 import fme.core.data_loading.config
-from fme.core.data_loading.data_typing import HorizontalCoordinates
+from fme.core.data_loading.data_typing import HorizontalCoordinates, VariableMetadata
 from fme.core.data_loading.getters import get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
@@ -72,12 +72,13 @@ class PairedDataset(torch.utils.data.Dataset):
 
 
 @dataclasses.dataclass
-class DownscalingDataLoader:
+class GriddedData:
     loader: torch.utils.data.DataLoader
     area_weights: HighResLowResPair[torch.Tensor]
     horizontal_coordinates: HighResLowResPair[HorizontalCoordinates]
     img_shape: HighResLowResPair[Tuple[int, int]]
     downscale_factor: int
+    metadata: Mapping[str, VariableMetadata]
 
 
 @dataclasses.dataclass
@@ -90,7 +91,7 @@ class DataLoaderConfig:
 
     def build(
         self, train: bool, var_names: List[str], dist: Optional[Distributed] = None
-    ) -> DownscalingDataLoader:
+    ) -> GriddedData:
         if dist is None:
             dist = Distributed.get_instance()
 
@@ -159,10 +160,16 @@ class DataLoaderConfig:
             downscale_factor_height == downscale_factor_width
         ), "Aspect ratio must match"
 
-        return DownscalingDataLoader(
+        assert (
+            dataset_highres.metadata == dataset_lowres.metadata
+        ), "Metadata must match."
+        metadata = dataset_highres.metadata
+
+        return GriddedData(
             dataloader,
             area_weights,
             horizontal_coordinates,
             img_shape,
             downscale_factor_height,
+            metadata,
         )
