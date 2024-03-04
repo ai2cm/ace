@@ -7,7 +7,13 @@ from fme.core import metrics
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 from fme.downscaling import metrics_and_maths
-from fme.downscaling.aggregators import Aggregator, DynamicHistogram, Mean, Snapshot
+from fme.downscaling.aggregators import (
+    Aggregator,
+    DynamicHistogram,
+    Mean,
+    MeanComparison,
+    Snapshot,
+)
 
 
 def assert_tensor_mapping_all_close(x: TensorMapping, y: TensorMapping):
@@ -17,36 +23,51 @@ def assert_tensor_mapping_all_close(x: TensorMapping, y: TensorMapping):
         assert torch.allclose(x[k], y[k]), f"Values do not match for {k}"
 
 
+@pytest.mark.parametrize("input_", [{"x": torch.tensor([1.0, 2.0, 3.0])}])
 @pytest.mark.parametrize(
-    "metric, input_values, expected_output_values",
+    "metric, expected_outputs, n_batches",
     [
         (
             torch.mean,
-            ({"x": torch.tensor([1.0, 2.0, 3.0])},),
             {"x": torch.tensor(2.0)},
+            1,
         ),
         (
-            metrics.root_mean_squared_error,
-            (
-                {"x": torch.tensor([1.0, 2.0, 3.0])},
-                {"x": torch.tensor([1.0, 2.0, 3.0])},
-            ),
-            {"x": torch.tensor(0.0)},
+            torch.mean,
+            {"x": torch.tensor(2.0)},
+            2,
         ),
-        (
-            metrics.root_mean_squared_error,
-            ({"x": torch.ones(2, 1, 4, 8)}, {"x": torch.ones(2, 1, 4, 8)}),
-            {"x": torch.tensor(0.0)},
-        ),
+        (torch.sum, {"x": torch.tensor(6.0)}, 1),
     ],
 )
-def test_mean_values(metric, input_values, expected_output_values):
+def test_mean_values(metric, input_, expected_outputs, n_batches):
     aggregator = Mean(metric)
-    n_batches = 2
     for _ in range(n_batches):
-        aggregator.record_batch(*input_values)
+        aggregator.record_batch(input_)
     result = aggregator.get()
-    assert_tensor_mapping_all_close(result, expected_output_values)
+    assert_tensor_mapping_all_close(result, expected_outputs)
+
+
+@pytest.mark.parametrize(
+    "target, prediction, metric, expected_outputs",
+    [
+        (
+            {"x": torch.tensor([0.0, 0.0])},
+            {"x": torch.tensor([1.0, 1.0])},
+            metrics.root_mean_squared_error,
+            {"x": torch.tensor(1.0)},
+        )
+    ],
+)
+@pytest.mark.parametrize("n_batches", [1, 2])
+def test_mean_comparison_values(
+    metric, target, prediction, expected_outputs, n_batches
+):
+    aggregator = MeanComparison(metric)
+    for _ in range(n_batches):
+        aggregator.record_batch(target, prediction)
+    result = aggregator.get()
+    assert_tensor_mapping_all_close(result, expected_outputs)
 
 
 def _compute_zonal_spectrum_for_testing(x):
