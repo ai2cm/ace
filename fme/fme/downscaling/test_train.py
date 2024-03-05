@@ -147,11 +147,18 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
 
 def _get_aggregator_keys(prefix: str) -> Set[str]:
     keys = [f"{prefix}/loss"]
-    for metric_name in ("rmse", "weighted_rmse", "ssim", "psnr"):
+    for metric_name in (
+        "rmse",
+        "weighted_rmse",
+        "ssim",
+        "psnr",
+        "snapshot/image-error",
+        "snapshot/image-full-field",
+    ):
         for var_name in ("x", "y"):
             keys.append(f"{prefix}/{metric_name}/{var_name}")
 
-    for instrinsic_name in ("histogram", "snapshot", "spectrum"):
+    for instrinsic_name in ("histogram", "spectrum"):
         for var_name in ("x", "y"):
             for data_type in ("target", "prediction"):
                 keys.append(f"{prefix}/{instrinsic_name}/{var_name}_{data_type}")

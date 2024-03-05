@@ -1,6 +1,6 @@
 """Contains classes for aggregating inference metrics and various statistics."""
 
-from typing import Any, Callable, Dict, Literal, Mapping, Optional, Union
+from typing import Any, Callable, Dict, Literal, Mapping, Optional, Protocol, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -9,7 +9,10 @@ import torch
 
 import fme.core.histogram
 from fme.core import metrics
-from fme.core.aggregator.plotting import plot_imshow
+from fme.core.aggregator.one_step.snapshot import (
+    SnapshotAggregator as CoreSnapshotAggregator,
+)
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
@@ -171,41 +174,6 @@ class ZonalPowerSpectrum:
         return ret
 
 
-class Snapshot:
-    """
-    A class for creating and retrieving snapshots of values. Stores the first
-    snapshot of values recorded
-
-    Attributes:
-        snapshot: The snapshot of values.
-    """
-
-    def __init__(self) -> None:
-        self.snapshot: Optional[TensorMapping] = None
-
-    @torch.no_grad()
-    def record_batch(self, data: TensorMapping) -> None:
-        """Creates a snapshot if one has not yet been set."""
-        if self.snapshot is None:
-            self.snapshot = _detach_and_to_cpu(data)
-
-    def get(self) -> TensorMapping:
-        """
-        Returns the snapshot.
-
-        Raises:
-            ValueError: If no values have been added to the snapshot.
-        """
-        if self.snapshot is None:
-            raise ValueError("No values have been added to the snapshot")
-        return self.snapshot
-
-    def get_wandb(self) -> Mapping[str, Any]:
-        return {
-            k: plot_imshow(v.squeeze(dim=-3)[0].numpy()) for k, v in self.get().items()
-        }
-
-
 class DynamicHistogram:
     """Wrapper of DynamicHistogram for multiple histograms, one per variable."""
 
@@ -244,6 +212,54 @@ class DynamicHistogram:
         return {k: wandb.Histogram(np_histogram=v) for k, v in self.get().items()}
 
 
+class SnapshotAggregator:
+    def __init__(self, metadata: Optional[Mapping[str, VariableMetadata]]) -> None:
+        self._snapshot_aggregator = CoreSnapshotAggregator(metadata)
+
+    def _tile_time_dim(self, x: torch.Tensor) -> torch.Tensor:
+        time_dim = -3
+        return x.unsqueeze(time_dim).repeat_interleave(2, dim=time_dim)
+
+    @torch.no_grad()
+    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
+        # core SnapshotAggregator expects a time dimension of length two, so we
+        # provide it by tiling the data.
+        target = map_tensor_mapping(self._tile_time_dim)(target)
+        prediction = map_tensor_mapping(self._tile_time_dim)(prediction)
+        self._snapshot_aggregator.record_batch(-1.0, target, prediction, {}, {})
+
+    def _remove_leading_slash(self, s: str) -> str:
+        if s.startswith("/"):
+            return s[1:]
+        else:
+            return s
+
+    def get(self, label: str = "") -> Mapping[str, Any]:
+        logs = self._snapshot_aggregator.get_logs(label)
+        ret = {}
+        for k, v in logs.items():
+            # residual is meaningless for single steps
+            if "residual" not in k:
+                # The core SnapshotAggregator returns {label}/{key} even when
+                # label == "". In this case, removing the leading slash.
+                ret[self._remove_leading_slash(k)] = v
+        return ret
+
+    def get_wandb(self, label: str = "") -> Mapping[str, Any]:
+        return self.get(label)
+
+
+class _ComparisonAggregator(Protocol):
+    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
+        ...
+
+    def get(self) -> Mapping[str, Any]:
+        ...
+
+    def get_wandb(self) -> Mapping[str, Any]:
+        ...
+
+
 class Aggregator:
     """
     Class for aggregating inference metrics and intrinsic statistics.
@@ -260,6 +276,7 @@ class Aggregator:
         latitudes: torch.Tensor,
         n_histogram_bins: int = 300,
         ssim_kwargs: Optional[Mapping[str, Any]] = None,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> None:
         def _area_weighted_rmse(truth, pred):
             return metrics.root_mean_squared_error(truth, pred, area_weights)
@@ -273,18 +290,18 @@ class Aggregator:
         def _compute_psnr(x, y):
             return compute_psnr(x, y, add_channel_dim=True)
 
-        self._comparisons = {
+        self._comparisons: Mapping[str, _ComparisonAggregator] = {
             "rmse": MeanComparison(metrics.root_mean_squared_error),
             "weighted_rmse": MeanComparison(_area_weighted_rmse),
             "ssim": MeanComparison(_compute_ssim),
             "psnr": MeanComparison(_compute_psnr),
+            "snapshot": SnapshotAggregator(metadata),
         }
         self._intrinsics: Mapping[
-            str, Mapping[str, Union[DynamicHistogram, Snapshot, ZonalPowerSpectrum]]
+            str, Mapping[str, Union[DynamicHistogram, ZonalPowerSpectrum]]
         ] = {
             input_type: {
                 "histogram": DynamicHistogram(n_bins=n_histogram_bins),
-                "snapshot": Snapshot(),
                 "spectrum": ZonalPowerSpectrum(latitudes),
             }
             for input_type in ("target", "prediction")
@@ -332,7 +349,7 @@ class Aggregator:
 
         for data_role in ("target", "prediction"):
             _aggregators = self._intrinsics[data_role]
-            for metric_name, agg in _aggregators.items():  # type: ignore
+            for metric_name, agg in _aggregators.items():
                 _metric_values = {
                     f"{prefix}{metric_name}/{var_name}_{data_role}": v
                     for (var_name, v) in getattr(agg, getter)().items()
