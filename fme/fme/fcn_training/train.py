@@ -153,6 +153,8 @@ class Trainer:
         )
 
         self._ema = self.config.ema.build(self.stepper.modules)
+        self._best_validation_loss = torch.inf
+        self._best_inference_error = torch.inf
 
     def switch_off_grad(self, model):
         for param in model.parameters():
@@ -161,8 +163,6 @@ class Trainer:
     def train(self):
         logging.info("Starting Training Loop...")
 
-        best_valid_loss = torch.inf
-        best_inference_error = torch.inf
         self._model_epoch = self.startEpoch
         inference_epochs = list(range(0, self.config.max_epochs))[
             self.config.inference.epochs.slice
@@ -217,16 +217,16 @@ class Trainer:
                     else:
                         best_checkpoint_context = contextlib.nullcontext
                     with best_checkpoint_context():
-                        if valid_loss <= best_valid_loss:
+                        if valid_loss <= self._best_validation_loss:
                             self.save_checkpoint(self.config.best_checkpoint_path)
-                            best_valid_loss = valid_loss
+                            self._best_validation_loss = valid_loss
                         if inference_error is not None and (
-                            inference_error <= best_inference_error
+                            inference_error <= self._best_inference_error
                         ):
                             self.save_checkpoint(
                                 self.config.best_inference_checkpoint_path
                             )
-                            best_inference_error = inference_error
+                            self._best_inference_error = inference_error
                     with self._ema_context():
                         self.save_checkpoint(self.config.ema_checkpoint_path)
 
@@ -382,6 +382,8 @@ class Trainer:
             {
                 "num_batches_seen": self.num_batches_seen,
                 "epoch": self._model_epoch,
+                "best_validation_loss": self._best_validation_loss,
+                "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
                 "optimization": self.optimization.get_state(),
             },
@@ -402,6 +404,8 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["epoch"]
+    trainer._best_validation_loss = checkpoint["best_validation_loss"]
+    trainer._best_inference_error = checkpoint["best_inference_error"]
 
 
 def main(yaml_config: str):
