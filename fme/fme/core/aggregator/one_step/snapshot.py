@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
-from fme.core.device import get_device
 from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
@@ -71,27 +70,27 @@ class SnapshotAggregator:
         wandb = WandB.get_instance()
         for name in self._gen_data.keys():
             # use first sample in batch
-            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0]
-            target = self._target_data[name].select(dim=time_dim, index=target_time)[0]
-            input = self._target_data[name].select(dim=time_dim, index=input_time)[0]
-            gap_shape = (input.shape[-2], 4)
-            gap = torch.full(gap_shape, target.min()).to(get_device())
-            gap_res = torch.full(gap_shape, (target - input).min()).to(get_device())
-            images = {}
-            images["error"] = (gen - target).cpu().numpy()
-            images["full-field"] = torch.cat((gen, gap, target), axis=1).cpu().numpy()
-            images["residual"] = (
-                torch.cat(
-                    (
-                        gen - input,
-                        gap_res,
-                        target - input,
-                    ),
-                    axis=1,
-                )
-                .cpu()
-                .numpy()
+            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0].cpu()
+            target = (
+                self._target_data[name].select(dim=time_dim, index=target_time)[0].cpu()
             )
+            input = (
+                self._target_data[name].select(dim=time_dim, index=input_time)[0].cpu()
+            )
+            gap_shape = (input.shape[-2], 4)
+            gap = torch.full(gap_shape, target.min())
+            gap_res = torch.full(gap_shape, (target - input).min())
+            images = {}
+            images["error"] = (gen - target).numpy()
+            images["full-field"] = torch.cat((gen, gap, target), axis=1).numpy()
+            images["residual"] = torch.cat(
+                (
+                    gen - input,
+                    gap_res,
+                    target - input,
+                ),
+                axis=1,
+            ).numpy()
             for key, data in images.items():
                 if key == "error" or key == "residual":
                     diverging = True
