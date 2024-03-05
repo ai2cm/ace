@@ -4,15 +4,17 @@ import pytest
 import torch
 
 from fme.core import metrics
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image
 from fme.downscaling import metrics_and_maths
 from fme.downscaling.aggregators import (
     Aggregator,
     DynamicHistogram,
     Mean,
     MeanComparison,
-    Snapshot,
+    SnapshotAggregator,
 )
 
 
@@ -93,13 +95,24 @@ def test_mean_shapes(metric, input_shape, output_shape):
     assert result["x"].shape == output_shape
 
 
-def test_snapshot_records_first_value():
-    snapshot = Snapshot()
-    values = {"x": torch.tensor([1, 2, 3]), "y": torch.tensor([4, 5, 6])}
-    snapshot.record_batch(values)
-    assert_tensor_mapping_all_close(snapshot.get(), values)
-    snapshot.record_batch({"x": torch.tensor([7, 8, 9])})
-    assert_tensor_mapping_all_close(snapshot.get(), values)
+def test_snapshot_runs():
+    metadata = {
+        "x": VariableMetadata("foo/sec", "bary bar bar"),
+        "y": VariableMetadata("bar/m", "fooey foo"),
+    }
+    snapshot = SnapshotAggregator(metadata)
+    batch_size, height, width = 2, 4, 8
+
+    target = {
+        "x": torch.rand(batch_size, height, width),
+        "y": torch.rand(batch_size, height, width),
+    }
+    prediction = {
+        "x": torch.rand(batch_size, height, width),
+        "y": torch.rand(batch_size, height, width),
+    }
+    snapshot.record_batch(target, prediction)
+    snapshot.get()
 
 
 @pytest.mark.parametrize(
@@ -153,19 +166,24 @@ def test_performance_metrics(prefix, expected_prefix):
         "weighted_rmse",
         "psnr",
         "ssim",
+        "snapshot/image-error",
+        "snapshot/image-full-field",
     ]:
         num_metrics += 1
         assert (
             f"{expected_prefix}{metric_name}/x" in all_metrics
         ), f"{expected_prefix}{metric_name}/x, {all_metrics.keys()}"
         assert f"{expected_prefix}{metric_name}/x" in wandb_metrics
-        assert (
-            all_metrics[f"{expected_prefix}{metric_name}/x"].shape == ()
-        ), f"{metric_name}/x"
+        if "snapshot" in metric_name:
+            assert isinstance(all_metrics[f"{expected_prefix}{metric_name}/x"], Image)
+        else:
+            assert (
+                all_metrics[f"{expected_prefix}{metric_name}/x"].shape == ()
+            ), f"{metric_name}/x"
 
-    expected_shapes = ((n_lon // 2 + 1,), shape, (n_bins,))
+    expected_shapes = ((n_lon // 2 + 1,), (n_bins,))
     for instrinsic_name, expected_shape in zip(
-        ("spectrum", "snapshot", "histogram"), expected_shapes
+        ("spectrum", "histogram"), expected_shapes
     ):
         for input_type in ["target", "prediction"]:
             num_metrics += 1
