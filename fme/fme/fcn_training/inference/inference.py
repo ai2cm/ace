@@ -54,7 +54,8 @@ class InferenceConfig:
             by forward_steps_in_memory.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
-        validation_loader: Configuration for validation data.
+        loader: Configuration for data to be used as initial conditions, forcing, and
+            target in inference.
         prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
@@ -77,7 +78,7 @@ class InferenceConfig:
     n_forward_steps: int
     checkpoint_path: str
     logging: LoggingConfig
-    validation_loader: InferenceDataLoaderConfig
+    loader: InferenceDataLoaderConfig
     prediction_loader: Optional[InferenceDataLoaderConfig] = None
     log_video: bool = True
     log_extended_video: bool = False
@@ -162,7 +163,7 @@ class InferenceConfig:
     def get_data_writer(self, data: GriddedData) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
-            n_samples=self.validation_loader.n_samples,
+            n_samples=self.loader.n_samples,
             n_timesteps=self.n_forward_steps + 1,
             metadata=data.metadata,
             coords=data.coords,
@@ -201,7 +202,7 @@ def main(
     )
 
     data = get_inference_data(
-        config.validation_loader,
+        config.loader,
         config.forward_steps_in_memory,
         data_requirements,
     )
@@ -264,7 +265,7 @@ def main(
     timers["final_writer_flush"] = final_flush_duration
 
     duration = time.time() - start_time
-    total_steps = config.n_forward_steps * config.validation_loader.n_samples
+    total_steps = config.n_forward_steps * config.loader.n_samples
     total_steps_per_second = total_steps / duration
     logging.info(f"Inference duration: {duration:.2f} seconds")
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")

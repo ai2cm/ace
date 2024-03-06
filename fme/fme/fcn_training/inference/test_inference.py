@@ -163,7 +163,7 @@ def inference_helper(
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_loader=data.inference_data_loader_config,
+        loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
         log_video=True,
         data_writer=DataWriterConfig(
@@ -294,7 +294,7 @@ def test_inference_writer_boundaries(
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_loader=data.inference_data_loader_config,
+        loader=data.inference_data_loader_config,
         log_video=True,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
@@ -428,7 +428,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             log_to_file=False,
             log_to_wandb=False,
         ),
-        validation_loader=data.inference_data_loader_config,
+        loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
@@ -552,7 +552,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
             log_to_file=False,
             log_to_wandb=True,
         ),
-        validation_loader=data.inference_data_loader_config,
+        loader=data.inference_data_loader_config,
         prediction_loader=None,
         log_video=True,
         save_prediction_files=True,
@@ -585,7 +585,7 @@ def test_inference_config_raises_incompatible_timesteps(
         n_forward_steps=n_forward_steps,
         checkpoint_path="./some_dir",
         logging=LoggingConfig(),
-        validation_loader=InferenceDataLoaderConfig(
+        loader=InferenceDataLoaderConfig(
             XarrayDataConfig(
                 data_path="./some_data",
             ),
