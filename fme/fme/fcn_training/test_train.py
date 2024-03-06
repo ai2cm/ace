@@ -129,7 +129,7 @@ logging:
   log_to_file: false
   project: fme
   entity: ai2cm
-validation_loader:
+loader:
   dataset:
     data_path: '{valid_data_path}'
   start_indices:
