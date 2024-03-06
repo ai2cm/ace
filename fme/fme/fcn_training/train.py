@@ -112,9 +112,10 @@ class Trainer:
 
         self.num_batches_seen = 0
         self.startEpoch = 0
-
         self._model_epoch = self.startEpoch
         self.num_batches_seen = 0
+        self._best_validation_loss = torch.inf
+        self._best_inference_error = torch.inf
 
         for batch in self.train_data.loader:
             shapes = {k: v.shape for k, v in batch.data.items()}
@@ -153,8 +154,6 @@ class Trainer:
         )
 
         self._ema = self.config.ema.build(self.stepper.modules)
-        self._best_validation_loss = torch.inf
-        self._best_inference_error = torch.inf
 
     def switch_off_grad(self, model):
         for param in model.parameters():
