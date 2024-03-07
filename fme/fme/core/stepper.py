@@ -24,7 +24,7 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
-from fme.core.loss import ConservationLossConfig, LossConfig
+from fme.core.loss import ConservationLossConfig, LossConfig, construct_weight_tensor
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.packer import DataShapesNotUniform, Packer
@@ -277,6 +277,13 @@ class SingleModuleStepper:
         self._corrector = config.corrector.build(
             area=area, sigma_coordinates=sigma_coordinates
         )
+        # TODO: If loss is updated to take Mapping[str: tensor] instead of
+        # tensor inputs, we can move loss weighting out of the stepper and
+        # into LossConfig.build
+        self._loss_weights = construct_weight_tensor(
+            weights=config.loss.weights,
+            out_names=self.out_packer.names,
+        )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
@@ -365,7 +372,10 @@ class SingleModuleStepper:
                 if target_tensor_norm is None:
                     step_loss = torch.tensor(torch.nan)
                 else:
-                    step_loss = self.loss_obj(gen_tensor_norm, target_tensor_norm)
+                    step_loss = self.loss_obj(
+                        self._loss_weights * gen_tensor_norm,
+                        self._loss_weights * target_tensor_norm,
+                    )
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
             gen_norm = self.out_packer.unpack(gen_tensor_norm, axis=channel_dim)
