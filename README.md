@@ -21,7 +21,7 @@ You may verify installation by running `pytest fme/`.
 
 The checkpoint and a 1-year subsample of the validation data are available at
 [this Zenodo repository](https://zenodo.org/doi/10.5281/zenodo.10791086).
-Download these to your local system.
+Download these to your local filesystem.
 
 Alternatively, if interested in the complete dataset, this is available via a public
 [requester pays](https://cloud.google.com/storage/docs/requester-pays)
@@ -30,8 +30,9 @@ can be downloaded with:
 ```
 gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
 ```
-It is possible to download a portion of the dataset  only, but it is necessary to have
-enough data to span the desired prediction period. The checkpoint is also available on GCS at `gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar`.
+It is possible to download a portion of the dataset only, but it is necessary to have
+enough data to span the desired prediction period. The checkpoint is also available on GCS at
+`gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar`.
 
 ### 3. Update configuration and run
 Update the paths in the [example config](examples/config-inference.yaml). Then in the
