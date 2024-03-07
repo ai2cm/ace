@@ -205,29 +205,8 @@ class Trainer:
 
             if self.dist.is_root():
                 if self.config.save_checkpoint:
-                    # checkpoint at the end of every epoch
-                    self.save_checkpoint(self.config.latest_checkpoint_path)
-                    if self.config.epoch_checkpoint_enabled(self._model_epoch):
-                        self.save_checkpoint(
-                            self.config.epoch_checkpoint_path(self._model_epoch)
-                        )
-                    if self.config.validate_using_ema:
-                        best_checkpoint_context = self._ema_context
-                    else:
-                        best_checkpoint_context = contextlib.nullcontext
-                    with best_checkpoint_context():
-                        if valid_loss <= self._best_validation_loss:
-                            self.save_checkpoint(self.config.best_checkpoint_path)
-                            self._best_validation_loss = valid_loss
-                        if inference_error is not None and (
-                            inference_error <= self._best_inference_error
-                        ):
-                            self.save_checkpoint(
-                                self.config.best_inference_checkpoint_path
-                            )
-                            self._best_inference_error = inference_error
-                    with self._ema_context():
-                        self.save_checkpoint(self.config.ema_checkpoint_path)
+                    logging.info(f"Saving checkpoints for epoch {epoch + 1}")
+                    self.save_all_checkpoints(valid_loss, inference_error)
 
             time_elapsed = time.time() - start_time
             logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
@@ -391,6 +370,42 @@ class Trainer:
 
     def restore_checkpoint(self, checkpoint_path):
         _restore_checkpoint(self, checkpoint_path)
+
+    def save_all_checkpoints(self, valid_loss: float, inference_error: Optional[float]):
+        logging.info(
+            f"Saving latest checkpoint to {self.config.latest_checkpoint_path}"
+        )
+        self.save_checkpoint(self.config.latest_checkpoint_path)
+        if self.config.epoch_checkpoint_enabled(self._model_epoch):
+            epoch_checkpoint_path = self.config.epoch_checkpoint_path(self._model_epoch)
+            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
+            self.save_checkpoint(epoch_checkpoint_path)
+        if self.config.validate_using_ema:
+            best_checkpoint_context = self._ema_context
+        else:
+            best_checkpoint_context = contextlib.nullcontext  # type: ignore
+        with best_checkpoint_context():
+            if valid_loss <= self._best_validation_loss:
+                logging.info(
+                    "Saving lowest validation loss checkpoint to "
+                    f"{self.config.best_checkpoint_path}"
+                )
+                self.save_checkpoint(self.config.best_checkpoint_path)
+                self._best_validation_loss = valid_loss
+            if inference_error is not None and (
+                inference_error <= self._best_inference_error
+            ):
+                logging.info(
+                    "Saving lowest inference error checkpoint to "
+                    f"{self.config.best_inference_checkpoint_path}"
+                )
+                self.save_checkpoint(self.config.best_inference_checkpoint_path)
+                self._best_inference_error = inference_error
+        with self._ema_context():
+            logging.info(
+                f"Saving latest EMA checkpoint to {self.config.ema_checkpoint_path}"
+            )
+            self.save_checkpoint(self.config.ema_checkpoint_path)
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path):
