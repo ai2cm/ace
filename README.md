@@ -6,7 +6,7 @@ This is rapidly changing research software. We make no guarantees of maintaining
 
 ## Quickstart
 
-### 1. Clone this repository and install dependencies
+### 1. Install
 
 Clone this repository. Then assuming [conda](https://docs.conda.io/en/latest/)
 is available, run
@@ -25,18 +25,17 @@ Download these to your local system.
 
 Alternatively, if interested in the complete dataset, this is available via a public
 [requester pays](https://cloud.google.com/storage/docs/requester-pays)
-Google Cloud Storage bucket. The checkpoint can be downloaded with:
-```
-gsutil -u YOUR_GCP_PROJECT cp gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar .
-```
-Download the 10-year validation data (approx. 190GB; can also download a portion only,
-but it is required to download enough data to span the desired prediction period):
+Google Cloud Storage bucket. For example, the 10-year validation data (approx. 190GB)
+can be downloaded with:
 ```
 gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
 ```
+It is possible to download a portion of the dataset  only, but it is necessary to have
+enough data to span the desired prediction period. The checkpoint is also available on GCS at `gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar`.
 
-### 3. Update the paths in the [example config](examples/config-inference.yaml).
-Then in the `fme` conda environment, run inference with:
+### 3. Update configuration and run
+Update the paths in the [example config](examples/config-inference.yaml). Then in the
+`fme` conda environment, run inference with:
 ```
 python -m fme.fcn_training.inference.inference examples/config-inference.yaml
 ```
