@@ -12,6 +12,7 @@ from fme.core.loss import (
     ConservationLossConfig,
     GlobalMeanLoss,
     LossConfig,
+    construct_weight_tensor,
     get_dry_air_nonconservation,
 )
 
@@ -194,3 +195,31 @@ def test_area_weighted_mse():
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
     torch.testing.assert_allclose(result, expected)
+
+
+def test_construct_weight_tensor():
+    out_names = ["a", "b", "c"]
+    weights = {"a": 0.5, "c": 3.0}
+    n_samples = 10
+    nlat, nlon = 8, 4
+    gen_data = torch.rand(n_samples, len(out_names), nlat, nlon, device=get_device())
+    weight_tensor = construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)
+    weighted_gen_data = gen_data * weight_tensor
+    assert weight_tensor.shape == (1, len(out_names), 1, 1)
+    assert weighted_gen_data.shape == gen_data.shape
+    for i, name in enumerate(out_names):
+        if name in weights:
+            assert torch.allclose(
+                weighted_gen_data[:, i], weights[name] * gen_data[:, i]
+            )
+        else:
+            assert torch.allclose(weighted_gen_data[:, i], gen_data[:, i])
+
+
+def test_construct_weight_tensor_missing_key_error():
+    out_names = ["a", "b", "c"]
+    weights = {"a": 0.5, "c": 3.0, "d": 1.5}
+    with pytest.raises(KeyError):
+        construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)(
+            out_names, n_dim=4, channel_dim=-3
+        )
