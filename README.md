@@ -8,7 +8,8 @@ This is rapidly changing research software. We make no guarantees of maintaining
 
 ### 1. Clone this repository and install dependencies
 
-Assuming [conda](https://docs.conda.io/en/latest/) is available, run
+Clone this repository. Then assuming [conda](https://docs.conda.io/en/latest/)
+is available, run
 ```
 make create_environment
 ```
@@ -18,7 +19,11 @@ You may verify installation by running `pytest fme/`.
 
 ### 2. Download data and checkpoint
 
-These are available via a public
+The checkpoint and a 1-year subsample of the validation data is available at
+[this Zenodo repository](https://zenodo.org/doi/10.5281/zenodo.10791086).
+Download these to your local system.
+
+Alternatively, if interested in the complete dataset, this is available via a public
 [requester pays](https://cloud.google.com/storage/docs/requester-pays)
 Google Cloud Storage bucket. The checkpoint can be downloaded with:
 ```
