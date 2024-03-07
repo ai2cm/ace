@@ -30,6 +30,40 @@ def get_dry_air_nonconservation(
     ).mean()
 
 
+def construct_weight_tensor(
+    weights: Dict[str, float],
+    out_names: List[str],
+    n_dim: int = 4,
+    channel_dim: int = -3,
+) -> torch.Tensor:
+    """Creates a packed weight tensor with the appropriate dimensions for
+    broadcasting with generated or target output tensors. When used in
+    the n_forward_steps loop in the stepper's run_on_batch, the channel dim is
+    -3 and the n_dim is 4 (sample, channel, lat, lon).
+
+    Args:
+        weights: dict of variable names with individual weights to apply
+            to their normalized loss
+        out_names: list of output variable names
+        n_dim: number of dimensions of the output tensor
+        channel_dim: the channel dimension of the output tensor
+    """
+
+    missing_keys = set(weights.keys()) - set(out_names)
+    if len(missing_keys) > 0:
+        raise KeyError(
+            f"Variables {missing_keys} in loss weights not in "
+            f"output variables list."
+        )
+    weights_tensor = torch.tensor([weights.get(key, 1.0) for key in out_names])
+    # positive index of the channel dimension
+    _channel_dim = n_dim + channel_dim if channel_dim < 0 else channel_dim
+    reshape_dim = (
+        len(weights_tensor) if i == _channel_dim else 1 for i in range(n_dim)
+    )
+    return weights_tensor.reshape(*reshape_dim).to(get_device(), dtype=torch.float)
+
+
 class ConservationLoss:
     def __init__(
         self,
@@ -223,6 +257,8 @@ class LossConfig:
             type to apply to the global mean of each sample
         global_mean_weight: the weight to apply to the global mean loss
             relative to the main loss
+        weights: A dictionary of variable names with individual
+            weights to apply to their normalized losses
     """
 
     type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
@@ -232,6 +268,7 @@ class LossConfig:
         default_factory=lambda: {}
     )
     global_mean_weight: float = 1.0
+    weights: Dict[str, float] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
         if self.type not in ("LpLoss", "MSE", "AreaWeightedMSE"):
