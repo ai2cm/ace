@@ -19,7 +19,7 @@ You may verify installation by running `pytest fme/`.
 
 ### 2. Download data and checkpoint
 
-The checkpoint and a 1-year subsample of the validation data is available at
+The checkpoint and a 1-year subsample of the validation data are available at
 [this Zenodo repository](https://zenodo.org/doi/10.5281/zenodo.10791086).
 Download these to your local system.
 
