@@ -11,7 +11,7 @@ logging:
   entity: your_wandb_entity
 validation_data:
   batch_size: 1
-  data_path: /path/to/validation/ic_0011
+  data_path: /path/to/data/directory  # time-ordered netCDFs ending in .nc
   data_type: xarray
   num_data_workers: 4
   n_samples: 1
