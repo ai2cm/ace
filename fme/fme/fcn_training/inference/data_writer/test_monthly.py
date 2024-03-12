@@ -1,3 +1,5 @@
+import datetime
+
 import cftime
 import numpy as np
 import pytest
@@ -7,7 +9,8 @@ import xarray as xr
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.fcn_training.inference.data_writer.monthly import (
     MonthlyDataWriter,
-    add_at,
+    add_data,
+    find_boundary,
     get_days_since_reference,
     months_for_timesteps,
 )
@@ -44,13 +47,12 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
             # repeat x along axis 1 to simulate a window_size > 1
             x_window = torch.cat([x] * window_size, dim=1)
             month_data = {"x": x_window}
-            for i_day in range(n_writes):
+            initial_time = cftime.DatetimeProlepticGregorian(year, month, 1, 0, 0, 0)
+            for i_write in range(n_writes):
                 times = xr.DataArray(
                     [
                         [
-                            cftime.DatetimeProlepticGregorian(
-                                year, month, 1, i_day, 0, 0
-                            )
+                            initial_time + datetime.timedelta(hours=6 * i_write)
                             for _ in range(window_size)
                         ]
                         for _ in range(n_samples)
@@ -75,22 +77,6 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         written["x"],
         torch.cat(month_values, dim=1).cpu().numpy() * window_size * n_writes,
     )
-
-
-def test_add_at():
-    m = 2
-    n_samples = 3
-    n_time = 5
-    n_lat = 4
-    n_lon = 8
-    values = np.random.uniform(size=(m, n_lat, n_lon))
-    indices = np.zeros((m,), dtype=int) + 2
-    target = np.zeros((n_samples, n_time, n_lat, n_lon))
-    assert np.sum(target) == 0.0
-    add_at(target, (indices, indices), values)
-    assert np.sum(target) > 0.0
-    np.testing.assert_allclose(target[2, 2], np.sum(values, axis=0))
-    np.testing.assert_allclose(np.sum(target), np.sum(values))
 
 
 @pytest.mark.parametrize(
@@ -122,3 +108,57 @@ def test_get_days_since_reference():
     assert days[1, 0] == 366 + 31
     assert days[1, 1] == 366 + 31 + 28
     assert days[1, 2] == 366 + 31 + 28 + 31
+
+
+@pytest.mark.parametrize(
+    "month_array, expected",
+    [
+        pytest.param([1, 2, 3, 4, 5, 6], 1, id="linear"),
+        pytest.param([1, 1, 2], 2, id="after two steps"),
+        pytest.param([1], 1, id="one value"),
+        pytest.param([1, 1, 1, 1], 4, id="all the same"),
+        pytest.param([0] * 50 + [1] * (23), 50, id="long array case"),
+    ],
+)
+def test_find_boundary(month_array, expected):
+    assert (
+        find_boundary(np.asarray(month_array), start_month=month_array[0]) == expected
+    )
+
+
+def test_add_data_one_first_month():
+    target = np.zeros((2, 3))
+    source = np.ones((2, 5))
+    months_elapsed = np.zeros((2, 5), dtype=np.int32)
+    expected = np.zeros((2, 3))
+    expected[:, 0] = 5
+
+    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    np.testing.assert_array_equal(target, expected)
+
+
+def test_add_data_one_later_month():
+    target = np.zeros((2, 4))
+    source = np.ones((2, 5))
+    months_elapsed = np.zeros((2, 5), dtype=np.int32) + 2
+    expected = np.zeros((2, 4))
+    expected[:, 2] = 5
+
+    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    np.testing.assert_array_equal(target, expected)
+
+
+def test_add_data_two_later_months():
+    target = np.zeros((2, 4))
+    source = np.ones((2, 5))
+    months_elapsed = np.zeros((2, 5), dtype=np.int32) + 2
+    months_elapsed[0, 2:] = 3
+    months_elapsed[1, 3:] = 3
+    expected = np.zeros((2, 4))
+    expected[0, 2] = 2
+    expected[0, 3] = 3
+    expected[1, 2] = 3
+    expected[1, 3] = 2
+
+    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    np.testing.assert_array_equal(target, expected)

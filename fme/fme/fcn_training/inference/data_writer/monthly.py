@@ -262,11 +262,6 @@ class MonthlyDataWriter:
             )
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
-        array_samples = np.arange(n_samples_data)[:, None]
-        array_samples, array_months = np.broadcast_arrays(array_samples, months)
-        # must combine [sample, time] dimensions for add_at
-        array_samples = array_samples.flatten()
-        array_months = array_months.flatten() - month_min
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -306,24 +301,62 @@ class MonthlyDataWriter:
             month_data = self.dataset.variables[variable_name][
                 :, month_min : month_min + month_range
             ]
-            # must combine [sample, time] dimensions for add_at
-            array = array.reshape(-1, *array.shape[-2:])
-            add_at(
+            add_data(
                 target=month_data,
-                indices=(array_samples, array_months),
                 source=array,
+                months_elapsed=months - month_min,
             )
             self.dataset.variables[variable_name][
                 :, month_min : month_min + month_range
             ] = month_data
 
-        self.dataset.sync()  # Flush the data to disk
+        self.dataset.sync()
 
     def flush(self):
         """
         Flush the data to disk.
         """
         self.dataset.sync()
+
+
+def add_data(
+    *,
+    target: np.ndarray,
+    source: np.ndarray,
+    months_elapsed: np.ndarray,
+):
+    """
+    Add source data to target data, aggregating by month.
+
+    All operations are performed independently on each batch member [b, ...].
+
+    Args:
+        target: Array of monthly total data to add to, of shape
+            [b, month].
+        source: Array of values to add into the monthly aggregates, of shape [b, time].
+        months_elapsed: Elapsed months of source since the start of the data,
+            of shape [b, time],
+            corresponding to an index of the target array for each value in source.
+            Assumed to be monotonically increasing.
+    """
+    for i_sample in range(source.shape[0]):
+        i_time = 0
+        while i_time < source.shape[1]:
+            i_month_boundary = i_time + find_boundary(
+                months_elapsed[i_sample, i_time:], months_elapsed[i_sample, i_time]
+            )
+            target[i_sample, months_elapsed[i_sample, i_time]] += np.sum(
+                source[i_sample, i_time:i_month_boundary], axis=0
+            )
+            i_time = i_month_boundary
+
+
+def find_boundary(month_array, start_month) -> int:
+    """
+    Assuming month_array is an ordered array of months,
+    find the index of the first month that is not start_month.
+    """
+    return np.searchsorted(month_array, start_month, side="right")
 
 
 def get_days_since_reference(
@@ -360,33 +393,3 @@ def get_days_since_reference(
         )
         days_since_reference[i, :] = (dates_sample - reference_date).days
     return days_since_reference
-
-
-def add_at(
-    target: np.ndarray,
-    indices: Tuple[np.ndarray, np.ndarray],
-    source: np.ndarray,
-):
-    """
-    Add the values in `array` to `value` at the indices given by `indices`.
-
-    In practice, an index of `m` corresponds to a time snapshot of data,
-    whereas the time index in `value` is a bin of such snapshots. The
-    `indices` array tells this function which time bin to add the snapshot into.
-
-    Args:
-        target: Array to which to add the values, of shape [sample, time, lat, lon].
-        indices: Tuple of arrays of time indices at which to add the values,
-            of shape [m]. Two arrays correspond to indices for each of the first two
-            dimensions of `value`.
-        source: Array of values to add, of shape [m, lat, lon].
-    """
-    assert len(target.shape) == 4
-    assert len(indices) == 2
-    for index in indices:
-        assert len(index.shape) == 1
-        assert source.shape[0] == index.shape[0]
-    assert len(source.shape) == 3
-    # This helper exists mainly for documentation, because np.add.at
-    # is quite tricky to understand.
-    np.add.at(target, indices, source)
