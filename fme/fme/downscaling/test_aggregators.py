@@ -14,6 +14,7 @@ from fme.downscaling.aggregators import (
     DynamicHistogram,
     Mean,
     MeanComparison,
+    MeanMapAggregator,
     SnapshotAggregator,
 )
 
@@ -136,6 +137,32 @@ def test_dynamic_histogram(shape, err):
             assert bin_edges.shape == (n_bins + 1,)
 
 
+@pytest.mark.parametrize("n_steps", (1, 2))
+def test_map_aggregator_shape(n_steps: int):
+    batch_size, height, width = 3, 4, 5
+    aggregator = MeanMapAggregator()
+    for _ in range(n_steps):
+        target = {
+            "x": torch.rand(batch_size, height, width),
+            "y": torch.rand(batch_size, height, width),
+        }
+        prediction = {
+            "x": torch.rand(batch_size, height, width),
+            "y": torch.rand(batch_size, height, width),
+        }
+        aggregator.record_batch(target, prediction)
+
+    values = aggregator.get()
+    for var_name in ("x", "y"):
+        assert values[f"full-field/{var_name}"].shape == (
+            height,
+            width * 2 + aggregator.gap_width,
+        )
+        assert values[f"error/{var_name}"].shape == (height, width)
+
+    aggregator.get_wandb()
+
+
 @pytest.mark.parametrize(
     "prefix, expected_prefix",
     [
@@ -158,28 +185,34 @@ def test_performance_metrics(prefix, expected_prefix):
         all_metrics = aggregator.get(prefix=prefix)
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
+    gap_width = aggregator._comparisons["time_mean_map"].gap_width  # type: ignore
     assert f"{expected_prefix}loss" in all_metrics
     assert f"{expected_prefix}loss" in wandb_metrics
     num_metrics = 1  # loss
-    for metric_name in [
-        "rmse",
-        "weighted_rmse",
-        "psnr",
-        "ssim",
-        "snapshot/image-error",
-        "snapshot/image-full-field",
+    for metric_name, expected_shape in [
+        ("rmse", ()),
+        ("weighted_rmse", ()),
+        ("psnr", ()),
+        ("ssim", ()),
+        ("time_mean_map/error", (n_lat, n_lon)),
+        (
+            "time_mean_map/full-field",
+            (n_lat, 2 * n_lon + gap_width),
+        ),
     ]:
         num_metrics += 1
         assert (
             f"{expected_prefix}{metric_name}/x" in all_metrics
         ), f"{expected_prefix}{metric_name}/x, {all_metrics.keys()}"
         assert f"{expected_prefix}{metric_name}/x" in wandb_metrics
-        if "snapshot" in metric_name:
-            assert isinstance(all_metrics[f"{expected_prefix}{metric_name}/x"], Image)
-        else:
-            assert (
-                all_metrics[f"{expected_prefix}{metric_name}/x"].shape == ()
-            ), f"{metric_name}/x"
+        assert all_metrics[f"{expected_prefix}{metric_name}/x"].shape == expected_shape
+
+    for metric_name in [
+        "snapshot/image-error",
+        "snapshot/image-full-field",
+    ]:
+        num_metrics += 1
+        assert isinstance(all_metrics[f"{expected_prefix}{metric_name}/x"], Image)
 
     expected_shapes = ((n_lon // 2 + 1,), (n_bins,))
     for instrinsic_name, expected_shape in zip(
