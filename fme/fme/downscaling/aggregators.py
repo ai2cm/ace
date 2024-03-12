@@ -12,6 +12,7 @@ from fme.core import metrics
 from fme.core.aggregator.one_step.snapshot import (
     SnapshotAggregator as CoreSnapshotAggregator,
 )
+from fme.core.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
@@ -249,6 +250,102 @@ class SnapshotAggregator:
         return self.get(label)
 
 
+class MeanMapAggregator:
+    """
+    Aggregates time mean maps of target and prediction tensors, and time mean
+    bias maps.
+
+    Args:
+        metadata: metadata for the variables.
+        gap_width: Width between the prediction and target images.
+    """
+
+    def __init__(
+        self,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        gap_width: int = 4,
+    ):
+        self.gap_width = gap_width
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
+
+        def batch_mean(x: torch.Tensor) -> torch.Tensor:
+            assert (
+                len(x.shape) == 3
+            ), f"Expected input (batch, height, width) but got {x.shape}."
+            return x.mean(dim=0)
+
+        self._mean_target = Mean(batch_mean)
+        self._mean_prediction = Mean(batch_mean)
+
+    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
+        """Updates the average of target, prediction, and bias time mean maps.
+
+        Args:
+            target: Tensor of shape (n_examples, n_lat, n_lon)
+            prediction: Tensor of shape (n_examples, n_lat, n_lon)
+        """
+        assert set(target.keys()) == set(prediction.keys()), "Keys do not match"
+        self._mean_target.record_batch(target)
+        self._mean_prediction.record_batch(prediction)
+
+    def get(self) -> TensorMapping:
+        prediction = self._mean_prediction.get()
+        target = self._mean_target.get()
+
+        ret = {}
+        for var_name in target.keys():
+            gap = torch.full(
+                (target[var_name].shape[-2], self.gap_width),
+                float(target[var_name].min()),
+            )
+            ret[f"full-field/{var_name}"] = torch.cat(
+                (prediction[var_name], gap, target[var_name]), dim=1
+            )
+            ret[f"error/{var_name}"] = prediction[var_name] - target[var_name]
+        return ret
+
+    _captions = {
+        "full-field": (
+            "{name} one step mean full field; "
+            "(left) generated and (right) target [{units}]"
+        ),
+        "error": "{name} one step mean full field error (generated - target) [{units}]",
+    }
+
+    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
+        if name in self._metadata:
+            caption_name = self._metadata[name].long_name
+            units = self._metadata[name].units
+        else:
+            caption_name, units = name, "unknown_units"
+        caption = self._captions[key].format(name=caption_name, units=units)
+        if "error" in key:
+            caption += f" vmin={vmin:.4g} (blue), vmax={vmax:.4g} (red)."
+        else:
+            caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
+        return caption
+
+    def get_wandb(self) -> Mapping[str, Any]:
+        ret = {}
+        wandb = WandB.get_instance()
+        for key, data in self.get().items():
+            if "error" in key:
+                diverging, cmap = True, "RdBu_r"
+            else:
+                diverging, cmap = False, None
+            data = data.cpu().numpy()
+            vmin, vmax = get_cmap_limits(data, diverging=diverging)
+            map_name, var_name = key.split("/")
+            caption = self._get_caption(map_name, var_name, vmin, vmax)
+            fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
+            ret[key] = wandb.Image(fig, caption=caption)
+            plt.close(fig)
+        return ret
+
+
 class _ComparisonAggregator(Protocol):
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         ...
@@ -296,6 +393,7 @@ class Aggregator:
             "ssim": MeanComparison(_compute_ssim),
             "psnr": MeanComparison(_compute_psnr),
             "snapshot": SnapshotAggregator(metadata),
+            "time_mean_map": MeanMapAggregator(metadata),
         }
         self._intrinsics: Mapping[
             str, Mapping[str, Union[DynamicHistogram, ZonalPowerSpectrum]]

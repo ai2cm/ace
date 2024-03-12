@@ -154,6 +154,8 @@ def _get_aggregator_keys(prefix: str) -> Set[str]:
         "psnr",
         "snapshot/image-error",
         "snapshot/image-full-field",
+        "time_mean_map/error",
+        "time_mean_map/full-field",
     ):
         for var_name in ("x", "y"):
             keys.append(f"{prefix}/{metric_name}/{var_name}")
