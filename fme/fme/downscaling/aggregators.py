@@ -2,7 +2,6 @@
 
 from typing import Any, Callable, Dict, Literal, Mapping, Optional, Protocol, Union
 
-import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -144,6 +143,8 @@ class MeanComparison:
 
 class ZonalPowerSpectrum:
     def __init__(self, latitudes: torch.Tensor) -> None:
+        self._wandb = WandB.get_instance()
+
         def _compute_zonal_power_spectrum(x):
             assert (
                 len(x.shape) == 3
@@ -161,11 +162,13 @@ class ZonalPowerSpectrum:
     def get(self) -> TensorMapping:
         return self._mean_aggregator.get()
 
-    def _plot_spectrum(self, spectrum: np.ndarray) -> matplotlib.figure.Figure:
+    def _plot_spectrum(self, spectrum: np.ndarray) -> Any:
         fig = plt.figure()
         plt.loglog(spectrum)
         plt.grid()
-        return fig
+        ret = self._wandb.Image(fig)
+        plt.close(fig)
+        return ret
 
     def get_wandb(self) -> Mapping[str, Any]:
         aggregated = self._mean_aggregator.get_wandb()
