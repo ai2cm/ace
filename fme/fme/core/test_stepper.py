@@ -12,7 +12,7 @@ from fme.core import ClimateData, metrics
 from fme.core.aggregator.inference.main import InferenceAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.loss import LossConfig
+from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
@@ -104,7 +104,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
             means=get_scalar_data(["a", "b"], 0.0),
             stds=get_scalar_data(["a", "b"], 1.0),
         ),
-        loss=LossConfig(type="MSE"),
+        loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper((5, 5), area, sigma_coordinates)
     stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
@@ -149,7 +149,7 @@ def test_run_on_batch_addition_series():
             means=get_scalar_data(["a", "b"], 0.0),
             stds=get_scalar_data(["a", "b"], 1.0),
         ),
-        loss=LossConfig(type="MSE"),
+        loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper((5, 5), area, sigma_coordinates)
     stepped = stepper.run_on_batch(

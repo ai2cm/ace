@@ -24,7 +24,7 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
-from fme.core.loss import ConservationLossConfig, LossConfig, construct_weight_tensor
+from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.packer import DataShapesNotUniform, Packer
@@ -46,7 +46,9 @@ class SingleModuleStepperConfig:
     )
     optimization: Optional[DisabledOptimizationConfig] = None
     ocean: Optional[OceanConfig] = None
-    loss: LossConfig = dataclasses.field(default_factory=lambda: LossConfig())
+    loss: WeightedMappingLossConfig = dataclasses.field(
+        default_factory=lambda: WeightedMappingLossConfig()
+    )
     conserve_dry_air: Optional[bool] = None
     corrector: CorrectorConfig = dataclasses.field(
         default_factory=lambda: CorrectorConfig()
@@ -210,6 +212,8 @@ class SingleModuleStepper:
     Stepper class for a single pytorch module.
     """
 
+    CHANNEL_DIM = -3
+
     def __init__(
         self,
         config: SingleModuleStepperConfig,
@@ -269,20 +273,14 @@ class SingleModuleStepper:
 
         self.area = area
         self.sigma_coordinates = sigma_coordinates.to(get_device())
-        self.loss_obj = config.loss.build(self.area)
+
+        self.loss_obj = config.loss.build(self.area, config.out_names, self.CHANNEL_DIM)
         self._conservation_loss = config.conservation_loss.build(
             area_weights=self.area,
             sigma_coordinates=self.sigma_coordinates,
         )
         self._corrector = config.corrector.build(
             area=area, sigma_coordinates=sigma_coordinates
-        )
-        # TODO: If loss is updated to take Mapping[str: tensor] instead of
-        # tensor inputs, we can move loss weighting out of the stepper and
-        # into LossConfig.build
-        self._loss_weights = construct_weight_tensor(
-            weights=config.loss.weights,
-            out_names=self.out_packer.names,
         )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
@@ -323,15 +321,14 @@ class SingleModuleStepper:
         data = {
             name: value.to(device, dtype=torch.float) for name, value in data.items()
         }
-        channel_dim = -3
         time_dim = 1
         full_data_norm = self.normalizer.normalize(data)
         get_input_data = get_name_and_time_query_fn(data, full_data_norm, time_dim)
 
-        full_target_tensor_norm = _pack_data_if_available(
+        full_target_norm = _validate_target_data_shape(
             self.out_packer,
             full_data_norm,
-            channel_dim,
+            self.CHANNEL_DIM,
         )
 
         loss = torch.tensor(0.0, device=get_device())
@@ -342,20 +339,25 @@ class SingleModuleStepper:
         gen_data_norm_list = []
         optimization.set_mode(self.module)
         for step in range(n_forward_steps):
-            input_tensor_norm = self.in_packer.pack(input_data_norm, axis=channel_dim)
+            input_tensor_norm = self.in_packer.pack(
+                input_data_norm, axis=self.CHANNEL_DIM
+            )
 
-            if full_target_tensor_norm is None:
-                target_tensor_norm: Optional[torch.Tensor] = None
+            if full_target_norm is None:
+                target_norm: Optional[Dict[str, torch.Tensor]] = None
             else:
-                target_tensor_norm = full_target_tensor_norm.select(
-                    dim=time_dim, index=step + 1
-                )
+                target_norm = {
+                    name: full_target_norm[name].select(dim=time_dim, index=step + 1)
+                    for name in self.out_packer.names
+                }
 
             with optimization.autocast():
                 gen_tensor_norm = self.module(input_tensor_norm).to(
                     get_device(), dtype=torch.float
                 )
-                gen_norm = self.out_packer.unpack(gen_tensor_norm, axis=channel_dim)
+                gen_norm = self.out_packer.unpack(
+                    gen_tensor_norm, axis=self.CHANNEL_DIM
+                )
                 gen_data = self.normalizer.denormalize(gen_norm)
                 input_data = self.normalizer.denormalize(input_data_norm)
                 if self._corrector is not None:
@@ -366,19 +368,12 @@ class SingleModuleStepper:
                     )
                     gen_data = self.ocean(target_data, input_data, gen_data)
                 gen_norm = self.normalizer.normalize(gen_data)
-                gen_tensor_norm = self.out_packer.pack(gen_norm, axis=channel_dim).to(
-                    get_device(), dtype=torch.float
-                )
-                if target_tensor_norm is None:
+                if target_norm is None:
                     step_loss = torch.tensor(torch.nan)
                 else:
-                    step_loss = self.loss_obj(
-                        self._loss_weights * gen_tensor_norm,
-                        self._loss_weights * target_tensor_norm,
-                    )
+                    step_loss = self.loss_obj(gen_norm, target_norm)
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
-            gen_norm = self.out_packer.unpack(gen_tensor_norm, axis=channel_dim)
 
             gen_data_norm_list.append(gen_norm)
             # update input data with generated outputs, and forcings for missing outputs
@@ -524,12 +519,13 @@ def get_name_and_time_query_fn(
     return name_and_time_query_fn
 
 
-def _pack_data_if_available(
+def _validate_target_data_shape(
     packer: Packer,
     data: Dict[str, torch.Tensor],
     axis: int,
-) -> Optional[torch.Tensor]:
+) -> Optional[Dict[str, torch.Tensor]]:
     try:
-        return packer.pack(data, axis=axis)
+        _ = packer.pack(data, axis=axis)
+        return data
     except DataShapesNotUniform:
         return None
