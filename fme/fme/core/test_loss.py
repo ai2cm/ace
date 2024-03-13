@@ -12,9 +12,13 @@ from fme.core.loss import (
     ConservationLossConfig,
     GlobalMeanLoss,
     LossConfig,
-    construct_weight_tensor,
+    MappingLoss,
+    VariableWeightingLoss,
+    WeightedMappingLossConfig,
+    _construct_weight_tensor,
     get_dry_air_nonconservation,
 )
+from fme.core.packer import Packer
 
 
 @pytest.mark.parametrize("global_mean_type", [None, "LpLoss"])
@@ -197,13 +201,15 @@ def test_area_weighted_mse():
     torch.testing.assert_allclose(result, expected)
 
 
-def test_construct_weight_tensor():
+def test__construct_weight_tensor():
     out_names = ["a", "b", "c"]
     weights = {"a": 0.5, "c": 3.0}
     n_samples = 10
     nlat, nlon = 8, 4
     gen_data = torch.rand(n_samples, len(out_names), nlat, nlon, device=get_device())
-    weight_tensor = construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)
+    weight_tensor = _construct_weight_tensor(
+        weights, out_names, n_dim=4, channel_dim=-3
+    )
     weighted_gen_data = gen_data * weight_tensor
     assert weight_tensor.shape == (1, len(out_names), 1, 1)
     assert weighted_gen_data.shape == gen_data.shape
@@ -216,10 +222,88 @@ def test_construct_weight_tensor():
             assert torch.allclose(weighted_gen_data[:, i], gen_data[:, i])
 
 
-def test_construct_weight_tensor_missing_key_error():
+def test__construct_weight_tensor_missing_key_error():
     out_names = ["a", "b", "c"]
     weights = {"a": 0.5, "c": 3.0, "d": 1.5}
     with pytest.raises(KeyError):
-        construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)(
+        _construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)(
             out_names, n_dim=4, channel_dim=-3
         )
+
+
+def test_MappingLoss():
+    loss = torch.nn.MSELoss()
+    n_channels = 5
+    packer = Packer([f"var_{i}" for i in range(n_channels)])
+    mapping_loss = MappingLoss(loss, packer)
+    x = torch.randn(
+        15,
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    y = torch.randn(
+        15,
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    x_mapping = {name: x[:, i, :, :] for i, name in enumerate(packer.names)}
+    y_mapping = {name: y[:, i, :, :] for i, name in enumerate(packer.names)}
+    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y))
+
+
+def test_VariableWeightingLoss():
+    weights = torch.tensor(
+        [
+            4.0,
+            1.0,
+        ]
+    ).to(get_device())
+    mse_loss = torch.nn.MSELoss()
+    weighted_loss = VariableWeightingLoss(weights=weights, loss=mse_loss)
+
+    x = torch.tensor([[1.0, 2.0]]).to(get_device())
+    y = torch.tensor([2, 2.5]).to(get_device())
+
+    weighted_result = weighted_loss(x, y)
+    assert weighted_result == ((16 + 0.25) / 2.0)
+
+
+def test_WeightedMappingLossConfig_no_weights():
+    loss_config = LossConfig()
+    n_channels = 5
+    out_names = [f"var_{i}" for i in range(n_channels)]
+    channel_dim = -3
+    area = torch.tensor([])  # area not used by this config
+    mapping_loss_config = WeightedMappingLossConfig()
+    loss = loss_config.build(area)
+    mapping_loss = mapping_loss_config.build(area, out_names, channel_dim)
+    packer = Packer(out_names)
+
+    x_mapping = {name: torch.randn(4, 5, 5).to(get_device()) for name in out_names}
+    y_mapping = {name: torch.randn(4, 5, 5).to(get_device()) for name in out_names}
+    x = packer.pack(x_mapping, axis=channel_dim)
+    y = packer.pack(y_mapping, axis=channel_dim)
+
+    assert loss(x, y) == mapping_loss(x_mapping, y_mapping)
+
+
+def test_WeightedMappingLossConfig_weights():
+    out_names = ["var_0", "var_1"]
+    channel_dim = -3
+    area = torch.tensor([])  # area not used by this config
+    mapping_loss_config = WeightedMappingLossConfig(
+        type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
+    )
+    mapping_loss = mapping_loss_config.build(area, out_names, channel_dim)
+
+    x0 = torch.ones(4, 5, 5).to(get_device())
+    x1 = 2.0 * x0
+    y0 = 2.0 * x0
+    y1 = 2.5 * x0
+
+    x_mapping = {"var_0": x0, "var_1": x1}
+    y_mapping = {"var_0": y0, "var_1": y1}
+
+    assert mapping_loss(x_mapping, y_mapping) == ((16 + 0.25) / 2.0)
