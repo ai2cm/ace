@@ -5,8 +5,25 @@ import torch
 
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.packer import Packer
 
 from .climate_data import ClimateData, compute_dry_air_absolute_differences
+
+
+class MappingLoss:
+    def __init__(self, loss: torch.nn.Module, packer: Packer, channel_dim: int = -3):
+        self.loss = loss
+        self.packer = packer
+        self.channel_dim = channel_dim
+
+    def __call__(
+        self,
+        predict_dict: Dict[str, torch.Tensor],
+        target_dict: Dict[str, torch.Tensor],
+    ):
+        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim)
+        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
+        return self.loss(predict_tensors, target_tensors)
 
 
 def get_dry_air_nonconservation(
@@ -30,7 +47,7 @@ def get_dry_air_nonconservation(
     ).mean()
 
 
-def construct_weight_tensor(
+def _construct_weight_tensor(
     weights: Dict[str, float],
     out_names: List[str],
     n_dim: int = 4,
@@ -242,6 +259,21 @@ class GlobalMean(torch.nn.Module):
         return (x * self.area_weights[None, None, None, :, :]).sum(dim=(3, 4))
 
 
+class VariableWeightingLoss(torch.nn.Module):
+    def __init__(self, weights: torch.Tensor, loss: torch.nn.Module):
+        """
+        Args:
+            weights: A tensor of shape (n_samples, n_channels, n_lat, n_lon)
+                containing the weights to apply to each channel.
+        """
+        super().__init__()
+        self.loss = loss
+        self.weights = weights
+
+    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        return self.loss(self.weights * x, self.weights * y)
+
+
 @dataclasses.dataclass
 class LossConfig:
     """
@@ -257,8 +289,6 @@ class LossConfig:
             type to apply to the global mean of each sample
         global_mean_weight: the weight to apply to the global mean loss
             relative to the main loss
-        weights: A dictionary of variable names with individual
-            weights to apply to their normalized losses
     """
 
     type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
@@ -268,7 +298,6 @@ class LossConfig:
         default_factory=lambda: {}
     )
     global_mean_weight: float = 1.0
-    weights: Dict[str, float] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
         if self.type not in ("LpLoss", "MSE", "AreaWeightedMSE"):
@@ -301,3 +330,58 @@ class LossConfig:
         else:
             final_loss = main_loss
         return final_loss.to(device=get_device())
+
+
+@dataclasses.dataclass
+class WeightedMappingLossConfig:
+    """
+    Loss configuration class that has the same fields as LossConfig but also
+    has additional weights field. The build method will apply the weights to
+    the inputs of the loss function. The loss returned by build will be a
+    MappingLoss, which takes Dict[str, tensor] as inputs instead of packed
+    tensors.
+
+    Args:
+        type: the type of the loss function
+        kwargs: data for a loss function instance of the indicated type
+        global_mean_type: the type of the loss function to apply to the global
+            mean of each sample, by default no loss is applied
+        global_mean_kwargs: data for a loss function instance of the indicated
+            type to apply to the global mean of each sample
+        global_mean_weight: the weight to apply to the global mean loss
+            relative to the main loss
+        weights: A dictionary of variable names with individual
+            weights to apply to their normalized losses
+
+    """
+
+    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
+    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
+    global_mean_type: Optional[Literal["LpLoss"]] = None
+    global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
+        default_factory=lambda: {}
+    )
+    global_mean_weight: float = 1.0
+    weights: Dict[str, float] = dataclasses.field(default_factory=lambda: {})
+
+    def __post_init__(self):
+        self.loss_config = LossConfig(
+            type=self.type,
+            kwargs=self.kwargs,
+            global_mean_type=self.global_mean_type,
+            global_mean_kwargs=self.global_mean_kwargs,
+            global_mean_weight=self.global_mean_weight,
+        )
+
+    def build(
+        self, area: torch.Tensor, out_names: List[str], channel_dim: int = -3
+    ) -> Any:
+        loss = self.loss_config.build(area)
+        weighted_loss = VariableWeightingLoss(
+            weights=_construct_weight_tensor(
+                self.weights, out_names, channel_dim=channel_dim
+            ),
+            loss=loss,
+        )
+        packer = Packer(out_names)
+        return MappingLoss(loss=weighted_loss, packer=packer, channel_dim=channel_dim)
