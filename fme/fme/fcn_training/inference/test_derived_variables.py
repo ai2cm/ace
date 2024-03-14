@@ -7,6 +7,7 @@ from fme.core.stepper import SteppedData
 from .derived_variables import (
     DerivedVariableRegistryEntry,
     _compute_derived_variable,
+    compute_derived_quantities,
     compute_stepped_derived_quantities,
 )
 
@@ -66,3 +67,16 @@ def test_compute_derived_quantities():
         assert name in out_data.target_data
         assert out_data.gen_data[name].shape == (2, 3, 4, 8)
         assert out_data.target_data[name].shape == (2, 3, 4, 8)
+
+
+def test_lowest_layer_air_temperature():
+    n_layers = 5
+    ones = torch.ones(2, 3, 4, 8)
+    fake_data = {f"air_temperature_{i}": ones * i for i in range(n_layers)}
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.ones(n_layers + 1), bk=torch.ones(n_layers + 1)
+    )
+    derived_data = compute_derived_quantities(fake_data, sigma_coordinates)
+    assert torch.allclose(
+        derived_data["lowest_layer_air_temperature"], fake_data["air_temperature_4"]
+    )
