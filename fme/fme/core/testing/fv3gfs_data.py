@@ -14,11 +14,13 @@ from fme.core.data_loading.inference import (
 )
 
 
-def _coord_value(name, size):
+def _coord_value(
+    name, size, timestep: datetime.timedelta = datetime.timedelta(hours=6)
+):
     # xarray data loader requires time to be a cftime.datetime object
     if name == "time":
         return [
-            cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(hours=i)
+            cftime.DatetimeProlepticGregorian(2000, 1, 1) + i * timestep
             for i in range(size)
         ]
     else:
@@ -31,6 +33,7 @@ class DimSizes:
     n_lat: int
     n_lon: int
     nz_interface: int
+    timestep: datetime.timedelta = datetime.timedelta(hours=6)
 
     @property
     def shape_2d(self) -> Tuple[int, int, int]:
@@ -44,7 +47,7 @@ class DimSizes:
     def coords_2d(self) -> Dict[str, xr.DataArray]:
         return {
             name: xr.DataArray(
-                _coord_value(name, shape),
+                _coord_value(name, shape, timestep=self.timestep),
                 dims=(name,),
             )
             for name, shape in zip(self.dims_2d, self.shape_2d)
@@ -55,8 +58,7 @@ class DimSizes:
         return (self.nz_interface,)
 
 
-def save_2d_netcdf(
-    filename,
+def get_2d_dataset(
     dim_sizes: DimSizes,
     variable_names: List[str],
     time_varying_values: Optional[List[float]] = None,
@@ -86,6 +88,30 @@ def save_2d_netcdf(
         data_vars[f"bk_{i}"] = float(i + 1)
 
     ds = xr.Dataset(data_vars=data_vars, coords=dim_sizes.coords_2d)
+    return ds
+
+
+def save_2d_netcdf(
+    filename,
+    dim_sizes: DimSizes,
+    variable_names: List[str],
+    time_varying_values: Optional[List[float]] = None,
+):
+    """
+    Save a 2D netcdf file with random data for the given variable names and
+    dimensions.
+
+    Args:
+        filename: The filename to save the netcdf file to.
+        dim_sizes: The dimensions of the data.
+        variable_names: The names of the variables to save.
+        time_varying_values: If not None, the values to use for each time step.
+    """
+    ds = get_2d_dataset(
+        dim_sizes=dim_sizes,
+        variable_names=variable_names,
+        time_varying_values=time_varying_values,
+    )
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
@@ -168,4 +194,50 @@ class FV3GFSData:
             start_indices=InferenceInitialConditionIndices(
                 first=0, n_initial_conditions=1, interval=1
             ),
+            num_data_workers=4,
         )
+
+
+@dataclasses.dataclass
+class MonthlyReferenceData:
+    path: pathlib.Path
+    names: List[str]
+    dim_sizes: DimSizes
+    n_ensemble: int
+
+    def __post_init__(self):
+        self.data_path.mkdir(parents=True, exist_ok=True)
+        ds = get_2d_dataset(
+            dim_sizes=self.dim_sizes,
+            variable_names=self.names,
+        )
+        ds = ds.rename({"time": "lead"})
+        # add a time axis for months
+        months = []
+        for i in range(self.dim_sizes.n_time):
+            year = 2000 + i // 12
+            month = i % 12 + 1
+            months.append(cftime.DatetimeProlepticGregorian(year, month, 15))
+        ds["counts"] = xr.DataArray(
+            np.random.randint(1, 10, size=(self.dim_sizes.n_time,)),
+            dims=["lead"],
+            attrs={"units": "m", "long_name": "counts", "coordinates": "valid_time"},
+        )
+        member_datasets = []
+        months_list = []
+        for _ in range(self.n_ensemble):
+            member_datasets.append(ds)
+            months_list.append(xr.DataArray(months, dims=["lead"]))
+        ds = xr.concat(member_datasets, dim="sample")
+        ds.coords["valid_time"] = xr.concat(months_list, dim="sample")
+        ds.to_netcdf(self.data_filename, format="NETCDF4_CLASSIC")
+        self.start_time = cftime.DatetimeProlepticGregorian(2000, 1, 1)
+
+    @property
+    def data_path(self):
+        # data must be in a separate path as loader loads all *.nc files
+        return self.path / "monthly_data"
+
+    @property
+    def data_filename(self):
+        return self.data_path / "monthly.nc"

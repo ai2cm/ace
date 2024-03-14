@@ -7,6 +7,7 @@ from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
+from .annual import GlobalMeanAnnualAggregator
 from .reduced import MeanAggregator
 from .time_mean import TimeMeanAggregator
 from .video import VideoAggregator
@@ -54,6 +55,7 @@ class InferenceAggregator:
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        monthly_reference_data: Optional[xr.Dataset] = None,
     ):
         """
         Args:
@@ -68,6 +70,7 @@ class InferenceAggregator:
                 time dimension.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            monthly_reference_data: Reference monthly data for computing target stats.
         """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(
@@ -108,11 +111,17 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
+        self._annual = GlobalMeanAnnualAggregator(
+            area_weights=area_weights,
+            metadata=metadata,
+            monthly_reference_data=monthly_reference_data,
+        )
 
     @torch.no_grad()
     def record_batch(
         self,
         loss: float,
+        time: xr.DataArray,
         target_data: Mapping[str, torch.Tensor],
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
@@ -132,6 +141,11 @@ class InferenceAggregator:
                 gen_data_norm=gen_data_norm,
                 i_time_start=i_time_start,
             )
+        self._annual.record_batch(
+            time=time,
+            target_data=target_data,
+            gen_data=gen_data,
+        )
 
     @torch.no_grad()
     def get_logs(self, label: str):
@@ -144,6 +158,7 @@ class InferenceAggregator:
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
+        logs.update(self._annual.get_logs(label="annual_weighted_mean"))
         logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 

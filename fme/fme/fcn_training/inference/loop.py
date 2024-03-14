@@ -67,14 +67,11 @@ class WindowStitcher:
             batch_times=batch_times,
         )
         self.i_time += tensor_shape[1]
-        if self.i_time < self.n_forward_steps:  # only store if needed
-            # store the end of the time window as
-            # initial condition for the next segment.
-            self._initial_condition = {key: value[:, -1] for key, value in data.items()}
-            for key, value in gen_data.items():
-                self._initial_condition[key] = value[:, -1]
-            for key, value in self._initial_condition.items():
-                self._initial_condition[key] = value.detach().cpu()
+        self._initial_condition = {key: value[:, -1] for key, value in data.items()}
+        for key, value in gen_data.items():
+            self._initial_condition[key] = value[:, -1]
+        for key, value in self._initial_condition.items():
+            self._initial_condition[key] = value.detach().cpu()
 
     def apply_initial_condition(self, data: Mapping[str, torch.Tensor]):
         """
@@ -125,6 +122,7 @@ def _inference_internal_loop(
     # record metrics
     aggregator.record_batch(
         loss=float(stepped.metrics["loss"]),
+        time=batch_times,
         target_data=stepped.target_data,
         gen_data=stepped.gen_data,
         target_data_norm=stepped.target_data_norm,

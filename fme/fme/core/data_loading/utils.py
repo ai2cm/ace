@@ -48,6 +48,10 @@ def get_times(ds: xr.Dataset, start: int, n_steps: int) -> xr.DataArray:
     assert isinstance(
         time_segment[0].item(), cftime.datetime
     ), "time must be cftime.datetime."
+    if len(time_segment) != n_steps:
+        raise ValueError(
+            f"Expected {n_steps} time steps, but got {len(time_segment)} instead."
+        )
     return time_segment.drop_vars(["time"])
 
 

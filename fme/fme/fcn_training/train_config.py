@@ -159,6 +159,11 @@ class TrainConfig:
         segment_epochs: (optional) exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
+        checkpoint_every_n_epochs: (deprecated) how often to save epoch-based
+            checkpoints, if save_checkpoint is True. Use checkpoint_save_epochs
+            instead.
+        monthly_reference_data: monthly reference data netCDF file for
+            inference metrics
     """
 
     train_loader: DataLoaderConfig
@@ -180,6 +185,7 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     checkpoint_every_n_epochs: Optional[int] = None
+    monthly_reference_data: Optional[str] = None
 
     def __post_init__(self):
         if self.checkpoint_every_n_epochs is not None:
