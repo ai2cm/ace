@@ -117,7 +117,7 @@ class MonthlyDataWriter:
         """
         if label != "":
             label = "_" + label
-        filename = str(Path(path) / f"monthly_binned{label}.nc")
+        filename = str(Path(path) / f"monthly_mean{label}.nc")
         self._save_names = save_names
         self.metadata = metadata
         self.coords = coords
@@ -256,12 +256,11 @@ class MonthlyDataWriter:
         dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, "lat", "lon")
         save_names = self._get_variable_names_to_save(data.keys())
         months = self._get_month_indices(start_sample, batch_times)
-        for i_sample in range(n_samples_data):
-            self.dataset.variables[COUNTS][start_sample + i_sample] += np.bincount(
-                months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
-            )
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
+        count_data = self.dataset.variables[COUNTS][
+            :, month_min : month_min + month_range
+        ]
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -303,12 +302,18 @@ class MonthlyDataWriter:
             ]
             add_data(
                 target=month_data,
+                target_start_counts=count_data,
                 source=array,
                 months_elapsed=months - month_min,
             )
             self.dataset.variables[variable_name][
                 :, month_min : month_min + month_range
             ] = month_data
+        # counts must be added after data, as we use the base counts when updating means
+        for i_sample in range(n_samples_data):
+            self.dataset.variables[COUNTS][start_sample + i_sample] += np.bincount(
+                months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
+            )
 
         self.dataset.sync()
 
@@ -322,17 +327,20 @@ class MonthlyDataWriter:
 def add_data(
     *,
     target: np.ndarray,
+    target_start_counts: np.ndarray,
     source: np.ndarray,
     months_elapsed: np.ndarray,
 ):
     """
-    Add source data to target data, aggregating by month.
+    Add source data to target monthly mean data, aggregating by month.
 
     All operations are performed independently on each batch member [b, ...].
 
     Args:
-        target: Array of monthly total data to add to, of shape
+        target: Array of monthly mean data to add to, of shape
             [b, month].
+        target_start_counts: Array of counts for each month, of shape
+            [b, month]. This array does not get updated.
         source: Array of values to add into the monthly aggregates, of shape [b, time].
         months_elapsed: Elapsed months of source since the start of the data,
             of shape [b, time],
@@ -342,12 +350,23 @@ def add_data(
     for i_sample in range(source.shape[0]):
         i_time = 0
         while i_time < source.shape[1]:
+            month_index = months_elapsed[i_sample, i_time]
             i_month_boundary = i_time + find_boundary(
-                months_elapsed[i_sample, i_time:], months_elapsed[i_sample, i_time]
+                months_elapsed[i_sample, i_time:], month_index
             )
-            target[i_sample, months_elapsed[i_sample, i_time]] += np.sum(
-                source[i_sample, i_time:i_month_boundary], axis=0
+            # Calculate sum of new data for the current month
+            new_data_sum = np.sum(source[i_sample, i_time:i_month_boundary], axis=0)
+            new_samples_count = i_month_boundary - i_time
+
+            # Update target mean for the month
+            old_mean = target[i_sample, month_index]
+            old_count = target_start_counts[i_sample, month_index]
+            new_mean = (old_mean * old_count + new_data_sum) / (
+                old_count + new_samples_count
             )
+
+            target[i_sample, month_index] = new_mean
+
             i_time = i_month_boundary
 
 

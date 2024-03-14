@@ -33,4 +33,4 @@ def test_write_monthly_data(tmp_path: pathlib.Path):
         variable_names=all_names,
     )
     run(config)
-    xr.open_dataset(tmp_path / "monthly_binned_data.nc")
+    xr.open_dataset(tmp_path / "monthly_mean_data.nc")
