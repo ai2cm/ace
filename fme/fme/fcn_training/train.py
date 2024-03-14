@@ -54,6 +54,7 @@ from typing import Optional
 
 import dacite
 import torch
+import xarray as xr
 import yaml
 
 import fme
@@ -154,6 +155,13 @@ class Trainer:
         )
 
         self._ema = self.config.ema.build(self.stepper.modules)
+
+        if self.config.monthly_reference_data is not None:
+            self._monthly_reference_data = xr.open_dataset(
+                self.config.monthly_reference_data
+            )
+        else:
+            self._monthly_reference_data = None
 
     def switch_off_grad(self, model):
         for param in model.parameters():
@@ -335,8 +343,9 @@ class Trainer:
     def inference_one_epoch(self):
         record_step_20 = self.config.inference.n_forward_steps >= 20
         aggregator = InferenceAggregator(
-            self.train_data.area_weights.to(fme.get_device()),
-            self.train_data.sigma_coordinates,
+            monthly_reference_data=self._monthly_reference_data,
+            area_weights=self.train_data.area_weights.to(fme.get_device()),
+            sigma_coordinates=self.train_data.sigma_coordinates,
             record_step_20=record_step_20,
             log_video=False,
             log_zonal_mean_images=True,

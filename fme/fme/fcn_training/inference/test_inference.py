@@ -1,4 +1,6 @@
+import contextlib
 import dataclasses
+import datetime
 import pathlib
 from typing import List, Tuple
 
@@ -10,6 +12,7 @@ import xarray as xr
 import yaml
 
 from fme.core import metrics
+from fme.core.aggregator.inference import annual
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.inference import (
@@ -19,7 +22,7 @@ from fme.core.data_loading.inference import (
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
-from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
+from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 from fme.fcn_training.inference.data_writer import DataWriterConfig
 from fme.fcn_training.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.fcn_training.inference.derived_variables import (
@@ -35,6 +38,16 @@ DIR = pathlib.Path(__file__).parent
 class PlusOne(torch.nn.Module):
     def forward(self, x):
         return x + 1
+
+
+@contextlib.contextmanager
+def patch_annual_aggregator_min_samples(value):
+    original = annual.MIN_SAMPLES
+    try:
+        annual.MIN_SAMPLES = value
+        yield
+    finally:
+        annual.MIN_SAMPLES = original
 
 
 def save_plus_one_stepper(
@@ -107,7 +120,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
 
 @pytest.mark.parametrize(
     "use_prediction_data, n_forward_steps",
-    [(True, 2), (True, 1), (False, 2), (False, 1)],
+    [(True, 2), (True, 1), (False, int(30 / 20 * 36)), (False, 1)],
 )
 def test_inference_plus_one_model(
     tmp_path: pathlib.Path, use_prediction_data: bool, n_forward_steps: int
@@ -117,10 +130,11 @@ def test_inference_plus_one_model(
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
-        n_time=8,
+        n_time=n_forward_steps + 1,
         n_lat=16,
         n_lon=32,
         nz_interface=4,
+        timestep=datetime.timedelta(days=20),
     )
     if use_prediction_data:
         # use std of 10 so the stepper would have errors at the plus-one problem
@@ -137,11 +151,18 @@ def test_inference_plus_one_model(
         dim_sizes,
         n_forward_steps,
         stepper_path,
+        save_monthly_files=False,  # requires timestep == 6h
     )
 
 
 def inference_helper(
-    tmp_path, all_names, use_prediction_data, dim_sizes, n_forward_steps, stepper_path
+    tmp_path,
+    all_names,
+    use_prediction_data,
+    dim_sizes: DimSizes,
+    n_forward_steps,
+    stepper_path,
+    save_monthly_files: bool = True,
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     data = FV3GFSData(
@@ -154,7 +175,25 @@ def inference_helper(
         prediction_data = data.inference_data_loader_config
     else:
         prediction_data = None
+
+    if dim_sizes.n_time > 365 * 4:
+        monthly_reference_filename = str(
+            MonthlyReferenceData(
+                path=pathlib.Path(tmp_path),
+                names=all_names,
+                dim_sizes=DimSizes(
+                    n_time=48,
+                    n_lat=dim_sizes.n_lat,
+                    n_lon=dim_sizes.n_lon,
+                    nz_interface=1,
+                ),
+                n_ensemble=3,
+            ).data_filename
+        )
+    else:
+        monthly_reference_filename = None
     config = InferenceConfig(
+        monthly_reference_data=monthly_reference_filename,
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
@@ -170,6 +209,7 @@ def inference_helper(
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
             save_histogram_files=True,
+            save_monthly_files=save_monthly_files,
         ),
         forward_steps_in_memory=1,
     )
@@ -177,7 +217,7 @@ def inference_helper(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
 
-    with mock_wandb() as wandb:
+    with mock_wandb() as wandb, patch_annual_aggregator_min_samples(0):
         inference_logs = main(
             yaml_config=str(config_filename),
         )
@@ -260,6 +300,10 @@ def inference_helper(
         var_counts_per_timestep.values == var_counts_per_timestep.values[0]
     )
     assert same_count_each_timestep
+    if monthly_reference_filename is not None:
+        assert "inference/annual/var" in inference_logs[-1]
+        assert "inference/annual/r2_gen_var" in inference_logs[-1]
+        assert "inference/annual/r2_target_var" in inference_logs[-1]
 
 
 @pytest.mark.parametrize("n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10)])

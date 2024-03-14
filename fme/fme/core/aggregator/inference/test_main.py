@@ -1,11 +1,16 @@
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 import fme
 from fme.core.aggregator.inference import InferenceAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+
+
+def get_zero_time(shape, dims):
+    return xr.DataArray(np.zeros(shape, dtype="datetime64[ms]"), dims=dims)
 
 
 def test_logs_labels_exist():
@@ -30,7 +35,8 @@ def test_logs_labels_exist():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
+    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
+    agg.record_batch(loss, time, target_data, gen_data, target_data_norm, gen_data_norm)
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
     assert "test/mean_norm/series" in logs
@@ -76,7 +82,8 @@ def test_inference_logs_labels_exist():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
+    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
+    agg.record_batch(loss, time, target_data, gen_data, target_data_norm, gen_data_norm)
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
     assert len(logs) == n_time
@@ -116,6 +123,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         n_timesteps=(window_len - overlap) * n_windows + 1,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+    time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
     i_start = 0
     for i in range(n_windows):
         sample_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
@@ -123,6 +131,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
             sample_data["a"][..., i, :, :] = float(i_start + i)
         agg.record_batch(
             1.0,
+            time=time,
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,
@@ -161,6 +170,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         n_timesteps=(window_len - overlap) * n_windows + overlap,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+    time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
     i_start = 0
     for i in range(n_windows):
         sample_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
@@ -168,6 +178,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
             sample_data["a"][..., i, :, :] = float(i_start + i)
         agg.record_batch(
             1.0,
+            time=time,
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,

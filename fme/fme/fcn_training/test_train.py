@@ -12,6 +12,7 @@ import xarray as xr
 import yaml
 
 from fme.core.data_loading.config import Slice
+from fme.core.testing import DimSizes, MonthlyReferenceData
 from fme.core.testing.wandb import mock_wandb
 from fme.fcn_training.inference.inference import main as inference_main
 from fme.fcn_training.train import _restore_checkpoint
@@ -25,8 +26,10 @@ JOB_SUBMISSION_SCRIPT_PATH = (
 
 
 def _get_test_yaml_files(
+    *,
     train_data_path,
     valid_data_path,
+    monthly_data_filename,
     results_dir,
     global_means_path,
     global_stds_path,
@@ -67,6 +70,7 @@ def _get_test_yaml_files(
         stepper_config = new_stepper_config
 
     train_string = f"""
+monthly_reference_data: {monthly_data_filename}
 train_loader:
   data_type: "xarray"
   dataset:
@@ -188,7 +192,7 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
     data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
     grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
     time = [
-        cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
+        cftime.DatetimeProlepticGregorian(2000, 1, 1) + 5 * datetime.timedelta(days=i)
         for i in range(data_dim_sizes["time"])
     ]
     stats_dim_sizes = {}
@@ -218,9 +222,22 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
         coords_override={},
     )
 
+    monthly_reference_data = MonthlyReferenceData(
+        path=data_dir,
+        names=out_variable_names,
+        dim_sizes=DimSizes(
+            n_time=10,
+            n_lat=16,
+            n_lon=32,
+            nz_interface=1,
+        ),
+        n_ensemble=3,
+    )
+
     train_config_filename, inference_config_filename = _get_test_yaml_files(
         train_data_path=data_dir,
         valid_data_path=data_dir,
+        monthly_data_filename=monthly_reference_data.data_filename,
         results_dir=results_dir,
         global_means_path=stats_dir / "stats-mean.nc",
         global_stds_path=stats_dir / "stats-stddev.nc",
