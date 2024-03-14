@@ -9,6 +9,7 @@ from typing import Optional, Sequence
 
 import dacite
 import torch
+import xarray as xr
 import yaml
 
 import fme
@@ -90,6 +91,7 @@ class InferenceConfig:
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
+    monthly_reference_data: Optional[str] = None
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -206,6 +208,10 @@ def main(
         config.forward_steps_in_memory,
         data_requirements,
     )
+    if config.monthly_reference_data is not None:
+        monthly_reference_data = xr.open_dataset(config.monthly_reference_data)
+    else:
+        monthly_reference_data = None
 
     stepper = config.load_stepper(
         data.area_weights.to(fme.get_device()),
@@ -221,6 +227,7 @@ def main(
         log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
+        monthly_reference_data=monthly_reference_data,
     )
     writer = config.get_data_writer(data)
 

@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import List, Optional
 
 import torch.distributed
 
@@ -118,6 +118,29 @@ class Distributed:
         if self._distributed:
             torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
+
+    def gather(self, tensor: torch.Tensor) -> Optional[List[torch.Tensor]]:
+        """
+        Gather a tensor from all processes to the root process.
+
+        Modifies the input tensor in-place as a side effect.
+
+        Args:
+            tensor: The tensor to gather.
+
+        Returns:
+            A list of tensors, where the i-th element is the tensor
+                from the i-th process.
+        """
+        if self.rank == 0:
+            gather_list: Optional[List[torch.Tensor]] = [
+                torch.empty_like(tensor) for _ in range(self.world_size)
+            ]
+        else:
+            gather_list = None
+        if self._distributed:
+            torch.distributed.gather(tensor, gather_list)
+        return gather_list
 
     def is_root(self) -> bool:
         """

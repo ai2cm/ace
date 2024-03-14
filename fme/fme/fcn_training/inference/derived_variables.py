@@ -94,7 +94,7 @@ def _compute_derived_variable(
 ) -> Dict[str, torch.Tensor]:
     """Computes a derived variable and adds it to the given data.
 
-    If the required input data is not available, a warning will be logged and
+    If the required input data is not available,
     no change will be made to the data.
 
     Args:
@@ -119,7 +119,7 @@ def _compute_derived_variable(
     try:
         output = derived_variable.func(climate_data, sigma_coordinates)
     except KeyError as key_error:
-        logging.warning(f"Could not compute {label} because {key_error} is missing")
+        logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
         new_data[label] = output
     return new_data
