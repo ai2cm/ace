@@ -33,6 +33,13 @@ def register(
 
 
 @register()
+def lowest_layer_air_temperature(
+    data: ClimateData, sigma_coordinates: SigmaCoordinates
+) -> torch.Tensor:
+    return data.air_temperature.select(-1, -1)
+
+
+@register()
 def surface_pressure_due_to_dry_air(
     data: ClimateData, sigma_coordinates: SigmaCoordinates
 ) -> torch.Tensor:
