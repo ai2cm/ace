@@ -183,7 +183,6 @@ class MeanAggregator:
                 self._variable_metrics["weighted_grad_mag_percent_diff"] = {}
 
             device = get_device()
-            area_weights = self._area_weights
             for key in gen_data:
                 self._variable_metrics["weighted_rmse"][
                     key
@@ -205,7 +204,7 @@ class MeanAggregator:
                 self._variable_metrics["weighted_mean_gen"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=compute_metric_on(
                         source="gen", metric=metrics.weighted_mean
@@ -215,7 +214,7 @@ class MeanAggregator:
                 self._variable_metrics["weighted_mean_target"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=compute_metric_on(
                         source="target", metric=metrics.weighted_mean
@@ -225,7 +224,7 @@ class MeanAggregator:
                 self._variable_metrics["weighted_bias"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=metrics.weighted_mean_bias,
                     n_timesteps=self._n_timesteps,
@@ -233,7 +232,7 @@ class MeanAggregator:
                 self._variable_metrics["weighted_std_gen"][
                     key
                 ] = AreaWeightedReducedMetric(
-                    area_weights=area_weights,
+                    area_weights=self._area_weights,
                     device=device,
                     compute_metric=compute_metric_on(
                         source="gen", metric=metrics.weighted_std

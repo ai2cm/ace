@@ -1,4 +1,3 @@
-import contextlib
 from collections import namedtuple
 from typing import Dict, Iterable, Optional, Tuple, Union
 from unittest.mock import MagicMock
@@ -9,7 +8,7 @@ import torch
 
 import fme
 from fme.core import ClimateData, metrics
-from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.aggregator.one_step.main import OneStepAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import WeightedMappingLossConfig
@@ -320,7 +319,7 @@ def _setup_and_run_on_batch(
     ocean_config: Optional[OceanConfig],
     n_forward_steps,
     optimization_config: Optional[OptimizationConfig],
-    aggregator: Optional[InferenceAggregator],
+    aggregator: Optional[OneStepAggregator],
 ):
     """Sets up the requisite classes to run run_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
@@ -362,7 +361,6 @@ def _setup_and_run_on_batch(
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
 @pytest.mark.parametrize("use_aggregator", [True, False], ids=["use_agg", ""])
 @pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
-@pytest.mark.parametrize("is_ragged_time_dim", [True, False], ids=["is_ragged", ""])
 def test_run_on_batch(
     n_forward_steps,
     is_input,
@@ -371,7 +369,6 @@ def test_run_on_batch(
     is_prescribed,
     time_dim_needed_for_var,
     use_aggregator,
-    is_ragged_time_dim,
 ):
     in_names, out_names = ["a"], ["a"]
     if is_input:
@@ -389,16 +386,9 @@ def test_run_on_batch(
         ocean_config = None
 
     data, area_weights, sigma_coords = get_data(all_names, 3, n_forward_steps + 1)
-    time_dim = 1
-
-    if is_ragged_time_dim:
-        # make time_dim ragged: only keep t=0, while preserving `time_dim`
-        data["b"] = data["b"].select(dim=time_dim, index=0).unsqueeze(time_dim)
 
     if use_aggregator:
-        aggregator = InferenceAggregator(
-            area_weights, sigma_coords, n_timesteps=n_forward_steps + 1
-        )
+        aggregator = OneStepAggregator(area_weights, sigma_coords)
     else:
         aggregator = None
 
@@ -407,21 +397,15 @@ def test_run_on_batch(
     else:
         optimization = None
 
-    if is_ragged_time_dim and (is_train or time_dim_needed_for_var):
-        context = pytest.raises(ValueError)
-    else:
-        context = contextlib.nullcontext()
-
-    with context:
-        _setup_and_run_on_batch(
-            data,
-            in_names,
-            out_names,
-            ocean_config,
-            n_forward_steps,
-            optimization,
-            aggregator,
-        )
+    _setup_and_run_on_batch(
+        data,
+        in_names,
+        out_names,
+        ocean_config,
+        n_forward_steps,
+        optimization,
+        aggregator,
+    )
 
 
 class Multiply(torch.nn.Module):
