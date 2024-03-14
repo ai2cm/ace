@@ -12,10 +12,10 @@ from netCDF4 import Dataset
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.fcn_training.inference.data_writer.utils import get_all_names
 
-LEAD_TIME_DIM = "lead"
+LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "microseconds"
 SAMPLE_DIM = "sample"
-INIT_TIME = "init"
+INIT_TIME = "init_time"
 INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
 

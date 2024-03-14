@@ -193,13 +193,13 @@ def inference_helper(
         decode_timedelta=False,
         decode_times=False,
     )
-    assert len(prediction_ds["lead"]) == config.n_forward_steps + 1
+    assert len(prediction_ds["time"]) == config.n_forward_steps + 1
     for i in range(config.n_forward_steps):
         np.testing.assert_allclose(
-            prediction_ds["var"].isel(lead=i).values + 1,
-            prediction_ds["var"].isel(lead=i + 1).values,
+            prediction_ds["var"].isel(time=i).values + 1,
+            prediction_ds["var"].isel(time=i + 1).values,
         )
-        assert not np.any(np.isnan(prediction_ds["var"].isel(lead=i + 1).values))
+        assert not np.any(np.isnan(prediction_ds["var"].isel(time=i + 1).values))
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
@@ -316,13 +316,13 @@ def test_inference_writer_boundaries(
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
     )
-    assert len(prediction_ds["lead"]) == n_forward_steps + 1
+    assert len(prediction_ds["time"]) == n_forward_steps + 1
     assert not np.any(np.isnan(prediction_ds["var"].values))
 
     gen = prediction_ds["var"].sel(source="prediction")
     tar = prediction_ds["var"].sel(source="target")
-    gen_time_mean = torch.from_numpy(gen[:, 1:].mean(dim="lead").values)
-    tar_time_mean = torch.from_numpy(tar[:, 1:].mean(dim="lead").values)
+    gen_time_mean = torch.from_numpy(gen[:, 1:].mean(dim="time").values)
+    tar_time_mean = torch.from_numpy(tar[:, 1:].mean(dim="time").values)
     area_weights = metrics.spherical_area_weights(
         tar["lat"].values, num_lon=len(tar["lon"])
     )
@@ -345,21 +345,21 @@ def test_inference_writer_boundaries(
 
     # the global initial condition should be identical for prediction and target
     np.testing.assert_allclose(
-        prediction_ds["var"].isel(lead=0).sel(source="prediction").values,
-        prediction_ds["var"].isel(lead=0).sel(source="target").values,
+        prediction_ds["var"].isel(time=0).sel(source="prediction").values,
+        prediction_ds["var"].isel(time=0).sel(source="target").values,
     )
     # the target initial condition should the same as the validation data
     # initial condition
     np.testing.assert_allclose(
-        prediction_ds["var"].isel(lead=0).sel(source="target").values,
+        prediction_ds["var"].isel(time=0).sel(source="target").values,
         ds["var"].isel(time=0).values,
     )
     for i in range(0, n_forward_steps + 1):
         log = inference_logs[i]
         # metric steps should match lead times
         assert log["inference/mean/forecast_step"] == i
-        gen_i = torch.from_numpy(gen.isel(lead=i).values)
-        tar_i = torch.from_numpy(tar.isel(lead=i).values)
+        gen_i = torch.from_numpy(gen.isel(time=i).values)
+        tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
         assert metrics.root_mean_squared_error(
             tar_i, gen_i, area_weights, dim=(-2, -1)
@@ -378,15 +378,15 @@ def test_inference_writer_boundaries(
 
         # the target obs should be the same as the validation data obs
         np.testing.assert_allclose(
-            prediction_ds["var"].isel(lead=i).sel(source="target").values,
+            prediction_ds["var"].isel(time=i).sel(source="target").values,
             ds["var"].isel(time=i).values,
         )
         if i > 0:
-            lead_da = prediction_ds["var"].isel(lead=i)
+            lead_da = prediction_ds["var"].isel(time=i)
             # predictions should be previous condition + 1
             np.testing.assert_allclose(
                 lead_da.sel(source="prediction").values,
-                prediction_ds["var"].sel(source="prediction").isel(lead=i - 1).values
+                prediction_ds["var"].sel(source="prediction").isel(time=i - 1).values
                 + 1,
             )
             # prediction and target should not have entirely the same values at
@@ -447,7 +447,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     )
     n_coarsened_timesteps = (config.n_forward_steps // coarsen_factor) + 1
     assert (
-        len(prediction_ds["lead"]) == n_coarsened_timesteps
+        len(prediction_ds["time"]) == n_coarsened_timesteps
     ), "raw predictions time dimension size"
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
     assert (
