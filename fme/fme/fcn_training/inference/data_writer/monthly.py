@@ -11,10 +11,10 @@ from netCDF4 import Dataset
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.fcn_training.inference.data_writer.utils import get_all_names
 
-LEAD_TIME_DIM = "lead"
+LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "months"
 ENSEMBLE_DIM = "sample"
-INIT_TIME = "init"
+INIT_TIME = "init_time"
 VALID_TIME = "valid_time"
 TIME_UNITS = "days since 1970-01-01 00:00:00"
 COUNTS = "counts"

@@ -177,9 +177,9 @@ class TestDataWriter:
 
         # Open the file and check the data
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
-        assert dataset["lead"].units == "microseconds"
-        assert dataset["init"].units == "microseconds since 1970-01-01 00:00:00"
-        assert dataset["init"].calendar == calendar
+        assert dataset["time"].units == "microseconds"
+        assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
+        assert dataset["init_time"].calendar == calendar
         for var_name in set(sample_target_data.keys()):
             var_data = dataset.variables[var_name][:]
             assert var_data.shape == (
@@ -221,27 +221,27 @@ class TestDataWriter:
                     MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
                     for i in np.arange(0, 31, 6)
                 ],
-                dims="lead",
+                dims="time",
             ).assign_coords(
                 {
-                    "lead": [
+                    "time": [
                         MICROSECONDS_PER_SECOND * SECONDS_PER_HOUR * i
                         for i in np.arange(0, 31, 6)
                     ]
                 }
             )
-            xr.testing.assert_equal(ds["lead"], expected_lead_times)
+            xr.testing.assert_equal(ds["time"], expected_lead_times)
             expected_init_times = xr.DataArray(
                 [CALENDAR_CFTIME[calendar](*start_time) for _ in range(n_samples)],
                 dims=["sample"],
             )
             expected_init_times = expected_init_times.assign_coords(
-                {"init": expected_init_times}
+                {"init_time": expected_init_times}
             )
-            xr.testing.assert_equal(ds["init"], expected_init_times)
+            xr.testing.assert_equal(ds["init_time"], expected_init_times)
             for var_name in set(sample_target_data.keys()):
                 assert "valid_time" in ds[var_name].coords
-                assert "init" in ds[var_name].coords
+                assert "init_time" in ds[var_name].coords
 
         histograms = xr.open_dataset(tmp_path / "histograms.nc")
         actual_var_names = sorted([str(k) for k in histograms.keys()])
@@ -261,8 +261,8 @@ class TestDataWriter:
             assert np.sum(np.isnan(ds["precipitation"])) == 0
             assert np.sum(np.isnan(ds["temp"])) == 0
             assert np.sum(np.isnan(ds["pressure"])) == 0
-            assert np.all(ds.init.dt.year.values > 0)
-            assert np.all(ds.init.dt.year.values >= 0)
+            assert np.all(ds.init_time.dt.year.values > 0)
+            assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
 
     @pytest.mark.parametrize(
@@ -316,7 +316,7 @@ class TestDataWriter:
             else set(sample_target_data.keys())
         )
         assert set(dataset.variables.keys()) == expected_variables.union(
-            {"source", "init", "lead", "lat", "lon", "valid_time"}
+            {"source", "init_time", "time", "lat", "lon", "valid_time"}
         )
         expected_prediction_variables = set(sample_prediction_data.keys())
         if save_names is not None:
@@ -331,8 +331,8 @@ class TestDataWriter:
         )
         assert set(dataset.variables.keys()) == expected_prediction_variables.union(
             {
-                "init",
-                "lead",
+                "init_time",
+                "time",
                 "valid_time",
                 "counts",
                 "lat",
