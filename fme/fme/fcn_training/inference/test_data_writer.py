@@ -256,7 +256,7 @@ class TestDataWriter:
         )
         assert same_count_each_timestep
 
-        with xr.open_dataset(tmp_path / "monthly_binned_predictions.nc") as ds:
+        with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
             assert ds.counts.sum() == n_samples * n_timesteps
             assert np.sum(np.isnan(ds["precipitation"])) == 0
             assert np.sum(np.isnan(ds["temp"])) == 0
@@ -323,7 +323,7 @@ class TestDataWriter:
             expected_prediction_variables = expected_prediction_variables.intersection(
                 save_names
             )
-        dataset = Dataset(tmp_path / "monthly_binned_predictions.nc", "r")
+        dataset = Dataset(tmp_path / "monthly_mean_predictions.nc", "r")
         expected_variables = (
             set(save_names)
             if save_names is not None
