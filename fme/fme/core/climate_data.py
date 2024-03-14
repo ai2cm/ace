@@ -22,6 +22,7 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "sfc_up_sw_radiative_flux": ["USWRFsfc"],
         "sfc_down_lw_radiative_flux": ["DLWRFsfc"],
         "sfc_up_lw_radiative_flux": ["ULWRFsfc"],
+        "air_temperature": ["air_temperature_"],
     }
 )
 
@@ -111,6 +112,13 @@ class ClimateData:
     def data(self) -> Dict[str, torch.Tensor]:
         """Mapping from field names to tensors."""
         return self._data
+
+    @property
+    def air_temperature(self) -> torch.Tensor:
+        """Returns all vertical levels of air_temperature, e.g. a tensor of
+        shape `(..., vertical_level)`."""
+        prefix = self._prefixes["air_temperature"]
+        return self._extract_levels(prefix)
 
     @property
     def specific_total_water(self) -> torch.Tensor:
