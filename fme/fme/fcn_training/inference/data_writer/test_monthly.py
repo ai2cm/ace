@@ -66,7 +66,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     batch_times=times,
                 )
     writer.flush()
-    written = xr.open_dataset(str(tmpdir / "monthly_binned_predictions.nc"))
+    written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)
     assert np.sum(written["x"].values != 0) > 0, "No non-zero values written"
     assert (
@@ -75,7 +75,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     np.testing.assert_array_equal(written["counts"].values, window_size * n_writes)
     np.testing.assert_allclose(
         written["x"],
-        torch.cat(month_values, dim=1).cpu().numpy() * window_size * n_writes,
+        torch.cat(month_values, dim=1).cpu().numpy(),
     )
 
 
@@ -128,37 +128,76 @@ def test_find_boundary(month_array, expected):
 
 def test_add_data_one_first_month():
     target = np.zeros((2, 3))
+    target_start_counts = np.zeros((2, 3), dtype=np.int32)
     source = np.ones((2, 5))
     months_elapsed = np.zeros((2, 5), dtype=np.int32)
     expected = np.zeros((2, 3))
-    expected[:, 0] = 5
+    expected[:, 0] = 1
 
-    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    add_data(
+        target=target,
+        target_start_counts=target_start_counts,
+        source=source,
+        months_elapsed=months_elapsed,
+    )
+    np.testing.assert_array_equal(target, expected)
+    np.testing.assert_array_equal(target_start_counts, 0)
+
+
+def test_add_data_one_first_month_averaging():
+    target = np.zeros((2, 3))
+    target[0, 0] = 2.0
+    target_start_counts = np.zeros((2, 3), dtype=np.int32)
+    target_start_counts[0, 0] = 1
+    source = np.ones((2, 5))
+    months_elapsed = np.zeros((2, 5), dtype=np.int32)
+    expected = np.zeros((2, 3))
+    expected[0, 0] = (2 + 5) / 6
+    expected[1, 0] = 1
+
+    add_data(
+        target=target,
+        target_start_counts=target_start_counts,
+        source=source,
+        months_elapsed=months_elapsed,
+    )
     np.testing.assert_array_equal(target, expected)
 
 
 def test_add_data_one_later_month():
     target = np.zeros((2, 4))
+    target_start_counts = np.zeros((2, 4), dtype=np.int32)
     source = np.ones((2, 5))
     months_elapsed = np.zeros((2, 5), dtype=np.int32) + 2
     expected = np.zeros((2, 4))
-    expected[:, 2] = 5
+    expected[:, 2] = 1
 
-    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    add_data(
+        target=target,
+        target_start_counts=target_start_counts,
+        source=source,
+        months_elapsed=months_elapsed,
+    )
     np.testing.assert_array_equal(target, expected)
 
 
 def test_add_data_two_later_months():
     target = np.zeros((2, 4))
+    target_start_counts = np.zeros((2, 4), dtype=np.int32)
     source = np.ones((2, 5))
     months_elapsed = np.zeros((2, 5), dtype=np.int32) + 2
     months_elapsed[0, 2:] = 3
     months_elapsed[1, 3:] = 3
     expected = np.zeros((2, 4))
-    expected[0, 2] = 2
-    expected[0, 3] = 3
-    expected[1, 2] = 3
-    expected[1, 3] = 2
+    expected[0, 2] = 1
+    expected[0, 3] = 1
+    expected[1, 2] = 1
+    expected[1, 3] = 1
 
-    add_data(target=target, source=source, months_elapsed=months_elapsed)
+    add_data(
+        target=target,
+        target_start_counts=target_start_counts,
+        source=source,
+        months_elapsed=months_elapsed,
+    )
     np.testing.assert_array_equal(target, expected)

@@ -15,3 +15,6 @@ COPY install_local_packages.sh ${FME_DIR}/install_local_packages.sh
 
 # install packages in full-model repo
 RUN cd $FME_DIR && ./install_local_packages.sh
+
+# copy after install so editing scripts does not trigger reinstall
+COPY scripts ${FME_DIR}/scripts
