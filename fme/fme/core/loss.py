@@ -21,8 +21,13 @@ class MappingLoss:
         predict_dict: Dict[str, torch.Tensor],
         target_dict: Dict[str, torch.Tensor],
     ):
-        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim)
-        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
+        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim).to(
+            dtype=torch.float
+        )
+        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim).to(
+            dtype=torch.float
+        )
+
         return self.loss(predict_tensors, target_tensors)
 
 
