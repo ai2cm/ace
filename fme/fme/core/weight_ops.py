@@ -66,7 +66,13 @@ class CopyWeightsConfig:
         for module, weight in zip(modules, weights):
 
             def func(module, name):
-                overwrite_weight_initial_slice(module, name, weight[name])
+                # Strip leading "module." from name if present
+                if name.startswith("module."):
+                    weight_name = name[len("module.") :]
+                else:
+                    weight_name = name
+
+                overwrite_weight_initial_slice(module, name, weight[weight_name])
 
             apply_by_wildcard(module, func, self.include, self.exclude)
         return module
@@ -143,7 +149,12 @@ def overwrite_weight_initial_slice(module, name, from_param):
         name: name of the parameter to be overwritten
         from_param: parameter to overwrite with
     """
-    to_param = module.get_parameter(name)
+    try:
+        to_param = module.get_parameter(name)
+    except AttributeError:
+        if name == "device_buffer" or name == "module.device_buffer":
+            return  # ignore device buffer, used for GPU operations
+        raise
     if len(from_param.shape) != len(to_param.shape):
         raise ValueError(
             f"Dest parameter {name} has "
@@ -169,6 +180,4 @@ def _set_nested_parameter(module, param_name, new_param):
     *path, name = param_name.split(".")
     for p in path:
         module = getattr(module, p)
-    if not isinstance(new_param, nn.Parameter):
-        new_param = nn.Parameter(new_param)
-    setattr(module, name, new_param)
+    getattr(module, name)[:] = new_param
