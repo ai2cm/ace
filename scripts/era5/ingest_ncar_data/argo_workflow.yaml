@@ -1,0 +1,80 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: ingest-ncar-era5-data-
+spec:
+  entrypoint: ingest-ncar-era5-data
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+    - name: variables
+    - name: script_flags
+      value: ""
+  templates:
+    - name: ingest-ncar-era5-data
+      steps:
+      - - name: ingest-ncar-era5-single-variable
+          template: ingest-ncar-era5-single-variable
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.python_script}}"
+            - name: category
+              value: "{{item.category}}"
+            - name: variable_name
+              value: "{{item.variable_name}}"
+            - name: start_time
+              value: "{{item.start_time}}"
+            - name: n_files
+              value: "{{item.n_files}}"
+            - name: script_flags
+              value: "{{workflow.parameters.script_flags}}"
+          withParam: "{{workflow.parameters.variables}}"
+    - name: ingest-ncar-era5-single-variable
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: category
+          - name: variable_name
+          - name: start_time
+          - name: n_files
+          - name: script_flags
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            python script.py \
+              {{inputs.parameters.category}} \
+              {{inputs.parameters.variable_name}} \
+              {{inputs.parameters.start_time}} \
+              {{inputs.parameters.n_files}} \
+              {{inputs.parameters.script_flags}}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
