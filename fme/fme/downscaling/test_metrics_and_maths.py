@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 
@@ -8,6 +9,7 @@ from fme.downscaling.metrics_and_maths import (
     filter_tensor_mapping,
     map_tensor_mapping,
     min_max_normalization,
+    quantile,
 )
 
 
@@ -131,3 +133,26 @@ def test_filter_tensor_mapping():
     non_existent_keys = {"e", "f"}
     result = filter_tensor_mapping(tensor_mapping, non_existent_keys)
     assert len(result) == 0
+
+
+@pytest.mark.parametrize(
+    "bins, hist, pct, expected",
+    [
+        pytest.param(
+            np.array([0, 1]), np.array([10]), 0.8, 0.8, id="single_bin_interpolation"
+        ),
+        pytest.param(
+            np.array([0, 1, 2]),
+            np.array([10, 10]),
+            0.8,
+            1.6,
+            id="two_bin_interpolation",
+        ),
+        pytest.param(
+            np.array([0, 1, 2]), np.array([10, 10]), 1.0, 2.0, id="two_bin_end_value"
+        ),
+    ],
+)
+def test_quantile(bins, hist, pct, expected):
+    result = quantile(bins, hist, pct)
+    np.testing.assert_allclose(result, expected)
