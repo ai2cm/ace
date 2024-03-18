@@ -1,7 +1,11 @@
 import pytest
 import torch
 
-from fme.downscaling.modules.registry import ModuleRegistrySelector, SwinirConfig
+from fme.downscaling.modules.registry import (
+    InterpolateConfig,
+    ModuleRegistrySelector,
+    SwinirConfig,
+)
 
 
 def test_module_registry_selector_build():
@@ -23,7 +27,7 @@ def test_module_registry_selector_build():
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
         lowres_shape=lowres_shape,
-        upscale_factor=upscale_factor,
+        downscale_factor=upscale_factor,
     )
 
     assert isinstance(module, torch.nn.Module)
@@ -66,9 +70,32 @@ def test_swinir_output_shapes(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
         lowres_shape=lowres_shape,
-        upscale_factor=upscale_factor,
+        downscale_factor=upscale_factor,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_channels, *lowres_shape)
     outputs = swinir(inputs)
     assert outputs.shape == (batch_size, n_channels, *highres_shape)
+
+
+@pytest.mark.parametrize("mode", ["bicubic", "nearest"])
+@pytest.mark.parametrize("batch_size", [1, 2])
+@pytest.mark.parametrize("n_in_channels, n_out_channels", [(1, 1), (2, 1)])
+@pytest.mark.parametrize("downscale_factor", [1, 2, 4])
+def test_interpolate(
+    mode,
+    batch_size,
+    n_in_channels,
+    n_out_channels,
+    downscale_factor,
+    lowres_shape=(4, 8),
+):
+    config = InterpolateConfig(mode)
+    interpolate = config.build(
+        n_in_channels, n_out_channels, lowres_shape, downscale_factor
+    )
+    inputs = torch.rand(batch_size, n_in_channels, *lowres_shape)
+    outputs = interpolate(inputs)
+    highres_shape = tuple(s * downscale_factor for s in lowres_shape)
+    # Note: interpolate models ignore `n_out_channels`
+    assert outputs.shape == (batch_size, n_in_channels, *highres_shape)
