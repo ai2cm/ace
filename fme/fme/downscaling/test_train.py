@@ -37,7 +37,7 @@ def test_trainer():
     mock_get_wandb.assert_called()
 
 
-def _create_test_data_on_disk(
+def create_test_data_on_disk(
     filename, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
 ):
     data_vars = {}
@@ -71,7 +71,7 @@ def _create_test_data_on_disk(
     return filename
 
 
-def _data_paths_helper(tmp_path):
+def data_paths_helper(tmp_path):
     dim_sizes = HighResLowResPair[Dict[str, int]](
         highres={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
         lowres={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
@@ -86,10 +86,10 @@ def _data_paths_helper(tmp_path):
         for i in range(NUM_TIMESTEPS)
     ]
     coords = {"time": time_coord}
-    _create_test_data_on_disk(
+    create_test_data_on_disk(
         highres_path / "data.nc", dim_sizes.highres, variable_names, coords
     )
-    _create_test_data_on_disk(
+    create_test_data_on_disk(
         lowres_path / "data.nc", dim_sizes.lowres, variable_names, coords
     )
     return HighResLowResPair[str](highres=highres_path, lowres=lowres_path)
@@ -99,23 +99,23 @@ def _data_paths_helper(tmp_path):
 def train_data_paths(tmp_path):
     path = tmp_path / "train"
     path.mkdir()
-    return _data_paths_helper(path)
+    return data_paths_helper(path)
 
 
 @pytest.fixture
 def validation_data_paths(tmp_path):
     path = tmp_path / "validation"
     path.mkdir()
-    return _data_paths_helper(path)
+    return data_paths_helper(path)
 
 
 @pytest.fixture
 def stats_paths(tmp_path):
     variable_names = ["x", "y"]
-    mean_path = _create_test_data_on_disk(
+    mean_path = create_test_data_on_disk(
         tmp_path / "stats-mean.nc", {}, variable_names, {}
     )
-    std_path = _create_test_data_on_disk(
+    std_path = create_test_data_on_disk(
         tmp_path / "stats-std.nc", {}, variable_names, {}
     )
     return mean_path, std_path
@@ -123,7 +123,9 @@ def stats_paths(tmp_path):
 
 @pytest.fixture
 def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_path):
-    file_path = f"{os.path.dirname(os.path.abspath(__file__))}/configs/test_config.yaml"
+    file_path = (
+        f"{os.path.dirname(os.path.abspath(__file__))}/configs/test_train_config.yaml"
+    )
     with open(file_path, "r") as file:
         config = yaml.safe_load(file)
 

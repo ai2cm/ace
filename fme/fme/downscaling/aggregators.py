@@ -1,4 +1,4 @@
-"""Contains classes for aggregating inference metrics and various statistics."""
+"""Contains classes for aggregating evaluation metrics and various statistics."""
 
 from typing import Any, Callable, Dict, Literal, Mapping, Optional, Protocol, Union
 
@@ -362,7 +362,7 @@ class _ComparisonAggregator(Protocol):
 
 class Aggregator:
     """
-    Class for aggregating inference metrics and intrinsic statistics.
+    Class for aggregating evaluation metrics and intrinsic statistics.
 
     Args:
         area_weights: Tensor of area weights.
@@ -474,17 +474,3 @@ class Aggregator:
         prefix: str = "",
     ) -> Mapping[str, Any]:
         return self._get(getter="get_wandb", prefix=prefix)
-
-
-class NullInferenceAggregator:
-    def __init__(
-        self,
-        *args,
-        **kwargs,
-    ) -> None:
-        del args, kwargs
-
-    def record_batch(
-        self, loss: torch.Tensor, target: TensorMapping, prediction: TensorMapping
-    ) -> None:
-        del loss, target, prediction

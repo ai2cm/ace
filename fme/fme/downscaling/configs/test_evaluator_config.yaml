@@ -1,0 +1,23 @@
+experiment_dir: /will/be/overwritten
+# interpolate model
+model:
+  mode: "place_holder"
+  downscale_factor: -1
+  in_names:
+    - "place"
+    - "holder"
+  out_names:
+    - "place"
+    - "holder"
+data:
+  path_highres: /will/be/overwritten
+  path_lowres: /will/be/overwritten
+  data_type: "xarray"
+  batch_size: 2
+  num_data_workers: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
