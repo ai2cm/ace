@@ -2,7 +2,7 @@
 return tensors of shape (batch, channel, height, width)."""
 
 import dataclasses
-from typing import Any, Mapping, Protocol, Sequence, Tuple, Type
+from typing import Any, Literal, Mapping, Protocol, Sequence, Tuple, Type
 
 import dacite
 import torch
@@ -16,7 +16,7 @@ class ModuleConfig(Protocol):
         n_in_channels: int,
         n_out_channels: int,
         lowres_shape: Tuple[int, int],
-        upscale_factor: int,
+        downscale_factor: int,
     ) -> torch.nn.Module:
         ...
 
@@ -35,16 +35,16 @@ class SwinirConfig:
         n_in_channels: int,
         n_out_channels: int,
         lowres_shape: Tuple[int, int],
-        upscale_factor: int,
+        downscale_factor: int,
     ):
         del n_out_channels  # unused for now
         height, width = lowres_shape
         # TODO(gideond): The SwinIR docs appear to be wrong, dig into why these
         # need to take these values to give the right output shapes
-        height = (height // upscale_factor // self.window_size + 1) * self.window_size
-        width = (width // upscale_factor // self.window_size + 1) * self.window_size
+        height = (height // downscale_factor // self.window_size + 1) * self.window_size
+        width = (width // downscale_factor // self.window_size + 1) * self.window_size
         return SwinIR(
-            upscale=upscale_factor,
+            upscale=downscale_factor,  # different ML versus climate convention
             img_size=(height, width),  # type: ignore
             window_size=self.window_size,
             depths=self.depths,
@@ -66,7 +66,7 @@ class ModuleRegistrySelector(ModuleConfig):
         n_in_channels: int,
         n_out_channels: int,
         lowres_shape: Tuple[int, int],
-        upscale_factor: int,
+        downscale_factor: int,
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -76,7 +76,7 @@ class ModuleRegistrySelector(ModuleConfig):
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             lowres_shape=lowres_shape,
-            upscale_factor=upscale_factor,
+            downscale_factor=downscale_factor,
         )
 
 
@@ -89,12 +89,46 @@ class PreBuiltBuilder:
         n_in_channels: int,
         n_out_channels: int,
         lowres_shape: Tuple[int, int],
-        upscale_factor: int,
+        downscale_factor: int,
     ) -> torch.nn.Module:
         return self.module
+
+
+class Interpolate(torch.nn.Module):
+    def __init__(self, downscale_factor: int, mode: Literal["bicubic", "nearest"]):
+        super(Interpolate, self).__init__()
+        self.downscale_factor = downscale_factor
+        self.mode = mode
+
+    def forward(self, x: torch.Tensor):
+        if self.mode == "bicubic":
+            align_corners = True
+        else:
+            align_corners = None
+        return torch.nn.functional.interpolate(
+            x,
+            scale_factor=[self.downscale_factor, self.downscale_factor],
+            mode=self.mode,
+            align_corners=align_corners,
+        )
+
+
+@dataclasses.dataclass
+class InterpolateConfig:
+    mode: Literal["bicubic", "nearest"]
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        lowres_shape: Tuple[int, int],
+        downscale_factor: int,
+    ) -> torch.nn.Module:
+        return Interpolate(downscale_factor, self.mode)
 
 
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
     "swinir": SwinirConfig,
     "prebuilt": PreBuiltBuilder,
+    "interpolate": InterpolateConfig,
 }

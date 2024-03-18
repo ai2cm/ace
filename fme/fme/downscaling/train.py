@@ -18,7 +18,7 @@ from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
 
 
-def _squeeze_time_dim(x: TensorMapping) -> TensorMapping:
+def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
@@ -50,7 +50,7 @@ class Trainer:
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
             inputs = HighResLowResPair(
-                _squeeze_time_dim(batch.highres), _squeeze_time_dim(batch.lowres)
+                squeeze_time_dim(batch.highres), squeeze_time_dim(batch.lowres)
             )
             outputs = self.model.run_on_batch(inputs, self.optimization)
             self._num_batches_seen += 1
@@ -75,8 +75,8 @@ class Trainer:
             batch: BatchData
             for batch in self.validation_data.loader:
                 inputs = HighResLowResPair(
-                    _squeeze_time_dim(batch.highres),
-                    _squeeze_time_dim(batch.lowres),
+                    squeeze_time_dim(batch.highres),
+                    squeeze_time_dim(batch.lowres),
                 )
                 outputs = self.model.run_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
