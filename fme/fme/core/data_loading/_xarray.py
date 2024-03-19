@@ -119,8 +119,8 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
         )
 
     return SigmaCoordinates(
-        ak=torch.as_tensor(ak_list, device=fme.get_device()),
-        bk=torch.as_tensor(bk_list, device=fme.get_device()),
+        ak=torch.as_tensor(ak_list, device=fme.get_device(), dtype=torch.float),
+        bk=torch.as_tensor(bk_list, device=fme.get_device(), dtype=torch.float),
     )
 
 
