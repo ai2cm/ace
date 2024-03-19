@@ -35,7 +35,7 @@ def get_lons_and_lats(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
     else:
         raise ValueError("Could not identify dataset's horizontal dimensions.")
     lons, lats = ds[hdims[0]].values, ds[hdims[1]].values
-    return np.array(lons), np.array(lats)
+    return np.array(lons, dtype=np.float32), np.array(lats, dtype=np.float32)
 
 
 def get_times(ds: xr.Dataset, start: int, n_steps: int) -> xr.DataArray:
