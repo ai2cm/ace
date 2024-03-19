@@ -163,7 +163,7 @@ def _save_netcdf(
     coords = {
         dim_name: (
             xr.DataArray(
-                np.arange(size, dtype=np.float32),
+                np.arange(size, dtype=np.float64),
                 dims=(dim_name,),
             )
             if dim_name not in coords_override
@@ -173,8 +173,8 @@ def _save_netcdf(
     }
 
     for i in range(7):
-        data_vars[f"ak_{i}"] = float(i)
-        data_vars[f"bk_{i}"] = float(i + 1)
+        data_vars[f"ak_{i}"] = np.float64(i)
+        data_vars[f"bk_{i}"] = np.float64(i + 1)
 
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
