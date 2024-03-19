@@ -1,17 +1,6 @@
 import dataclasses
 import warnings
-from typing import (
-    Any,
-    Dict,
-    Iterable,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Protocol,
-    Tuple,
-    Union,
-)
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -27,12 +16,13 @@ from fme.core.distributed import Distributed
 from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.ocean import OceanConfig
-from fme.core.packer import DataShapesNotUniform, Packer
+from fme.core.packer import Packer
 from fme.core.prescriber import PrescriberConfig
 from fme.fcn_training.registry import ModuleSelector
 
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
+from .typing_ import TensorMapping
 
 
 @dataclasses.dataclass
@@ -136,6 +126,11 @@ class SingleModuleStepperConfig:
         """Names of variables which require normalization. I.e. inputs/outputs."""
         return list(set(self.in_names).union(self.out_names))
 
+    @property
+    def forcing_names(self) -> List[str]:
+        """Names of variables which are inputs only."""
+        return list(set(self.in_names) - set(self.out_names))
+
 
 @dataclasses.dataclass
 class ExistingStepperConfig:
@@ -212,6 +207,7 @@ class SingleModuleStepper:
     Stepper class for a single pytorch module.
     """
 
+    TIME_DIM = 1
     CHANNEL_DIM = -3
 
     def __init__(
@@ -294,6 +290,78 @@ class SingleModuleStepper:
         """
         return nn.ModuleList([self.module])
 
+    def step(
+        self,
+        input: TensorMapping,
+        ocean_data: TensorMapping,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Step the model forward one timestep given input data.
+
+        Args:
+            input: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
+                and is assumed to contain all input variables and be denormalized.
+            ocean_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This must contain the necessary data at the
+                output timestep for the ocean model (e.g. surface temperature,
+                mixed-layer depth etc.).
+
+        Returns:
+            The denormalized output data at the next time step.
+        """
+        input_norm = self.normalizer.normalize(input)
+        input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+        output_tensor = self.module(input_tensor)
+        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        output = self.normalizer.denormalize(output_norm)
+        if self._corrector is not None:
+            output = self._corrector(input, output)
+        if self.ocean is not None:
+            output = self.ocean(ocean_data, input, output)
+        return output
+
+    def predict(
+        self,
+        initial_condition: TensorMapping,
+        forcing_data: TensorMapping,
+        n_forward_steps: int,
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Predict multiple steps forward given initial condition and forcing data.
+
+        Args:
+            initial_condition: Mapping from variable name to tensors of shape
+                [n_batch, n_lat, n_lon]. This data is assumed to contain all prognostic
+                variables and be denormalized.
+            forcing_data: Mapping from variable name to tensors of shape
+                [n_batch, n_forward_steps + 1, n_lat, n_lon]. This contains the forcing
+                and ocean data for the initial condition and all subsequent timesteps.
+            n_forward_steps: The number of timesteps to run the model forward for.
+
+        Returns:
+            The denormalized output data for all the forward timesteps. Shape of
+            each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].
+        """
+        output_list = []
+        state = initial_condition
+        forcing_names = self._config.forcing_names
+        ocean_target_names = self.ocean.target_names if self.ocean is not None else []
+        for step in range(n_forward_steps):
+            current_step_forcing = {k: forcing_data[k][:, step] for k in forcing_names}
+            next_step_ocean_data = {
+                k: forcing_data[k][:, step + 1] for k in ocean_target_names
+            }
+            input_data = {**state, **current_step_forcing}
+            state = self.step(input_data, next_step_ocean_data)
+            output_list.append(state)
+        output_timeseries = {}
+        for name in state:
+            output_timeseries[name] = torch.stack(
+                [x[name] for x in output_list], dim=self.TIME_DIM
+            )
+        return output_timeseries
+
     def run_on_batch(
         self,
         data: Dict[str, torch.Tensor],
@@ -302,94 +370,56 @@ class SingleModuleStepper:
         aggregator: Optional[Union[OneStepAggregator, TrainAggregator]] = None,
     ) -> SteppedData:
         """
-        Step the model forward on a batch of data.
+        Step the model forward multiple steps on a batch of data.
 
         Args:
-            data: The batch data of shape [n_sample, n_timesteps, n_channels, n_x, n_y].
+            data: The batch data where each tensor has shape
+                [n_sample, n_forward_steps + 1, n_lat, n_lon].
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             n_forward_steps: The number of timesteps to run the model for.
             aggregator: The data aggregator.
 
         Returns:
-            The loss, the generated data, the normalized generated data,
+            The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
         device = get_device()
         data = {
             name: value.to(device, dtype=torch.float) for name, value in data.items()
         }
-        time_dim = 1
-        full_data_norm = self.normalizer.normalize(data)
-        get_input_data = get_name_and_time_query_fn(data, full_data_norm, time_dim)
-
-        full_target_norm = _validate_target_data_shape(
-            self.out_packer,
-            full_data_norm,
-            self.CHANNEL_DIM,
-        )
+        time_dim = self.TIME_DIM
+        if self.ocean is None:
+            forcing_names = self._config.forcing_names
+        else:
+            forcing_names = self._config.forcing_names + self.ocean.target_names
+        forcing_data = {k: data[k] for k in forcing_names}
 
         loss = torch.tensor(0.0, device=get_device())
         metrics = {}
-        input_data_norm = get_input_data(
-            self.in_packer.names, time_index=0, norm_mode="norm"
-        )
-        gen_data_norm_list = []
+        input_data = {k: data[k].select(time_dim, 0) for k in self.in_packer.names}
         optimization.set_mode(self.module)
-        for step in range(n_forward_steps):
-            input_tensor_norm = self.in_packer.pack(
-                input_data_norm, axis=self.CHANNEL_DIM
-            )
+        with optimization.autocast():
+            gen_data = self.predict(input_data, forcing_data, n_forward_steps)
 
-            if full_target_norm is None:
-                target_norm: Optional[Dict[str, torch.Tensor]] = None
-            else:
-                target_norm = {
-                    name: full_target_norm[name].select(dim=time_dim, index=step + 1)
-                    for name in self.out_packer.names
-                }
-
-            with optimization.autocast():
-                gen_tensor_norm = self.module(input_tensor_norm).to(
-                    get_device(), dtype=torch.float
-                )
-                gen_norm = self.out_packer.unpack(
-                    gen_tensor_norm, axis=self.CHANNEL_DIM
-                )
-                gen_data = self.normalizer.denormalize(gen_norm)
-                input_data = self.normalizer.denormalize(input_data_norm)
-                if self._corrector is not None:
-                    gen_data = self._corrector(input_data, gen_data)
-                if self.ocean is not None:
-                    target_data = get_input_data(
-                        self.ocean.target_names, step + 1, "denorm"
-                    )
-                    gen_data = self.ocean(target_data, input_data, gen_data)
-                gen_norm = self.normalizer.normalize(gen_data)
-                if target_norm is None:
-                    step_loss = torch.tensor(torch.nan)
-                else:
-                    step_loss = self.loss_obj(gen_norm, target_norm)
+            # compute loss for each timestep except initial condition
+            for step in range(n_forward_steps):
+                # output from self.predict does not include initial condition, hence
+                # using index=step for gen_norm and index=step+1 for full_data_norm
+                gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
+                target_step = {k: v.select(time_dim, step + 1) for k, v in data.items()}
+                gen_norm_step = self.normalizer.normalize(gen_step)
+                target_norm_step = self.normalizer.normalize(target_step)
+                step_loss = self.loss_obj(gen_norm_step, target_norm_step)
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
 
-            gen_data_norm_list.append(gen_norm)
-            # update input data with generated outputs, and forcings for missing outputs
-            forcing_names = list(set(self.in_packer.names).difference(gen_norm.keys()))
-            forcing_data_norm = get_input_data(
-                forcing_names, time_index=step + 1, norm_mode="norm"
-            )
-            input_data_norm = {**forcing_data_norm, **gen_norm}
-
         # prepend the initial (pre-first-timestep) output data to the generated data
-        initial = get_input_data(self.out_packer.names, time_index=0, norm_mode="norm")
-        gen_data_norm_list = [initial] + gen_data_norm_list
-        gen_data_norm_timeseries = {}
+        initial = {k: data[k].select(time_dim, 0) for k in self.out_packer.names}
         for name in self.out_packer.names:
-            gen_data_norm_timeseries[name] = torch.stack(
-                [x[name] for x in gen_data_norm_list], dim=time_dim
+            gen_data[name] = torch.cat(
+                [initial[name].unsqueeze(time_dim), gen_data[name]], dim=time_dim
             )
-        gen_data = self.normalizer.denormalize(gen_data_norm_timeseries)
 
         conservation_metrics, conservation_loss = self._conservation_loss(gen_data)
         metrics.update(conservation_metrics)
@@ -398,20 +428,23 @@ class SingleModuleStepper:
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)
 
+        gen_data_norm = self.normalizer.normalize(gen_data)
+        full_data_norm = self.normalizer.normalize(data)
+
         if aggregator is not None:
             aggregator.record_batch(
                 float(loss),
                 target_data=data,
                 gen_data=gen_data,
                 target_data_norm=full_data_norm,
-                gen_data_norm=gen_data_norm_timeseries,
+                gen_data_norm=gen_data_norm,
             )
 
         return SteppedData(
             metrics=metrics,
             gen_data=gen_data,
             target_data=data,
-            gen_data_norm=gen_data_norm_timeseries,
+            gen_data_norm=gen_data_norm,
             target_data_norm=full_data_norm,
         )
 
@@ -481,49 +514,3 @@ class SingleModuleStepper:
         )
         stepper.load_state(state)
         return stepper
-
-
-class NameAndTimeQueryFunction(Protocol):
-    def __call__(
-        self,
-        names: Iterable[str],
-        time_index: int,
-        norm_mode: Literal["norm", "denorm"],
-    ) -> Dict[str, torch.Tensor]:
-        ...
-
-
-def get_name_and_time_query_fn(
-    data: Dict[str, torch.Tensor], data_norm: Dict[str, torch.Tensor], time_dim: int
-) -> NameAndTimeQueryFunction:
-    """Construct a function for querying `data` by name and time and whether it
-    is normalized or not. (Note: that the `names` argument can contain None values
-    to handle NullPrescriber)."""
-
-    norm_mode_to_data = {"norm": data_norm, "denorm": data}
-
-    def name_and_time_query_fn(names, time_index, norm_mode):
-        _data = norm_mode_to_data[norm_mode]
-        query_results = {}
-        for name in names:
-            try:
-                query_results[name] = _data[name].select(dim=time_dim, index=time_index)
-            except IndexError as err:
-                raise ValueError(
-                    f'tensor "{name}" does not have values at t={time_index}'
-                ) from err
-        return query_results
-
-    return name_and_time_query_fn
-
-
-def _validate_target_data_shape(
-    packer: Packer,
-    data: Dict[str, torch.Tensor],
-    axis: int,
-) -> Optional[Dict[str, torch.Tensor]]:
-    try:
-        _ = packer.pack(data, axis=axis)
-        return data
-    except DataShapesNotUniform:
-        return None

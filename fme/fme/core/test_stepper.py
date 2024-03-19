@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Dict, Iterable, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -351,11 +351,11 @@ def _setup_and_run_on_batch(
 
 
 @pytest.mark.parametrize(
-    "is_input,is_output,is_prescribed,time_dim_needed_for_var",
+    "is_input,is_output,is_prescribed",
     [
-        pytest.param(True, True, True, True, id="in_out_prescribed"),
-        pytest.param(True, True, False, False, id="in_out_not_prescribed"),
-        pytest.param(False, True, False, False, id="out_only_not_prescribed"),
+        pytest.param(True, True, True, id="in_out_prescribed"),
+        pytest.param(True, True, False, id="in_out_not_prescribed"),
+        pytest.param(False, True, False, id="out_only_not_prescribed"),
     ],
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
@@ -367,7 +367,6 @@ def test_run_on_batch(
     is_output,
     is_train,
     is_prescribed,
-    time_dim_needed_for_var,
     use_aggregator,
 ):
     in_names, out_names = ["a"], ["a"]
@@ -542,3 +541,138 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
     )
     dry_air_nonconservation = np.abs(dry_air[:, 1:] - dry_air[:, :-1])
     np.testing.assert_almost_equal(dry_air_nonconservation, 0.0, decimal=3)
+
+
+def _get_stepper(
+    in_names: List[str],
+    out_names: List[str],
+    ocean_config: Optional[OceanConfig] = None,
+    module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
+):
+    if module_name == "AddOne":
+
+        class AddOne(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        module_config = {"module": AddOne()}
+    elif module_name == "ChannelSum":
+        # convenient for testing stepper with more inputs than outputs
+        class ChannelSum(torch.nn.Module):
+            def forward(self, x):
+                return x.sum(dim=-3, keepdim=True)
+
+        module_config = {"module": ChannelSum()}
+    elif module_name == "RepeatChannel":
+        # convenient for testing stepper with more outputs than inputs
+        class RepeatChannel(torch.nn.Module):
+            def forward(self, x):
+                return x.repeat(1, 2, 1, 1)
+
+        module_config = {"module": RepeatChannel()}
+
+    all_names = list(set(in_names + out_names))
+    area = torch.ones((5, 5))
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config=module_config),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=NormalizationConfig(
+            means={n: torch.tensor([0.0]) for n in all_names},
+            stds={n: torch.tensor([1.0]) for n in all_names},
+        ),
+        ocean=ocean_config,
+    )
+    return config.get_stepper((5, 5), area, sigma_coordinates)
+
+
+def test_step():
+    stepper = _get_stepper(["a", "b"], ["a", "b"])
+    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+
+    output = stepper.step(input_data, {})
+
+    torch.testing.assert_close(output["a"], input_data["a"] + 1)
+    torch.testing.assert_close(output["b"], input_data["b"] + 1)
+
+
+def test_step_with_diagnostic():
+    stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
+    input_data = {"a": torch.rand(3, 5, 5)}
+    output = stepper.step(input_data, {})
+    torch.testing.assert_close(output["a"], input_data["a"])
+    torch.testing.assert_close(output["c"], input_data["a"])
+
+
+def test_step_with_forcing_and_diagnostic():
+    stepper = _get_stepper(["a", "b"], ["a", "c"])
+    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+    output = stepper.step(input_data, {})
+    torch.testing.assert_close(output["a"], input_data["a"] + 1)
+    assert "b" not in output
+    assert "c" in output
+
+
+def test_step_with_prescribed_ocean():
+    stepper = _get_stepper(
+        ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
+    )
+    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b", "mask"]}
+    ocean_data = {x: torch.rand(3, 5, 5) for x in ["a", "mask"]}
+    output = stepper.step(input_data, ocean_data)
+    expected_a_output = torch.where(
+        torch.round(ocean_data["mask"]).to(int) == 1,
+        ocean_data["a"],
+        input_data["a"] + 1,
+    )
+    torch.testing.assert_close(output["a"], expected_a_output)
+    torch.testing.assert_close(output["b"], input_data["b"] + 1)
+    assert set(output) == {"a", "b"}
+
+
+def test_predict():
+    stepper = _get_stepper(["a", "b"], ["a", "b"])
+    n_steps = 3
+    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+    forcing_data = {}
+    output = stepper.predict(input_data, forcing_data, n_steps)
+    for variable in ["a", "b"]:
+        assert output[variable].size(dim=1) == n_steps
+        torch.testing.assert_close(
+            output[variable][:, -1], input_data[variable] + n_steps
+        )
+
+
+def test_predict_with_forcing():
+    stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
+    n_steps = 3
+    input_data = {"a": torch.rand(3, 5, 5)}
+    forcing_data = {"b": torch.rand(3, n_steps + 1, 5, 5)}
+    output = stepper.predict(input_data, forcing_data, n_steps)
+    assert "b" not in output
+    assert output["a"].size(dim=1) == n_steps
+    torch.testing.assert_close(
+        output["a"][:, 0], input_data["a"] + forcing_data["b"][:, 0]
+    )
+    for n in range(1, n_steps):
+        expected_a_output = output["a"][:, n - 1] + forcing_data["b"][:, n]
+        torch.testing.assert_close(output["a"][:, n], expected_a_output)
+
+
+def test_predict_with_ocean():
+    stepper = _get_stepper(["a"], ["a"], ocean_config=OceanConfig("a", "mask"))
+    n_steps = 3
+    input_data = {"a": torch.rand(3, 5, 5)}
+    forcing_data = {x: torch.rand(3, n_steps + 1, 5, 5) for x in ["a", "mask"]}
+    output = stepper.predict(input_data, forcing_data, n_steps)
+    assert "mask" not in output
+    assert output["a"].size(dim=1) == n_steps
+    for n in range(n_steps):
+        previous_a = input_data["a"] if n == 0 else output["a"][:, n - 1]
+        expected_a_output = torch.where(
+            torch.round(forcing_data["mask"][:, n + 1]).to(int) == 1,
+            forcing_data["a"][:, n + 1],
+            previous_a + 1,
+        )
+        torch.testing.assert_close(output["a"][:, n], expected_a_output)
