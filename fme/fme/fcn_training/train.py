@@ -362,6 +362,14 @@ class Trainer:
                 forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
             )
         logs = aggregator.get_logs(label="inference")
+        if "inference/mean/series" in logs:
+            # Tables don't work well when reported every epoch, this is a quick
+            # workaround to remove them. Could refactor to avoid returning
+            # at all, but it's used when converting the logs to epoch-wise
+            # wandb logs in standalone inference.
+            logs.pop("inference/mean/series")
+        if "inference/mean_norm/series" in logs:
+            logs.pop("inference/mean_norm/series")
         return logs
 
     def save_checkpoint(self, checkpoint_path):
