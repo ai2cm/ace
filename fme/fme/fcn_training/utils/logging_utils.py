@@ -12,6 +12,7 @@ ENV_VAR_NAMES = (
     "FME_STATS_DIR",
     "FME_CHECKPOINT_DIR",
     "FME_OUTPUT_DIR",
+    "FME_IMAGE",
 )
 
 
