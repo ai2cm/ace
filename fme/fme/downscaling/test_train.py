@@ -158,14 +158,16 @@ def _get_aggregator_keys(prefix: str) -> Set[str]:
         "snapshot/image-full-field",
         "time_mean_map/error",
         "time_mean_map/full-field",
+        "histogram",
+        "histogram/target/99.9999th-percentile",
+        "histogram/prediction/99.9999th-percentile",
     ):
         for var_name in ("x", "y"):
             keys.append(f"{prefix}/{metric_name}/{var_name}")
 
-    for instrinsic_name in ("histogram", "spectrum"):
-        for var_name in ("x", "y"):
-            for data_type in ("target", "prediction"):
-                keys.append(f"{prefix}/{instrinsic_name}/{var_name}_{data_type}")
+    for var_name in ("x", "y"):
+        for data_type in ("target", "prediction"):
+            keys.append(f"{prefix}/spectrum/{var_name}_{data_type}")
     return set(keys)
 
 
