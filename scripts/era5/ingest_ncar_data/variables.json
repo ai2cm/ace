@@ -43,6 +43,18 @@
   },
   {
     "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_053_mtdwswrf",
+    "start_time": "1978121606",
+    "n_files": "1058"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_039_mtnswrf",
+    "start_time": "1978121606",
+    "n_files": "1058"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
     "variable_name": "235_040_mtnlwrf",
     "start_time": "1978121606",
     "n_files": "1058"
