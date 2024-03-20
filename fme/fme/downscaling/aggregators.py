@@ -310,14 +310,13 @@ class DynamicHistogram:
         return fig
 
     def get_wandb(self) -> Mapping[str, Any]:
-        wandb = WandB.get_instance()
         ret: Dict[str, Any] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms["target"]
             prediction = histograms["prediction"]
             fig = self._plot_histogram(target, prediction)
-            ret[field_name] = wandb.Image(fig)
+            ret[field_name] = fig
             plt.close(fig)
             for p in self.percentiles:
                 ret[f"target/{p}th-percentile/{field_name}"] = quantile(
