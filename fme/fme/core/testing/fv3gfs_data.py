@@ -211,7 +211,6 @@ class MonthlyReferenceData:
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
         )
-        ds = ds.rename({"time": "lead"})
         # add a time axis for months
         months = []
         for i in range(self.dim_sizes.n_time):
@@ -220,14 +219,14 @@ class MonthlyReferenceData:
             months.append(cftime.DatetimeProlepticGregorian(year, month, 15))
         ds["counts"] = xr.DataArray(
             np.random.randint(1, 10, size=(self.dim_sizes.n_time,)),
-            dims=["lead"],
+            dims=["time"],
             attrs={"units": "m", "long_name": "counts", "coordinates": "valid_time"},
         )
         member_datasets = []
         months_list = []
         for _ in range(self.n_ensemble):
             member_datasets.append(ds)
-            months_list.append(xr.DataArray(months, dims=["lead"]))
+            months_list.append(xr.DataArray(months, dims=["time"]))
         ds = xr.concat(member_datasets, dim="sample")
         ds.coords["valid_time"] = xr.concat(months_list, dim="sample")
         ds.to_netcdf(self.data_filename, format="NETCDF4_CLASSIC")

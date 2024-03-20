@@ -29,13 +29,6 @@ class GlobalMeanAnnualAggregator:
         self._target_datasets: Optional[List[xr.Dataset]] = None
         self._gen_datasets: Optional[List[xr.Dataset]] = None
         self._monthly_reference_data = monthly_reference_data
-        if self._monthly_reference_data is not None:
-            self._monthly_reference_data = self._monthly_reference_data.rename(
-                {"lead": "time"}
-            )
-            counts = self._monthly_reference_data["counts"]
-            self._monthly_reference_data = self._monthly_reference_data / counts
-            self._monthly_reference_data["counts"] = counts
         self._variable_reference_data: Dict[str, VariableReferenceData] = {}
 
     def _get_reference(self, name: str) -> Optional["VariableReferenceData"]:
@@ -221,7 +214,9 @@ def process_monthly_reference(
         if not valid_time_0.equals(valid_time_i):
             raise ValueError("All time axes must be the same")
     # need to select just one time axis so we don't lose sample dim
-    ref_annual_coarsened = ref_global_mean.groupby(valid_time_0.dt.year).mean()
+    ref_annual_coarsened = (ref_global_mean * monthly_reference_data["counts"]).groupby(
+        valid_time_0.dt.year
+    ).sum() / monthly_reference_data["counts"].groupby(valid_time_0.dt.year).sum()
     return VariableReferenceData(
         mean=ref_annual_coarsened.mean("sample"),
         min=ref_annual_coarsened.min("sample"),
