@@ -296,7 +296,7 @@ class LossConfig:
             relative to the main loss
     """
 
-    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
+    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE"] = "LpLoss"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Optional[Literal["LpLoss"]] = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -319,6 +319,8 @@ class LossConfig:
         area = area.to(get_device())
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
+        elif self.type == "L1":
+            main_loss = torch.nn.L1Loss(reduction="mean")
         elif self.type == "MSE":
             main_loss = torch.nn.MSELoss(reduction="mean")
         elif self.type == "AreaWeightedMSE":
