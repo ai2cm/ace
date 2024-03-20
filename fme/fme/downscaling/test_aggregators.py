@@ -123,18 +123,40 @@ def test_snapshot_runs():
         pytest.param((2, 1, 8, 16), pytest.raises(AssertionError), id="no_time_dim"),
     ],
 )
-def test_dynamic_histogram(shape, err):
+@pytest.mark.parametrize("percentiles", [[], [99.0], [99.0, 99.99]])
+def test_dynamic_histogram(shape, err, percentiles):
     n_bins = 300
-    histogram = DynamicHistogram(n_bins)
-    data = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
+    histogram = DynamicHistogram(n_bins, percentiles=percentiles)
+    target = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
+    prediction = {"x": torch.rand(*shape), "y": torch.rand(*shape)}
     with err:
-        histogram.record_batch(data)
+        histogram.record_batch(target, prediction)
         result = histogram.get()
-        assert sorted(list(result.keys())) == ["x", "y"]
+
+        percentile_names = []
+        for p in percentiles:
+            for data_type in ("target", "prediction"):
+                for var_name in ("x", "y"):
+                    percentile_names.append(f"{data_type}/{p}th-percentile/{var_name}")
+
+        assert sorted(list(result.keys())) == sorted(
+            [
+                "prediction/x",
+                "prediction/y",
+                "target/x",
+                "target/y",
+            ]
+            + percentile_names
+        )
         for var_name in ["x", "y"]:
-            counts, bin_edges = result[var_name]
-            assert counts.shape == (n_bins,)
-            assert bin_edges.shape == (n_bins + 1,)
+            for data_type in ["target", "prediction"]:
+                counts, bin_edges = result[f"{data_type}/{var_name}"]
+                assert counts.shape == (n_bins,)
+                assert bin_edges.shape == (n_bins + 1,)
+                for p in percentiles:
+                    assert (
+                        result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
+                    )
 
 
 @pytest.mark.parametrize("n_steps", (1, 2))
@@ -170,7 +192,7 @@ def test_map_aggregator_shape(n_steps: int):
         pytest.param("foo", "foo/", id="prefix=foo"),
     ],
 )
-def test_performance_metrics(prefix, expected_prefix):
+def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
     shape = (2, 16, 32)
     _, n_lat, n_lon = shape
     area_weights = torch.ones(n_lon)
@@ -180,7 +202,9 @@ def test_performance_metrics(prefix, expected_prefix):
     prediction = {"x": torch.ones(*shape)}
 
     with mock_wandb():
-        aggregator = Aggregator(area_weights, latitudes, n_histogram_bins=n_bins)
+        aggregator = Aggregator(
+            area_weights, latitudes, n_histogram_bins=n_bins, percentiles=percentiles
+        )
         aggregator.record_batch(torch.tensor(0.0), target, prediction)
         all_metrics = aggregator.get(prefix=prefix)
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
@@ -189,6 +213,11 @@ def test_performance_metrics(prefix, expected_prefix):
     assert f"{expected_prefix}loss" in all_metrics
     assert f"{expected_prefix}loss" in wandb_metrics
     num_metrics = 1  # loss
+    percentile_names_and_shapes = [
+        (f"histogram/{data_type}/{p}th-percentile", ())
+        for p in percentiles
+        for data_type in ("target", "prediction")
+    ]
     for metric_name, expected_shape in [
         ("rmse", ()),
         ("weighted_rmse", ()),
@@ -199,13 +228,24 @@ def test_performance_metrics(prefix, expected_prefix):
             "time_mean_map/full-field",
             (n_lat, 2 * n_lon + gap_width),
         ),
-    ]:
+        ("histogram/target", (n_bins,)),
+        ("histogram/prediction", (n_bins,)),
+    ] + percentile_names_and_shapes:
         num_metrics += 1
-        assert (
-            f"{expected_prefix}{metric_name}/x" in all_metrics
-        ), f"{expected_prefix}{metric_name}/x, {all_metrics.keys()}"
-        assert f"{expected_prefix}{metric_name}/x" in wandb_metrics
-        assert all_metrics[f"{expected_prefix}{metric_name}/x"].shape == expected_shape
+
+        key = f"{expected_prefix}{metric_name}/x"
+
+        assert key in all_metrics
+
+        if "histogram" in key and "percentile" not in key:
+            wandb_key = f"{expected_prefix}histogram/x"
+            counts, _ = all_metrics[key]
+            shape = counts.shape
+        else:
+            wandb_key = key
+            shape = all_metrics[key].shape
+        assert wandb_key in wandb_metrics
+        assert shape == expected_shape
 
     for metric_name in [
         "snapshot/image-error",
@@ -214,26 +254,12 @@ def test_performance_metrics(prefix, expected_prefix):
         num_metrics += 1
         assert isinstance(all_metrics[f"{expected_prefix}{metric_name}/x"], Image)
 
-    expected_shapes = ((n_lon // 2 + 1,), (n_bins,))
-    for instrinsic_name, expected_shape in zip(
-        ("spectrum", "histogram"), expected_shapes
-    ):
-        for input_type in ["target", "prediction"]:
-            num_metrics += 1
-            key = f"{expected_prefix}{instrinsic_name}/x_{input_type}"
-            assert key in all_metrics
-            assert key in wandb_metrics
-            value = all_metrics[key]
-            if instrinsic_name == "histogram":
-                counts, _ = value
-                shape = counts.shape
-            else:
-                shape = value.shape
+    for data_type in ["target", "prediction"]:
+        num_metrics += 1
+        key = f"{expected_prefix}spectrum/x_{data_type}"
+        assert key in all_metrics
+        assert key in wandb_metrics
+        assert all_metrics[key].shape == (n_lon // 2 + 1,)
 
-            assert shape == expected_shape
-
-    assert len(all_metrics) == len(wandb_metrics) == num_metrics
-
-
-if __name__ == "__main__":
-    pytest.main()
+    # in wandb target and prediction histograms are plotted on the same figure
+    assert len(all_metrics) == len(wandb_metrics) + 1 == num_metrics
