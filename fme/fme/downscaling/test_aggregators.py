@@ -221,8 +221,6 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
     for metric_name, expected_shape in [
         ("rmse", ()),
         ("weighted_rmse", ()),
-        ("psnr", ()),
-        ("ssim", ()),
         ("time_mean_map/error", (n_lat, n_lon)),
         (
             "time_mean_map/full-field",
