@@ -152,8 +152,6 @@ def _get_aggregator_keys(prefix: str) -> Set[str]:
     for metric_name in (
         "rmse",
         "weighted_rmse",
-        "ssim",
-        "psnr",
         "snapshot/image-error",
         "snapshot/image-full-field",
         "time_mean_map/error",

@@ -28,8 +28,6 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
-    compute_psnr,
-    compute_ssim,
     compute_zonal_power_spectrum,
     map_tensor_mapping,
     quantile,
@@ -498,17 +496,9 @@ class Aggregator:
         if ssim_kwargs is None:
             ssim_kwargs = {}
 
-        def _compute_ssim(x, y):
-            return compute_ssim(x, y, add_channel_dim=True, **ssim_kwargs)
-
-        def _compute_psnr(x, y):
-            return compute_psnr(x, y, add_channel_dim=True)
-
         self._comparisons: Mapping[str, _ComparisonAggregator] = {
             "rmse": MeanComparison(metrics.root_mean_squared_error),
             "weighted_rmse": MeanComparison(_area_weighted_rmse),
-            "ssim": MeanComparison(_compute_ssim),
-            "psnr": MeanComparison(_compute_psnr),
             "snapshot": SnapshotAggregator(metadata),
             "time_mean_map": MeanMapAggregator(metadata),
             "histogram": DynamicHistogram(
