@@ -526,13 +526,16 @@ def main(
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
         # these currently fail
-        assert_column_integral_of_moisture_is_conserved(ds)
+        assert_column_integral_of_moisture_is_conserved(
+            ds, PRECIPITABLE_WATER_PATH, TOTAL_WATER_PATH
+        )
         assert_global_dry_air_mass_conservation(
             ds,
             dims=HORIZONTAL_DIMS,
             surface_pressure_name=SURFACE_PRESSURE,
             total_water_path_name=TOTAL_WATER_PATH,
             latitude_dim=LATITUDE_DIM,
+            time_dim=TIME_DIM,
         )
         assert_global_moisture_conservation(
             ds,
@@ -542,6 +545,7 @@ def main(
             latent_heat_flux_name=LATENT_HEAT_FLUX,
             latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
             precip_rate_name=PRECIP_RATE,
+            time_dim=TIME_DIM,
         )
     if water_budget_dataset:
         ds = ds[WATER_BUDGET_DATASET_VARS]
