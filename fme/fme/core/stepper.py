@@ -47,6 +47,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ConservationLossConfig()
     )
     prescriber: Optional[PrescriberConfig] = None
+    loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
 
     def __post_init__(self):
         if self.conserve_dry_air is not None:
@@ -278,6 +279,12 @@ class SingleModuleStepper:
         self._corrector = config.corrector.build(
             area=area, sigma_coordinates=sigma_coordinates
         )
+        if config.loss_normalization is not None:
+            self.loss_normalizer = config.loss_normalization.build(
+                names=config.normalize_names
+            )
+        else:
+            self.loss_normalizer = self.normalizer
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
@@ -408,8 +415,9 @@ class SingleModuleStepper:
                 # using index=step for gen_norm and index=step+1 for full_data_norm
                 gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
                 target_step = {k: v.select(time_dim, step + 1) for k, v in data.items()}
-                gen_norm_step = self.normalizer.normalize(gen_step)
-                target_norm_step = self.normalizer.normalize(target_step)
+                gen_norm_step = self.loss_normalizer.normalize(gen_step)
+                target_norm_step = self.loss_normalizer.normalize(target_step)
+
                 step_loss = self.loss_obj(gen_norm_step, target_norm_step)
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
@@ -460,6 +468,7 @@ class SingleModuleStepper:
             "config": self._config.get_state(),
             "area": self.area,
             "sigma_coordinates": self.sigma_coordinates.as_dict(),
+            "loss_normalizer": self.loss_normalizer.get_state(),
         }
 
     def load_state(self, state):
@@ -490,6 +499,9 @@ class SingleModuleStepper:
         """
         config = {**state["config"]}  # make a copy to avoid mutating input
         config["normalization"] = FromStateNormalizer(state["normalizer"])
+        # for backwards compatibility with previous steppers w/o loss_normalizer
+        loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
+        config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
         area = state.get("area", area)
         if "sigma_coordinates" in state:
             sigma_coordinates = dacite.from_dict(
