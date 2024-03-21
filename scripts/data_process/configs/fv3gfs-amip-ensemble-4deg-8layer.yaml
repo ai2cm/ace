@@ -1,0 +1,53 @@
+runs:
+  ic_0001: gs://vcm-ml-raw-flexible-retention/2023-10-20-C96-FME-AMIP-ensemble-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0001
+  ic_0002: gs://vcm-ml-raw-flexible-retention/2023-10-20-C96-FME-AMIP-ensemble-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0002
+  ic_0003: gs://vcm-ml-raw-flexible-retention/2023-10-20-C96-FME-AMIP-ensemble-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0003
+  ic_0004: gs://vcm-ml-raw-flexible-retention/2023-10-20-C96-FME-AMIP-ensemble-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0004
+output_directory: gs://vcm-ml-intermediate/2023-10-27-vertically-resolved-4deg-fme-amip-ensemble-dataset
+dataset_computation:
+  reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc
+  vertical_coarsening_indices:
+    - [0, 18]
+    - [18, 26]
+    - [26, 31]
+    - [31, 36]
+    - [36, 41]
+    - [41, 47]
+    - [47, 53]
+    - [53, 63]
+  variable_sources:
+    fluxes_2d.zarr:
+      - PRATEsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - precipitable_water_path
+      - GRAUPELsfc
+      - ICEsfc
+      - SNOWsfc
+    fourcastnet_vanilla.zarr:
+      - PRESsfc
+      - HGTsfc
+    full_state.zarr:
+      - surface_temperature
+      - air_temperature
+      - specific_humidity
+      - cloud_water_mixing_ratio
+      - cloud_ice_mixing_ratio
+      - graupel_mixing_ratio
+      - rain_mixing_ratio
+      - snow_mixing_ratio
+      - northward_wind
+      - eastward_wind
+      - pressure_thickness_of_atmospheric_layer
+      - soil_moisture
+    encoded_surface_type.zarr:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction

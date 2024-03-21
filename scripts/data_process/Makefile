@@ -3,6 +3,7 @@
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
 RESOLUTION ?= "1deg"
+LAYERS ?= "8layer"
 
 ROOT_BASE_CLIMSST_1DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360
 ROOT_BASE_CLIMSST_4DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_45_by_90
@@ -45,14 +46,12 @@ endif
 
 .PHONY: fv3gfs_1deg_climSST_dataset
 fv3gfs_1deg_climSST_dataset:
-	$(MAKE) fv3gfs_climSST_dataset RESOLUTION=1deg
+	$(MAKE) fv3gfs_climSST_dataset RESOLUTION=1deg LAYERS=8layer
 
 .PHONY: fv3gfs_climSST_dataset
 fv3gfs_climSST_dataset:
-	./compute_dataset_fv3gfs.sh \
-	--root $(ROOT_BASE)/ic_{ic:04d} \
-	--output $(ROOT_INTERMEDIATE)/ic_{ic:04d}.zarr \
-	--ic-max 11
+	./compute_dataset.sh \
+	--config configs/fv3gfs-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: fv3gfs_1deg_climSST_monthly_netcdfs
 fv3gfs_1deg_climSST_monthly_netcdfs:
@@ -99,10 +98,8 @@ fv3gfs_climSST_full_field_stats_beaker_dataset:
 # launch jobs for different time chunks would probably be a good idea.
 .PHONY: fv3gfs_climSST_c48_baseline_dataset
 fv3gfs_climSST_c48_baseline_dataset:
-	./compute_dataset_fv3gfs.sh \
-	--root gs://vcm-ml-raw-flexible-retention/2023-08-03-C48-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0011_2021010100 \
-	--output gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset/ic_0011.zarr \
-	--script-flags "--roundtrip-fraction-kept 0.65"
+	./compute_dataset.sh \
+	--config configs/fv3gfs-c48-ensemble-1deg-8layer.yaml
 
 .PHONY: fv3gfs_climSST_c48_baseline_monthly_netcdfs
 fv3gfs_climSST_c48_baseline_monthly_netcdfs:
@@ -115,14 +112,12 @@ fv3gfs_climSST_c48_baseline_monthly_netcdfs:
 
 .PHONY: fv3gfs_1deg_AMIP_dataset
 fv3gfs_1deg_AMIP_dataset:
-	$(MAKE) fv3gfs_AMIP_dataset RESOLUTION=1deg
+	$(MAKE) fv3gfs_AMIP_dataset RESOLUTION=1deg LAYERS=8layer
 
 .PHONY: fv3gfs_AMIP_dataset
 fv3gfs_AMIP_dataset:
-	./compute_dataset_fv3gfs.sh \
-	--root $(ROOT_AMIP)/ic_{ic:04d} \
-	--output $(ROOT_INTERMEDIATE_AMIP)/ic_{ic:04d}.zarr \
-	--ic-max 4
+	./compute_dataset.sh \
+	--config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: fv3gfs_1deg_AMIP_monthly_netcdfs
 fv3gfs_1deg_AMIP_monthly_netcdfs:

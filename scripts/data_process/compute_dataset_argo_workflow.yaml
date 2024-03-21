@@ -12,11 +12,11 @@ spec:
   arguments:
     parameters:
     - name: python_script
+    - name: config
+    - name: names
+    - name: run_directories
+    - name: output_directory
     - name: ic_max
-    - name: root
-    - name: output
-    - name: script_flags
-      value: ""
   templates:
     - name: compute-fme-dataset-ensemble
       steps:
@@ -26,14 +26,18 @@ spec:
             parameters:
             - name: python_script
               value: "{{workflow.parameters.python_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+            - name: names
+              value: "{{workflow.parameters.names}}"
+            - name: run_directories
+              value: "{{workflow.parameters.run_directories}}"
+            - name: output_directory
+              value: "{{workflow.parameters.output_directory}}"
+            - name: ic_max
+              value: "{{workflow.parameters.ic_max}}"
             - name: ic
               value: "{{item}}"
-            - name: root
-              value: "{{workflow.parameters.root}}"
-            - name: output
-              value: "{{workflow.parameters.output}}"
-            - name: script_flags
-              value: "{{workflow.parameters.script_flags}}"
           withSequence:
             start: "1"
             end: "{{workflow.parameters.ic_max}}"
@@ -45,10 +49,11 @@ spec:
       inputs:
         parameters:
           - name: python_script
+          - name: config
+          - name: names
+          - name: run_directories
+          - name: output_directory
           - name: ic
-          - name: root
-          - name: output
-          - name: script_flags
       container:
         image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
         resources:
@@ -65,8 +70,24 @@ spec:
             {{inputs.parameters.python_script}}
             EOF
 
-            python script.py --ic {{inputs.parameters.ic}} --root {{inputs.parameters.root}} \
-              --output {{inputs.parameters.output}} {{inputs.parameters.script_flags}}
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            names=({{inputs.parameters.names}})
+            run_directories=({{inputs.parameters.run_directories}})
+            output_directory={{inputs.parameters.output_directory}}
+            ic={{inputs.parameters.ic}}
+
+            i="$((ic - 1))"  # bash arrays are zero indexed
+            name="${names[${i}]}"
+            run_directory="${run_directories[${i}]}"
+
+            output_store=${output_directory}/${name}.zarr
+
+            python script.py --config config.yaml \
+              --run-directory ${run_directory} \
+              --output-store ${output_store}
         env:
           - name: GOOGLE_APPLICATION_CREDENTIALS
             value: /secret/gcp-credentials/key.json
