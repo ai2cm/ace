@@ -111,6 +111,10 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
     )  # as std=1, mean=0, no change
     config.normalization.stds = get_scalar_data(["a", "b"], 2.0)
+    config.loss_normalization = NormalizationConfig(
+        means=get_scalar_data(["a", "b"], 0.0),
+        stds=get_scalar_data(["a", "b"], 3.0),
+    )
     stepper = config.get_stepper((5, 5), area, sigma_coordinates)
     stepped_double_std = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
@@ -125,7 +129,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         rtol=1e-4,
     )
     assert torch.allclose(
-        stepped.metrics["loss"], 4.0 * stepped_double_std.metrics["loss"], rtol=1e-4
+        stepped.metrics["loss"], 9.0 * stepped_double_std.metrics["loss"], rtol=1e-4
     )  # mse scales with std**2
 
 
