@@ -2,8 +2,8 @@
 # which can be installed using fv3net's Makefile. See
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
-RESOLUTION ?= "1deg"
-LAYERS ?= "8layer"
+RESOLUTION ?= 1deg
+LAYERS ?= 8layer
 
 ROOT_BASE_CLIMSST_1DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360
 ROOT_BASE_CLIMSST_4DEG = gs://vcm-ml-raw-flexible-retention/2023-07-08-C96-FME-reference-ensemble/regridded-zarrs/gaussian_grid_45_by_90
@@ -17,10 +17,10 @@ OUTPUT_DIR_CLIMSST_1DEG = /net/nfs/climate/data/2023-08-11-vertically-resolved-1
 OUTPUT_DIR_CLIMSST_4DEG = /net/nfs/climate/data/2023-08-11-vertically-resolved-4deg-fme-ensemble-dataset
 OUTPUT_DIR_AMIP_1DEG = /pscratch/sd/b/bhenn/data/2023-11-01-vertically-resolved-1deg-fme-amip-ensemble-dataset
 OUTPUT_DIR_AMIP_4DEG = /pscratch/sd/b/bhenn/data/2023-11-01-vertically-resolved-4deg-fme-amip-ensemble-dataset
-NAME_CLIMSST_1DEG = "fv3gfs-ensemble"
-NAME_CLIMSST_4DEG = "fv3gfs-ensemble-4deg"
-NAME_AMIP_1DEG = "fv3gfs-AMIP-ensemble"
-NAME_AMIP_4DEG = "fv3gfs-AMIP-ensemble-4deg"
+NAME_CLIMSST_1DEG = fv3gfs-ensemble
+NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
+NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
+NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -40,8 +40,6 @@ else ifeq ($(RESOLUTION),4deg)
 	OUTPUT_DIR_AMIP ?= $(OUTPUT_DIR_AMIP_4DEG)
 	NAME ?= $(NAME_CLIMSST_4DEG)
 	NAME_AMIP ?= $(NAME_AMIP_4DEG)
-else
-	$(error RESOLUTION must be 1deg or 4deg)
 endif
 
 .PHONY: fv3gfs_1deg_climSST_dataset
@@ -66,18 +64,19 @@ fv3gfs_climSST_monthly_netcdfs:
 	--start-date 2021-01-01 \
 	--end-date 2030-12-31
 
-.PHONY: fv3gfs_1deg_climSST_residual_stats_beaker_dataset
-fv3gfs_1deg_climSST_residual_stats_beaker_dataset:
-	$(MAKE) fv3gfs_climSST_residual_stats_beaker_dataset RESOLUTION=1deg
+.PHONY: fv3gfs_1deg_climSST_stats_beaker_dataset
+fv3gfs_1deg_climSST_stats_beaker_dataset:
+	$(MAKE) fv3gfs_climSST_stats_beaker_dataset RESOLUTION=1deg
 
-.PHONY: fv3gfs_climSST_residual_stats_beaker_dataset
-fv3gfs_climSST_residual_stats_beaker_dataset:
+.PHONY: fv3gfs_climSST_stats_beaker_dataset
+fv3gfs_climSST_stats_beaker_dataset:
 	./generate_beaker_stats_dataset_fv3gfs.sh \
 	--input-url $(ROOT_INTERMEDIATE)/ic_0001.zarr \
 	--start-date 2021-01-01 \
 	--end-date 2030-12-31 \
-	--name "${NAME}-ic0001-stats-residual-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using residual scaling. Includes surface height."
+	--name "${NAME}-ic0001-stats-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
+
 
 .PHONY: fv3gfs_1deg_climSST_full_field_stats_beaker_dataset
 fv3gfs_1deg_climSST_full_field_stats_beaker_dataset:
@@ -142,8 +141,8 @@ fv3gfs_AMIP_stats_beaker_dataset:
 	--input-url $(ROOT_INTERMEDIATE_AMIP)/ic_0001.zarr \
 	--start-date 1990-01-01 \
 	--end-date 2019-12-31 \
-	--name "${NAME_AMIP}-ensemble-ic0001-stats-residual-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with AMIP SSTs, using residual scaling."
+	--name "${NAME_AMIP}-ic0001-stats-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with AMIP SSTs."
 
 # TODO: Add AMIP baseline C48 dataset processing when available
 
