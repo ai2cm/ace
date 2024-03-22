@@ -3,6 +3,7 @@ from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 import torch
 import xarray as xr
 
+from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.wandb import Table, WandB
 
@@ -111,11 +112,16 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
-        self._annual = GlobalMeanAnnualAggregator(
-            area_weights=area_weights,
-            metadata=metadata,
-            monthly_reference_data=monthly_reference_data,
-        )
+        if n_timesteps * TIMESTEP_SECONDS > (60 * 60 * 24 * 365 * 2):
+            self._annual: Optional[
+                GlobalMeanAnnualAggregator
+            ] = GlobalMeanAnnualAggregator(
+                area_weights=area_weights,
+                metadata=metadata,
+                monthly_reference_data=monthly_reference_data,
+            )
+        else:
+            self._annual = None
 
     @torch.no_grad()
     def record_batch(
@@ -141,11 +147,12 @@ class InferenceAggregator:
                 gen_data_norm=gen_data_norm,
                 i_time_start=i_time_start,
             )
-        self._annual.record_batch(
-            time=time,
-            target_data=target_data,
-            gen_data=gen_data,
-        )
+        if self._annual is not None:
+            self._annual.record_batch(
+                time=time,
+                target_data=target_data,
+                gen_data=gen_data,
+            )
 
     @torch.no_grad()
     def get_logs(self, label: str):
@@ -158,7 +165,8 @@ class InferenceAggregator:
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
-        logs.update(self._annual.get_logs(label="annual_weighted_mean"))
+        if self._annual is not None:
+            logs.update(self._annual.get_logs(label="annual_weighted_mean"))
         logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 
