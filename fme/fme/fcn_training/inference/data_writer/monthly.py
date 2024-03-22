@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.core import constants
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.fcn_training.inference.data_writer.utils import get_all_names
 
@@ -21,7 +22,8 @@ COUNTS = "counts"
 
 
 def months_for_timesteps(n_timesteps: int) -> int:
-    return ceil(n_timesteps * (12.0 / (365.24 * 4))) + 2
+    steps_per_day = 24 * 60 * 60 / constants.TIMESTEP_SECONDS
+    return ceil(n_timesteps * (12.0 / (365.24 * steps_per_day))) + 2
 
 
 class PairedMonthlyDataWriter:
