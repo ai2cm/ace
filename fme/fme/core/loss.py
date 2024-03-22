@@ -10,6 +10,14 @@ from fme.core.packer import Packer
 from .climate_data import ClimateData, compute_dry_air_absolute_differences
 
 
+class NaNLoss(torch.nn.Module):
+    def __init__(self):
+        super(NaNLoss, self).__init__()
+
+    def forward(self, input, target):
+        return torch.tensor(torch.nan)
+
+
 class MappingLoss:
     def __init__(self, loss: torch.nn.Module, packer: Packer, channel_dim: int = -3):
         self.loss = loss
@@ -296,7 +304,7 @@ class LossConfig:
             relative to the main loss
     """
 
-    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE"] = "LpLoss"
+    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"] = "LpLoss"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Optional[Literal["LpLoss"]] = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -305,7 +313,7 @@ class LossConfig:
     global_mean_weight: float = 1.0
 
     def __post_init__(self):
-        if self.type not in ("LpLoss", "MSE", "AreaWeightedMSE"):
+        if self.type not in ("LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"):
             raise NotImplementedError(self.type)
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
@@ -325,6 +333,8 @@ class LossConfig:
             main_loss = torch.nn.MSELoss(reduction="mean")
         elif self.type == "AreaWeightedMSE":
             main_loss = AreaWeightedMSELoss(area)
+        elif self.type == "NaN":
+            main_loss = NaNLoss()
 
         if self.global_mean_type is not None:
             global_mean_loss = GlobalMeanLoss(
