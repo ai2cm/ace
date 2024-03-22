@@ -22,7 +22,7 @@ validation_data:
   num_data_workers: 2
 model:
   loss:
-    type: "L1Loss"
+    type: "L1"
   module:
     type: swinir
     config:

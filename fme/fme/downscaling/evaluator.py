@@ -9,6 +9,7 @@ import torch
 import yaml
 
 from fme.core.dicts import to_flat_dict
+from fme.core.loss import NaNLoss
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
@@ -54,14 +55,6 @@ class Config(abc.ABC):
     @abc.abstractmethod
     def build(self) -> Model:
         pass
-
-
-class NaNLoss(torch.nn.Module):
-    def __init__(self):
-        super(NaNLoss, self).__init__()
-
-    def forward(self, input, target):
-        return torch.tensor(torch.nan)
 
 
 @dataclasses.dataclass

@@ -4,11 +4,11 @@ from typing import List, Tuple, Union
 import torch
 
 from fme.core.device import get_device
+from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
-from fme.downscaling.losses import LossConfig
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import HighResLowResPair
@@ -105,10 +105,15 @@ class DownscalingModelConfig:
     out_names: List[str]
     normalization: PairedNormalizationConfig
 
-    def build(self, lowres_shape: Tuple[int, int], downscale_factor: int) -> Model:
+    def build(
+        self,
+        lowres_shape: Tuple[int, int],
+        downscale_factor: int,
+        area_weights: HighResLowResPair[torch.Tensor],
+    ) -> Model:
         module = self.module.build(
             len(self.in_names), len(self.out_names), lowres_shape, downscale_factor
         )
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build()
+        loss = self.loss.build(area_weights.highres)
         return Model(module, normalizer, loss, self.in_names, self.out_names)
