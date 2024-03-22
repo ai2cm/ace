@@ -263,6 +263,7 @@ class Trainer:
                         }
                     wandb.log(metrics, step=self.num_batches_seen)
         batch: BatchData
+        current_time = time.time()
         for batch in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
                 batch.data,
@@ -285,6 +286,14 @@ class Trainer:
                         f"batch_{name}": self.dist.reduce_mean(metric)
                         for name, metric in sorted(stepped.metrics.items())
                     }
+                duration = time.time() - current_time
+                current_time = time.time()
+                n_samples = (
+                    self.train_data.loader.batch_size
+                    * self.config.log_train_every_n_batches
+                )
+                samples_per_second = n_samples / duration
+                metrics["training_samples_per_second"] = samples_per_second
                 wandb.log(metrics, step=self.num_batches_seen)
         self._model_epoch += 1
 
