@@ -1,6 +1,5 @@
 """Contains classes for aggregating evaluation metrics and various statistics."""
 
-from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -13,25 +12,23 @@ from typing import (
     Union,
 )
 
-import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import xarray as xr
 
-import fme.core.histogram
 from fme.core import metrics
 from fme.core.aggregator.one_step.snapshot import (
     SnapshotAggregator as CoreSnapshotAggregator,
 )
 from fme.core.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
     compute_zonal_power_spectrum,
     map_tensor_mapping,
-    quantile,
 )
 
 
@@ -187,144 +184,6 @@ class ZonalPowerSpectrum:
         ret = {}
         for name, values in aggregated.items():
             ret[name] = self._plot_spectrum(values)
-        return ret
-
-
-_Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
-
-
-class DynamicHistogram:
-    """Wrapper of DynamicHistogram for multiple histograms, two histograms per
-    variable plotted on the same axis."""
-
-    def __init__(self, n_bins: int, percentiles: Optional[List[float]] = None) -> None:
-        self.n_bins = n_bins
-        percentiles = [99.9999] if percentiles is None else percentiles
-        self.percentiles = [p for p in percentiles]
-        self.target_histograms: Optional[
-            Mapping[str, fme.core.histogram.DynamicHistogram]
-        ] = None
-        self.prediction_histograms: Optional[
-            Mapping[str, fme.core.histogram.DynamicHistogram]
-        ] = None
-        self._time_dim = -2
-
-    @torch.no_grad()
-    def record_batch(self, target: TensorMapping, prediction: TensorMapping):
-        target = _detach_and_to_cpu(target)
-        prediction = _detach_and_to_cpu(prediction)
-
-        if set(target.keys()) != set(prediction.keys()):
-            raise ValueError(
-                (
-                    "Keys do not match between target and prediction. Got "
-                    f"{target.keys()=} and {prediction.keys()=}"
-                )
-            )
-
-        if self.target_histograms is None or self.prediction_histograms is None:
-            self.target_histograms = {}
-            self.prediction_histograms = {}
-            for k in target:
-                self.target_histograms[k] = fme.core.histogram.DynamicHistogram(
-                    n_times=1, n_bins=self.n_bins
-                )
-                self.prediction_histograms[k] = fme.core.histogram.DynamicHistogram(
-                    n_times=1, n_bins=self.n_bins
-                )
-
-        for k in target:
-            assert len(target[k].shape) == 3, (
-                "Expected input (batch, height, width) but got "
-                f"{target[k].shape} for target."
-            )
-            assert len(prediction[k].shape) == 3, (
-                "Expected input (batch, height, width) but got "
-                f"{prediction[k].shape} for prediction."
-            )
-            self.target_histograms[k].add(target[k].flatten().unsqueeze(0).numpy())
-            self.prediction_histograms[k].add(
-                prediction[k].flatten().unsqueeze(0).numpy()
-            )
-
-    def _get_histograms(
-        self,
-    ) -> Mapping[str, Mapping[Literal["target", "prediction"], Any]]:
-        if self.target_histograms is None or self.prediction_histograms is None:
-            raise ValueError("No data has been added to the histogram")
-
-        return {
-            k: {
-                "target": _Histogram(
-                    self.target_histograms[k].counts.squeeze(self._time_dim),
-                    self.target_histograms[k].bin_edges,
-                ),
-                "prediction": _Histogram(
-                    self.prediction_histograms[k].counts.squeeze(self._time_dim),
-                    self.prediction_histograms[k].bin_edges,
-                ),
-            }
-            for k in self.target_histograms
-        }
-
-    def get(self):
-        """Returns a dict containing histograms and percentiles for target and
-        prediction."""
-        ret = {}
-        for field_name, metrics_dict in self._get_histograms().items():
-            target = metrics_dict["target"]
-            prediction = metrics_dict["prediction"]
-            ret[f"target/{field_name}"] = target
-            ret[f"prediction/{field_name}"] = prediction
-            for p in self.percentiles:
-                ret[f"target/{p}th-percentile/{field_name}"] = quantile(
-                    target.bin_edges, target.counts, p / 100.0
-                )
-                ret[f"prediction/{p}th-percentile/{field_name}"] = quantile(
-                    prediction.bin_edges, prediction.counts, p / 100.0
-                )
-        return ret
-
-    def _plot_histogram(
-        self, target_histogram, prediction_histogram
-    ) -> matplotlib.figure.Figure:
-        fig, ax = plt.subplots()
-        for histogram, label, line_style, color in zip(
-            (target_histogram, prediction_histogram),
-            ("target", "prediction"),
-            ("-", "--"),
-            ("C0", "C1"),
-        ):
-            ax.step(
-                histogram.bin_edges[:-1],
-                histogram.counts,
-                line_style,
-                where="post",
-                label=label,
-                color=color,
-            )
-        ax.set(yscale="log")
-        ax.legend()
-        plt.tight_layout()
-        return fig
-
-    def get_wandb(self) -> Mapping[str, Any]:
-        ret: Dict[str, Any] = {}
-
-        for field_name, histograms in self._get_histograms().items():
-            target = histograms["target"]
-            prediction = histograms["prediction"]
-            fig = self._plot_histogram(target, prediction)
-            ret[field_name] = fig
-            plt.close(fig)
-            for p in self.percentiles:
-                ret[f"target/{p}th-percentile/{field_name}"] = quantile(
-                    target.bin_edges, target.counts, p / 100.0
-                )
-                ret[f"prediction/{p}th-percentile/{field_name}"] = quantile(
-                    prediction.bin_edges, prediction.counts, p / 100.0
-                )
-
         return ret
 
 
@@ -528,12 +387,12 @@ class Aggregator:
             "weighted_rmse": MeanComparison(_area_weighted_rmse),
             "snapshot": SnapshotAggregator(metadata),
             "time_mean_map": MeanMapAggregator(metadata),
-            "histogram": DynamicHistogram(
+            "histogram": ComparedDynamicHistograms(
                 n_bins=n_histogram_bins, percentiles=percentiles
             ),
         }
         self._intrinsics: Mapping[
-            str, Mapping[str, Union[DynamicHistogram, ZonalPowerSpectrum]]
+            str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
         ] = {
             input_type: {
                 "spectrum": ZonalPowerSpectrum(latitudes),

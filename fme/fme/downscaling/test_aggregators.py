@@ -1,5 +1,3 @@
-import contextlib
-
 import pytest
 import torch
 
@@ -11,7 +9,6 @@ from fme.core.wandb import Image
 from fme.downscaling import metrics_and_maths
 from fme.downscaling.aggregators import (
     Aggregator,
-    DynamicHistogram,
     Mean,
     MeanComparison,
     MeanMapAggregator,
@@ -113,49 +110,6 @@ def test_snapshot_runs():
         "y": torch.rand(batch_size, height, width),
     }
     snapshot.record_batch(target, prediction)
-
-
-@pytest.mark.parametrize(
-    "shape,err",
-    [
-        pytest.param((2, 8, 16), contextlib.nullcontext(), id="no_time_dim"),
-        pytest.param((2, 1, 8, 16), pytest.raises(AssertionError), id="no_time_dim"),
-    ],
-)
-@pytest.mark.parametrize("percentiles", [[], [99.0], [99.0, 99.99]])
-def test_dynamic_histogram(shape, err, percentiles):
-    n_bins = 300
-    histogram = DynamicHistogram(n_bins, percentiles=percentiles)
-    target = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
-    prediction = {"x": torch.rand(*shape), "y": torch.rand(*shape)}
-    with err:
-        histogram.record_batch(target, prediction)
-        result = histogram.get()
-
-        percentile_names = []
-        for p in percentiles:
-            for data_type in ("target", "prediction"):
-                for var_name in ("x", "y"):
-                    percentile_names.append(f"{data_type}/{p}th-percentile/{var_name}")
-
-        assert sorted(list(result.keys())) == sorted(
-            [
-                "prediction/x",
-                "prediction/y",
-                "target/x",
-                "target/y",
-            ]
-            + percentile_names
-        )
-        for var_name in ["x", "y"]:
-            for data_type in ["target", "prediction"]:
-                counts, bin_edges = result[f"{data_type}/{var_name}"]
-                assert counts.shape == (n_bins,)
-                assert bin_edges.shape == (n_bins + 1,)
-                for p in percentiles:
-                    assert (
-                        result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
-                    )
 
 
 @pytest.mark.parametrize("n_steps", (1, 2))
