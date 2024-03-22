@@ -1,3 +1,4 @@
+import matplotlib.figure
 import numpy as np
 import pytest
 import torch
@@ -91,7 +92,6 @@ def test_compared_dynamic_histograms(shape, percentiles):
     target = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
     prediction = {"x": torch.rand(*shape), "y": torch.rand(*shape)}
     histogram.record_batch(target, prediction)
-    result = histogram.get()
     wandb_result = histogram.get_wandb()
 
     percentile_names = []
@@ -100,15 +100,6 @@ def test_compared_dynamic_histograms(shape, percentiles):
             for var_name in ("x", "y"):
                 percentile_names.append(f"{data_type}/{p}th-percentile/{var_name}")
 
-    assert sorted(list(result.keys())) == sorted(
-        [
-            "prediction/x",
-            "prediction/y",
-            "target/x",
-            "target/y",
-        ]
-        + percentile_names
-    )
     assert sorted(list(wandb_result.keys())) == sorted(
         [
             "x",
@@ -118,11 +109,8 @@ def test_compared_dynamic_histograms(shape, percentiles):
     )
     for var_name in ["x", "y"]:
         for data_type in ["target", "prediction"]:
-            counts, bin_edges = result[f"{data_type}/{var_name}"]
-            assert counts.shape == (n_bins,)
-            assert bin_edges.shape == (n_bins + 1,)
+            assert isinstance(wandb_result[f"{var_name}"], matplotlib.figure.Figure)
             for p in percentiles:
-                assert result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
                 assert (
                     wandb_result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
                 )
