@@ -1,16 +1,6 @@
 """Contains classes for aggregating evaluation metrics and various statistics."""
 
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Protocol,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -350,9 +340,6 @@ class _ComparisonAggregator(Protocol):
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         ...
 
-    def get(self) -> Mapping[str, Any]:
-        ...
-
     def get_wandb(self) -> Mapping[str, Any]:
         ...
 
@@ -421,23 +408,17 @@ class Aggregator:
 
         self.loss.record_batch({"loss": loss})
 
-    def _get(
-        self, getter: Literal["get", "get_wandb"], prefix: str = ""
+    def get_wandb(
+        self,
+        prefix: str = "",
     ) -> Mapping[str, Any]:
-        """Helper methods for accumulating all metrics into a single mapping
-        with consistent keys. Values depend on the specified `getter`
-        function."""
-
         if prefix != "":
             prefix += "/"
 
         ret: Dict[str, Any] = {f"{prefix}loss": self.loss.get()["loss"]}
         for metric_name, agg in self._comparisons.items():
             ret.update(
-                {
-                    f"{prefix}{metric_name}/{k}": v
-                    for (k, v) in getattr(agg, getter)().items()
-                }
+                {f"{prefix}{metric_name}/{k}": v for (k, v) in agg.get_wandb().items()}
             )
 
         for data_role in ("target", "prediction"):
@@ -445,24 +426,8 @@ class Aggregator:
             for metric_name, agg in _aggregators.items():
                 _metric_values = {
                     f"{prefix}{metric_name}/{var_name}_{data_role}": v
-                    for (var_name, v) in getattr(agg, getter)().items()
+                    for (var_name, v) in agg.get_wandb().items()
                 }
                 ret.update(_metric_values)
 
         return ret
-
-    def get(self, prefix: str = "") -> Mapping[str, torch.Tensor]:
-        """
-        Returns a mapping of aggregated metrics and statistics.
-
-        Returns:
-            Mapping of aggregated metrics and statistics with keys corresponding
-            to the metric and variable name (e.g. for passing to wandb).
-        """
-        return self._get(getter="get", prefix=prefix)
-
-    def get_wandb(
-        self,
-        prefix: str = "",
-    ) -> Mapping[str, Any]:
-        return self._get(getter="get_wandb", prefix=prefix)
