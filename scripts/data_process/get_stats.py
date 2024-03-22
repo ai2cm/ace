@@ -42,16 +42,14 @@ DIMS = {
 }
 
 
-def add_history_attr(ds, input_zarr, start_date, end_date, full_field):
-    scaling_str = "full-field" if full_field else "residual"
+def add_history_attr(ds, input_zarr, start_date, end_date):
     ds.attrs["history"] = (
         "Created by full-model/fv3gfs_data_process/get_stats.py. INPUT_ZARR:"
-        f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}, using "
-        f" {scaling_str} scaling."
+        f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}."
     )
 
 
-def compute_residual_scaling(
+def compute_geometric_residual_scaling(
     ds, centering, scaling, dims=["time", "grid_xt", "grid_yt"]
 ):
     """For some variables (e.g. surface pressure), normalization based on the
@@ -77,6 +75,11 @@ def compute_residual_scaling(
     return scaling * norm_residual_stddev
 
 
+def compute_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
+    residual = ds.diff("time")
+    return residual.std(dim=dims)
+
+
 @click.command()
 @click.argument("input_zarr")
 @click.argument("output_directory")
@@ -86,18 +89,11 @@ def compute_residual_scaling(
     "--data-type", default="FV3GFS", help="Input data type, e.g., 'FV3GFS' or 'E3SMV2'"
 )
 @click.option(
-    "--full-field",
-    is_flag=True,
-    help="If set, compute statistics with full field. If unset, use residual.",
-)
-@click.option(
     "--debug",
     is_flag=True,
     help="If set, print some statistics instead of writing normalization coefficients.",
 )
-def main(
-    input_zarr, output_directory, start_date, end_date, data_type, full_field, debug
-):
+def main(input_zarr, output_directory, start_date, end_date, data_type, debug):
     """Using data at INPUT_ZARR, compute statistics data and save to OUTPUT_DIRECTORY.
     It is assumed that OUTPUT_DIRECTORY does not exist."""
     xr.set_options(keep_attrs=True, display_max_rows=100)
@@ -111,24 +107,36 @@ def main(
     time_invariant_variables = TIME_INVARIANT_VARIABLES[data_type]
 
     centering = ds.mean(dim=dims)
-    scaling = ds.std(dim=dims)
+    scaling_full_field = ds.std(dim=dims)
     time_means = ds.mean(dim="time")
 
-    if not full_field:
-        ds_time_varying = ds.drop_vars(time_invariant_variables)
-        centering_time_varying = centering.drop_vars(time_invariant_variables)
-        scaling_time_varying = scaling.drop_vars(time_invariant_variables)
-        residual_scaling = compute_residual_scaling(
-            ds_time_varying, centering_time_varying, scaling_time_varying, dims
-        )
-        for name in residual_scaling:
-            scaling[name] = residual_scaling[name]
+    ds_time_varying = ds.drop_vars(time_invariant_variables)
+    centering_time_varying = centering.drop_vars(time_invariant_variables)
+    scaling_time_varying = scaling_full_field.drop_vars(time_invariant_variables)
+    geometric_residual_scaling = compute_geometric_residual_scaling(
+        ds_time_varying, centering_time_varying, scaling_time_varying, dims
+    )
+    # residual scaling still uses full-field scales for time invariant data
+    scaling_geometric_residual = scaling_full_field.copy()
+    for name in geometric_residual_scaling:
+        scaling_geometric_residual[name] = geometric_residual_scaling[name]
 
-    for dataset in [centering, scaling, time_means]:
-        add_history_attr(dataset, input_zarr, start_date, end_date, full_field)
+    scaling_residual = scaling_full_field.copy()
+    residual_scaling = compute_residual_scaling(ds_time_varying, dims)
+    for name in residual_scaling:
+        scaling_residual[name] = residual_scaling[name]
+
+    for dataset in [
+        centering,
+        scaling_full_field,
+        scaling_geometric_residual,
+        scaling_residual,
+        time_means,
+    ]:
+        add_history_attr(dataset, input_zarr, start_date, end_date)
 
     if debug:
-        normed_data = (ds - centering) / scaling
+        normed_data = (ds - centering) / scaling_full_field
         print("Printing average of normed data:")
         print(normed_data.mean(dim=dims).compute())
         print("Printing standard deviation of normed data:")
@@ -140,7 +148,17 @@ def main(
         with ProgressBar():
             centering.to_netcdf(os.path.join(output_directory, "centering.nc"))
         with ProgressBar():
-            scaling.to_netcdf(os.path.join(output_directory, "scaling.nc"))
+            scaling_full_field.to_netcdf(
+                os.path.join(output_directory, "scaling-full-field.nc")
+            )
+        with ProgressBar():
+            scaling_geometric_residual.to_netcdf(
+                os.path.join(output_directory, "scaling-geometric-residual.nc")
+            )
+        with ProgressBar():
+            scaling_residual.to_netcdf(
+                os.path.join(output_directory, "scaling-residual.nc")
+            )
         with ProgressBar():
             time_means.to_netcdf(os.path.join(output_directory, "time-mean.nc"))
 
