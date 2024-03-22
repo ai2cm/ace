@@ -11,6 +11,7 @@ from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator
+from .seasonal import SeasonalAggregator
 from .time_mean import TimeMeanAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
@@ -37,6 +38,21 @@ class _Aggregator(Protocol):
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
+        ...
+
+
+class _TimeDependentAggregator(Protocol):
+    @torch.no_grad()
+    def record_batch(
+        self,
+        time: xr.DataArray,
+        target_data: Mapping[str, torch.Tensor],
+        gen_data: Mapping[str, torch.Tensor],
+    ):
+        ...
+
+    @torch.no_grad()
+    def get_logs(self, label: str):
         ...
 
 
@@ -115,16 +131,20 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
+
+        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {
+            "seasonal": SeasonalAggregator(
+                area_weights=area_weights,
+                metadata=metadata,
+            ),
+        }
+
         if n_timesteps * TIMESTEP_SECONDS > (60 * 60 * 24 * 365 * 2):
-            self._annual: Optional[
-                GlobalMeanAnnualAggregator
-            ] = GlobalMeanAnnualAggregator(
+            self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
                 area_weights=area_weights,
                 metadata=metadata,
                 monthly_reference_data=monthly_reference_data,
             )
-        else:
-            self._annual = None
 
     @torch.no_grad()
     def record_batch(
@@ -150,8 +170,8 @@ class InferenceAggregator:
                 gen_data_norm=gen_data_norm,
                 i_time_start=i_time_start,
             )
-        if self._annual is not None:
-            self._annual.record_batch(
+        for time_dependent_aggregator in self._time_dependent_aggregators.values():
+            time_dependent_aggregator.record_batch(
                 time=time,
                 target_data=target_data,
                 gen_data=gen_data,
@@ -168,8 +188,8 @@ class InferenceAggregator:
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
-        if self._annual is not None:
-            logs.update(self._annual.get_logs(label="annual_weighted_mean"))
+        for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
+            logs.update(time_dependent_aggregator.get_logs(label=name))
         logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 

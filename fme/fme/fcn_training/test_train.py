@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import pathlib
 import subprocess
@@ -11,6 +12,8 @@ import pytest
 import xarray as xr
 import yaml
 
+import fme.core.aggregator.inference.annual
+from fme.core import constants
 from fme.core.data_loading.config import Slice
 from fme.core.testing import DimSizes, MonthlyReferenceData
 from fme.core.testing.wandb import mock_wandb
@@ -42,6 +45,7 @@ def _get_test_yaml_files(
     log_to_wandb=False,
     max_epochs=1,
     segment_epochs=1,
+    inference_forward_steps=2,
 ):
     new_stepper_config = f"""
   in_names: {in_variable_names}
@@ -101,7 +105,7 @@ inference:
       first: 0
       n_initial_conditions: 2
       interval: 1
-  n_forward_steps: 2
+  n_forward_steps: {inference_forward_steps}
   forward_steps_in_memory: 2
 n_forward_steps: {n_forward_steps}
 max_epochs: {max_epochs}
@@ -180,7 +184,16 @@ def _save_netcdf(
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
+def _setup(
+    path,
+    nettype,
+    log_to_wandb=False,
+    max_epochs=1,
+    segment_epochs=1,
+    n_time=20,
+    timestep_days=5,
+    inference_forward_steps=2,
+):
     if not path.exists():
         path.mkdir()
     seed = 0
@@ -189,10 +202,11 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names))
-    data_dim_sizes = {"time": 20, "grid_yt": 16, "grid_xt": 32}
+    data_dim_sizes = {"time": n_time, "grid_yt": 16, "grid_xt": 32}
     grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
     time = [
-        cftime.DatetimeProlepticGregorian(2000, 1, 1) + 5 * datetime.timedelta(days=i)
+        cftime.DatetimeProlepticGregorian(2000, 1, 1)
+        + timestep_days * datetime.timedelta(days=i)
         for i in range(data_dim_sizes["time"])
     ]
     stats_dim_sizes = {}
@@ -226,7 +240,7 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
         path=data_dir,
         names=out_variable_names,
         dim_sizes=DimSizes(
-            n_time=10,
+            n_time=10 * 12,
             n_lat=16,
             n_lon=32,
             nz_interface=1,
@@ -248,8 +262,22 @@ def _setup(path, nettype, log_to_wandb=False, max_epochs=1, segment_epochs=1):
         log_to_wandb=log_to_wandb,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
+        inference_forward_steps=inference_forward_steps,
     )
     return train_config_filename, inference_config_filename
+
+
+@contextlib.contextmanager
+def patch_timestep_seconds(new):
+    original = constants.TIMESTEP_SECONDS
+    original_min_samples = fme.core.aggregator.inference.annual.MIN_SAMPLES
+    try:
+        constants.TIMESTEP_SECONDS = new
+        fme.core.aggregator.inference.annual.MIN_SAMPLES = 362 * int(24 * 60 * 60 / new)
+        yield
+    finally:
+        constants.TIMESTEP_SECONDS = original
+        fme.core.aggregator.inference.annual.MIN_SAMPLES = original_min_samples
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
@@ -261,18 +289,26 @@ def test_train_and_inference_inline(tmp_path, nettype):
         nettype: parameter indicating model architecture to use.
         debug: option for developers to allow use of pdb.
     """
-    train_config, inference_config = _setup(tmp_path, nettype)
+    # need multi-year to cover annual aggregator
+    train_config, inference_config = _setup(
+        tmp_path,
+        nettype,
+        timestep_days=20,
+        n_time=int(366 * 3 / 20 + 1),
+        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+    )
 
     # using pdb requires calling main functions directly
-    train_main(
-        yaml_config=train_config,
-    )
-    # inference should not require stats files
-    (tmp_path / "stats" / "stats-mean.nc").unlink()
-    (tmp_path / "stats" / "stats-stddev.nc").unlink()
-    inference_logs = inference_main(
-        yaml_config=inference_config,
-    )
+    with patch_timestep_seconds(20 * 24 * 3600):
+        train_main(
+            yaml_config=train_config,
+        )
+        # inference should not require stats files
+        (tmp_path / "stats" / "stats-mean.nc").unlink()
+        (tmp_path / "stats" / "stats-stddev.nc").unlink()
+        inference_logs = inference_main(
+            yaml_config=inference_config,
+        )
     assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
     netcdf_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     assert netcdf_output_path.exists()
