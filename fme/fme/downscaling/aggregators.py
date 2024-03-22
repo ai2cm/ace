@@ -17,6 +17,7 @@ import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import xarray as xr
 
 import fme.core.histogram
 from fme.core import metrics
@@ -458,6 +459,32 @@ class MeanMapAggregator:
             ret[key] = wandb.Image(fig, caption=caption)
             plt.close(fig)
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        prediction = self._mean_prediction.get()
+        target = self._mean_target.get()
+        dataset: Dict[str, xr.DataArray] = {}
+        dims = ("source", "lat", "lon")
+        coords = {
+            "source": ["target", "prediction"],
+        }
+        for var_name in target:
+            metadata = self._metadata.get(
+                var_name, VariableMetadata("unknown_units", var_name)
+            )._asdict()
+            datum = torch.stack(
+                (
+                    target[var_name],
+                    prediction[var_name],
+                ),
+                dim=0,
+            )
+            dataset[var_name] = xr.DataArray(
+                datum,
+                dims=dims,
+                attrs=metadata,
+            )
+        return xr.Dataset(dataset, coords=coords)
 
 
 class _ComparisonAggregator(Protocol):
