@@ -9,6 +9,7 @@ from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
+from .histogram import HistogramAggregator
 from .reduced import MeanAggregator
 from .time_mean import TimeMeanAggregator
 from .video import VideoAggregator
@@ -26,6 +27,7 @@ class _Aggregator(Protocol):
         gen_data: Mapping[str, torch.Tensor],
         target_data_norm: Mapping[str, torch.Tensor],
         gen_data_norm: Mapping[str, torch.Tensor],
+        i_time_start: int = 0,
     ):
         ...
 
@@ -96,6 +98,7 @@ class InferenceAggregator:
                 metadata=metadata,
                 log_individual_channels=False,
             ),
+            "histogram": HistogramAggregator(),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(

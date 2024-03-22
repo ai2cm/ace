@@ -323,3 +323,36 @@ def net_surface_energy_flux(
         )
     net_surface_radiative_flux = sw_rad_down - sw_rad_up + lw_rad_down - lw_rad_up
     return net_surface_radiative_flux - latent_heat_flux - sensible_heat_flux
+
+
+def quantile(bins: np.ndarray, hist: np.ndarray, probability: float) -> float:
+    """
+    Calculate the quantile value for a given histogram, using linear
+    interpolation within bins. This is the inverse of the cumulative
+    distribution function (CDF).
+
+    Args:
+        bins: The bin edges of the histogram.
+        hist: The histogram values.
+        probability: The probability to query the quantile for.
+
+    Returns:
+        The quantile value.
+
+    Raises:
+        ValueError: If probability is not between 0 and 1.
+    """
+    if not (0.0 <= probability <= 1.0):
+        raise ValueError("Probabilities must be between 0 and 1.")
+
+    # get the normalized CDF based on the histogram
+    cdf = np.cumsum(hist)
+    cdf = cdf / cdf[-1]
+    # append initial zero to cdf as there are no values less than the first bin
+    cdf = np.insert(cdf, 0, 0)
+    # find within which bin the requested pct percentile falls
+    bin_idx = np.argmax(cdf > probability) - 1
+    # linearly interpolate within the bin to get the percentile value
+    c0, c1 = bins[bin_idx], bins[bin_idx + 1]
+    p0, p1 = cdf[bin_idx], cdf[bin_idx + 1]
+    return c0 + (c1 - c0) * (probability - p0) / (p1 - p0)

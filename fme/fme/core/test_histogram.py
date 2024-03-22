@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
+import torch
 
-from fme.core.histogram import DynamicHistogram
+from fme.core.histogram import ComparedDynamicHistograms, DynamicHistogram
 
 
 @pytest.mark.parametrize(
@@ -74,3 +75,54 @@ def test_histogram_handles_uniform_field():
     histogram = DynamicHistogram(n_times=1, n_bins=200)
     histogram.add(np.array([[1.0, 1.0, 1.0]]))  # has zero range
     histogram.add(np.array([[1.0, 2.0, 3.0]]))  # has non-zero range
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        pytest.param((2, 8, 16), id="no_time_dim"),
+        pytest.param((2, 1, 8, 16), id="time_dim"),
+    ],
+)
+@pytest.mark.parametrize("percentiles", [[], [99.0], [99.0, 99.99]])
+def test_compared_dynamic_histograms(shape, percentiles):
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=percentiles)
+    target = {"x": torch.ones(*shape), "y": torch.zeros(*shape)}
+    prediction = {"x": torch.rand(*shape), "y": torch.rand(*shape)}
+    histogram.record_batch(target, prediction)
+    result = histogram.get()
+    wandb_result = histogram.get_wandb()
+
+    percentile_names = []
+    for p in percentiles:
+        for data_type in ("target", "prediction"):
+            for var_name in ("x", "y"):
+                percentile_names.append(f"{data_type}/{p}th-percentile/{var_name}")
+
+    assert sorted(list(result.keys())) == sorted(
+        [
+            "prediction/x",
+            "prediction/y",
+            "target/x",
+            "target/y",
+        ]
+        + percentile_names
+    )
+    assert sorted(list(wandb_result.keys())) == sorted(
+        [
+            "x",
+            "y",
+        ]
+        + percentile_names
+    )
+    for var_name in ["x", "y"]:
+        for data_type in ["target", "prediction"]:
+            counts, bin_edges = result[f"{data_type}/{var_name}"]
+            assert counts.shape == (n_bins,)
+            assert bin_edges.shape == (n_bins + 1,)
+            for p in percentiles:
+                assert result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
+                assert (
+                    wandb_result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
+                )
