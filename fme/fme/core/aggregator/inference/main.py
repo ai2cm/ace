@@ -161,6 +161,8 @@ class InferenceAggregator:
             raise ValueError("No data in target_data")
         if len(gen_data) == 0:
             raise ValueError("No data in gen_data")
+        target_data = {k: v for k, v in target_data.items() if k in gen_data}
+        target_data_norm = {k: v for k, v in target_data_norm.items() if k in gen_data}
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 loss=loss,
