@@ -5,7 +5,6 @@ from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
-from fme.core.wandb import Image
 from fme.downscaling import metrics_and_maths
 from fme.downscaling.aggregators import (
     Aggregator,
@@ -161,58 +160,43 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
             area_weights, latitudes, n_histogram_bins=n_bins, percentiles=percentiles
         )
         aggregator.record_batch(torch.tensor(0.0), target, prediction)
-        all_metrics = aggregator.get(prefix=prefix)
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
-    gap_width = aggregator._comparisons["time_mean_map"].gap_width  # type: ignore
-    assert f"{expected_prefix}loss" in all_metrics
     assert f"{expected_prefix}loss" in wandb_metrics
-    num_metrics = 1  # loss
-    percentile_names_and_shapes = [
-        (f"histogram/{data_type}/{p}th-percentile", ())
+    num_metrics = 1
+    percentile_names = [
+        f"histogram/{data_type}/{p}th-percentile"
         for p in percentiles
         for data_type in ("target", "prediction")
     ]
-    for metric_name, expected_shape in [
-        ("rmse", ()),
-        ("weighted_rmse", ()),
-        ("time_mean_map/error", (n_lat, n_lon)),
-        (
-            "time_mean_map/full-field",
-            (n_lat, 2 * n_lon + gap_width),
-        ),
-        ("histogram/target", (n_bins,)),
-        ("histogram/prediction", (n_bins,)),
-    ] + percentile_names_and_shapes:
+    for metric_name in [
+        "rmse",
+        "weighted_rmse",
+        "time_mean_map/error",
+        "time_mean_map/full-field",
+        "histogram/target",
+        "histogram/prediction",
+    ] + percentile_names:
         num_metrics += 1
 
         key = f"{expected_prefix}{metric_name}/x"
 
-        assert key in all_metrics
-
         if "histogram" in key and "percentile" not in key:
             wandb_key = f"{expected_prefix}histogram/x"
-            counts, _ = all_metrics[key]
-            shape = counts.shape
         else:
             wandb_key = key
-            shape = all_metrics[key].shape
         assert wandb_key in wandb_metrics
-        assert shape == expected_shape
 
     for metric_name in [
         "snapshot/image-error",
         "snapshot/image-full-field",
     ]:
         num_metrics += 1
-        assert isinstance(all_metrics[f"{expected_prefix}{metric_name}/x"], Image)
 
     for data_type in ["target", "prediction"]:
         num_metrics += 1
         key = f"{expected_prefix}spectrum/x_{data_type}"
-        assert key in all_metrics
         assert key in wandb_metrics
-        assert all_metrics[key].shape == (n_lon // 2 + 1,)
 
     # in wandb target and prediction histograms are plotted on the same figure
-    assert len(all_metrics) == len(wandb_metrics) + 1 == num_metrics
+    assert len(wandb_metrics) + 1 == num_metrics

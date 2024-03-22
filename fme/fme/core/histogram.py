@@ -166,27 +166,6 @@ class ComparedDynamicHistograms:
             )
         return return_dict
 
-    def get(self):
-        """Returns a dict containing histograms for target and
-        prediction."""
-        return_dict = {}
-        for field_name, metrics_dict in self._get_histograms().items():
-            if "target" in metrics_dict:
-                target = metrics_dict["target"]
-                return_dict[f"target/{field_name}"] = target
-                for p in self.percentiles:
-                    return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
-                        target.bin_edges, target.counts, p / 100.0
-                    )
-            if "prediction" in metrics_dict:
-                prediction = metrics_dict["prediction"]
-                return_dict[f"prediction/{field_name}"] = prediction
-                for p in self.percentiles:
-                    return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
-                        prediction.bin_edges, prediction.counts, p / 100.0
-                    )
-        return return_dict
-
     def _plot_histogram(
         self, target_histogram: Optional[_Histogram], prediction_histogram
     ) -> matplotlib.figure.Figure:
