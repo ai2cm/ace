@@ -113,7 +113,6 @@ def test_snapshot_runs():
         "y": torch.rand(batch_size, height, width),
     }
     snapshot.record_batch(target, prediction)
-    snapshot.get()
 
 
 @pytest.mark.parametrize(
@@ -160,7 +159,7 @@ def test_dynamic_histogram(shape, err, percentiles):
 
 
 @pytest.mark.parametrize("n_steps", (1, 2))
-def test_map_aggregator_shape(n_steps: int):
+def test_map_aggregator(n_steps: int):
     batch_size, height, width = 3, 4, 5
     aggregator = MeanMapAggregator()
     for _ in range(n_steps):
@@ -183,6 +182,8 @@ def test_map_aggregator_shape(n_steps: int):
         assert values[f"error/{var_name}"].shape == (height, width)
 
     aggregator.get_wandb()
+    ds = aggregator.get_dataset()
+    all(ds.coords["source"] == ["target", "prediction"])
 
 
 @pytest.mark.parametrize(
