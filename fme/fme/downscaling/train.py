@@ -118,6 +118,7 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             train_data.img_shape.lowres,
             train_data.downscale_factor,
+            train_data.area_weights,
         )
 
         optimization = self.optimization.build(

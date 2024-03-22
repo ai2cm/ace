@@ -3,9 +3,9 @@ from typing import Tuple
 import pytest
 import torch
 
+from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, OptimizationConfig
-from fme.downscaling.losses import LossConfig
 from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
@@ -71,7 +71,7 @@ def test_run_on_batch(use_opt):
     ],
 )
 def test_build_downscaling_model_config_runs(in_names, out_names):
-    normalizer = PairedNormalizationConfig(
+    normalization = PairedNormalizationConfig(
         highres=NormalizationConfig(
             means={n: 0.0 for n in out_names}, stds={n: 1.0 for n in out_names}
         ),
@@ -79,16 +79,21 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
             means={n: 0.0 for n in in_names}, stds={n: 1.0 for n in in_names}
         ),
     )
-    model_config = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": LinearUpscaling(4, (4, 8))}),
-        LossConfig("L1Loss"),
-        ["x"],
-        ["x"],
-        normalizer,
-    )
 
     img_shape, upscale_factor = (4, 8), 4
-    model_config.build(img_shape, upscale_factor)
+    area_weights = HighResLowResPair[torch.Tensor](
+        torch.ones(img_shape[0] * upscale_factor, img_shape[1] * upscale_factor),
+        torch.ones(img_shape[0], img_shape[1]),
+    )
+    loss = LossConfig(type="L1")
+    model_config = DownscalingModelConfig(
+        ModuleRegistrySelector("prebuilt", {"module": LinearUpscaling(4, (4, 8))}),
+        loss,
+        ["x"],
+        ["x"],
+        normalization,
+    )
+    model_config.build(img_shape, upscale_factor, area_weights)
 
 
 def test_count_parameters():
