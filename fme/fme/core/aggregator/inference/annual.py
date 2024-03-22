@@ -35,6 +35,8 @@ class GlobalMeanAnnualAggregator:
         if self._monthly_reference_data is None:
             return None
         if name not in self._variable_reference_data:
+            if name not in self._monthly_reference_data:
+                return None
             self._variable_reference_data[name] = process_monthly_reference(
                 self._monthly_reference_data, self.area_weights, name
             )
@@ -168,15 +170,16 @@ class GlobalMeanAnnualAggregator:
                         ax=ax, x="year", label=gen_label, color="cornflowerblue"
                     )
 
-                for i_sample in range(gen.sizes["sample"]):
-                    gen[name].isel(sample=i_sample).plot(
-                        ax=ax,
-                        x="year",
-                        color="cornflowerblue",
-                        alpha=0.4,
-                        linestyle="-.",
-                        marker="x",
-                    )
+                if "year" in gen[name].dims:
+                    for i_sample in range(gen.sizes["sample"]):
+                        gen[name].isel(sample=i_sample).plot(
+                            ax=ax,
+                            x="year",
+                            color="cornflowerblue",
+                            alpha=0.4,
+                            linestyle="-.",
+                            marker="x",
+                        )
             ax.set_title(f"{name}")
             ax.legend()
             fig.tight_layout()
