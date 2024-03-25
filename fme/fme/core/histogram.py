@@ -6,6 +6,7 @@ import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.core.metrics import quantile
 from fme.core.typing_ import TensorMapping
@@ -210,3 +211,49 @@ class ComparedDynamicHistograms:
                         prediction.bin_edges, prediction.counts, p / 100.0
                     )
         return return_dict
+
+    def _get_single_dataset(
+        self, histograms: Mapping[str, DynamicHistogram]
+    ) -> xr.Dataset:
+        data = {}
+        for var_name, histogram in histograms.items():
+            data[var_name] = xr.DataArray(
+                histogram.counts[0, :],
+                dims=("bin",),
+            )
+            data[f"{var_name}_bin_edges"] = xr.DataArray(
+                histogram.bin_edges,
+                dims=("bin_edges",),
+            )
+        return xr.Dataset(data)
+
+    def get_dataset(self) -> xr.Dataset:
+        if self.target_histograms is None or self.prediction_histograms is None:
+            raise ValueError("No data has been added to the histogram")
+        target_dataset = self._get_single_dataset(self.target_histograms)
+        prediction_dataset = self._get_single_dataset(self.prediction_histograms)
+        for missing_target_name in set(prediction_dataset.data_vars) - set(
+            target_dataset.data_vars
+        ):
+            if not missing_target_name.endswith("_bin_edges"):
+                target_dataset[missing_target_name] = xr.DataArray(
+                    np.zeros_like(prediction_dataset[missing_target_name]),
+                    dims=("bin",),
+                )
+                target_dataset[f"{missing_target_name}_bin_edges"] = prediction_dataset[
+                    f"{missing_target_name}_bin_edges"
+                ]
+        for missing_prediction_name in set(target_dataset.data_vars) - set(
+            prediction_dataset.data_vars
+        ):
+            if not missing_prediction_name.endswith("_bin_edges"):
+                prediction_dataset[missing_prediction_name] = xr.DataArray(
+                    np.zeros_like(target_dataset[missing_prediction_name]),
+                    dims=("bin",),
+                )
+                prediction_dataset[
+                    f"{missing_prediction_name}_bin_edges"
+                ] = target_dataset[f"{missing_prediction_name}_bin_edges"]
+        ds = xr.concat([target_dataset, prediction_dataset], dim="source")
+        ds["source"] = ["target", "prediction"]
+        return ds
