@@ -1,6 +1,6 @@
 import collections
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional
+from typing import Dict, List, Literal, Mapping, Optional, Tuple
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -12,6 +12,28 @@ from fme.core.metrics import quantile
 from fme.core.typing_ import TensorMapping
 
 EPSILON = 1.0e-6
+
+
+def trim_zero_bins(
+    counts: np.ndarray, bin_edges: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Trim bins with zero counts from the edges of the histogram.
+
+    Args:
+        counts: 1D array of counts for each bin
+        bin_edges: 1D array of bin edges
+
+    Returns:
+        counts, bin_edges: trimmed arrays
+    """
+    mask = counts > 0
+    first_nonzero = np.argmax(mask)
+    last_nonzero = len(mask) - np.argmax(mask[::-1])
+    return (
+        counts[first_nonzero:last_nonzero],
+        bin_edges[first_nonzero : last_nonzero + 1],
+    )
 
 
 class DynamicHistogram:
@@ -156,15 +178,17 @@ class ComparedDynamicHistograms:
             str, Dict[Literal["target", "prediction"], _Histogram]
         ] = collections.defaultdict(dict)
         for k in self.target_histograms:
-            return_dict[k]["target"] = _Histogram(
+            counts, bin_edges = trim_zero_bins(
                 self.target_histograms[k].counts.squeeze(self._time_dim),
                 self.target_histograms[k].bin_edges,
             )
+            return_dict[k]["target"] = _Histogram(counts, bin_edges)
         for k in self.prediction_histograms:
-            return_dict[k]["prediction"] = _Histogram(
+            counts, bin_edges = trim_zero_bins(
                 self.prediction_histograms[k].counts.squeeze(self._time_dim),
                 self.prediction_histograms[k].bin_edges,
             )
+            return_dict[k]["prediction"] = _Histogram(counts, bin_edges)
         return return_dict
 
     def _plot_histogram(
