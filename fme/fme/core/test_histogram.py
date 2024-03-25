@@ -114,3 +114,6 @@ def test_compared_dynamic_histograms(shape, percentiles):
                 assert (
                     wandb_result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
                 )
+
+    ds = histogram.get_dataset()
+    all(ds.coords["source"] == ["target", "prediction"])
