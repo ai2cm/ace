@@ -109,6 +109,7 @@ def test_snapshot_runs():
         "y": torch.rand(batch_size, height, width),
     }
     snapshot.record_batch(target, prediction)
+    snapshot.get()
 
 
 @pytest.mark.parametrize("n_steps", (1, 2))

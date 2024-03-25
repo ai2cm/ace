@@ -262,7 +262,9 @@ def main(
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    for name, ds in aggregator.get_datasets(("time_mean", "zonal_mean")).items():
+    for name, ds in aggregator.get_datasets(
+        ("time_mean", "zonal_mean", "histogram")
+    ).items():
         coords = {k: v for k, v in data.coords.items() if k in ds.dims}
         ds = ds.assign_coords(coords)
         ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
