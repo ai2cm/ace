@@ -30,4 +30,4 @@ class HistogramAggregator:
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        return xr.Dataset()
+        return self._histograms.get_dataset()
