@@ -201,10 +201,13 @@ class ComparedDynamicHistograms:
             ("-", "--"),
             ("C0", "C1"),
         ):
+            normalized_counts = _normalize_histogram(
+                histogram.counts, histogram.bin_edges
+            )
             if histogram is not None:
                 ax.step(
                     histogram.bin_edges[:-1],
-                    histogram.counts,
+                    normalized_counts,
                     line_style,
                     where="post",
                     label=label,
@@ -281,3 +284,11 @@ class ComparedDynamicHistograms:
         ds = xr.concat([target_dataset, prediction_dataset], dim="source")
         ds["source"] = ["target", "prediction"]
         return ds
+
+
+def _normalize_histogram(counts, bin_edges):
+    """
+    Normalize histogram counts so that the integral is 1.
+    """
+    bin_widths = np.diff(bin_edges)
+    return counts / np.sum(counts * bin_widths)

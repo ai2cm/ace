@@ -3,7 +3,25 @@ import numpy as np
 import pytest
 import torch
 
-from fme.core.histogram import ComparedDynamicHistograms, DynamicHistogram
+from fme.core.histogram import (
+    ComparedDynamicHistograms,
+    DynamicHistogram,
+    _normalize_histogram,
+)
+
+
+def test__normalize_histogram():
+    counts = np.array(
+        [
+            1,
+            2,
+            3,
+            4,
+        ]
+    )
+    bin_edges = np.array([0, 1, 2, 3, 5])
+    normalized_counts = _normalize_histogram(counts, bin_edges)
+    assert sum(np.diff(bin_edges) * normalized_counts) == 1.0
 
 
 @pytest.mark.parametrize(
