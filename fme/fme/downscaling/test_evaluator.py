@@ -44,3 +44,6 @@ def test_evaluator(tmp_path):
         with mock_wandb():
             evaluator.main(evaluator_config_path)
     mock_get_wandb.assert_called()
+
+    assert os.path.isfile(tmp_path / "output/histogram_diagnostics.nc")
+    assert os.path.isfile(tmp_path / "output/time_mean_map_diagnostics.nc")

@@ -2,7 +2,7 @@ import abc
 import argparse
 import dataclasses
 import logging
-from typing import List, Literal, Union
+from typing import List, Literal, Optional, Union
 
 import dacite
 import torch
@@ -24,10 +24,13 @@ from fme.fcn_training.utils import logging_utils
 
 
 class Evaluator:
-    def __init__(self, data: GriddedData, model: Model) -> None:
+    def __init__(
+        self, data: GriddedData, model: Model, experiment_dir: Optional[str]
+    ) -> None:
         self.data = data
         self.model = model
         self.optimization = NullOptimization()
+        self.experiment_dir = experiment_dir
 
     def run(self):
         aggregator = Aggregator(
@@ -49,6 +52,12 @@ class Evaluator:
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
+
+        datasets = aggregator.get_datasets()
+        for ds_name in datasets:
+            datasets[ds_name].to_netcdf(
+                f"{self.experiment_dir}/{ds_name}_diagnostics.nc"
+            )
 
 
 class Config(abc.ABC):
@@ -120,7 +129,9 @@ class EvaluatorConfig:
         in_names = model.in_packer.names
         out_names = model.out_packer.names
         var_names = list(set(in_names).union(set(out_names)))
-        return Evaluator(self.data.build(False, var_names, None), model)
+        return Evaluator(
+            self.data.build(False, var_names, None), model, self.experiment_dir
+        )
 
 
 def main(config_path: str):
@@ -139,9 +150,9 @@ def main(config_path: str):
     evaluator_config.configure_wandb(resume=True, notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
-    runner = evaluator_config.build()
-    logging.info(f"Number of parameters: {runner.model.count_parameters()}")
-    runner.run()
+    evaluator = evaluator_config.build()
+    logging.info(f"Number of parameters: {evaluator.model.count_parameters()}")
+    evaluator.run()
 
 
 def parse_args():
