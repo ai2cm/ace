@@ -408,6 +408,7 @@ class Aggregator:
 
         self.loss.record_batch({"loss": loss})
 
+    @torch.no_grad()
     def get_wandb(
         self,
         prefix: str = "",
@@ -431,3 +432,12 @@ class Aggregator:
                 ret.update(_metric_values)
 
         return ret
+
+    @torch.no_grad()
+    def get_datasets(self) -> Mapping[str, xr.Dataset]:
+        datasets = {
+            # get_dataset is not yet implemented for all _ComparisonAggregator
+            k: self._comparisons[k].get_dataset()  # type: ignore
+            for k in ("time_mean_map", "histogram")
+        }
+        return datasets
