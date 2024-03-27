@@ -1,7 +1,8 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.colors import Colormap
 from matplotlib.figure import Figure
 
 from fme.core.wandb import WandB
@@ -20,13 +21,25 @@ def plot_imshow(
     data: np.ndarray,
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
-    cmap: Optional[str] = None,
+    cmap: Optional[Union[str, Colormap]] = None,
     flip_lat: bool = True,
-) -> plt.figure:
+    use_colorbar: bool = True,
+) -> Figure:
     """Plot a 2D array using imshow, ensuring figure size is same as array size."""
     if flip_lat:
         lat_dim = -2
         data = np.flip(data, axis=lat_dim)
+
+    if use_colorbar:
+        height, width = data.shape
+        colorbar_width = max(1, int(0.025 * width))
+        min_ = np.min(data) if vmin is None else vmin
+        max_ = np.max(data) if vmax is None else vmax
+        range_ = np.linspace(min_, max_, height)
+        range_ = np.repeat(range_[:, np.newaxis], repeats=colorbar_width, axis=1)
+        padding = np.zeros((height, colorbar_width)) + np.nan
+        data = np.concatenate((data, padding, range_), axis=1)
+
     # make figure size (in pixels) be the same as array size
     figsize = np.array(data.T.shape) / plt.rcParams["figure.dpi"]
     fig = Figure(figsize=figsize)  # create directly for cleanup when it leaves scope

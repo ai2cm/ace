@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from .plotting import _stitch_data_panels, get_cmap_limits, plot_imshow
 
@@ -17,13 +18,18 @@ def test_cmap_limits_diverging():
     assert vmax == 3
 
 
-def test_plot_imshow():
+@pytest.mark.parametrize("use_colorbar", [True, False])
+def test_plot_imshow(use_colorbar):
     shape = [10, 15]
     data = np.random.randn(*shape)
-    fig = plot_imshow(data)
-    fig_size_pixels = fig.get_size_inches() * fig.dpi
-    # matplotlib figsize is height then width, hence flipping shape order
-    assert [int(x) for x in fig_size_pixels] == shape[::-1]
+    fig = plot_imshow(np.array(data), use_colorbar=use_colorbar)
+    width, height = (fig.get_size_inches() * fig.dpi).astype(int)
+    if use_colorbar:
+        # colorbar is no more than 15% of the width but greater than 0 pixels
+        assert shape[1] < width <= int(shape[1] * 1.15)
+        assert height == shape[0]
+    else:
+        assert [height, width] == shape
 
 
 def test_stitch_data_panels():
