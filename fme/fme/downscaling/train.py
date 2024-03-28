@@ -1,12 +1,15 @@
 import argparse
 import dataclasses
 import logging
+import os
+from typing import Optional
 
 import dacite
 import torch
 import yaml
 
 from fme.core.dicts import to_flat_dict
+from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
@@ -30,19 +33,29 @@ class Trainer:
         train_data: GriddedData,
         validation_data: GriddedData,
         num_epochs: int,
+        checkpoint_dir: Optional[str],
     ) -> None:
         self.model = model
-
         self.optimization = optimization
         self.null_optimization = NullOptimization()
         self.train_data = train_data
         self.validation_data = validation_data
         self.num_epochs = num_epochs
+        self.checkpoint_dir = checkpoint_dir
         self.area_weights = self.train_data.area_weights.highres.cpu()
         self.latitudes = self.train_data.horizontal_coordinates.highres.lat.cpu()
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self._num_batches_seen = 0
+
+        self._best_valid_loss = float("inf")
+        self.epoch_checkpoint_path: Optional[str] = None
+        self.best_checkpoint_path: Optional[str] = None
+        if self.checkpoint_dir is not None:
+            self.epoch_checkpoint_path = os.path.join(
+                self.checkpoint_dir, "latest.ckpt"
+            )
+            self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
 
     def train_one_epoch(self) -> None:
         train_aggregator = Aggregator(self.area_weights, self.latitudes)
@@ -69,7 +82,7 @@ class Trainer:
                 step=self._num_batches_seen,
             )
 
-    def valid_one_epoch(self) -> None:
+    def valid_one_epoch(self) -> float:
         with torch.no_grad():
             validation_aggregator = Aggregator(self.area_weights, self.latitudes)
             batch: BatchData
@@ -81,12 +94,37 @@ class Trainer:
                 outputs = self.model.run_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
-                ),
+                )
         wandb = WandB.get_instance()
+        metrics = validation_aggregator.get_wandb(prefix="validation")
         wandb.log(
-            validation_aggregator.get_wandb(prefix="validation"),
+            metrics,
             self._num_batches_seen,
         )
+        return metrics["validation/loss"]
+
+    def save_checkpoint(self, path: str) -> None:
+        torch.save(
+            {
+                "model": self.model.get_state(),
+                "num_batches_seen": self._num_batches_seen,
+                "num_epochs": self.num_epochs,
+                "optimization": self.optimization.get_state(),
+            },
+            path,
+        )
+
+    def save_checkpoints(self, valid_loss: float) -> None:
+        if (
+            self.epoch_checkpoint_path is not None
+            and self.best_checkpoint_path is not None
+        ):
+            logging.info(f"Saving latest checkpoint")
+            self.save_checkpoint(self.epoch_checkpoint_path)
+            if valid_loss < self._best_valid_loss:
+                logging.info(f"Saving best checkpoint")
+                self._best_valid_loss = valid_loss
+                self.save_checkpoint(self.best_checkpoint_path)
 
     def train(self) -> None:
         logging.info("Running metrics on validation data.")
@@ -95,7 +133,11 @@ class Trainer:
             logging.info(f"Training epoch: {epoch+1}")
             self.train_one_epoch()
             logging.info("Running metrics on validation data.")
-            self.valid_one_epoch()
+            valid_loss = self.valid_one_epoch()
+
+            dist = Distributed.get_instance()
+            if dist.is_root():
+                self.save_checkpoints(valid_loss)
 
 
 @dataclasses.dataclass
@@ -106,7 +148,15 @@ class TrainerConfig:
     validation_data: DataLoaderConfig
     num_epochs: int
     experiment_dir: str
+    save_checkpoints: bool
     logging: LoggingConfig
+
+    @property
+    def checkpoint_dir(self) -> Optional[str]:
+        if self.save_checkpoints:
+            return os.path.join(self.experiment_dir, "checkpoints")
+        else:
+            return None
 
     def build(self) -> Trainer:
         all_names = list(set(self.model.in_names).union(set(self.model.out_names)))
@@ -131,6 +181,7 @@ class TrainerConfig:
             train_data,
             validation_data,
             self.num_epochs,
+            self.checkpoint_dir,
         )
 
     def configure_logging(self, log_filename: str):
@@ -155,6 +206,15 @@ def main(config_path: str):
         data=config,
         config=dacite.Config(strict=True),
     )
+
+    dist = Distributed.get_instance()
+    if dist.is_root():
+        if not os.path.isdir(train_config.experiment_dir):
+            os.makedirs(train_config.experiment_dir)
+        if train_config.checkpoint_dir is not None and not os.path.isdir(
+            train_config.checkpoint_dir
+        ):
+            os.makedirs(train_config.checkpoint_dir)
 
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
