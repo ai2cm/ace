@@ -1,6 +1,7 @@
 import dataclasses
-from typing import List, Tuple, Union
+from typing import Any, List, Mapping, Tuple, Union
 
+import dacite
 import torch
 
 from fme.core.device import get_device
@@ -27,6 +28,61 @@ def _tensor_mapping_to_device(
     return {k: v.to(device) for k, v in tensor_mapping.items()}
 
 
+@dataclasses.dataclass
+class PairedNormalizationConfig:
+    highres: NormalizationConfig
+    lowres: NormalizationConfig
+
+    def build(
+        self, in_names: List[str], out_names: List[str]
+    ) -> HighResLowResPair[StandardNormalizer]:
+        return HighResLowResPair[StandardNormalizer](
+            lowres=self.lowres.build(in_names),
+            highres=self.highres.build(out_names),
+        )
+
+
+@dataclasses.dataclass
+class DownscalingModelConfig:
+    module: ModuleRegistrySelector
+    loss: LossConfig
+    in_names: List[str]
+    out_names: List[str]
+    normalization: PairedNormalizationConfig
+
+    def build(
+        self,
+        lowres_shape: Tuple[int, int],
+        downscale_factor: int,
+        area_weights: HighResLowResPair[torch.Tensor],
+    ) -> "Model":
+        normalizer = self.normalization.build(self.in_names, self.out_names)
+        loss = self.loss.build(area_weights.highres)
+        module = self.module.build(
+            n_in_channels=len(self.in_names),
+            n_out_channels=len(self.out_names),
+            lowres_shape=lowres_shape,
+            downscale_factor=downscale_factor,
+        )
+        return Model(
+            module,
+            normalizer,
+            loss,
+            self.in_names,
+            self.out_names,
+            lowres_shape,
+            downscale_factor,
+            self,
+        )
+
+    def get_state(self) -> Mapping[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DownscalingModelConfig":
+        return dacite.from_dict(data_class=cls, data=state)
+
+
 class Model:
     def __init__(
         self,
@@ -35,12 +91,18 @@ class Model:
         loss: torch.nn.Module,
         in_names: List[str],
         out_names: List[str],
+        lowres_shape: Tuple[int, int],
+        downscale_factor: int,
+        config: DownscalingModelConfig,
     ) -> None:
+        self.lowres_shape = lowres_shape
+        self.downscale_factor = downscale_factor
         self.module = module.to(get_device())
         self.normalizer = normalizer
         self.loss = loss
         self.in_packer = Packer(in_names)
         self.out_packer = Packer(out_names)
+        self.config = config
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -82,38 +144,21 @@ class Model:
         )
         return ModelOutputs(prediction=prediction, target=target, loss=loss)
 
+    def get_state(self) -> Mapping[str, Any]:
+        return {
+            "config": self.config.get_state(),
+            "module": self.module.state_dict(),
+            "lowres_shape": self.lowres_shape,
+            "downscale_factor": self.downscale_factor,
+        }
 
-@dataclasses.dataclass
-class PairedNormalizationConfig:
-    highres: NormalizationConfig
-    lowres: NormalizationConfig
-
-    def build(
-        self, in_names: List[str], out_names: List[str]
-    ) -> HighResLowResPair[StandardNormalizer]:
-        return HighResLowResPair[StandardNormalizer](
-            lowres=self.lowres.build(in_names),
-            highres=self.highres.build(out_names),
+    @classmethod
+    def from_state(
+        cls, state: Mapping[str, Any], area_weights: HighResLowResPair[torch.Tensor]
+    ) -> "Model":
+        config = DownscalingModelConfig.from_state(state["config"])
+        model = config.build(
+            state["lowres_shape"], state["downscale_factor"], area_weights
         )
-
-
-@dataclasses.dataclass
-class DownscalingModelConfig:
-    module: ModuleRegistrySelector
-    loss: LossConfig
-    in_names: List[str]
-    out_names: List[str]
-    normalization: PairedNormalizationConfig
-
-    def build(
-        self,
-        lowres_shape: Tuple[int, int],
-        downscale_factor: int,
-        area_weights: HighResLowResPair[torch.Tensor],
-    ) -> Model:
-        module = self.module.build(
-            len(self.in_names), len(self.out_names), lowres_shape, downscale_factor
-        )
-        normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.highres)
-        return Model(module, normalizer, loss, self.in_names, self.out_names)
+        model.module.load_state_dict(state["module"], strict=True)
+        return model

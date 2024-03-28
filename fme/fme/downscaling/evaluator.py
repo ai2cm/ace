@@ -9,14 +9,18 @@ import torch
 import yaml
 
 from fme.core.dicts import to_flat_dict
-from fme.core.loss import NaNLoss
-from fme.core.normalizer import StandardNormalizer
+from fme.core.loss import LossConfig
+from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.downscaling import train
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import DataLoaderConfig, GriddedData
-from fme.downscaling.models import Model
+from fme.downscaling.models import (
+    DownscalingModelConfig,
+    Model,
+    PairedNormalizationConfig,
+)
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import HighResLowResPair
 from fme.fcn_training.train_config import LoggingConfig
@@ -74,25 +78,28 @@ class InterpolateModelConfig(Config):
     out_names: List[str]
 
     def build(self) -> Model:
-        module = ModuleRegistrySelector(
-            type="interpolate", config={"mode": self.mode}
-        ).build(
-            len(self.in_names),
-            len(self.out_names),
-            # interpolate methods don't need shape
-            (-1, -1),
-            self.downscale_factor,
-        )
+        module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
         var_names = list(set(self.in_names).union(set(self.out_names)))
-        standard_normalizer = StandardNormalizer(
-            {var_name: torch.tensor(0.0) for var_name in var_names},
-            {var_name: torch.tensor(1.0) for var_name in var_names},
+        normalization_config = PairedNormalizationConfig(
+            NormalizationConfig(
+                means={var_name: 0.0 for var_name in var_names},
+                stds={var_name: 1.0 for var_name in var_names},
+            ),
+            NormalizationConfig(
+                means={var_name: 0.0 for var_name in var_names},
+                stds={var_name: 1.0 for var_name in var_names},
+            ),
         )
-        normalizer = HighResLowResPair[StandardNormalizer](
-            lowres=standard_normalizer, highres=standard_normalizer
-        )
-        loss = NaNLoss()
-        return Model(module, normalizer, loss, self.in_names, self.out_names)
+
+        area_weights = HighResLowResPair(torch.tensor(1.0), torch.tensor(1.0))
+
+        return DownscalingModelConfig(
+            module,
+            LossConfig("NaN"),
+            self.in_names,
+            self.out_names,
+            normalization_config,
+        ).build((-1, -1), self.downscale_factor, area_weights)
 
 
 @dataclasses.dataclass
