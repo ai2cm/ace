@@ -4,8 +4,9 @@ import pytest
 import torch
 
 from fme.core.loss import LossConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization, OptimizationConfig
+from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
@@ -32,27 +33,39 @@ class LinearUpscaling(torch.nn.Module):
 
 @pytest.mark.parametrize("use_opt", [True, False])
 def test_run_on_batch(use_opt):
-    highres_shape = (16, 32)  # larger size is need for piq
+    highres_shape = (8, 16)
+    lowres_shape = (4, 8)
     upscaling_factor = 2
-    module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
-    normalizer = HighResLowResPair[StandardNormalizer](
-        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
-        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
+    normalization_config = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
+
     batch_size = 3
-    model = Model(module, normalizer, torch.nn.MSELoss(), ["x"], ["x"])
-    batch = HighResLowResPair(
-        {"x": torch.ones(batch_size, highres_shape[0], highres_shape[1])},
+    module_selector = ModuleRegistrySelector(
+        "prebuilt",
         {
-            "x": torch.ones(
-                batch_size,
-                highres_shape[0] // upscaling_factor,
-                highres_shape[1] // upscaling_factor,
+            "module": LinearUpscaling(
+                upscaling_factor=upscaling_factor, img_shape=highres_shape
             )
         },
     )
+    area_weights = HighResLowResPair(
+        torch.ones(*highres_shape), torch.ones(*lowres_shape)
+    )
+    model = DownscalingModelConfig(
+        module_selector, LossConfig(type="MSE"), ["x"], ["x"], normalization_config
+    ).build(
+        lowres_shape,
+        upscaling_factor,
+        area_weights,
+    )
+    batch: HighResLowResPair[TensorMapping] = HighResLowResPair(
+        {"x": torch.ones(batch_size, *highres_shape)},
+        {"x": torch.ones(batch_size, *lowres_shape)},
+    )
     if use_opt:
-        optimization = OptimizationConfig().build(module.parameters(), 2)
+        optimization = OptimizationConfig().build(model.module.parameters(), 2)
     else:
         optimization = NullOptimization()
 
@@ -98,12 +111,65 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
 
 def test_count_parameters():
     highres_shape = (16, 32)
+    lowres_shape = (8, 16)
+    downscale_factor = 2
     module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
-    normalizer = HighResLowResPair[StandardNormalizer](
-        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
-        StandardNormalizer({"x": torch.tensor(0.0)}, {"x": torch.tensor(1.0)}),
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    model = Model(module, normalizer, torch.nn.MSELoss(), ["x"], ["x"])
+    area_weights = HighResLowResPair(
+        torch.ones(*highres_shape), torch.ones(*lowres_shape)
+    )
+    model = DownscalingModelConfig(
+        ModuleRegistrySelector("prebuilt", {"module": module}),
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalizer,
+    ).build(lowres_shape, downscale_factor, area_weights)
+
     num_parameters = model.count_parameters()
     # Linear layer has 16 * 32 // 2**2 input features and 16 * 32 output features
     assert num_parameters == (16 * 32 // 2) ** 2
+
+
+def test_serialization(tmp_path):
+    highres_shape = (16, 32)
+    lowres_shape = (8, 16)
+    downscale_factor = 2
+    module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    area_weights = HighResLowResPair(
+        torch.ones(*highres_shape), torch.ones(*lowres_shape)
+    )
+    model = DownscalingModelConfig(
+        ModuleRegistrySelector("prebuilt", {"module": module}),
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalizer,
+    ).build(lowres_shape, downscale_factor, area_weights)
+
+    batch_size = 3
+    batch: HighResLowResPair[TensorMapping] = HighResLowResPair(
+        highres={"x": torch.ones(batch_size, *highres_shape)},
+        lowres={"x": torch.ones(batch_size, *lowres_shape)},
+    )
+    expected = model.run_on_batch(batch, NullOptimization()).prediction["x"]
+
+    model_from_state = Model.from_state(model.get_state(), area_weights)
+    torch.testing.assert_allclose(
+        expected,
+        model_from_state.run_on_batch(batch, NullOptimization()).prediction["x"],
+    )
+
+    torch.save(model.get_state(), tmp_path / "test.ckpt")
+    model_from_disk = Model.from_state(torch.load(tmp_path / "test.ckpt"), area_weights)
+    torch.testing.assert_allclose(
+        expected,
+        model_from_disk.run_on_batch(batch, NullOptimization()).prediction["x"],
+    )
