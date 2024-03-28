@@ -25,6 +25,7 @@ def test_trainer():
         train_data=MagicMock(),
         validation_data=MagicMock(),
         num_epochs=2,
+        checkpoint_dir=None,
     )
 
     with unittest.mock.patch(
@@ -136,6 +137,7 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
     config["validation_data"]["path_highres"] = str(validation_data_paths.highres)
     config["validation_data"]["path_lowres"] = str(validation_data_paths.lowres)
     config["experiment_dir"] = str(experiment_dir)
+    config["save_checkpoints"] = True
 
     for res in ("highres", "lowres"):
         for key, path in zip(("global_means_path", "global_stds_path"), stats_paths):
