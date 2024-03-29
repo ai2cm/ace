@@ -934,6 +934,7 @@ class SwinIR(nn.Module):
         img_size=64,
         patch_size=1,
         in_chans=3,
+        out_chans=3,
         embed_dim=96,
         depths=[6, 6, 6, 6],
         num_heads=[6, 6, 6, 6],
@@ -958,7 +959,7 @@ class SwinIR(nn.Module):
     ):
         super(SwinIR, self).__init__()
         num_in_ch = in_chans
-        num_out_ch = in_chans
+        num_out_ch = out_chans
         num_feat = 64
         self.mean = torch.Tensor(mean)
         self.std = torch.Tensor(std)
