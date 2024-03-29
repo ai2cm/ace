@@ -37,7 +37,6 @@ class SwinirConfig:
         lowres_shape: Tuple[int, int],
         downscale_factor: int,
     ):
-        del n_out_channels  # unused for now
         height, width = lowres_shape
         # TODO(gideond): The SwinIR docs appear to be wrong, dig into why these
         # need to take these values to give the right output shapes
@@ -53,6 +52,7 @@ class SwinirConfig:
             mlp_ratio=self.mlp_ratio,
             upsampler=self.upsampler,
             in_chans=n_in_channels,
+            out_chans=n_out_channels,
         )
 
 
