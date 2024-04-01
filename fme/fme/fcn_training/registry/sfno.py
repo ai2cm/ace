@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Literal, Optional, Tuple
 
-from modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
+from ai2modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 
 from fme.fcn_training.registry.registry import ModuleConfig, register
 
