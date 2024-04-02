@@ -169,7 +169,6 @@ class GlobalMeanAnnualAggregator:
                     gen_ensemble_mean.plot(
                         ax=ax, x="year", label=gen_label, color="cornflowerblue"
                     )
-
                 if "year" in gen[name].dims:
                     for i_sample in range(gen.sizes["sample"]):
                         gen[name].isel(sample=i_sample).plot(
