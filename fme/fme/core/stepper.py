@@ -47,6 +47,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ConservationLossConfig()
     )
     prescriber: Optional[PrescriberConfig] = None
+    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
 
     def __post_init__(self):
@@ -71,6 +72,16 @@ class SingleModuleStepperConfig:
                 interpolate=self.prescriber.interpolate,
             )
             del self.prescriber
+        self.prognostic_names = set(self.in_names).intersection(self.out_names)
+        for name in self.next_step_forcing_names:
+            if name not in self.in_names:
+                raise ValueError(
+                    f"next_step_forcing_name '{name}' not in in_names: {self.in_names}"
+                )
+            if name in self.out_names:
+                raise ValueError(
+                    f"next_step_forcing_name is an output variable: '{name}'"
+                )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -355,7 +366,12 @@ class SingleModuleStepper:
         forcing_names = self._config.forcing_names
         ocean_target_names = self.ocean.target_names if self.ocean is not None else []
         for step in range(n_forward_steps):
-            current_step_forcing = {k: forcing_data[k][:, step] for k in forcing_names}
+            current_step_forcing = {
+                k: forcing_data[k][:, step]
+                if k not in self._config.next_step_forcing_names
+                else forcing_data[k][:, step + 1]
+                for k in forcing_names
+            }
             next_step_ocean_data = {
                 k: forcing_data[k][:, step + 1] for k in ocean_target_names
             }
@@ -404,7 +420,10 @@ class SingleModuleStepper:
 
         loss = torch.tensor(0.0, device=get_device())
         metrics = {}
-        input_data = {k: data[k].select(time_dim, 0) for k in self.in_packer.names}
+        input_data = {
+            k: data[k].select(time_dim, 0) for k in self._config.prognostic_names
+        }
+
         optimization.set_mode(self.module)
         with optimization.autocast():
             gen_data = self.predict(input_data, forcing_data, n_forward_steps)

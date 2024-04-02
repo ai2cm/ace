@@ -552,6 +552,7 @@ def _get_stepper(
     out_names: List[str],
     ocean_config: Optional[OceanConfig] = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
+    **kwargs,
 ):
     if module_name == "AddOne":
 
@@ -563,7 +564,12 @@ def _get_stepper(
     elif module_name == "ChannelSum":
         # convenient for testing stepper with more inputs than outputs
         class ChannelSum(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.last_input: Optional[torch.Tensor] = None
+
             def forward(self, x):
+                self.last_input = x
                 return x.sum(dim=-3, keepdim=True)
 
         module_config = {"module": ChannelSum()}
@@ -587,6 +593,7 @@ def _get_stepper(
             stds={n: torch.tensor([1.0]) for n in all_names},
         ),
         ocean=ocean_config,
+        **kwargs,
     )
     return config.get_stepper((5, 5), area, sigma_coordinates)
 
@@ -680,3 +687,21 @@ def test_predict_with_ocean():
             previous_a + 1,
         )
         torch.testing.assert_close(output["a"][:, n], expected_a_output)
+
+
+def test_next_step_forcing_names():
+    stepper = _get_stepper(
+        ["a", "b", "c"],
+        ["a"],
+        module_name="ChannelSum",
+        next_step_forcing_names=["c"],
+    )
+    input_data = {x: torch.rand(1, 5, 5) for x in ["a"]}
+    forcing_data = {x: torch.rand(1, 2, 5, 5) for x in ["b", "c"]}
+    stepper.predict(input_data, forcing_data, 1)
+    torch.testing.assert_close(
+        stepper.module.module.last_input[:, 1, :], forcing_data["b"][:, 0]
+    )
+    torch.testing.assert_close(
+        stepper.module.module.last_input[:, 2, :], forcing_data["c"][:, 1]
+    )
