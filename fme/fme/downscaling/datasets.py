@@ -1,7 +1,7 @@
 """Contains code relating to loading (highres, lowres) examples for downscaling."""
 
 import dataclasses
-from typing import List, Literal, Mapping, Optional, Sequence, Tuple
+from typing import Literal, Mapping, Optional, Sequence, Tuple
 
 import torch
 import torch.utils.data
@@ -90,7 +90,10 @@ class DataLoaderConfig:
     num_data_workers: int
 
     def build(
-        self, train: bool, var_names: List[str], dist: Optional[Distributed] = None
+        self,
+        train: bool,
+        requirements: DataRequirements,
+        dist: Optional[Distributed] = None,
     ) -> GriddedData:
         if dist is None:
             dist = Distributed.get_instance()
@@ -105,7 +108,7 @@ class DataLoaderConfig:
                     batch_size=self.batch_size,
                     num_data_workers=self.num_data_workers,
                 ),
-                DataRequirements(var_names, 1),
+                requirements=requirements,
             )
             for path in (self.path_highres, self.path_lowres)
         ]

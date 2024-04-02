@@ -2,6 +2,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.requirements import DataRequirements
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 
 from .datasets import BatchData, DataLoaderConfig, PairedDataset
@@ -129,7 +130,7 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
         1,
     )
 
-    loader = config.build(True, all_names, None)
+    loader = config.build(True, DataRequirements(all_names, 1), None)
     assert len(loader.loader) == num_timesteps // batch_size
     assert len(loader.loader.dataset) == num_timesteps  # type: ignore
     assert loader.downscale_factor == 2
