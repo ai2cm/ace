@@ -1,5 +1,5 @@
 experiment_dir: /will/be/overwritten
-num_epochs: 2
+max_epochs: 2
 logging:
   log_to_screen: true
   log_to_wandb: true
@@ -26,10 +26,10 @@ model:
   module:
     type: swinir
     config:
-      depths: [6]
-      window_size: 1
-      embed_dim: 30
-      num_heads: [6]
+      depths: [1]
+      window_size: 2
+      embed_dim: 1
+      num_heads: [1]
   normalization:
     highres:
       global_means_path: /will/be/overwritten
