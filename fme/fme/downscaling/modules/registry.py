@@ -59,7 +59,7 @@ class SwinirConfig:
 @dataclasses.dataclass
 class ModuleRegistrySelector(ModuleConfig):
     type: str
-    config: Mapping[str, Any]
+    config: Mapping[str, Any] = dataclasses.field(default_factory=dict)
 
     def build(
         self,
