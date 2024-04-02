@@ -195,10 +195,11 @@ class TrainerConfig:
             return None
 
     def build(self) -> Trainer:
-        all_names = list(set(self.model.in_names).union(set(self.model.out_names)))
-        train_data: GriddedData = self.train_data.build(train=True, var_names=all_names)
+        train_data: GriddedData = self.train_data.build(
+            train=True, requirements=self.model.data_requirements
+        )
         validation_data: GriddedData = self.validation_data.build(
-            train=False, var_names=all_names
+            train=False, requirements=self.model.data_requirements
         )
 
         downscaling_model = self.model.build(

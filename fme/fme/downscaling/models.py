@@ -4,6 +4,7 @@ from typing import Any, List, Mapping, Tuple, Union
 import dacite
 import torch
 
+from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -81,6 +82,13 @@ class DownscalingModelConfig:
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "DownscalingModelConfig":
         return dacite.from_dict(data_class=cls, data=state)
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        return DataRequirements(
+            names=list(set(self.in_names).union(self.out_names)),
+            n_timesteps=1,
+        )
 
 
 class Model:

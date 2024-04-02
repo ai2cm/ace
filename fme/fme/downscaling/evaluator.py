@@ -8,6 +8,7 @@ import dacite
 import torch
 import yaml
 
+from fme.core.data_loading.requirements import DataRequirements
 from fme.core.dicts import to_flat_dict
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -101,12 +102,25 @@ class InterpolateModelConfig(Config):
             normalization_config,
         ).build((-1, -1), self.downscale_factor, area_weights)
 
+    @property
+    def data_requirements(self) -> DataRequirements:
+        return DataRequirements(
+            names=list(set(self.in_names).union(self.out_names)),
+            n_timesteps=1,
+        )
+
 
 @dataclasses.dataclass
 class CheckpointModelConfig(Config):
     checkpoint: str
 
     def build(self) -> Model:
+        raise NotImplementedError(
+            "Evaluating a checkpointed model is not yet implemented."
+        )
+
+    @property
+    def data_requirements(self) -> DataRequirements:
         raise NotImplementedError(
             "Evaluating a checkpointed model is not yet implemented."
         )
@@ -133,11 +147,10 @@ class EvaluatorConfig:
 
     def build(self) -> Evaluator:
         model = self.model.build()
-        in_names = model.in_packer.names
-        out_names = model.out_packer.names
-        var_names = list(set(in_names).union(set(out_names)))
         return Evaluator(
-            self.data.build(False, var_names, None), model, self.experiment_dir
+            self.data.build(False, requirements=self.model.data_requirements),
+            model,
+            self.experiment_dir,
         )
 
 
