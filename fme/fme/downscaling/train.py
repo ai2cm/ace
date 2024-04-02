@@ -8,6 +8,7 @@ import dacite
 import torch
 import yaml
 
+import fme
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
@@ -25,6 +26,28 @@ def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
+def save_checkpoint(trainer: "Trainer", path: str) -> None:
+    torch.save(
+        {
+            "model": trainer.model.get_state(),
+            "optimization": trainer.optimization.get_state(),
+            "num_batches_seen": trainer.num_batches_seen,
+            "startEpoch": trainer.startEpoch,
+            "best_valid_loss": trainer.best_valid_loss,
+        },
+        path,
+    )
+
+
+def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
+    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    trainer.model.from_state(checkpoint["model"], trainer.area_weights)
+    trainer.optimization.load_state(checkpoint["optimization"])
+    trainer.num_batches_seen = checkpoint["num_batches_seen"]
+    trainer.startEpoch = checkpoint["startEpoch"]
+    trainer.best_valid_loss = checkpoint["best_valid_loss"]
+
+
 class Trainer:
     def __init__(
         self,
@@ -32,7 +55,8 @@ class Trainer:
         optimization: Optimization,
         train_data: GriddedData,
         validation_data: GriddedData,
-        num_epochs: int,
+        max_epochs: int,
+        segment_epochs: Optional[int],
         checkpoint_dir: Optional[str],
     ) -> None:
         self.model = model
@@ -40,15 +64,18 @@ class Trainer:
         self.null_optimization = NullOptimization()
         self.train_data = train_data
         self.validation_data = validation_data
-        self.num_epochs = num_epochs
+        self.max_epochs = max_epochs
         self.checkpoint_dir = checkpoint_dir
-        self.area_weights = self.train_data.area_weights.highres.cpu()
+        self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.highres.lat.cpu()
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
-        self._num_batches_seen = 0
+        self.num_batches_seen = 0
 
-        self._best_valid_loss = float("inf")
+        self.startEpoch = 0
+        self.segment_epochs = segment_epochs
+
+        self.best_valid_loss = float("inf")
         self.epoch_checkpoint_path: Optional[str] = None
         self.best_checkpoint_path: Optional[str] = None
         if self.checkpoint_dir is not None:
@@ -58,7 +85,7 @@ class Trainer:
             self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
 
     def train_one_epoch(self) -> None:
-        train_aggregator = Aggregator(self.area_weights, self.latitudes)
+        train_aggregator = Aggregator(self.area_weights.highres.cpu(), self.latitudes)
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
@@ -66,25 +93,27 @@ class Trainer:
                 squeeze_time_dim(batch.highres), squeeze_time_dim(batch.lowres)
             )
             outputs = self.model.run_on_batch(inputs, self.optimization)
-            self._num_batches_seen += 1
+            self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
-                    step=self._num_batches_seen,
+                    step=self.num_batches_seen,
                 )
 
         with torch.no_grad():
             wandb.log(
                 train_aggregator.get_wandb(prefix="train"),
-                step=self._num_batches_seen,
+                step=self.num_batches_seen,
             )
 
     def valid_one_epoch(self) -> float:
         with torch.no_grad():
-            validation_aggregator = Aggregator(self.area_weights, self.latitudes)
+            validation_aggregator = Aggregator(
+                self.area_weights.highres.cpu(), self.latitudes
+            )
             batch: BatchData
             for batch in self.validation_data.loader:
                 inputs = HighResLowResPair(
@@ -99,20 +128,15 @@ class Trainer:
         metrics = validation_aggregator.get_wandb(prefix="validation")
         wandb.log(
             metrics,
-            self._num_batches_seen,
+            self.num_batches_seen,
         )
         return metrics["validation/loss"]
 
-    def save_checkpoint(self, path: str) -> None:
-        torch.save(
-            {
-                "model": self.model.get_state(),
-                "num_batches_seen": self._num_batches_seen,
-                "num_epochs": self.num_epochs,
-                "optimization": self.optimization.get_state(),
-            },
-            path,
-        )
+    @property
+    def resuming(self) -> bool:
+        if self.epoch_checkpoint_path is None:
+            return False
+        return os.path.isfile(self.epoch_checkpoint_path)
 
     def save_checkpoints(self, valid_loss: float) -> None:
         if (
@@ -120,20 +144,31 @@ class Trainer:
             and self.best_checkpoint_path is not None
         ):
             logging.info(f"Saving latest checkpoint")
-            self.save_checkpoint(self.epoch_checkpoint_path)
-            if valid_loss < self._best_valid_loss:
+            save_checkpoint(self, self.epoch_checkpoint_path)
+            if valid_loss < self.best_valid_loss:
                 logging.info(f"Saving best checkpoint")
-                self._best_valid_loss = valid_loss
-                self.save_checkpoint(self.best_checkpoint_path)
+                self.best_valid_loss = valid_loss
+                save_checkpoint(self, self.best_checkpoint_path)
 
     def train(self) -> None:
         logging.info("Running metrics on validation data.")
         self.valid_one_epoch()
-        for epoch in range(self.num_epochs):
+        wandb = WandB.get_instance()
+
+        if self.segment_epochs is None:
+            segment_max_epochs = self.max_epochs
+        else:
+            segment_max_epochs = min(
+                self.startEpoch + self.segment_epochs, self.max_epochs
+            )
+
+        for epoch in range(self.startEpoch, segment_max_epochs):
+            self.startEpoch = epoch
             logging.info(f"Training epoch: {epoch+1}")
             self.train_one_epoch()
             logging.info("Running metrics on validation data.")
             valid_loss = self.valid_one_epoch()
+            wandb.log({"epoch": epoch}, step=self.num_batches_seen)
 
             dist = Distributed.get_instance()
             if dist.is_root():
@@ -146,10 +181,11 @@ class TrainerConfig:
     optimization: OptimizationConfig
     train_data: DataLoaderConfig
     validation_data: DataLoaderConfig
-    num_epochs: int
+    max_epochs: int
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    segment_epochs: Optional[int] = None
 
     @property
     def checkpoint_dir(self) -> Optional[str]:
@@ -172,7 +208,7 @@ class TrainerConfig:
         )
 
         optimization = self.optimization.build(
-            downscaling_model.module.parameters(), self.num_epochs
+            downscaling_model.module.parameters(), self.max_epochs
         )
 
         return Trainer(
@@ -180,7 +216,8 @@ class TrainerConfig:
             optimization,
             train_data,
             validation_data,
-            self.num_epochs,
+            self.max_epochs,
+            self.segment_epochs,
             self.checkpoint_dir,
         )
 
@@ -223,6 +260,11 @@ def main(config_path: str):
 
     logging.info("Starting training")
     trainer = train_config.build()
+
+    if trainer.resuming:
+        logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
+        restore_checkpoint(trainer, trainer.epoch_checkpoint_path)
+
     logging.info(f"Number of parameters: {trainer.model.count_parameters()}")
     trainer.train()
 
