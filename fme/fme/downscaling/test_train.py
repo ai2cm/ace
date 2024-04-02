@@ -1,7 +1,9 @@
 import datetime
 import os
+import pathlib
+import subprocess
 import unittest.mock
-from typing import Dict, Set
+from typing import Dict, Literal, Set
 from unittest.mock import MagicMock
 
 import cftime
@@ -11,7 +13,7 @@ import xarray as xr
 import yaml
 
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.train import Trainer, main
+from fme.downscaling.train import Trainer, main, restore_checkpoint
 from fme.downscaling.typing_ import HighResLowResPair
 
 NUM_TIMESTEPS = 10
@@ -24,7 +26,8 @@ def test_trainer():
         optimization=MagicMock(),
         train_data=MagicMock(),
         validation_data=MagicMock(),
-        num_epochs=2,
+        max_epochs=2,
+        segment_epochs=None,
         checkpoint_dir=None,
     )
 
@@ -149,8 +152,11 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
     return outpath
 
 
-def _get_aggregator_keys(prefix: str) -> Set[str]:
+def _get_aggregator_keys(prefix: Literal["train", "validation"]) -> Set[str]:
     keys = [f"{prefix}/loss"]
+    if prefix == "train":
+        keys.append("epoch")
+
     for metric_name in (
         "rmse",
         "weighted_rmse",
@@ -187,7 +193,7 @@ def test_train_main(trainer_config):
     assert (
         len(logs)
         == 1  # validation is run once before training
-        + trainer_config_dict["num_epochs"] * num_gradient_descent_updates_per_epoch
+        + trainer_config_dict["max_epochs"] * num_gradient_descent_updates_per_epoch
     )
 
     validation_keys = _get_aggregator_keys("validation")
@@ -208,3 +214,72 @@ def test_train_main(trainer_config):
             ), "batch_loss should also be logged each epoch."
         else:
             assert len(keys) == 1, "Within an epoch, only batch_loss should be logged."
+
+
+def test_resume(trainer_config, tmp_path):
+    """Make sure the training is resumed from a checkpoint when restarted."""
+
+    with open(trainer_config, "r") as f:
+        trainer_config_dict = yaml.safe_load(f)
+
+    trainer_config_segment_one_dict = dict(trainer_config_dict)
+    trainer_config_segment_one_dict["max_epochs"] = 2
+    trainer_config_segment_one_dict["segment_epochs"] = 1
+
+    trainer_config_segment_two_dict = dict(trainer_config_dict)
+    trainer_config_segment_two_dict["max_epochs"] = 2
+    trainer_config_segment_two_dict["segment_epochs"] = None
+
+    trainer_config_segment_one = tmp_path / "config-segment-one.yaml"
+    with open(trainer_config_segment_one, "w") as f:
+        yaml.dump(trainer_config_segment_one_dict, f)
+
+    trainer_config_segment_two = tmp_path / "config-segment-two.yaml"
+    with open(trainer_config_segment_two, "w") as f:
+        yaml.dump(trainer_config_segment_two_dict, f)
+
+    mock = unittest.mock.MagicMock(side_effect=restore_checkpoint)
+    with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
+        with mock_wandb() as wandb:
+            main(trainer_config_segment_one)
+            assert 1 == len(
+                [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
+            )
+            mock.assert_not_called()
+
+    with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
+        with mock_wandb() as wandb:
+            main(trainer_config_segment_two)
+            assert 2 == len(
+                [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
+            )
+            mock.assert_called()
+
+
+def test_resume_two_workers(trainer_config, skip_slow: bool):
+    """Make sure the training is resumed from a checkpoint when restarted, using
+    torchrun with NPROC_PER_NODE set to 2."""
+    if skip_slow:
+        # script is slow as everything is re-imported when it runs
+        pytest.skip("Skipping slow tests")
+
+    with open(trainer_config, "r") as f:
+        trainer_config_dict = yaml.safe_load(f)
+        trainer_config_dict["logging"]["log_to_wandb"] = False
+        trainer_config_dict["max_epochs"] = 1
+    with open(trainer_config, "w") as f:
+        yaml.dump(trainer_config_dict, f)
+
+    repo_path = pathlib.PurePath(__file__).parent.parent.parent.parent
+    train_script_path = repo_path / "fme" / "fme" / "downscaling" / "train.py"
+    command = [
+        "torchrun",
+        "--nproc_per_node",
+        "2",
+        train_script_path,
+        trainer_config,
+    ]
+    initial_process = subprocess.run(command)
+    initial_process.check_returncode()
+    resume_process = subprocess.run(command)
+    resume_process.check_returncode()
