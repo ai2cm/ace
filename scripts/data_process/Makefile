@@ -42,6 +42,54 @@ else ifeq ($(RESOLUTION),4deg)
 	NAME_AMIP ?= $(NAME_AMIP_4DEG)
 endif
 
+# separate netCDF output name to avoid retrieving a default from above, must be given by user
+NC_OUTPUT ?=
+
+
+.PHONY: shield_c24_4deg_climSST_dataset
+shield_c24_4deg_climSST_dataset:
+	./compute_dataset.sh \
+	--config configs/shield-c24-ensemble-4deg-8layer.yaml
+
+.PHONY: shield_c24_4deg_climSST_monthly_netcdfs
+shield_c24_4deg_climSST_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2024-03-26-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset \
+	--n-ic 11 \
+	--output-dir $(NC_OUTPUT) \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31
+
+shield_c24_4deg_climSST_stats_beaker_dataset:
+	./generate_beaker_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2024-03-26-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset/ic_0001.zarr \
+	--start-date 2021-01-01 \
+	--end-date 2030-12-31 \
+	--name "shield-c24-4deg-8layer-ic0001-stats-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
+
+.PHONY: shield_c96_4deg_climSST_dataset
+shield_c96_4deg_climSST_dataset:
+	./compute_dataset.sh \
+	--config configs/shield-c96-4deg-8layer.yaml
+
+.PHONY: shield_c96_4deg_climSST_monthly_netcdfs
+shield_c96_4deg_climSST_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset \
+	--n-ic 1 \
+	--output-dir $(NC_OUTPUT) \
+	--start-date 2035-01-01 \
+	--end-date 2060-12-31
+
+shield_c96_4deg_climSST_stats_beaker_dataset:
+	./generate_beaker_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset/ic_0001.zarr \
+	--start-date 2035-01-01 \
+	--end-date 2060-12-31 \
+	--name "shield-c96-4deg-8layer-ic0001-stats-scaling-all-years-v2" \
+	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
+
 .PHONY: fv3gfs_1deg_climSST_dataset
 fv3gfs_1deg_climSST_dataset:
 	$(MAKE) fv3gfs_climSST_dataset RESOLUTION=1deg LAYERS=8layer
