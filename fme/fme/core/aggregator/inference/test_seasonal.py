@@ -2,6 +2,7 @@ import datetime
 
 import cftime
 import numpy as np
+import pytest
 import torch
 import xarray as xr
 
@@ -14,7 +15,9 @@ def get_zero_time(shape, dims):
     return xr.DataArray(np.zeros(shape, dtype="datetime64[ms]"), dims=dims)
 
 
-def test_seasonal_aggregator():
+def test_seasonal_aggregator(skip_slow: bool):
+    if skip_slow:
+        pytest.skip("Skipping slow tests")
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised

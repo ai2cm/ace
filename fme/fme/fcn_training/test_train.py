@@ -457,9 +457,12 @@ def _create_copy_weights_after_batch_config(
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_copy_weights_after_batch(tmp_path, nettype):
+def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
     """Check that fine tuning config using copy_weights_after_batch
     runs without errors."""
+    if skip_slow:
+        pytest.skip("Skipping slow tests")
+
     train_config, _ = _setup(tmp_path, nettype)
 
     train_main(
