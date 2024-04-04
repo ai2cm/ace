@@ -105,7 +105,9 @@ def _stitch_data_panels(data: List[List[np.ndarray]], vmin) -> np.ndarray:
         + vmin
     )
 
-    for i, row in enumerate(data):
+    # iterate over rows backwards, as the image starts in the bottom left
+    # and moves upwards
+    for i, row in enumerate(reversed(data)):
         for j, arr in enumerate(row):
             start_row = i * (arr.shape[0] + 1)
             end_row = start_row + arr.shape[0]
