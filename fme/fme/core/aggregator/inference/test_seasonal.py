@@ -2,7 +2,6 @@ import datetime
 
 import cftime
 import numpy as np
-import pytest
 import torch
 import xarray as xr
 
@@ -15,15 +14,13 @@ def get_zero_time(shape, dims):
     return xr.DataArray(np.zeros(shape, dtype="datetime64[ms]"), dims=dims)
 
 
-def test_seasonal_aggregator(skip_slow: bool):
-    if skip_slow:
-        pytest.skip("Skipping slow tests")
+def test_seasonal_aggregator():
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised
     n_sample = 2
-    n_time = 365 * 4 * 2
     n_time_step = 8
+    n_time = int(365 / 10 * 2 / n_time_step + 1) * n_time_step
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     agg = SeasonalAggregator(
         area_weights=area_weights,
@@ -40,7 +37,7 @@ def test_seasonal_aggregator(skip_slow: bool):
 
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     time_1d = [
-        cftime.DatetimeProlepticGregorian(2000, 1, 1) + i * datetime.timedelta(hours=6)
+        cftime.DatetimeProlepticGregorian(2000, 1, 1) + i * datetime.timedelta(days=10)
         for i in range(n_time)
     ]
     time = xr.DataArray([time_1d for _ in range(n_sample)], dims=["sample", "time"])
