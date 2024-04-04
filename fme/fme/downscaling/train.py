@@ -18,6 +18,7 @@ from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
 from fme.downscaling.models import DownscalingModelConfig, Model
 from fme.downscaling.typing_ import HighResLowResPair
+from fme.fcn_training.train import count_parameters
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
 
@@ -266,7 +267,7 @@ def main(config_path: str):
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer, trainer.epoch_checkpoint_path)
 
-    logging.info(f"Number of parameters: {trainer.model.count_parameters()}")
+    logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 
 

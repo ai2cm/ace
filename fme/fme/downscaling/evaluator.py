@@ -24,6 +24,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import HighResLowResPair
+from fme.fcn_training.train import count_parameters
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
 
@@ -171,7 +172,7 @@ def main(config_path: str):
 
     logging.info("Starting downscaling model evaluation")
     evaluator = evaluator_config.build()
-    logging.info(f"Number of parameters: {evaluator.model.count_parameters()}")
+    logging.info(f"Number of parameters: {count_parameters(evaluator.model.modules)}")
     evaluator.run()
 
 
