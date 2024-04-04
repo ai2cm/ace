@@ -9,6 +9,7 @@ from typing import Dict
 import cftime
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 import yaml
 
@@ -18,7 +19,7 @@ from fme.core.data_loading.config import Slice
 from fme.core.testing import DimSizes, MonthlyReferenceData
 from fme.core.testing.wandb import mock_wandb
 from fme.fcn_training.inference.inference import main as inference_main
-from fme.fcn_training.train import _restore_checkpoint
+from fme.fcn_training.train import _restore_checkpoint, count_parameters
 from fme.fcn_training.train import main as train_main
 from fme.fcn_training.train_config import epoch_checkpoint_enabled
 
@@ -489,3 +490,15 @@ def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
             assert epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
         else:
             assert not epoch_checkpoint_enabled(i, max_epochs, checkpoint_save_epochs)
+
+
+@pytest.mark.parametrize(
+    "module_list,expected_num_parameters",
+    [
+        (torch.nn.ModuleList([torch.nn.Linear(10, 5), torch.nn.Linear(5, 2)]), 67),
+        (torch.nn.ModuleList([]), 0),
+    ],
+)
+def test_count_parameters(module_list, expected_num_parameters):
+    num_parameters = count_parameters(module_list)
+    assert num_parameters == expected_num_parameters
