@@ -47,6 +47,9 @@ def natural_sort(alist: List[str]) -> List[str]:
     return sorted(alist, key=alphanum_key)
 
 
+LEVEL_PATTERN = re.compile(r"_(\d+)$")
+
+
 class ClimateData:
     """Container for climate data for accessing variables and providing
     torch.Tensor views on data with multiple vertical levels."""
@@ -82,6 +85,20 @@ class ClimateData:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
         ]
+
+        levels = []
+        for name in names:
+            match = LEVEL_PATTERN.search(name)
+            if match is None:
+                raise ValueError(
+                    f"Invalid field name {name}, is a prefix variable "
+                    "but does not end in _(number)."
+                )
+            levels.append(int(match.group(1)))
+
+        for i, level in enumerate(sorted(levels)):
+            if i != level:
+                raise KeyError(f"Missing level {i} in {prefix} levels {levels}.")
 
         if len(names) == 0:
             raise KeyError(prefix)
