@@ -109,31 +109,6 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     model_config.build(img_shape, upscale_factor, area_weights)
 
 
-def test_count_parameters():
-    highres_shape = (16, 32)
-    lowres_shape = (8, 16)
-    downscale_factor = 2
-    module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
-    normalizer = PairedNormalizationConfig(
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-    )
-    area_weights = HighResLowResPair(
-        torch.ones(*highres_shape), torch.ones(*lowres_shape)
-    )
-    model = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": module}),
-        LossConfig(type="MSE"),
-        ["x"],
-        ["x"],
-        normalizer,
-    ).build(lowres_shape, downscale_factor, area_weights)
-
-    num_parameters = model.count_parameters()
-    # Linear layer has 16 * 32 // 2**2 input features and 16 * 32 output features
-    assert num_parameters == (16 * 32 // 2) ** 2
-
-
 def test_serialization(tmp_path):
     highres_shape = (16, 32)
     lowres_shape = (8, 16)

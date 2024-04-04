@@ -72,15 +72,16 @@ from fme.fcn_training.train_config import TrainConfig
 from fme.fcn_training.utils import logging_utils
 
 
-class Trainer:
-    def count_parameters(self):
-        parameters = 0
-        for module in self.stepper.modules:
-            for parameter in module.parameters():
-                if parameter.requires_grad:
-                    parameters += parameter.numel()
-        return parameters
+def count_parameters(modules: torch.nn.ModuleList) -> int:
+    parameters = 0
+    for module in modules:
+        for parameter in module.parameters():
+            if parameter.requires_grad:
+                parameters += parameter.numel()
+    return parameters
 
+
+class Trainer:
     def __init__(self, config: TrainConfig):
         self.dist = Distributed.get_instance()
         if self.dist.is_root():
@@ -145,7 +146,12 @@ class Trainer:
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
-        logging.info(f"Number of trainable model parameters: {self.count_parameters()}")
+        logging.info(
+            (
+                "Number of trainable model parameters: "
+                f"{count_parameters(self.stepper.modules)}"
+            )
+        )
         inference_data_requirements = dataclasses.replace(data_requirements)
         inference_data_requirements.n_timesteps = config.inference.n_forward_steps + 1
 
