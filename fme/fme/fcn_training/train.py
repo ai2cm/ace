@@ -226,6 +226,8 @@ class Trainer:
             time_elapsed = time.time() - start_time
             logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
             logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
+            if inference_error is not None:
+                logging.info(f"Inference error: {inference_error}")
 
             logging.info("Logging to wandb")
             all_logs = {
@@ -429,6 +431,10 @@ class Trainer:
             if inference_error is not None and (
                 inference_error <= self._best_inference_error
             ):
+                logging.info(
+                    f"Epoch inference error ({inference_error}) is lower than "
+                    f"previous best inference error ({self._best_inference_error})."
+                )
                 logging.info(
                     "Saving lowest inference error checkpoint to "
                     f"{self.config.best_inference_checkpoint_path}"
