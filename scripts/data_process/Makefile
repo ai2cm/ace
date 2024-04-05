@@ -54,15 +54,15 @@ shield_c24_4deg_climSST_dataset:
 .PHONY: shield_c24_4deg_climSST_monthly_netcdfs
 shield_c24_4deg_climSST_monthly_netcdfs:
 	./convert_to_monthly_netcdf_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-03-26-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset \
-	--n-ic 11 \
+	--input-url gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset \
+	--n-ic 21 \
 	--output-dir $(NC_OUTPUT) \
 	--start-date 2021-01-01 \
 	--end-date 2030-12-31
 
 shield_c24_4deg_climSST_stats_beaker_dataset:
 	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-03-26-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset/ic_0001.zarr \
+	--input-url gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset/ic_0001.zarr \
 	--start-date 2021-01-01 \
 	--end-date 2030-12-31 \
 	--name "shield-c24-4deg-8layer-ic0001-stats-scaling-all-years-v2" \
