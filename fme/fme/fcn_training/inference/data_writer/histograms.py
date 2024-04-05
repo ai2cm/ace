@@ -45,26 +45,14 @@ class _HistogramAggregator:
             #     [n_timesteps, n_samples, n_lat, n_lon]
             # and then reshape to [n_timesteps, n_hist_samples]
             n_times = prediction_data[var_name].shape[1]
-            data = (
-                prediction_data[var_name]
-                .cpu()
-                .numpy()
-                .transpose(1, 0, 2, 3)
-                .reshape(n_times, -1)
-            )
+            data = prediction_data[var_name].transpose(1, 0).reshape(n_times, -1)
             histogram.add(data, i_time_start=i_time_start)
         for var_name, histogram in self._target_histograms.items():
             # go from [n_samples, n_timesteps, n_lat, n_lon] to
             #     [n_timesteps, n_samples, n_height, n_width]
             # and then reshape to [n_timesteps, n_hist_samples]
             n_times = target_data[var_name].shape[1]
-            data = (
-                target_data[var_name]
-                .cpu()
-                .numpy()
-                .transpose(1, 0, 2, 3)
-                .reshape(n_times, -1)
-            )
+            data = target_data[var_name].transpose(1, 0).reshape(n_times, -1)
             histogram.add(data, i_time_start=i_time_start)
 
     def get_dataset(self) -> xr.Dataset:
