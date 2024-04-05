@@ -36,6 +36,28 @@ def trim_zero_bins(
     )
 
 
+def histogram(
+    arr: torch.Tensor, vmin: float, bin_size: float, n_bins: int
+) -> torch.Tensor:
+    """
+    Compute histogram of a tensor.
+
+    Args:
+        arr: 1D tensor of values
+        vmin: minimum value of the histogram
+        bin_size: size of each bin
+        n_bins: number of bins
+
+    Returns:
+        counts, bin_edges: arrays of counts and bin edges
+    """
+    # use np.bincount for speed
+    counts = torch.bincount(((arr - vmin) / bin_size).int(), minlength=n_bins)
+    return_counts = counts[:n_bins]
+    return_counts[-1] += torch.sum(counts[n_bins:])
+    return return_counts
+
+
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
@@ -62,20 +84,19 @@ class DynamicHistogram:
         self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
         self._epsilon: float = EPSILON
 
-    def add(self, value: np.ndarray, i_time_start: int = 0):
+    def add(self, value: torch.Tensor, i_time_start: int = 0):
         """
         Add new values to the histogram.
 
         Args:
-            value: array of values of shape (n_times, n_values) to add to the histogram
+            value: tensor of values of shape (n_times, n_values) to add to the histogram
             i_time_start: index of the first time to add values to
         """
-        vmin = np.min(value)
-        vmax = np.max(value)
-        if vmin == vmax:
-            # if all values are the same, add a small amount to vmin and vmax
-            vmin -= self._epsilon
-            vmax += self._epsilon
+        # add epsilon to ensure all values stay within (and not just equal to)
+        # the bin edges, and to avoid the case where vmin == vmax
+        vmin = float((torch.min(value) - self._epsilon).cpu().numpy())
+        vmax = float((torch.max(value) + self._epsilon).cpu().numpy())
+
         if self.bin_edges is None:
             self.bin_edges = np.linspace(vmin, vmax, self._n_bins + 1)
         else:
@@ -83,12 +104,19 @@ class DynamicHistogram:
                 self._double_size_left()
             while vmax > self.bin_edges[-1]:
                 self._double_size_right()
+
         i_time_end = i_time_start + value.shape[0]
-        self.counts[i_time_start:i_time_end, :] += np.apply_along_axis(
-            lambda arr: np.histogram(arr, bins=self.bin_edges)[0],
-            axis=1,
-            arr=value,
-        )
+        for i_time in range(i_time_start, i_time_end):
+            self.counts[i_time] += (
+                histogram(
+                    value[i_time - i_time_start, :],
+                    self.bin_edges[0],
+                    self.bin_edges[1] - self.bin_edges[0],
+                    self._n_bins,
+                )
+                .cpu()
+                .numpy()
+            )
 
     def _double_size_left(self):
         """
@@ -146,8 +174,8 @@ class ComparedDynamicHistograms:
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping):
-        target = {k: v.detach().cpu() for k, v in target.items()}
-        prediction = {k: v.detach().cpu() for k, v in prediction.items()}
+        target = {k: v.detach() for k, v in target.items()}
+        prediction = {k: v.detach() for k, v in prediction.items()}
 
         if self.target_histograms is None or self.prediction_histograms is None:
             self.target_histograms = {}
@@ -163,11 +191,9 @@ class ComparedDynamicHistograms:
 
         for k in target:
             # no matter what data shape is given, combine it all into one histogram
-            self.target_histograms[k].add(target[k].flatten().unsqueeze(0).numpy())
+            self.target_histograms[k].add(target[k].flatten().unsqueeze(0))
         for k in prediction:
-            self.prediction_histograms[k].add(
-                prediction[k].flatten().unsqueeze(0).numpy()
-            )
+            self.prediction_histograms[k].add(prediction[k].flatten().unsqueeze(0))
 
     def _get_histograms(
         self,
