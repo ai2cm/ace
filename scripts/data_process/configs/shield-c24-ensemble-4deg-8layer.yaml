@@ -10,7 +10,17 @@ runs:
   ic_0009: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0009
   ic_0010: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0010
   ic_0011: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0011
-output_directory: gs://vcm-ml-intermediate/2024-03-26-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset
+  ic_0012: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0012
+  ic_0013: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0013
+  ic_0014: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0014
+  ic_0015: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0015
+  ic_0016: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0016
+  ic_0017: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0017
+  ic_0018: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0018
+  ic_0019: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0019
+  ic_0020: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0020
+  ic_0021: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0021
+output_directory: gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset
 dataset_computation:
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
