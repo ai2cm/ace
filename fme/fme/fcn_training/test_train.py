@@ -281,7 +281,9 @@ def patch_timestep_seconds(new):
         fme.core.aggregator.inference.annual.MIN_SAMPLES = original_min_samples
 
 
-@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+@pytest.mark.parametrize(
+    "nettype", ["SphericalFourierNeuralOperatorNet", "SFNO-v0.1.0"]
+)
 def test_train_and_inference_inline(tmp_path, nettype):
     """Make sure that training and inference run without errors
 
