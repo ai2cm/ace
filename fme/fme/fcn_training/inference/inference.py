@@ -14,7 +14,7 @@ import yaml
 
 import fme
 from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
@@ -63,16 +63,13 @@ class InferenceConfig:
         log_video: Whether to log videos of the state evolution.
         log_extended_video: Whether to log wandb videos of the predictions with
             statistical metrics, only done if log_video is True.
-        log_extended_video_netcdfs: Whether to log videos of the predictions with
-            statistical metrics as netcdf files.
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
             time dimension.
-        save_prediction_files: Whether to save the predictions as a netcdf file.
-        save_raw_prediction_names: Names of variables to save in the predictions
-             netcdf file. Ignored if save_prediction_files is False.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
+        monthly_reference_data: Path to monthly reference data to compare against.
+        aggregator: Configuration for inference aggregator.
     """
 
     experiment_dir: str
@@ -92,6 +89,9 @@ class InferenceConfig:
         default_factory=lambda: DataWriterConfig()
     )
     monthly_reference_data: Optional[str] = None
+    aggregator: InferenceAggregatorConfig = dataclasses.field(
+        default_factory=lambda: InferenceAggregatorConfig()
+    )
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -218,8 +218,9 @@ def main(
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
 
-    aggregator = InferenceAggregator(
-        data.area_weights.to(fme.get_device()),
+    aggregator_config: InferenceAggregatorConfig = config.aggregator
+    aggregator = aggregator_config.build(
+        area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
         log_video=config.log_video,
