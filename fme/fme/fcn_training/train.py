@@ -431,8 +431,8 @@ class Trainer:
                     "Saving lowest validation loss checkpoint to "
                     f"{self.config.best_checkpoint_path}"
                 )
-                self.save_checkpoint(self.config.best_checkpoint_path)
                 self._best_validation_loss = valid_loss
+                self.save_checkpoint(self.config.best_checkpoint_path)
             if inference_error is not None and (
                 inference_error <= self._best_inference_error
             ):
@@ -444,8 +444,8 @@ class Trainer:
                     "Saving lowest inference error checkpoint to "
                     f"{self.config.best_inference_checkpoint_path}"
                 )
-                self.save_checkpoint(self.config.best_inference_checkpoint_path)
                 self._best_inference_error = inference_error
+                self.save_checkpoint(self.config.best_inference_checkpoint_path)
         with self._ema_context():
             logging.info(
                 f"Saving latest EMA checkpoint to {self.config.ema_checkpoint_path}"
