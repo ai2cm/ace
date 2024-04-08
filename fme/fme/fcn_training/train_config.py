@@ -5,6 +5,7 @@ import warnings
 from typing import Any, Mapping, Optional, Union
 
 from fme.core import SingleModuleStepperConfig
+from fme.core.aggregator import InferenceAggregatorConfig
 from fme.core.data_loading.config import DataLoaderConfig, Slice
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -79,6 +80,7 @@ class InlineInferenceConfig:
         epochs: epochs on which to run inference, where the first epoch is
             defined as epoch 0 (unlike in logs which show epochs as starting
             from 1). By default runs inference every epoch.
+        aggregator: configuration of inline inference aggregator.
     """
 
     loader: InferenceDataLoaderConfig
@@ -86,6 +88,9 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
     parallel: Optional[bool] = None
+    aggregator: InferenceAggregatorConfig = dataclasses.field(
+        default_factory=lambda: InferenceAggregatorConfig()
+    )
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:

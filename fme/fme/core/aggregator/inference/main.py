@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
@@ -57,6 +58,21 @@ class _TimeDependentAggregator(Protocol):
         ...
 
 
+@dataclasses.dataclass
+class InferenceAggregatorConfig:
+    """
+    Configuration for inference aggregator.
+
+    Attributes:
+        log_histograms: Whether to log histograms of the targets and predictions.
+    """
+
+    log_histograms: bool = False
+
+    def build(self, **kwargs):
+        return InferenceAggregator(log_histograms=self.log_histograms, **kwargs)
+
+
 class InferenceAggregator:
     """
     Aggregates statistics for inference.
@@ -76,6 +92,7 @@ class InferenceAggregator:
         log_zonal_mean_images: bool = False,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
+        log_histograms: bool = False,
     ):
         """
         Args:
@@ -91,6 +108,7 @@ class InferenceAggregator:
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
+            log_histograms: Whether to aggregate histograms.
         """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(
@@ -115,7 +133,6 @@ class InferenceAggregator:
                 metadata=metadata,
                 log_individual_channels=False,
             ),
-            "histogram": HistogramAggregator(),
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
@@ -146,6 +163,8 @@ class InferenceAggregator:
                 metadata=metadata,
                 monthly_reference_data=monthly_reference_data,
             )
+        if log_histograms:
+            self._aggregators["histogram"] = HistogramAggregator()
 
     @torch.no_grad()
     def record_batch(

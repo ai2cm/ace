@@ -58,7 +58,11 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.core.aggregator import InferenceAggregator, OneStepAggregator, TrainAggregator
+from fme.core.aggregator import (
+    InferenceAggregatorConfig,
+    OneStepAggregator,
+    TrainAggregator,
+)
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
@@ -361,7 +365,8 @@ class Trainer:
 
     def inference_one_epoch(self):
         record_step_20 = self.config.inference.n_forward_steps >= 20
-        aggregator = InferenceAggregator(
+        aggregator_config: InferenceAggregatorConfig = self.config.inference.aggregator
+        aggregator = aggregator_config.build(
             monthly_reference_data=self._monthly_reference_data,
             area_weights=self.train_data.area_weights.to(fme.get_device()),
             sigma_coordinates=self.train_data.sigma_coordinates,
