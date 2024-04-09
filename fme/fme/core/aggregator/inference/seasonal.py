@@ -82,7 +82,7 @@ class SeasonalAggregator:
 
         target = cast(xr.Dataset, target / target["counts"])  # type: ignore
         gen = cast(xr.Dataset, gen / gen["counts"])  # type: ignore
-        bias = target - gen
+        bias = gen - target
         plots = {}
         metric_logs = {}
 
