@@ -17,3 +17,37 @@ make ingest_ncar_variables
 and uses an argo workflow to run on our Google cloud resources. Sometimes the download
 will fail for certain variables. If this happens, the workflow can be resubmitted
 with the same command as above, and it will pick up where it left off.
+
+## Converting netCDF files downloaded from NCAR to zarr
+
+To facilitate further processing and alignment with the data available from
+Google, we use an xarray-beam pipeline to concatenate, merge, and rechunk the
+ERA5 data downloaded from NCAR into a set of three zarr stores:
+
+- `e5.oper.fc.sfc.meanflux`
+- `e5.oper.an.sfc`
+- `e5.oper.invariant`
+
+The scaled up version of the beam pipeline is run using Dataflow. It first
+requires creating a local Python environment with the needed dependencies
+installed:
+
+```
+make create_environment
+```
+
+To submit the full Dataflow workflow, one can use:
+
+```
+make netcdf_to_zarr_dataflow
+```
+
+This submits the jobs to create each dataset one at a time, though the process
+for creating each dataset is highly parallelized.
+
+If needed the Docker image required for running the workflow in the cloud can
+be rebuilt and pushed using:
+
+```
+make build_dataflow push_dataflow
+```
