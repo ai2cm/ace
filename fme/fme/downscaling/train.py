@@ -12,7 +12,6 @@ import fme
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
@@ -21,10 +20,6 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 from fme.fcn_training.train import count_parameters
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
-
-
-def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
-    return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
 def save_checkpoint(trainer: "Trainer", path: str) -> None:
@@ -90,9 +85,7 @@ class Trainer:
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
-            inputs = FineResCoarseResPair(
-                squeeze_time_dim(batch.fine), squeeze_time_dim(batch.coarse)
-            )
+            inputs = FineResCoarseResPair(batch.fine, batch.coarse)
             outputs = self.model.run_on_batch(inputs, self.optimization)
             self.num_batches_seen += 1
             with torch.no_grad():
@@ -118,8 +111,8 @@ class Trainer:
             batch: BatchData
             for batch in self.validation_data.loader:
                 inputs = FineResCoarseResPair(
-                    squeeze_time_dim(batch.fine),
-                    squeeze_time_dim(batch.coarse),
+                    batch.fine,
+                    batch.coarse,
                 )
                 outputs = self.model.run_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(

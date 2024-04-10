@@ -19,6 +19,10 @@ from fme.core.typing_ import TensorMapping
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
+def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
+    return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
+
+
 @dataclasses.dataclass
 class BatchData:
     fine: Mapping[str, torch.Tensor]
@@ -68,7 +72,7 @@ class PairedDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         batch1, times1 = self.dataset1[idx]
         batch2, _ = self.dataset2[idx]
-        return batch1, batch2, times1
+        return squeeze_time_dim(batch1), squeeze_time_dim(batch2), times1.squeeze()
 
 
 @dataclasses.dataclass
