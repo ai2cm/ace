@@ -77,8 +77,17 @@ class GriddedData:
     area_weights: FineResCoarseResPair[torch.Tensor]
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
-    downscale_factor: int
     metadata: Mapping[str, VariableMetadata]
+
+    def __post_init__(self):
+        assert (
+            self.img_shape.fine[0] % self.img_shape.coarse[0] == 0
+        ), "Highres height must be divisible by lowres height"
+        assert (
+            self.img_shape.fine[0] // self.img_shape.coarse[0]
+            == self.img_shape.fine[1] // self.img_shape.coarse[1]
+        ), "Aspect ratio must match"
+        self.downscale_factor: int = self.img_shape.fine[0] // self.img_shape.coarse[0]
 
 
 @dataclasses.dataclass
@@ -156,13 +165,6 @@ class DataLoaderConfig:
             fine_width % coarse_width == 0
         ), "Fine resolution width must be divisible by coarse resolution width"
 
-        downscale_factor_height = fine_height // coarse_height
-        downscale_factor_width = fine_width // coarse_width
-
-        assert (
-            downscale_factor_height == downscale_factor_width
-        ), "Aspect ratio must match"
-
         assert dataset_fine.metadata == dataset_coarse.metadata, "Metadata must match."
         metadata = dataset_fine.metadata
 
@@ -171,6 +173,5 @@ class DataLoaderConfig:
             area_weights,
             horizontal_coordinates,
             img_shape,
-            downscale_factor_height,
             metadata,
         )
