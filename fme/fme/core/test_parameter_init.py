@@ -1,7 +1,7 @@
 """The registry also performs configuration set up so it needs to be tested."""
 import copy
 from pathlib import Path
-from typing import Mapping, Tuple
+from typing import Tuple
 
 import pytest
 import torch
@@ -11,6 +11,7 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
+from fme.core.typing_ import TensorMapping
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
@@ -78,8 +79,8 @@ def test_builder_with_weights_loads_same_state(tmpdir):
 
 
 def assert_same_state(
-    state1: Mapping[str, torch.Tensor],
-    state2: Mapping[str, torch.Tensor],
+    state1: TensorMapping,
+    state2: TensorMapping,
     allow_larger: bool,
     same_keys: bool = True,
 ):

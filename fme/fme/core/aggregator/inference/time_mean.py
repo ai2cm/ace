@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Literal, Mapping, MutableMapping, Optional, Union
+from typing import Dict, List, Literal, Mapping, Optional, Union
 
 import matplotlib.pyplot as plt
 import torch
@@ -8,6 +8,7 @@ import xarray as xr
 from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
@@ -44,7 +45,7 @@ class _TargetGenPair:
         )
 
 
-def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
 
@@ -86,18 +87,18 @@ class TimeMeanAggregator:
         else:
             self._metadata = metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._target_data: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_data: Optional[Dict[str, torch.Tensor]] = None
+        self._target_data: Optional[TensorDict] = None
+        self._gen_data: Optional[TensorDict] = None
         self._target_data_norm = None
         self._gen_data_norm = None
         self._n_batches = 0
 
     @staticmethod
     def _add_or_initialize_time_mean(
-        maybe_dict: Optional[MutableMapping[str, torch.Tensor]],
-        new_data: Mapping[str, torch.Tensor],
+        maybe_dict: Optional[TensorDict],
+        new_data: TensorMapping,
         ignore_initial: bool = False,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> TensorDict:
         sample_dim = 0
         time_dim = 1
         if ignore_initial:
@@ -105,7 +106,7 @@ class TimeMeanAggregator:
         else:
             time_slice = slice(0, None)
         if maybe_dict is None:
-            d: Dict[str, torch.Tensor] = {
+            d: TensorDict = {
                 name: tensor[:, time_slice].mean(dim=time_dim).mean(dim=sample_dim)
                 for name, tensor in new_data.items()
             }
@@ -119,10 +120,10 @@ class TimeMeanAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
         i_time_start: int = 0,
     ):
         if self._target == "norm":

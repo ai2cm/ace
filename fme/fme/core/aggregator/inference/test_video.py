@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple
+from typing import List, Tuple
 
 import numpy as np
 import pytest
@@ -6,11 +6,12 @@ import torch
 
 from fme.core.aggregator.inference.video import VideoAggregator
 from fme.core.device import get_device
+from fme.core.typing_ import TensorDict
 
 
 def _make_data(
     names: List[str], n_samples: int, nx: int, ny: int, offsets: np.ndarray
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+) -> Tuple[TensorDict, TensorDict]:
     """
     Make a 2D array with a pattern of offsets.
 
@@ -42,9 +43,9 @@ def _make_data(
 def time_select(
     i_start: int,
     i_end: int,
-    gen: Dict[str, torch.Tensor],
-    target: Dict[str, torch.Tensor],
-) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    gen: TensorDict,
+    target: TensorDict,
+) -> Tuple[TensorDict, TensorDict]:
     """
     Select a time range from the generated and target data.
 
@@ -133,7 +134,7 @@ def test_video_data_without_extended_videos(offsets: np.ndarray):
         )
 
 
-def slice_samples(data: Dict[str, torch.Tensor], i_start: int, i_end: int):
+def slice_samples(data: TensorDict, i_start: int, i_end: int):
     data_out = {}
     for name in data.keys():
         data_out[name] = data[name][i_start:i_end]

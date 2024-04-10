@@ -1,4 +1,4 @@
-from typing import Dict, Mapping, Optional, Union
+from typing import Dict, Optional, Union
 
 import torch
 import xarray as xr
@@ -6,11 +6,12 @@ import xarray as xr
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorMapping
 
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
-def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
 
@@ -39,7 +40,7 @@ class MeanAggregator:
         self._target_time = target_time
         self._dist = Distributed.get_instance()
 
-    def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
+    def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
             self._variable_metrics = {
                 "weighted_rmse": {},
@@ -75,10 +76,10 @@ class MeanAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
         i_time_start: int = 0,
     ):
         self._loss += loss

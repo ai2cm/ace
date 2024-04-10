@@ -14,6 +14,7 @@ from fme.core.climate_data import (
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.typing_ import TensorMapping
 
 
 @dataclass
@@ -110,10 +111,10 @@ class DerivedMetricsAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         del loss, target_data_norm, gen_data_norm  # unused
         target = ClimateData(target_data, self.climate_field_name_prefixes)

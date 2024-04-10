@@ -1,6 +1,6 @@
 import dataclasses
 import warnings
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, List, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -22,7 +22,7 @@ from fme.fcn_training.registry import ModuleSelector
 
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
-from .typing_ import TensorMapping
+from .typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -188,11 +188,11 @@ class DummyWrapper(nn.Module):
 
 @dataclasses.dataclass
 class SteppedData:
-    metrics: Dict[str, torch.Tensor]
-    gen_data: Dict[str, torch.Tensor]
-    target_data: Dict[str, torch.Tensor]
-    gen_data_norm: Dict[str, torch.Tensor]
-    target_data_norm: Dict[str, torch.Tensor]
+    metrics: TensorDict
+    gen_data: TensorDict
+    target_data: TensorDict
+    gen_data_norm: TensorDict
+    target_data_norm: TensorDict
 
     def remove_initial_condition(self) -> "SteppedData":
         return SteppedData(
@@ -312,7 +312,7 @@ class SingleModuleStepper:
         self,
         input: TensorMapping,
         ocean_data: TensorMapping,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
 
@@ -344,7 +344,7 @@ class SingleModuleStepper:
         initial_condition: TensorMapping,
         forcing_data: TensorMapping,
         n_forward_steps: int,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> TensorDict:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -387,7 +387,7 @@ class SingleModuleStepper:
 
     def run_on_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: TensorDict,
         optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
         aggregator: Optional[Union[OneStepAggregator, TrainAggregator]] = None,

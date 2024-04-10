@@ -1,11 +1,13 @@
 import abc
 import dataclasses
 from collections import namedtuple
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 import torch
 import xarray as xr
+
+from fme.core.typing_ import TensorDict, TensorMapping
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
 
@@ -36,7 +38,7 @@ class SigmaCoordinates:
             bk=self.bk.to(device),
         )
 
-    def as_dict(self) -> Mapping[str, torch.Tensor]:
+    def as_dict(self) -> TensorMapping:
         return {"ak": self.ak, "bk": self.bk}
 
 
@@ -78,7 +80,7 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
     @abc.abstractmethod
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
+    ) -> Tuple[TensorDict, xr.DataArray]:
         """
         Returns a sample of data for the given time slice.
 
@@ -103,7 +105,7 @@ class GriddedData:
 
     Attributes:
         loader: torch DataLoader, which returns batches of type
-            Mapping[str, torch.Tensor] where keys indicate variable name.
+            TensorMapping where keys indicate variable name.
             Each tensor has shape
             [batch_size, time_window_size, n_channels, n_lat, n_lon].
         metadata: Metadata for each variable.
