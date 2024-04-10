@@ -10,6 +10,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import Dimension
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
 
@@ -26,7 +27,7 @@ class _SeriesData:
         return f"{self.metric_name}-{self.var_name}"
 
 
-def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
 
@@ -168,7 +169,7 @@ class MeanAggregator:
         else:
             self._metadata = metadata
 
-    def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
+    def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
             self._variable_metrics = {
                 "weighted_rmse": {},
@@ -246,10 +247,10 @@ class MeanAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
         i_time_start: int = 0,
     ):
         if self._target == "norm":

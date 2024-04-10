@@ -11,6 +11,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import weighted_mean
+from fme.core.typing_ import TensorMapping
 
 _STEPS_PER_DAY = int(24 * 60 * 60 / TIMESTEP_SECONDS)
 
@@ -46,8 +47,8 @@ class GlobalMeanAnnualAggregator:
     def record_batch(
         self,
         time: xr.DataArray,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
     ):
         """Record a batch of data for computing time variability statistics."""
         target_data_area_mean, gen_data_area_mean = {}, {}
@@ -274,7 +275,7 @@ def _gather_sample_datasets(
 
 
 @torch.no_grad()
-def to_dataset(data: Mapping[str, torch.Tensor], time: xr.DataArray) -> xr.Dataset:
+def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
     """Convert a dictionary of data to an xarray dataset."""
     assert time.dims == ("sample", "time")  # must be consistent with this module
     data_vars = {}

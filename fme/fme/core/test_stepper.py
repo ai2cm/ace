@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Dict, Iterable, List, Literal, Optional, Tuple, Union
+from typing import Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -20,6 +20,7 @@ from fme.core.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
 )
+from fme.core.typing_ import TensorDict
 from fme.fcn_training.inference.derived_variables import (
     compute_stepped_derived_quantities,
 )
@@ -317,7 +318,7 @@ class ReturnZerosModule(torch.nn.Module):
 
 
 def _setup_and_run_on_batch(
-    data: Dict[str, torch.Tensor],
+    data: TensorDict,
     in_names,
     out_names,
     ocean_config: Optional[OceanConfig],
