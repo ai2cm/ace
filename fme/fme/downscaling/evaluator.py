@@ -14,7 +14,6 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
-from fme.downscaling import train
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import DataLoaderConfig, GriddedData
 from fme.downscaling.models import (
@@ -45,10 +44,7 @@ class Evaluator:
         )
 
         for batch in self.data.loader:
-            inputs = FineResCoarseResPair(
-                train.squeeze_time_dim(batch.fine),
-                train.squeeze_time_dim(batch.coarse),
-            )
+            inputs = FineResCoarseResPair(batch.fine, batch.coarse)
             with torch.no_grad():
                 outputs = self.model.run_on_batch(inputs, self.optimization)
                 aggregator.record_batch(

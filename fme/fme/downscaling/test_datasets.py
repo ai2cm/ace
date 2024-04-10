@@ -134,5 +134,6 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
     assert loader.downscale_factor == 2
     batch = next(iter(loader.loader))
     for var_name in all_names:
-        assert batch.fine[var_name].shape == (batch_size, 1, *fine_shape)
-        assert batch.coarse[var_name].shape == (batch_size, 1, *coarse_shape)
+        assert batch.fine[var_name].shape == (batch_size, *fine_shape)
+        assert batch.coarse[var_name].shape == (batch_size, *coarse_shape)
+        assert batch.times.shape == (batch_size,)
