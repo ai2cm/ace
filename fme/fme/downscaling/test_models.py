@@ -13,7 +13,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 class LinearUpscaling(torch.nn.Module):
@@ -33,8 +33,8 @@ class LinearUpscaling(torch.nn.Module):
 
 @pytest.mark.parametrize("use_opt", [True, False])
 def test_run_on_batch(use_opt):
-    highres_shape = (8, 16)
-    lowres_shape = (4, 8)
+    fine_shape = (8, 16)
+    coarse_shape = (4, 8)
     upscaling_factor = 2
     normalization_config = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
@@ -46,23 +46,23 @@ def test_run_on_batch(use_opt):
         "prebuilt",
         {
             "module": LinearUpscaling(
-                upscaling_factor=upscaling_factor, img_shape=highres_shape
+                upscaling_factor=upscaling_factor, img_shape=fine_shape
             )
         },
     )
-    area_weights = HighResLowResPair(
-        torch.ones(*highres_shape), torch.ones(*lowres_shape)
+    area_weights = FineResCoarseResPair(
+        torch.ones(*fine_shape), torch.ones(*coarse_shape)
     )
     model = DownscalingModelConfig(
         module_selector, LossConfig(type="MSE"), ["x"], ["x"], normalization_config
     ).build(
-        lowres_shape,
+        coarse_shape,
         upscaling_factor,
         area_weights,
     )
-    batch: HighResLowResPair[TensorMapping] = HighResLowResPair(
-        {"x": torch.ones(batch_size, *highres_shape)},
-        {"x": torch.ones(batch_size, *lowres_shape)},
+    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
+        {"x": torch.ones(batch_size, *fine_shape)},
+        {"x": torch.ones(batch_size, *coarse_shape)},
     )
     if use_opt:
         optimization = OptimizationConfig().build(model.module.parameters(), 2)
@@ -85,16 +85,16 @@ def test_run_on_batch(use_opt):
 )
 def test_build_downscaling_model_config_runs(in_names, out_names):
     normalization = PairedNormalizationConfig(
-        highres=NormalizationConfig(
+        fine=NormalizationConfig(
             means={n: 0.0 for n in out_names}, stds={n: 1.0 for n in out_names}
         ),
-        lowres=NormalizationConfig(
+        coarse=NormalizationConfig(
             means={n: 0.0 for n in in_names}, stds={n: 1.0 for n in in_names}
         ),
     )
 
     img_shape, upscale_factor = (4, 8), 4
-    area_weights = HighResLowResPair[torch.Tensor](
+    area_weights = FineResCoarseResPair[torch.Tensor](
         torch.ones(img_shape[0] * upscale_factor, img_shape[1] * upscale_factor),
         torch.ones(img_shape[0], img_shape[1]),
     )
@@ -110,16 +110,16 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
 
 
 def test_serialization(tmp_path):
-    highres_shape = (16, 32)
-    lowres_shape = (8, 16)
+    fine_shape = (16, 32)
+    coarse_shape = (8, 16)
     downscale_factor = 2
-    module = LinearUpscaling(upscaling_factor=2, img_shape=highres_shape)
+    module = LinearUpscaling(upscaling_factor=2, img_shape=fine_shape)
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    area_weights = HighResLowResPair(
-        torch.ones(*highres_shape), torch.ones(*lowres_shape)
+    area_weights = FineResCoarseResPair(
+        torch.ones(*fine_shape), torch.ones(*coarse_shape)
     )
     model = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": module}),
@@ -127,12 +127,12 @@ def test_serialization(tmp_path):
         ["x"],
         ["x"],
         normalizer,
-    ).build(lowres_shape, downscale_factor, area_weights)
+    ).build(coarse_shape, downscale_factor, area_weights)
 
     batch_size = 3
-    batch: HighResLowResPair[TensorMapping] = HighResLowResPair(
-        highres={"x": torch.ones(batch_size, *highres_shape)},
-        lowres={"x": torch.ones(batch_size, *lowres_shape)},
+    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
+        fine={"x": torch.ones(batch_size, *fine_shape)},
+        coarse={"x": torch.ones(batch_size, *coarse_shape)},
     )
     expected = model.run_on_batch(batch, NullOptimization()).prediction["x"]
 

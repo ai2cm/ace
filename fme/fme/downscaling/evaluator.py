@@ -23,7 +23,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 from fme.fcn_training.train import count_parameters
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
@@ -40,14 +40,14 @@ class Evaluator:
 
     def run(self):
         aggregator = Aggregator(
-            self.data.area_weights.highres,
-            self.data.horizontal_coordinates.highres.lat.cpu(),
+            self.data.area_weights.fine,
+            self.data.horizontal_coordinates.fine.lat.cpu(),
         )
 
         for batch in self.data.loader:
-            inputs = HighResLowResPair(
-                train.squeeze_time_dim(batch.highres),
-                train.squeeze_time_dim(batch.lowres),
+            inputs = FineResCoarseResPair(
+                train.squeeze_time_dim(batch.fine),
+                train.squeeze_time_dim(batch.coarse),
             )
             with torch.no_grad():
                 outputs = self.model.run_on_batch(inputs, self.optimization)
@@ -93,7 +93,7 @@ class InterpolateModelConfig(Config):
             ),
         )
 
-        area_weights = HighResLowResPair(torch.tensor(1.0), torch.tensor(1.0))
+        area_weights = FineResCoarseResPair(torch.tensor(1.0), torch.tensor(1.0))
 
         return DownscalingModelConfig(
             module,
