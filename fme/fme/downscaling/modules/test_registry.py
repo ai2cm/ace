@@ -11,7 +11,7 @@ from fme.downscaling.modules.registry import (
 def test_module_registry_selector_build():
     n_in_channels = 3
     n_out_channels = 3
-    lowres_shape = (16, 16)
+    coarse_shape = (16, 16)
     upscale_factor = 4
 
     selector = ModuleRegistrySelector(
@@ -26,7 +26,7 @@ def test_module_registry_selector_build():
     module = selector.build(
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
-        lowres_shape=lowres_shape,
+        coarse_shape=coarse_shape,
         downscale_factor=upscale_factor,
     )
 
@@ -34,7 +34,7 @@ def test_module_registry_selector_build():
 
 
 @pytest.mark.parametrize(
-    "lowres_shape, downscale_factor, highres_shape",
+    "coarse_shape, downscale_factor, fine_shape",
     [
         pytest.param(
             (45, 90),
@@ -60,9 +60,9 @@ def test_module_registry_selector_build():
 @pytest.mark.parametrize("n_out_channels", [1, 2])
 @pytest.mark.parametrize("window_size", [1, 4])
 def test_swinir_output_shapes(
-    lowres_shape,
+    coarse_shape,
     downscale_factor,
-    highres_shape,
+    fine_shape,
     n_in_channels,
     n_out_channels,
     window_size,
@@ -75,17 +75,17 @@ def test_swinir_output_shapes(
     ).build(
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
-        lowres_shape=lowres_shape,
+        coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
     )
     batch_size = 2
-    inputs = torch.rand(batch_size, n_in_channels, *lowres_shape)
+    inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
     outputs = swinir(inputs)
-    assert outputs.shape == (batch_size, n_out_channels, *highres_shape)
+    assert outputs.shape == (batch_size, n_out_channels, *fine_shape)
 
 
 @pytest.mark.parametrize(
-    "lowres_shape, upscale_factor, highres_shape",
+    "coarse_shape, upscale_factor, fine_shape",
     [
         pytest.param(
             (4, 4),
@@ -103,9 +103,9 @@ def test_swinir_output_shapes(
     ["pixelshuffle", "pixelshuffledirect", "nearest+conv"],
 )
 def test_swinir_downscaling_options(
-    lowres_shape,
+    coarse_shape,
     upscale_factor,
-    highres_shape,
+    fine_shape,
     n_in_channels,
     n_out_channels,
     window_size,
@@ -122,17 +122,17 @@ def test_swinir_downscaling_options(
     ).build(
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
-        lowres_shape=lowres_shape,
+        coarse_shape=coarse_shape,
         downscale_factor=upscale_factor,
     )
     batch_size = 2
-    inputs = torch.rand(batch_size, n_in_channels, *lowres_shape)
+    inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
     outputs = swinir(inputs)
-    assert outputs.shape == (batch_size, n_out_channels, *highres_shape)
+    assert outputs.shape == (batch_size, n_out_channels, *fine_shape)
 
 
 @pytest.mark.parametrize(
-    "lowres_shape, upscale_factor, highres_shape",
+    "coarse_shape, upscale_factor, fine_shape",
     [
         pytest.param(
             (4, 4),
@@ -146,9 +146,9 @@ def test_swinir_downscaling_options(
 @pytest.mark.parametrize("window_size", [4])
 @pytest.mark.parametrize("upsampler", ["pixelshuffle"])
 def test_swinir_values(
-    lowres_shape,
+    coarse_shape,
     upscale_factor,
-    highres_shape,
+    fine_shape,
     n_channels,
     window_size,
     upsampler,
@@ -168,13 +168,13 @@ def test_swinir_values(
     ).build(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
-        lowres_shape=lowres_shape,
+        coarse_shape=coarse_shape,
         downscale_factor=upscale_factor,
     )
     batch_size = 2
-    inputs = torch.rand(batch_size, n_channels, *lowres_shape)
+    inputs = torch.rand(batch_size, n_channels, *coarse_shape)
     outputs = swinir(inputs)
-    assert outputs.shape == (batch_size, n_channels, *highres_shape)
+    assert outputs.shape == (batch_size, n_channels, *fine_shape)
     torch.testing.assert_allclose(
         float(torch.sum(outputs)), expected_sum, atol=1e-2, rtol=1e-3
     )
@@ -190,14 +190,14 @@ def test_interpolate(
     n_in_channels,
     n_out_channels,
     downscale_factor,
-    lowres_shape=(4, 8),
+    coarse_shape=(4, 8),
 ):
     config = InterpolateConfig(mode)
     interpolate = config.build(
-        n_in_channels, n_out_channels, lowres_shape, downscale_factor
+        n_in_channels, n_out_channels, coarse_shape, downscale_factor
     )
-    inputs = torch.rand(batch_size, n_in_channels, *lowres_shape)
+    inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
     outputs = interpolate(inputs)
-    highres_shape = tuple(s * downscale_factor for s in lowres_shape)
+    fine_shape = tuple(s * downscale_factor for s in coarse_shape)
     # Note: interpolate models ignore `n_out_channels`
-    assert outputs.shape == (batch_size, n_in_channels, *highres_shape)
+    assert outputs.shape == (batch_size, n_in_channels, *fine_shape)

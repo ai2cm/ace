@@ -5,6 +5,6 @@ T = TypeVar("T")
 
 
 @dataclasses.dataclass
-class HighResLowResPair(Generic[T]):
-    highres: T
-    lowres: T
+class FineResCoarseResPair(Generic[T]):
+    fine: T
+    coarse: T

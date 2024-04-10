@@ -15,7 +15,7 @@ class ModuleConfig(Protocol):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         ...
@@ -34,10 +34,10 @@ class SwinirConfig:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ):
-        height, width = lowres_shape
+        height, width = coarse_shape
         # TODO(gideond): The SwinIR docs appear to be wrong, dig into why these
         # need to take these values to give the right output shapes
         height = (height // downscale_factor // self.window_size + 1) * self.window_size
@@ -65,7 +65,7 @@ class ModuleRegistrySelector:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return dacite.from_dict(
@@ -75,7 +75,7 @@ class ModuleRegistrySelector:
         ).build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
-            lowres_shape=lowres_shape,
+            coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
         )
 
@@ -88,7 +88,7 @@ class PreBuiltBuilder:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return self.module
@@ -121,7 +121,7 @@ class InterpolateConfig:
         self,
         n_in_channels: int,
         n_out_channels: int,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ) -> torch.nn.Module:
         return Interpolate(downscale_factor, self.mode)

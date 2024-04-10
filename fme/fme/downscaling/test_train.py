@@ -14,7 +14,7 @@ import yaml
 
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import Trainer, main, restore_checkpoint
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 10
 
@@ -76,27 +76,27 @@ def create_test_data_on_disk(
 
 
 def data_paths_helper(tmp_path):
-    dim_sizes = HighResLowResPair[Dict[str, int]](
-        highres={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
-        lowres={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
+    dim_sizes = FineResCoarseResPair[Dict[str, int]](
+        fine={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
+        coarse={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
     )
     variable_names = ["x", "y"]
-    highres_path = tmp_path / "highres"
-    lowres_path = tmp_path / "lowres"
-    highres_path.mkdir()
-    lowres_path.mkdir()
+    fine_path = tmp_path / "fine"
+    coarse_path = tmp_path / "coarse"
+    fine_path.mkdir()
+    coarse_path.mkdir()
     time_coord = [
         cftime.DatetimeProlepticGregorian(2000, 1, 1) + datetime.timedelta(days=i)
         for i in range(NUM_TIMESTEPS)
     ]
     coords = {"time": time_coord}
     create_test_data_on_disk(
-        highres_path / "data.nc", dim_sizes.highres, variable_names, coords
+        fine_path / "data.nc", dim_sizes.fine, variable_names, coords
     )
     create_test_data_on_disk(
-        lowres_path / "data.nc", dim_sizes.lowres, variable_names, coords
+        coarse_path / "data.nc", dim_sizes.coarse, variable_names, coords
     )
-    return HighResLowResPair[str](highres=highres_path, lowres=lowres_path)
+    return FineResCoarseResPair[str](fine=fine_path, coarse=coarse_path)
 
 
 @pytest.fixture
@@ -135,14 +135,14 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
-    config["train_data"]["path_highres"] = str(train_data_paths.highres)
-    config["train_data"]["path_lowres"] = str(train_data_paths.lowres)
-    config["validation_data"]["path_highres"] = str(validation_data_paths.highres)
-    config["validation_data"]["path_lowres"] = str(validation_data_paths.lowres)
+    config["train_data"]["path_fine"] = str(train_data_paths.fine)
+    config["train_data"]["path_coarse"] = str(train_data_paths.coarse)
+    config["validation_data"]["path_fine"] = str(validation_data_paths.fine)
+    config["validation_data"]["path_coarse"] = str(validation_data_paths.coarse)
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
 
-    for res in ("highres", "lowres"):
+    for res in ("fine", "coarse"):
         for key, path in zip(("global_means_path", "global_stds_path"), stats_paths):
             config["model"]["normalization"][res][key] = str(path)
 

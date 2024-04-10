@@ -1,4 +1,4 @@
-"""Contains code relating to loading (highres, lowres) examples for downscaling."""
+"""Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
 from typing import Literal, Mapping, Optional, Sequence, Tuple
@@ -16,13 +16,13 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 @dataclasses.dataclass
 class BatchData:
-    highres: Mapping[str, torch.Tensor]
-    lowres: Mapping[str, torch.Tensor]
+    fine: Mapping[str, torch.Tensor]
+    coarse: Mapping[str, torch.Tensor]
     times: xr.DataArray
 
     @classmethod
@@ -31,10 +31,10 @@ class BatchData:
         samples: Sequence[Tuple[TensorMapping, TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
     ) -> "BatchData":
-        highres, lowres, times = zip(*samples)
+        fine, coarse, times = zip(*samples)
         return cls(
-            torch.utils.data.default_collate(highres),
-            torch.utils.data.default_collate(lowres),
+            torch.utils.data.default_collate(fine),
+            torch.utils.data.default_collate(coarse),
             xr.concat(times, sample_dim_name),
         )
 
@@ -74,17 +74,17 @@ class PairedDataset(torch.utils.data.Dataset):
 @dataclasses.dataclass
 class GriddedData:
     loader: torch.utils.data.DataLoader
-    area_weights: HighResLowResPair[torch.Tensor]
-    horizontal_coordinates: HighResLowResPair[HorizontalCoordinates]
-    img_shape: HighResLowResPair[Tuple[int, int]]
+    area_weights: FineResCoarseResPair[torch.Tensor]
+    horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
+    img_shape: FineResCoarseResPair[Tuple[int, int]]
     downscale_factor: int
     metadata: Mapping[str, VariableMetadata]
 
 
 @dataclasses.dataclass
 class DataLoaderConfig:
-    path_highres: str
-    path_lowres: str
+    path_fine: str
+    path_coarse: str
     data_type: Literal["xarray", "ensemble_xarray"]
     batch_size: int
     num_data_workers: int
@@ -98,7 +98,7 @@ class DataLoaderConfig:
         if dist is None:
             dist = Distributed.get_instance()
 
-        dataset_highres, dataset_lowres = [
+        dataset_fine, dataset_coarse = [
             get_dataset(
                 fme.core.data_loading.config.DataLoaderConfig(
                     dataset=fme.core.data_loading.config.XarrayDataConfig(
@@ -110,10 +110,10 @@ class DataLoaderConfig:
                 ),
                 requirements=requirements,
             )
-            for path in (self.path_highres, self.path_lowres)
+            for path in (self.path_fine, self.path_coarse)
         ]
 
-        dataset = PairedDataset(dataset_highres, dataset_lowres)
+        dataset = PairedDataset(dataset_fine, dataset_coarse)
 
         sampler: Optional[DistributedSampler] = (
             DistributedSampler(dataset, shuffle=train)
@@ -132,41 +132,39 @@ class DataLoaderConfig:
             collate_fn=BatchData.from_sample_tuples,
         )
 
-        area_weights = HighResLowResPair(
-            dataset_highres.area_weights, dataset_lowres.area_weights
+        area_weights = FineResCoarseResPair(
+            dataset_fine.area_weights, dataset_coarse.area_weights
         )
-        horizontal_coordinates = HighResLowResPair(
-            highres=dataset_highres.horizontal_coordinates,
-            lowres=dataset_lowres.horizontal_coordinates,
+        horizontal_coordinates = FineResCoarseResPair(
+            fine=dataset_fine.horizontal_coordinates,
+            coarse=dataset_coarse.horizontal_coordinates,
         )
 
-        example_highres, _ = dataset_highres[0]
-        example_lowres, _ = dataset_lowres[0]
-        highres_shape = next(iter(example_highres.values())).shape[-2:]
-        lowres_shape = next(iter(example_lowres.values())).shape[-2:]
-        img_shape = HighResLowResPair(highres_shape, lowres_shape)
+        example_fine, _ = dataset_fine[0]
+        example_coarse, _ = dataset_coarse[0]
+        fine_shape = next(iter(example_fine.values())).shape[-2:]
+        coarse_shape = next(iter(example_coarse.values())).shape[-2:]
+        img_shape = FineResCoarseResPair(fine_shape, coarse_shape)
 
-        highres_height, highres_width = highres_shape
-        lowres_height, lowres_width = lowres_shape
+        fine_height, fine_width = fine_shape
+        coarse_height, coarse_width = coarse_shape
 
         assert (
-            highres_height % lowres_height == 0
-        ), "Highres height must be divisible by lowres height"
+            fine_height % coarse_height == 0
+        ), "Fine resolution height must be divisible by coarse resolution height"
         assert (
-            highres_width % lowres_width == 0
-        ), "Highres width must be divisible by lowres width"
+            fine_width % coarse_width == 0
+        ), "Fine resolution width must be divisible by coarse resolution width"
 
-        downscale_factor_height = highres_height // lowres_height
-        downscale_factor_width = highres_width // lowres_width
+        downscale_factor_height = fine_height // coarse_height
+        downscale_factor_width = fine_width // coarse_width
 
         assert (
             downscale_factor_height == downscale_factor_width
         ), "Aspect ratio must match"
 
-        assert (
-            dataset_highres.metadata == dataset_lowres.metadata
-        ), "Metadata must match."
-        metadata = dataset_highres.metadata
+        assert dataset_fine.metadata == dataset_coarse.metadata, "Metadata must match."
+        metadata = dataset_fine.metadata
 
         return GriddedData(
             dataloader,

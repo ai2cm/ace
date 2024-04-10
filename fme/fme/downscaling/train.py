@@ -17,7 +17,7 @@ from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
 from fme.downscaling.models import DownscalingModelConfig, Model
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 from fme.fcn_training.train import count_parameters
 from fme.fcn_training.train_config import LoggingConfig
 from fme.fcn_training.utils import logging_utils
@@ -68,7 +68,7 @@ class Trainer:
         self.max_epochs = max_epochs
         self.checkpoint_dir = checkpoint_dir
         self.area_weights = self.train_data.area_weights
-        self.latitudes = self.train_data.horizontal_coordinates.highres.lat.cpu()
+        self.latitudes = self.train_data.horizontal_coordinates.fine.lat.cpu()
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
@@ -86,12 +86,12 @@ class Trainer:
             self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
 
     def train_one_epoch(self) -> None:
-        train_aggregator = Aggregator(self.area_weights.highres.cpu(), self.latitudes)
+        train_aggregator = Aggregator(self.area_weights.fine.cpu(), self.latitudes)
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
-            inputs = HighResLowResPair(
-                squeeze_time_dim(batch.highres), squeeze_time_dim(batch.lowres)
+            inputs = FineResCoarseResPair(
+                squeeze_time_dim(batch.fine), squeeze_time_dim(batch.coarse)
             )
             outputs = self.model.run_on_batch(inputs, self.optimization)
             self.num_batches_seen += 1
@@ -113,13 +113,13 @@ class Trainer:
     def valid_one_epoch(self) -> float:
         with torch.no_grad():
             validation_aggregator = Aggregator(
-                self.area_weights.highres.cpu(), self.latitudes
+                self.area_weights.fine.cpu(), self.latitudes
             )
             batch: BatchData
             for batch in self.validation_data.loader:
-                inputs = HighResLowResPair(
-                    squeeze_time_dim(batch.highres),
-                    squeeze_time_dim(batch.lowres),
+                inputs = FineResCoarseResPair(
+                    squeeze_time_dim(batch.fine),
+                    squeeze_time_dim(batch.coarse),
                 )
                 outputs = self.model.run_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
@@ -204,7 +204,7 @@ class TrainerConfig:
         )
 
         downscaling_model = self.model.build(
-            train_data.img_shape.lowres,
+            train_data.img_shape.coarse,
             train_data.downscale_factor,
             train_data.area_weights,
         )
