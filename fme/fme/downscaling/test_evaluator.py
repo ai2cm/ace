@@ -21,8 +21,8 @@ def create_evaluator_config(tmp_path):
     experiment_dir.mkdir()
     with open(file_path, "r") as file:
         config = yaml.safe_load(file)
-    config["data"]["path_highres"] = str(paths.highres)
-    config["data"]["path_lowres"] = str(paths.lowres)
+    config["data"]["path_fine"] = str(paths.fine)
+    config["data"]["path_coarse"] = str(paths.coarse)
     config["experiment_dir"] = str(experiment_dir)
     config["model"]["mode"] = "nearest"
     config["model"]["in_names"] = ["x", "y"]

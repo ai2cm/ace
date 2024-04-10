@@ -10,8 +10,8 @@ model:
     - "place"
     - "holder"
 data:
-  path_highres: /will/be/overwritten
-  path_lowres: /will/be/overwritten
+  path_fine: /will/be/overwritten
+  path_coarse: /will/be/overwritten
   data_type: "xarray"
   batch_size: 2
   num_data_workers: 2

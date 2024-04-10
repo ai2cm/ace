@@ -9,14 +9,14 @@ logging:
 optimization:
   lr: 0.0001
 train_data:
-  path_highres: /will/be/overwritten
-  path_lowres: /will/be/overwritten
+  path_fine: /will/be/overwritten
+  path_coarse: /will/be/overwritten
   data_type: "xarray"
   batch_size: 2
   num_data_workers: 2
 validation_data:
-  path_highres: /will/be/overwritten
-  path_lowres: /will/be/overwritten
+  path_fine: /will/be/overwritten
+  path_coarse: /will/be/overwritten
   data_type: "xarray"
   batch_size: 2
   num_data_workers: 2
@@ -31,10 +31,10 @@ model:
       embed_dim: 1
       num_heads: [1]
   normalization:
-    highres:
+    fine:
       global_means_path: /will/be/overwritten
       global_stds_path: /will/be/overwritten
-    lowres:
+    coarse:
       global_means_path: /will/be/overwritten
       global_stds_path: /will/be/overwritten
   in_names:

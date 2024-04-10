@@ -13,7 +13,7 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.typing_ import HighResLowResPair
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 @dataclasses.dataclass
@@ -31,15 +31,15 @@ def _tensor_mapping_to_device(
 
 @dataclasses.dataclass
 class PairedNormalizationConfig:
-    highres: NormalizationConfig
-    lowres: NormalizationConfig
+    fine: NormalizationConfig
+    coarse: NormalizationConfig
 
     def build(
         self, in_names: List[str], out_names: List[str]
-    ) -> HighResLowResPair[StandardNormalizer]:
-        return HighResLowResPair[StandardNormalizer](
-            lowres=self.lowres.build(in_names),
-            highres=self.highres.build(out_names),
+    ) -> FineResCoarseResPair[StandardNormalizer]:
+        return FineResCoarseResPair[StandardNormalizer](
+            coarse=self.coarse.build(in_names),
+            fine=self.fine.build(out_names),
         )
 
 
@@ -53,16 +53,16 @@ class DownscalingModelConfig:
 
     def build(
         self,
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        area_weights: HighResLowResPair[torch.Tensor],
+        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.highres)
+        loss = self.loss.build(area_weights.fine)
         module = self.module.build(
             n_in_channels=len(self.in_names),
             n_out_channels=len(self.out_names),
-            lowres_shape=lowres_shape,
+            coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
         )
         return Model(
@@ -71,7 +71,7 @@ class DownscalingModelConfig:
             loss,
             self.in_names,
             self.out_names,
-            lowres_shape,
+            coarse_shape,
             downscale_factor,
             self,
         )
@@ -95,15 +95,15 @@ class Model:
     def __init__(
         self,
         module: torch.nn.Module,
-        normalizer: HighResLowResPair[StandardNormalizer],
+        normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
         in_names: List[str],
         out_names: List[str],
-        lowres_shape: Tuple[int, int],
+        coarse_shape: Tuple[int, int],
         downscale_factor: int,
         config: DownscalingModelConfig,
     ) -> None:
-        self.lowres_shape = lowres_shape
+        self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
         self.module = module.to(get_device())
         self.normalizer = normalizer
@@ -122,24 +122,24 @@ class Model:
 
     def run_on_batch(
         self,
-        batch: HighResLowResPair[TensorMapping],
+        batch: FineResCoarseResPair[TensorMapping],
         optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         channel_axis = -3
-        lowres, highres = _tensor_mapping_to_device(
-            batch.lowres, get_device()
-        ), _tensor_mapping_to_device(batch.highres, get_device())
+        coarse, fine = _tensor_mapping_to_device(
+            batch.coarse, get_device()
+        ), _tensor_mapping_to_device(batch.fine, get_device())
         inputs_norm = self.in_packer.pack(
-            self.normalizer.lowres.normalize(dict(lowres)), axis=channel_axis
+            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
         )
         targets_norm = self.out_packer.pack(
-            self.normalizer.highres.normalize(dict(highres)), axis=channel_axis
+            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
         )
         predicted_norm = self.module(inputs_norm)
         loss = self.loss(predicted_norm, targets_norm)
         optimizer.step_weights(loss)
-        target = filter_tensor_mapping(batch.highres, set(self.out_packer.names))
-        prediction = self.normalizer.highres.denormalize(
+        target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        prediction = self.normalizer.fine.denormalize(
             self.out_packer.unpack(predicted_norm, axis=channel_axis)
         )
         return ModelOutputs(prediction=prediction, target=target, loss=loss)
@@ -148,17 +148,17 @@ class Model:
         return {
             "config": self.config.get_state(),
             "module": self.module.state_dict(),
-            "lowres_shape": self.lowres_shape,
+            "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
         }
 
     @classmethod
     def from_state(
-        cls, state: Mapping[str, Any], area_weights: HighResLowResPair[torch.Tensor]
+        cls, state: Mapping[str, Any], area_weights: FineResCoarseResPair[torch.Tensor]
     ) -> "Model":
         config = DownscalingModelConfig.from_state(state["config"])
         model = config.build(
-            state["lowres_shape"], state["downscale_factor"], area_weights
+            state["coarse_shape"], state["downscale_factor"], area_weights
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
