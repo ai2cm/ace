@@ -1,7 +1,9 @@
 import dataclasses
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
+
+from fme.core.typing_ import TensorDict
 
 from .climate_data import ClimateData
 from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER, TIMESTEP_SECONDS
@@ -89,10 +91,10 @@ class Ocean:
 
     def __call__(
         self,
-        target_data: Dict[str, torch.Tensor],
-        input_data: Dict[str, torch.Tensor],
-        gen_data: Dict[str, torch.Tensor],
-    ) -> Dict[str, torch.Tensor]:
+        target_data: TensorDict,
+        input_data: TensorDict,
+        gen_data: TensorDict,
+    ) -> TensorDict:
         """
         Args:
             target_data: Denormalized data that includes mask and forcing data. Assumed

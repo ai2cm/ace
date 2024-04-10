@@ -1,7 +1,9 @@
 import dataclasses
-from typing import Dict, List
+from typing import List
 
 import torch
+
+from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
@@ -70,10 +72,10 @@ class Prescriber:
 
     def __call__(
         self,
-        mask_data: Dict[str, torch.Tensor],
-        gen: Dict[str, torch.Tensor],
-        target: Dict[str, torch.Tensor],
-    ) -> Dict[str, torch.Tensor]:
+        mask_data: TensorDict,
+        gen: TensorDict,
+        target: TensorDict,
+    ) -> TensorDict:
         """
         Args:
             data: Dictionary of data containing the mask variable.

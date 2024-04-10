@@ -9,6 +9,7 @@ from fme.core.aggregator.plotting import plot_paneled_data
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorMapping
 
 
 class SeasonalAggregator:
@@ -26,8 +27,8 @@ class SeasonalAggregator:
     def record_batch(
         self,
         time: xr.DataArray,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
     ):
         """Record a batch of data for computing time variability statistics."""
         target_data = {name: value.cpu() for name, value in target_data.items()}
@@ -226,7 +227,7 @@ def _reduce_datasets(dist: Distributed, dataset: xr.Dataset) -> Optional[xr.Data
 
 
 @torch.no_grad()
-def _to_dataset(data: Mapping[str, torch.Tensor], time: xr.DataArray) -> xr.Dataset:
+def _to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
     """Convert a dictionary of data to an xarray dataset."""
     assert time.dims == ("sample", "time")  # must be consistent with this module
     data_vars = {}

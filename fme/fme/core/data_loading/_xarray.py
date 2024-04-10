@@ -12,6 +12,7 @@ import xarray as xr
 
 import fme
 from fme.core import metrics
+from fme.core.typing_ import TensorDict
 from fme.core.winds import lon_lat_to_xyz
 
 from .config import XarrayDataConfig
@@ -163,7 +164,7 @@ class StaticDerivedData:
         self._y: Optional[torch.Tensor] = None
         self._z: Optional[torch.Tensor] = None
 
-    def _get_xyz(self) -> Dict[str, torch.Tensor]:
+    def _get_xyz(self) -> TensorDict:
         if self._x is None or self._y is None or self._z is None:
             lats, lons = np.broadcast_arrays(self._lats[:, None], self._lons[None, :])
             x, y, z = lon_lat_to_xyz(lons, lats)
@@ -310,7 +311,7 @@ class XarrayDataset(Dataset):
             mask_and_scale=False,
         )
 
-    def __getitem__(self, idx: int) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
+    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
 
         Args:
@@ -325,7 +326,7 @@ class XarrayDataset(Dataset):
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> Tuple[Dict[str, torch.Tensor], xr.DataArray]:
+    ) -> Tuple[TensorDict, xr.DataArray]:
         input_file_idx, input_local_idx = get_file_local_index(
             time_slice.start, self.start_indices
         )
@@ -352,7 +353,7 @@ class XarrayDataset(Dataset):
             times_segments.append(get_times(ds, start, n_steps))
             del ds
 
-        tensors: Dict[str, torch.Tensor] = {}
+        tensors: TensorDict = {}
         for n, tensor_list in arrays.items():
             tensors[n] = torch.cat(tensor_list)
         del arrays

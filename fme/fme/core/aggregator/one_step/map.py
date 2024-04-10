@@ -4,6 +4,7 @@ import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
@@ -35,17 +36,17 @@ class MapAggregator:
         else:
             self._metadata = metadata
         self._n_batches = 0
-        self._target_data: Dict[str, torch.Tensor] = {}
-        self._gen_data: Dict[str, torch.Tensor] = {}
+        self._target_data: TensorDict = {}
+        self._gen_data: TensorDict = {}
 
     @torch.no_grad()
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         self._loss = loss
         for name in target_data:

@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -7,12 +7,13 @@ import xarray as xr
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 wandb = WandB.get_instance()
 
 
-def _get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def _get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
     raise ValueError("No data in gen_data")
@@ -20,9 +21,9 @@ def _get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
 
 @dataclasses.dataclass
 class _ErrorData:
-    rmse: Dict[str, torch.Tensor]
-    min_err: Dict[str, torch.Tensor]
-    max_err: Dict[str, torch.Tensor]
+    rmse: TensorDict
+    min_err: TensorDict
+    max_err: TensorDict
 
 
 class _ErrorVideoData:
@@ -31,9 +32,9 @@ class _ErrorVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._mse_data: Optional[Dict[str, torch.Tensor]] = None
-        self._min_err_data: Optional[Dict[str, torch.Tensor]] = None
-        self._max_err_data: Optional[Dict[str, torch.Tensor]] = None
+        self._mse_data: Optional[TensorDict] = None
+        self._min_err_data: Optional[TensorDict] = None
+        self._max_err_data: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -41,8 +42,8 @@ class _ErrorVideoData:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -111,8 +112,8 @@ class _MeanVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._target_data: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_data: Optional[Dict[str, torch.Tensor]] = None
+        self._target_data: Optional[TensorDict] = None
+        self._gen_data: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -120,8 +121,8 @@ class _MeanVideoData:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -149,7 +150,7 @@ class _MeanVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def get(self) -> Tuple[TensorDict, TensorDict]:
         if self._gen_data is None or self._target_data is None:
             raise RuntimeError("No data recorded")
         target_data = {}
@@ -169,10 +170,10 @@ class _VarianceVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._target_means: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_means: Optional[Dict[str, torch.Tensor]] = None
-        self._target_squares: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_squares: Optional[Dict[str, torch.Tensor]] = None
+        self._target_means: Optional[TensorDict] = None
+        self._gen_means: Optional[TensorDict] = None
+        self._target_squares: Optional[TensorDict] = None
+        self._gen_squares: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -180,8 +181,8 @@ class _VarianceVideoData:
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -221,7 +222,7 @@ class _VarianceVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def get(self) -> Tuple[TensorDict, TensorDict]:
         if (
             self._gen_means is None
             or self._target_means is None
@@ -248,7 +249,7 @@ class _VarianceVideoData:
 
 
 def _initialize_video_from_batch(
-    batch: Mapping[str, torch.Tensor], n_timesteps: int, fill_value: float = 0.0
+    batch: TensorMapping, n_timesteps: int, fill_value: float = 0.0
 ):
     """
     Initialize a video of the same shape as the batch, but with all valeus equal
@@ -318,10 +319,10 @@ class VideoAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
-        gen_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: Optional[TensorMapping] = None,
+        gen_data_norm: Optional[TensorMapping] = None,
         i_time_start: int = 0,
     ):
         del target_data_norm, gen_data_norm  # intentionally unused

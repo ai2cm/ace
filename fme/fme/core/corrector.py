@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Literal, Mapping, Optional
+from typing import Literal, Optional
 
 import torch
 
@@ -8,6 +8,7 @@ from fme.core.climate_data import ClimateData
 from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -109,8 +110,8 @@ class Corrector:
 
     def __call__(
         self,
-        input_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
     ):
         if self._config.conserve_dry_air:
             gen_data = _force_conserve_dry_air(
@@ -136,11 +137,11 @@ class Corrector:
 
 
 def _force_conserve_dry_air(
-    input_data: Mapping[str, torch.Tensor],
-    gen_data: Mapping[str, torch.Tensor],
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
     area: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
-) -> Dict[str, torch.Tensor]:
+) -> TensorDict:
     """
     Update the generated data to conserve dry air.
 
@@ -193,9 +194,9 @@ def _force_conserve_dry_air(
 
 
 def _force_zero_global_mean_moisture_advection(
-    gen_data: Mapping[str, torch.Tensor],
+    gen_data: TensorMapping,
     area: torch.Tensor,
-) -> Dict[str, torch.Tensor]:
+) -> TensorDict:
     """
     Update the generated data so advection conserves moisture.
 
@@ -221,8 +222,8 @@ def _force_zero_global_mean_moisture_advection(
 
 
 def _force_conserve_moisture(
-    input_data: Mapping[str, torch.Tensor],
-    gen_data: Mapping[str, torch.Tensor],
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
     area: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
     terms_to_modify: Literal[
@@ -231,7 +232,7 @@ def _force_conserve_moisture(
         "advection_and_precipitation",
         "advection_and_evaporation",
     ],
-) -> Dict[str, torch.Tensor]:
+) -> TensorDict:
     """
     Update the generated data to conserve moisture.
 

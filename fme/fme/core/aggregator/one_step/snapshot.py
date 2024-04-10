@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
@@ -44,10 +45,10 @@ class SnapshotAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         self._loss = loss
         self._target_data = target_data
