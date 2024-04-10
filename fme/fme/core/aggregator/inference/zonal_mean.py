@@ -9,6 +9,7 @@ import xarray as xr
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image, WandB
 
 from ..plotting import get_cmap_limits, plot_imshow
@@ -75,8 +76,8 @@ class ZonalMeanAggregator:
         else:
             self._metadata = metadata
 
-        self._target_data: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_data: Optional[Dict[str, torch.Tensor]] = None
+        self._target_data: Optional[TensorDict] = None
+        self._gen_data: Optional[TensorDict] = None
         self._n_batches = torch.zeros(
             n_timesteps, dtype=torch.int32, device=get_device()
         )[
@@ -86,10 +87,10 @@ class ZonalMeanAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
         i_time_start: int,
     ):
         lon_dim = 3
@@ -182,8 +183,8 @@ class ZonalMeanAggregator:
 
     @staticmethod
     def _initialize_zeros_zonal_mean_from_batch(
-        data: Mapping[str, torch.Tensor], n_timesteps: int, lat_dim: int = 2
-    ) -> Dict[str, torch.Tensor]:
+        data: TensorMapping, n_timesteps: int, lat_dim: int = 2
+    ) -> TensorDict:
         return {
             name: torch.zeros(
                 (tensor.shape[0], n_timesteps, tensor.shape[lat_dim]),

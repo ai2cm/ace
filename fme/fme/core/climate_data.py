@@ -1,12 +1,13 @@
 import re
 from types import MappingProxyType
-from typing import Dict, List, Mapping, Union
+from typing import List, Mapping, Union
 
 import torch
 
 from fme.core import metrics
 from fme.core.constants import LATENT_HEAT_OF_VAPORIZATION
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.typing_ import TensorDict, TensorMapping
 
 CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
     {
@@ -56,7 +57,7 @@ class ClimateData:
 
     def __init__(
         self,
-        climate_data: Mapping[str, torch.Tensor],
+        climate_data: TensorMapping,
         climate_field_name_prefixes: Mapping[
             str, List[str]
         ] = CLIMATE_FIELD_NAME_PREFIXES,
@@ -126,7 +127,7 @@ class ClimateData:
         self._data[prefix] = value
 
     @property
-    def data(self) -> Dict[str, torch.Tensor]:
+    def data(self) -> TensorDict:
         """Mapping from field names to tensors."""
         return self._data
 

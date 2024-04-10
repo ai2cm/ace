@@ -1,5 +1,5 @@
 import dataclasses
-from typing import List, Mapping, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import cftime
 import dask
@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
+
+from fme.core.typing_ import TensorMapping
 
 
 def load_series_data(
@@ -69,13 +71,13 @@ class BatchData:
 
     """
 
-    data: Mapping[str, torch.Tensor]
+    data: TensorMapping
     times: xr.DataArray
 
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[Tuple[Mapping[str, torch.Tensor], xr.DataArray]],
+        samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
     ) -> "BatchData":
         """

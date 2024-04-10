@@ -4,6 +4,7 @@ import torch
 
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
+from fme.core.typing_ import TensorMapping
 
 from .map import MapAggregator
 from .reduced import MeanAggregator
@@ -11,16 +12,16 @@ from .snapshot import SnapshotAggregator
 
 
 class _Aggregator(Protocol):
-    def get_logs(self, label: str) -> Mapping[str, torch.Tensor]:
+    def get_logs(self, label: str) -> TensorMapping:
         ...
 
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ) -> None:
         ...
 
@@ -50,10 +51,10 @@ class OneStepAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         if len(target_data) == 0:
             raise ValueError("No data in target_data")

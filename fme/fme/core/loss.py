@@ -6,6 +6,7 @@ import torch
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.packer import Packer
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from .climate_data import ClimateData, compute_dry_air_absolute_differences
 
@@ -26,8 +27,8 @@ class MappingLoss:
 
     def __call__(
         self,
-        predict_dict: Dict[str, torch.Tensor],
-        target_dict: Dict[str, torch.Tensor],
+        predict_dict: TensorDict,
+        target_dict: TensorDict,
     ):
         predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim).to(
             dtype=torch.float
@@ -40,7 +41,7 @@ class MappingLoss:
 
 
 def get_dry_air_nonconservation(
-    data: Mapping[str, torch.Tensor],
+    data: TensorMapping,
     area_weights: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
 ):
@@ -111,9 +112,7 @@ class ConservationLoss:
         self._area_weights = area_weights.to(get_device())
         self._sigma_coordinates = sigma_coordinates.to(get_device())
 
-    def __call__(
-        self, gen_data: Mapping[str, torch.Tensor]
-    ) -> Tuple[Dict[str, torch.Tensor], torch.Tensor]:
+    def __call__(self, gen_data: TensorMapping) -> Tuple[TensorDict, torch.Tensor]:
         """
         Compute loss and metrics related to conservation.
 

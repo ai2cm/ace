@@ -7,6 +7,7 @@ import torch
 import torch.jit
 
 from fme.core.device import get_device
+from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
@@ -71,16 +72,16 @@ class StandardNormalizer:
 
     def __init__(
         self,
-        means: Dict[str, torch.Tensor],
-        stds: Dict[str, torch.Tensor],
+        means: TensorDict,
+        stds: TensorDict,
     ):
         self.means = means
         self.stds = stds
 
-    def normalize(self, tensors: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def normalize(self, tensors: TensorDict) -> TensorDict:
         return _normalize(tensors, means=self.means, stds=self.stds)
 
-    def denormalize(self, tensors: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def denormalize(self, tensors: TensorDict) -> TensorDict:
         return _denormalize(tensors, means=self.means, stds=self.stds)
 
     def get_state(self):
@@ -110,10 +111,10 @@ class StandardNormalizer:
 
 @torch.jit.script
 def _normalize(
-    tensors: Dict[str, torch.Tensor],
-    means: Dict[str, torch.Tensor],
-    stds: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+    tensors: TensorDict,
+    means: TensorDict,
+    stds: TensorDict,
+) -> TensorDict:
     return {
         k: (t - means[k]) / stds[k] if k in means.keys() else t
         for k, t in tensors.items()
@@ -122,10 +123,10 @@ def _normalize(
 
 @torch.jit.script
 def _denormalize(
-    tensors: Dict[str, torch.Tensor],
-    means: Dict[str, torch.Tensor],
-    stds: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+    tensors: TensorDict,
+    means: TensorDict,
+    stds: TensorDict,
+) -> TensorDict:
     return {
         k: t * stds[k] + means[k] if k in means.keys() else t
         for k, t in tensors.items()
