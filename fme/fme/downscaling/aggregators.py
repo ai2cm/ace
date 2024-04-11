@@ -165,9 +165,8 @@ class ZonalPowerSpectrum:
         fig = plt.figure()
         plt.loglog(spectrum)
         plt.grid()
-        ret = self._wandb.Image(fig)
         plt.close(fig)
-        return ret
+        return fig
 
     def get_wandb(self) -> Mapping[str, Any]:
         aggregated = self._mean_aggregator.get_wandb()
