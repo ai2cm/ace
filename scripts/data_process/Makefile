@@ -65,7 +65,7 @@ shield_c24_4deg_climSST_stats_beaker_dataset:
 	--input-url gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset/ic_0001.zarr \
 	--start-date 2021-01-01 \
 	--end-date 2030-12-31 \
-	--name "shield-c24-4deg-8layer-ic0001-stats-scaling-all-years-v2" \
+	--name "2024-04-08-shield-c24-4deg-8layer-ic0001-stats-scaling-all-years-v3" \
 	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
 
 .PHONY: shield_c96_4deg_climSST_dataset
