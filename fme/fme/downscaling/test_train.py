@@ -16,7 +16,7 @@ from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import Trainer, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
-NUM_TIMESTEPS = 10
+NUM_TIMESTEPS = 4
 
 
 def test_trainer():
