@@ -5,6 +5,7 @@
 import os
 
 import click
+import numpy as np
 import xarray as xr
 from dask.diagnostics import ProgressBar
 
@@ -49,9 +50,7 @@ def add_history_attr(ds, input_zarr, start_date, end_date):
     )
 
 
-def compute_geometric_residual_scaling(
-    ds, centering, scaling, dims=["time", "grid_xt", "grid_yt"]
-):
+def compute_geometric_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
     """For some variables (e.g. surface pressure), normalization based on the
     'full field' leads to residuals that are very small and therefore don't
     contribute much to loss function. Here we rescale based on the residual
@@ -59,20 +58,20 @@ def compute_geometric_residual_scaling(
     https://github.com/ai2cm/explore/blob/master/oliwm/2023-04-16-fme-analysis/2023-04-27-compute-new-scaling-dataset.ipynb  # noqa: E501
     for more details.
     """
-    norm = (ds - centering) / scaling
-    norm_residual = norm.diff("time")
-    norm_residual_stddev = norm_residual.std(dim=dims)
+    residual = ds.diff("time")
+    residual_stddev = residual.std(dim=dims)
     # We want to multiply the global_stds by the above norm_residual_stddev variable
     # so that the residuals are more evenly weighted. However, we don't want to
     # make the standard deviations of the normalized inputs/outputs very different from
     # 1. Therefore we rescale the norm_residual_stddev variable so that its geometric
     # mean is 1. Choice of using geometric mean is somewhat arbitrary.
-    as_variable_array = norm_residual_stddev.to_array()
+    # must have float64 for .prod as variables can have very different scales
+    as_variable_array = residual_stddev.to_array().astype(np.float64)
     n_variables = as_variable_array.sizes["variable"]
-    geometric_mean = as_variable_array.prod(dim="variable") ** (1 / n_variables)
-    norm_residual_stddev /= geometric_mean
+    geometric_mean = np.exp(np.log(as_variable_array).sum(dim="variable") / n_variables)
+    residual_stddev /= geometric_mean
     # rescale standard deviations so that residuals are evenly weighted in loss
-    return scaling * norm_residual_stddev
+    return residual_stddev
 
 
 def compute_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
@@ -111,10 +110,8 @@ def main(input_zarr, output_directory, start_date, end_date, data_type, debug):
     time_means = ds.mean(dim="time")
 
     ds_time_varying = ds.drop_vars(time_invariant_variables)
-    centering_time_varying = centering.drop_vars(time_invariant_variables)
-    scaling_time_varying = scaling_full_field.drop_vars(time_invariant_variables)
     geometric_residual_scaling = compute_geometric_residual_scaling(
-        ds_time_varying, centering_time_varying, scaling_time_varying, dims
+        ds_time_varying, dims
     )
     # residual scaling still uses full-field scales for time invariant data
     scaling_geometric_residual = scaling_full_field.copy()
