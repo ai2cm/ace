@@ -23,7 +23,16 @@ from .data_typing import (
     VariableMetadata,
 )
 from .requirements import DataRequirements
-from .utils import get_lons_and_lats, get_times, load_series_data
+from .utils import (
+    as_broadcasted_tensor,
+    get_lons_and_lats,
+    get_times,
+    infer_horizontal_dimension_names,
+    load_series_data,
+)
+
+SLICE_NONE = slice(None)
+
 
 VariableNames = namedtuple(
     "VariableNames",
@@ -361,9 +370,12 @@ class XarrayDataset(Dataset):
 
         # load time-invariant variables from first dataset
         ds = self._open_file(idxs[0])
+        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+        dims = ("time", lat_dim, lon_dim)
+        shape = (total_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
         for name in self.time_invariant_names:
-            tensor = torch.as_tensor(ds[name].values)
-            tensors[name] = tensor.repeat((total_steps, 1, 1))
+            variable = ds[name].variable
+            tensors[name] = as_broadcasted_tensor(variable, dims, shape)
 
         # load static derived variables
         for name in self.static_derived_names:
