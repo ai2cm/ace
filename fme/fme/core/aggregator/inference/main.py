@@ -1,5 +1,4 @@
 import dataclasses
-import logging
 from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
@@ -212,10 +211,7 @@ class InferenceAggregator:
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
         for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
-            try:
-                logs.update(time_dependent_aggregator.get_logs(label=name))
-            except Exception as e:
-                logging.error(f"Exception raised in get_logs in {name} aggregator: {e}")
+            logs.update(time_dependent_aggregator.get_logs(label=name))
         logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 

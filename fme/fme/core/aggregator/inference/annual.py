@@ -268,7 +268,7 @@ def _gather_sample_datasets(
         gather_list, dim=1  # gather along sample, first dims are [name, sample]
     ).cpu()
     dataset_out = xr.Dataset(
-        {name: (["sample", "time"], tensor[i]) for i, name in enumerate(names)},
+        {name: (["sample", "year"], tensor[i]) for i, name in enumerate(names)},
         coords=dataset.coords,
     )
     return dataset_out
