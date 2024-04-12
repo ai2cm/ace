@@ -7,6 +7,7 @@ from typing import Dict, Iterable, List, Union
 import cftime
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import (
@@ -17,6 +18,12 @@ from fme.core.data_loading._xarray import (
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.utils import (
+    as_broadcasted_tensor,
+    infer_horizontal_dimension_names,
+)
+
+SLICE_NONE = slice(None)
 
 
 @dataclasses.dataclass
@@ -82,6 +89,7 @@ def _get_data(
         np.random.randn(n_lat, n_lon).astype(np.float32),
         dims=("lat", "lon"),
     )
+    constant_scalar_var = xr.DataArray(1.0).astype(np.float32)
     ak = {f"ak_{i}": float(i) for i in range(n_levels)}
     bk = {f"bk_{i}": float(i + 1) for i in range(n_levels)}
     tmpdir = tmp_path_factory.mktemp(dirname)
@@ -99,7 +107,13 @@ def _get_data(
             data = np.random.randn(len(times), n_lat, n_lon).astype(np.float32)
             data_vars[varname] = xr.DataArray(data, dims=("time", "lat", "lon"))
 
+        data_varying_scalar = np.random.randn(len(times)).astype(np.float32)
+        data_vars["varying_scalar_var"] = xr.DataArray(
+            data_varying_scalar, dims=("time",)
+        )
+
         data_vars["constant_var"] = constant_var
+        data_vars["constant_scalar_var"] = constant_scalar_var
         if i == 0 and has_ragged_var:
             rand_data = np.random.randn(n_lat, n_lon).astype(np.float32)
             data_vars["ragged_var"] = xr.DataArray(
@@ -135,8 +149,8 @@ def _get_data(
     start_indices = get_cumulative_timesteps(filenames)
 
     variable_names = VariableNames(
-        time_dependent_names=("foo", "bar"),
-        time_invariant_names=("constant_var",),
+        time_dependent_names=("foo", "bar", "varying_scalar_var"),
+        time_invariant_names=("constant_var", "constant_scalar_var"),
         initial_condition_names=initial_condition_names,
     )
     return MockData(tmpdir, obs_times, start_times, start_indices, variable_names)
@@ -226,11 +240,16 @@ def _test_monthly_values(
     with xr.open_mfdataset(mock_data.tmpdir.glob("*.nc"), use_cftime=True) as ds:
         target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
         xr.testing.assert_equal(times, target_times)
+        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+        dims = ("time", lat_dim, lon_dim)
+        shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
+        time_slice = slice(global_idx, global_idx + 2)
         for var_name in var_names.time_resolved_names:
-            data = arrays[var_name].detach().numpy()
+            data = arrays[var_name]
             assert data.shape[0] == 2
-            target_data = ds[var_name][global_idx : global_idx + 2, :, :].values
-            assert np.all(data == target_data)
+            variable = ds[var_name].variable
+            target_data = as_broadcasted_tensor(variable, dims, shape, time_slice)
+            assert torch.equal(data, target_data)
 
         for var_name in mock_data.var_names.initial_condition_names:
             data = arrays[var_name].detach().numpy()
@@ -322,17 +341,20 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
             )
             dataset = XarrayDataset(config=config, requirements=requirements)
             assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
+            lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+            dims = ("time", lat_dim, lon_dim)
+            shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
+            time_slice = slice(global_idx, global_idx + n_steps)
             for varname in mock_data.var_names.time_resolved_names:
-                target_data = ds[varname][
-                    global_idx : global_idx + n_steps, :, :
-                ].values
+                variable = ds[varname].variable
+                target_data = as_broadcasted_tensor(variable, dims, shape, time_slice)
                 target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
                     "time"
                 )
                 data, times = dataset[global_idx]
-                data = data[varname].detach().numpy()
+                data = data[varname]
                 assert data.shape[0] == n_steps
-                assert np.all(data == target_data)
+                assert torch.equal(data, target_data)
                 xr.testing.assert_equal(times, target_times)
 
 
@@ -350,6 +372,7 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     data = get_data_loader(config=config, train=False, requirements=requirements)
     batch, _ = data.loader.dataset[0]
     assert batch["constant_var"].shape[0] == 15
+    assert batch["constant_scalar_var"].shape == (15, 4, 8)
 
 
 def _get_repeat_dataset(
