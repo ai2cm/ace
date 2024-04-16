@@ -99,10 +99,12 @@ class InlineInferenceConfig:
                 f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
             )
         dist = Distributed.get_instance()
-        if self.loader.n_samples % dist.world_size != 0:
+        if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
             raise ValueError(
-                "batch_size must be divisible by the number of parallel "
-                f"workers, got {self.batch_size} and {dist.world_size}"
+                "Number of inference initial conditions must be divisible by the "
+                "number of parallel workers, got "
+                f"{self.loader.start_indices.n_initial_conditions} and "
+                f"{dist.world_size}."
             )
         if self.parallel is not None:
             if self.parallel:
