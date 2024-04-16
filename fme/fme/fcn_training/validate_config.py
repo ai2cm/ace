@@ -1,8 +1,10 @@
 import argparse
 
 import dacite
+import dacite.exceptions
 import yaml
 
+from fme.core.stepper import SingleModuleStepperConfig
 from fme.fcn_training.inference.inference import InferenceConfig
 from fme.fcn_training.train_config import TrainConfig
 
@@ -31,8 +33,18 @@ if __name__ == "__main__":
             config=dacite.Config(strict=True),
         )
     else:
-        dacite.from_dict(
-            data_class=TrainConfig,
-            data=config_data,
-            config=dacite.Config(strict=True),
-        )
+        try:
+            dacite.from_dict(
+                data_class=TrainConfig,
+                data=config_data,
+                config=dacite.Config(strict=True),
+            )
+        except dacite.exceptions.UnionMatchError as err:
+            if "checkpoint_path" not in config_data["stepper"]:
+                dacite.from_dict(
+                    data_class=SingleModuleStepperConfig,
+                    data=config_data["stepper"],
+                    config=dacite.Config(strict=True),
+                )
+            # if there was no issue for SingleModuleStepperConfig, raise original error
+            raise err
