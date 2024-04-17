@@ -3,10 +3,10 @@ from typing import Literal, Optional, Tuple
 
 from ai2modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
 
-from fme.fcn_training.models.makani.sfnonet import (
+from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
 )
-from fme.fcn_training.registry.registry import ModuleConfig, register
+from fme.ace.registry.registry import ModuleConfig, register
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at

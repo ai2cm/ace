@@ -18,4 +18,4 @@ echo ===========================================================================
 
 # run inference
 export WANDB_JOB_TYPE=inference
-python $SCRIPT_DIRECTORY/inference/inference.py $YAML_INFERENCE_CONFIG
+python -m fme.ace.inference $YAML_INFERENCE_CONFIG

@@ -9,6 +9,9 @@ import torch
 import yaml
 
 import fme
+from fme.ace.train import count_parameters
+from fme.ace.train_config import LoggingConfig
+from fme.ace.utils import logging_utils
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
@@ -17,9 +20,6 @@ from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
 from fme.downscaling.models import DownscalingModelConfig, Model
 from fme.downscaling.typing_ import FineResCoarseResPair
-from fme.fcn_training.train import count_parameters
-from fme.fcn_training.train_config import LoggingConfig
-from fme.fcn_training.utils import logging_utils
 
 
 def save_checkpoint(trainer: "Trainer", path: str) -> None:

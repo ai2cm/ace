@@ -6,14 +6,14 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.data_loading.data_typing import VariableMetadata
-from fme.fcn_training.inference.data_writer.monthly import (
+from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     add_data,
     find_boundary,
     get_days_since_reference,
     months_for_timesteps,
 )
+from fme.core.data_loading.data_typing import VariableMetadata
 
 
 @pytest.mark.parametrize(

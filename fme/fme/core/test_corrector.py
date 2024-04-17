@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 
+from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
 from fme.core.corrector import (
     _force_conserve_dry_air,
@@ -10,9 +11,6 @@ from fme.core.corrector import (
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.loss import get_dry_air_nonconservation
-from fme.fcn_training.inference.derived_variables import (
-    total_water_path_budget_residual,
-)
 
 
 def test_force_no_global_mean_moisture_advection():

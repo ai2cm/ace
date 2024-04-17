@@ -7,10 +7,8 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.fcn_training.inference.data_writer import DataWriter, DataWriterConfig
-from fme.fcn_training.inference.data_writer.prediction import (
-    get_batch_lead_times_microseconds,
-)
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.data_writer.prediction import get_batch_lead_times_microseconds
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
