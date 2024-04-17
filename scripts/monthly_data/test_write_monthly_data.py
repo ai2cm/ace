@@ -3,9 +3,9 @@ import pathlib
 import xarray as xr
 from write_monthly_data import Config, run, write_ensemble_dataset
 
+from fme.ace.train_config import LoggingConfig
 from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.testing import DimSizes
-from fme.fcn_training.train_config import LoggingConfig
 
 
 def test_write_monthly_data(tmp_path: pathlib.Path):
