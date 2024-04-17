@@ -4,9 +4,9 @@ import dacite
 import dacite.exceptions
 import yaml
 
+from fme.ace.inference.inference import InferenceConfig
+from fme.ace.train_config import TrainConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.fcn_training.inference.inference import InferenceConfig
-from fme.fcn_training.train_config import TrainConfig
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

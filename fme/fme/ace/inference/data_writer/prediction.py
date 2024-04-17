@@ -9,8 +9,8 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.inference.data_writer.utils import get_all_names
 from fme.core.data_loading.data_typing import VariableMetadata
-from fme.fcn_training.inference.data_writer.utils import get_all_names
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "microseconds"

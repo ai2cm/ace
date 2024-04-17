@@ -8,6 +8,9 @@ import dacite
 import torch
 import yaml
 
+from fme.ace.train import count_parameters
+from fme.ace.train_config import LoggingConfig
+from fme.ace.utils import logging_utils
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.dicts import to_flat_dict
 from fme.core.loss import LossConfig
@@ -23,9 +26,6 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import FineResCoarseResPair
-from fme.fcn_training.train import count_parameters
-from fme.fcn_training.train_config import LoggingConfig
-from fme.fcn_training.utils import logging_utils
 
 
 class Evaluator:

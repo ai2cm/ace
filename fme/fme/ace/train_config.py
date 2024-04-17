@@ -19,7 +19,7 @@ from fme.core.weight_ops import CopyWeightsConfig
 
 @dataclasses.dataclass
 class LoggingConfig:
-    project: str = "fcn_training"
+    project: str = "ace"
     entity: str = "ai2cm"
     log_to_screen: bool = True
     log_to_file: bool = True

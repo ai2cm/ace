@@ -13,6 +13,10 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.loop import run_dataset_inference, run_inference
+from fme.ace.train_config import LoggingConfig
+from fme.ace.utils import logging_utils
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
@@ -21,10 +25,6 @@ from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
-from fme.fcn_training.inference.data_writer import DataWriter, DataWriterConfig
-from fme.fcn_training.inference.loop import run_dataset_inference, run_inference
-from fme.fcn_training.train_config import LoggingConfig
-from fme.fcn_training.utils import logging_utils
 
 
 def _load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:

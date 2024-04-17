@@ -7,6 +7,8 @@ import pytest
 import torch
 
 import fme
+from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
+from fme.ace.registry import ModuleSelector
 from fme.core import ClimateData, metrics
 from fme.core.aggregator.one_step.main import OneStepAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -21,10 +23,6 @@ from fme.core.stepper import (
     SingleModuleStepperConfig,
 )
 from fme.core.typing_ import TensorDict
-from fme.fcn_training.inference.derived_variables import (
-    compute_stepped_derived_quantities,
-)
-from fme.fcn_training.registry import ModuleSelector
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 

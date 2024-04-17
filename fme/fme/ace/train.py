@@ -58,6 +58,10 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.inference import run_inference
+from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
+from fme.ace.train_config import TrainConfig
+from fme.ace.utils import logging_utils
 from fme.core.aggregator import (
     InferenceAggregatorConfig,
     OneStepAggregator,
@@ -68,12 +72,6 @@ from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
 from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
-from fme.fcn_training.inference import run_inference
-from fme.fcn_training.inference.derived_variables import (
-    compute_stepped_derived_quantities,
-)
-from fme.fcn_training.train_config import TrainConfig
-from fme.fcn_training.utils import logging_utils
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
