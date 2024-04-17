@@ -14,18 +14,18 @@ import xarray as xr
 import yaml
 
 import fme.core.aggregator.inference.annual
+from fme.ace.inference.inference import main as inference_main
+from fme.ace.train import _restore_checkpoint, count_parameters
+from fme.ace.train import main as train_main
+from fme.ace.train_config import epoch_checkpoint_enabled
 from fme.core import constants
 from fme.core.data_loading.config import Slice
 from fme.core.testing import DimSizes, MonthlyReferenceData
 from fme.core.testing.wandb import mock_wandb
-from fme.fcn_training.inference.inference import main as inference_main
-from fme.fcn_training.train import _restore_checkpoint, count_parameters
-from fme.fcn_training.train import main as train_main
-from fme.fcn_training.train_config import epoch_checkpoint_enabled
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
-    REPOSITORY_PATH / "fme" / "fme" / "fcn_training" / "run-train-and-inference.sh"
+    REPOSITORY_PATH / "fme" / "fme" / "ace" / "run-train-and-inference.sh"
 )
 
 
@@ -360,7 +360,7 @@ def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
-    with unittest.mock.patch("fme.fcn_training.train._restore_checkpoint", new=mock):
+    with unittest.mock.patch("fme.ace.train._restore_checkpoint", new=mock):
         train_config, inference_config = _setup(
             tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )

@@ -11,6 +11,12 @@ import torch
 import xarray as xr
 import yaml
 
+from fme.ace.inference.data_writer import DataWriterConfig
+from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
+from fme.ace.inference.inference import InferenceConfig, main
+from fme.ace.registry import ModuleSelector
+from fme.ace.train_config import LoggingConfig
 from fme.core import metrics
 from fme.core.aggregator.inference import annual
 from fme.core.data_loading.config import XarrayDataConfig
@@ -23,14 +29,6 @@ from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
-from fme.fcn_training.inference.data_writer import DataWriterConfig
-from fme.fcn_training.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.fcn_training.inference.derived_variables import (
-    compute_stepped_derived_quantities,
-)
-from fme.fcn_training.inference.inference import InferenceConfig, main
-from fme.fcn_training.registry import ModuleSelector
-from fme.fcn_training.train_config import LoggingConfig
 
 DIR = pathlib.Path(__file__).parent
 

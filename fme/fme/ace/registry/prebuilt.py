@@ -3,7 +3,7 @@ from typing import Tuple
 
 from torch import nn
 
-from fme.fcn_training.registry.registry import ModuleConfig, register
+from fme.ace.registry.registry import ModuleConfig, register
 
 
 @register("prebuilt")

@@ -7,6 +7,7 @@ import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
+from fme.ace.registry import ModuleSelector
 from fme.core.aggregator import OneStepAggregator, TrainAggregator
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -18,7 +19,6 @@ from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.packer import Packer
 from fme.core.prescriber import PrescriberConfig
-from fme.fcn_training.registry import ModuleSelector
 
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
@@ -367,9 +367,11 @@ class SingleModuleStepper:
         ocean_target_names = self.ocean.target_names if self.ocean is not None else []
         for step in range(n_forward_steps):
             current_step_forcing = {
-                k: forcing_data[k][:, step]
-                if k not in self._config.next_step_forcing_names
-                else forcing_data[k][:, step + 1]
+                k: (
+                    forcing_data[k][:, step]
+                    if k not in self._config.next_step_forcing_names
+                    else forcing_data[k][:, step + 1]
+                )
                 for k in forcing_names
             }
             next_step_ocean_data = {
