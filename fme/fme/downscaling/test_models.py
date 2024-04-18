@@ -16,18 +16,21 @@ from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
-class LinearUpscaling(torch.nn.Module):
-    def __init__(self, upscaling_factor: int, img_shape: Tuple[int, int]):
-        super(LinearUpscaling, self).__init__()
+class LinearDownscaling(torch.nn.Module):
+    def __init__(self, factor: int, img_shape: Tuple[int, int], n_channels: int = 1):
+        super(LinearDownscaling, self).__init__()
         self.img_shape = img_shape
+        self.n_channels = n_channels
         height, width = img_shape
         self.linear = torch.nn.Linear(
-            height * width // upscaling_factor**2, height * width, bias=False
+            ((height * width) // factor**2) * n_channels,
+            height * width * n_channels,
+            bias=False,
         )
 
     def forward(self, x):
         x = self.linear(torch.flatten(x, start_dim=1))
-        x = x.view(x.shape[0], 1, *self.img_shape)
+        x = x.view(x.shape[0], self.n_channels, *self.img_shape)
         return x
 
 
@@ -44,11 +47,7 @@ def test_run_on_batch(use_opt):
     batch_size = 3
     module_selector = ModuleRegistrySelector(
         "prebuilt",
-        {
-            "module": LinearUpscaling(
-                upscaling_factor=upscaling_factor, img_shape=fine_shape
-            )
-        },
+        {"module": LinearDownscaling(factor=upscaling_factor, img_shape=fine_shape)},
     )
     area_weights = FineResCoarseResPair(
         torch.ones(*fine_shape), torch.ones(*coarse_shape)
@@ -100,7 +99,7 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     )
     loss = LossConfig(type="L1")
     model_config = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": LinearUpscaling(4, (4, 8))}),
+        ModuleRegistrySelector("prebuilt", {"module": LinearDownscaling(4, (4, 8))}),
         loss,
         ["x"],
         ["x"],
@@ -113,7 +112,7 @@ def test_serialization(tmp_path):
     fine_shape = (16, 32)
     coarse_shape = (8, 16)
     downscale_factor = 2
-    module = LinearUpscaling(upscaling_factor=2, img_shape=fine_shape)
+    module = LinearDownscaling(factor=2, img_shape=fine_shape)
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
