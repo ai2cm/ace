@@ -2,7 +2,7 @@ import abc
 import argparse
 import dataclasses
 import logging
-from typing import List, Literal, Optional, Union
+from typing import Any, List, Literal, Mapping, Optional, Union
 
 import dacite
 import torch
@@ -64,8 +64,13 @@ class Evaluator:
 
 class Config(abc.ABC):
     @abc.abstractmethod
-    def build(self) -> Model:
+    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
         pass
+
+    @property
+    @abc.abstractmethod
+    def data_requirements(self) -> DataRequirements:
+        ...
 
 
 @dataclasses.dataclass
@@ -75,7 +80,8 @@ class InterpolateModelConfig(Config):
     in_names: List[str]
     out_names: List[str]
 
-    def build(self) -> Model:
+    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
+        del area_weights  # unused
         module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
         var_names = list(set(self.in_names).union(set(self.out_names)))
         normalization_config = PairedNormalizationConfig(
@@ -107,19 +113,53 @@ class InterpolateModelConfig(Config):
         )
 
 
+def clean_checkpoint_dict(checkpoint: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Handle the breaking rename change from high to fine and low to coarse in
+    the checkpoint dict. This should be deleted in the future.
+    Today is 2024-04-12."""
+    if "highres" in checkpoint["model"]["config"]["normalization"]:
+        config = dict(checkpoint["model"]["config"])
+        config["normalization"] = {
+            "fine": {
+                "global_means_path": "/fine_statsdata/centering.nc",
+                "global_stds_path": "/fine_statsdata/scaling-full-field.nc",
+                "exclude_names": None,
+                "means": {},
+                "stds": {},
+            },
+            "coarse": {
+                "global_means_path": "/coarse_statsdata/centering.nc",
+                "global_stds_path": "/coarse_statsdata/scaling-full-field.nc",
+                "exclude_names": None,
+                "means": {},
+                "stds": {},
+            },
+        }
+        checkpoint["model"]["config"] = config
+        checkpoint["model"]["coarse_shape"] = checkpoint["model"]["lowres_shape"]
+        del checkpoint["model"]["lowres_shape"]
+    return checkpoint
+
+
 @dataclasses.dataclass
 class CheckpointModelConfig(Config):
     checkpoint: str
 
-    def build(self) -> Model:
-        raise NotImplementedError(
-            "Evaluating a checkpointed model is not yet implemented."
-        )
+    def __post_init__(self) -> None:
+        checkpoint_dict = torch.load(self.checkpoint)
+        checkpoint_dict = clean_checkpoint_dict(checkpoint_dict)
+        self.checkpoint_dict: Mapping[str, Any] = checkpoint_dict
+
+    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
+        return Model.from_state(self.checkpoint_dict["model"], area_weights)
 
     @property
     def data_requirements(self) -> DataRequirements:
-        raise NotImplementedError(
-            "Evaluating a checkpointed model is not yet implemented."
+        in_names = self.checkpoint_dict["model"]["config"]["in_names"]
+        out_names = self.checkpoint_dict["model"]["config"]["out_names"]
+        return DataRequirements(
+            names=list(set(in_names).union(out_names)),
+            n_timesteps=1,
         )
 
 
@@ -143,9 +183,10 @@ class EvaluatorConfig:
         self.logging.configure_wandb(config=config, **kwargs)
 
     def build(self) -> Evaluator:
-        model = self.model.build()
+        dataset = self.data.build(False, requirements=self.model.data_requirements)
+        model = self.model.build(dataset.area_weights)
         return Evaluator(
-            self.data.build(False, requirements=self.model.data_requirements),
+            dataset,
             model,
             self.experiment_dir,
         )
