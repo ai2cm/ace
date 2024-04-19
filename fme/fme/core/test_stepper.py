@@ -10,7 +10,6 @@ import fme
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.registry import ModuleSelector
 from fme.core import ClimateData, metrics
-from fme.core.aggregator.one_step.main import OneStepAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import WeightedMappingLossConfig
@@ -322,7 +321,6 @@ def _setup_and_run_on_batch(
     ocean_config: Optional[OceanConfig],
     n_forward_steps,
     optimization_config: Optional[OptimizationConfig],
-    aggregator: Optional[OneStepAggregator],
 ):
     """Sets up the requisite classes to run run_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
@@ -346,10 +344,7 @@ def _setup_and_run_on_batch(
     )
     stepper = config.get_stepper(area.shape, area, sigma_coordinates)
     return stepper.run_on_batch(
-        data,
-        optimization=optimization,
-        n_forward_steps=n_forward_steps,
-        aggregator=aggregator,
+        data, optimization=optimization, n_forward_steps=n_forward_steps
     )
 
 
@@ -362,16 +357,8 @@ def _setup_and_run_on_batch(
     ],
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
-@pytest.mark.parametrize("use_aggregator", [True, False], ids=["use_agg", ""])
 @pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
-def test_run_on_batch(
-    n_forward_steps,
-    is_input,
-    is_output,
-    is_train,
-    is_prescribed,
-    use_aggregator,
-):
+def test_run_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescribed):
     in_names, out_names = ["a"], ["a"]
     if is_input:
         in_names.append("b")
@@ -389,24 +376,13 @@ def test_run_on_batch(
 
     data, area_weights, sigma_coords = get_data(all_names, 3, n_forward_steps + 1)
 
-    if use_aggregator:
-        aggregator = OneStepAggregator(area_weights, sigma_coords)
-    else:
-        aggregator = None
-
     if is_train:
         optimization = OptimizationConfig()
     else:
         optimization = None
 
     _setup_and_run_on_batch(
-        data,
-        in_names,
-        out_names,
-        ocean_config,
-        n_forward_steps,
-        optimization,
-        aggregator,
+        data, in_names, out_names, ocean_config, n_forward_steps, optimization
     )
 
 
