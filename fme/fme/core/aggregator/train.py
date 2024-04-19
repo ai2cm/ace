@@ -2,7 +2,6 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorMapping
 
 
 class TrainAggregator:
@@ -18,19 +17,7 @@ class TrainAggregator:
         self._loss = torch.tensor(0.0, device=get_device())
 
     @torch.no_grad()
-    def record_batch(
-        self,
-        loss: float,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
-    ):
-        if i_time_start != 0:
-            raise ValueError(
-                "TrainAggregator should only be used on the start of a timeseries"
-            )
+    def record_batch(self, loss: float):
         self._loss += loss
         self._n_batches += 1
 
