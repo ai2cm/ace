@@ -27,6 +27,7 @@ from fme.core.data_loading.inference import (
 )
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
+from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 
@@ -644,3 +645,58 @@ def test_inference_config_raises_incompatible_timesteps(
             data=base_config_dict,
             config=dacite.Config(strict=True),
         )
+
+
+def test_inference_ocean_override(tmp_path: pathlib.Path):
+    """Test that data at initial condition boundaires"""
+    in_names = ["var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 8
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        n_lat=4,
+        n_lon=8,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+    )
+    data = FV3GFSData(
+        path=tmp_path,
+        names=all_names,
+        dim_sizes=dim_sizes,
+    )
+    ocean_override = OceanConfig(
+        surface_temperature_name="override_sfc_temp",
+        ocean_fraction_name="override_ocean_fraction",
+    )
+
+    config = InferenceConfig(
+        experiment_dir=str(tmp_path),
+        n_forward_steps=n_forward_steps,
+        checkpoint_path=str(stepper_path),
+        logging=LoggingConfig(
+            log_to_screen=True,
+            log_to_file=False,
+            log_to_wandb=True,
+        ),
+        loader=data.inference_data_loader_config,
+        log_video=True,
+        data_writer=DataWriterConfig(
+            save_prediction_files=True,
+            time_coarsen=None,
+        ),
+        forward_steps_in_memory=4,
+        ocean=ocean_override,
+    )
+    stepper = config.load_stepper(
+        sigma_coordinates=SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)),
+        area=torch.ones(10),
+    )
+    assert (
+        stepper.ocean.surface_temperature_name
+        == ocean_override.surface_temperature_name
+    )
+    assert stepper.ocean.ocean_fraction_name == ocean_override.ocean_fraction_name
