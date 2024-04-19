@@ -8,7 +8,6 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.ace.registry import ModuleSelector
-from fme.core.aggregator import OneStepAggregator, TrainAggregator
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
@@ -392,7 +391,6 @@ class SingleModuleStepper:
         data: TensorDict,
         optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
-        aggregator: Optional[Union[OneStepAggregator, TrainAggregator]] = None,
     ) -> SteppedData:
         """
         Step the model forward multiple steps on a batch of data.
@@ -459,15 +457,6 @@ class SingleModuleStepper:
 
         gen_data_norm = self.normalizer.normalize(gen_data)
         full_data_norm = self.normalizer.normalize(data)
-
-        if aggregator is not None:
-            aggregator.record_batch(
-                float(loss),
-                target_data=data,
-                gen_data=gen_data,
-                target_data_norm=full_data_norm,
-                gen_data_norm=gen_data_norm,
-            )
 
         return SteppedData(
             metrics=metrics,
