@@ -279,8 +279,8 @@ class Trainer:
                 batch.data,
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
-                aggregator=aggregator,
             )
+            aggregator.record_batch(stepped.metrics["loss"])
             if self._base_weights is not None:
                 self._copy_after_batch.apply(
                     weights=self._base_weights, modules=self.stepper.modules
