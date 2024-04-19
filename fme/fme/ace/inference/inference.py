@@ -23,6 +23,7 @@ from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
 
@@ -70,6 +71,8 @@ class InferenceConfig:
         data_writer: Configuration for data writers.
         monthly_reference_data: Path to monthly reference data to compare against.
         aggregator: Configuration for inference aggregator.
+        ocean: Ocean configuration for running inference with a
+            different one than what is used in training.
     """
 
     experiment_dir: str
@@ -92,6 +95,7 @@ class InferenceConfig:
     aggregator: InferenceAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceAggregatorConfig()
     )
+    ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
         if self.n_forward_steps % self.forward_steps_in_memory != 0:
@@ -152,11 +156,18 @@ class InferenceConfig:
             sigma_coordinates: The sigma coordinates of the model.
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return _load_stepper(
+        stepper = _load_stepper(
             self.checkpoint_path,
             area=area,
             sigma_coordinates=sigma_coordinates,
         )
+        if self.ocean is not None:
+            logging.info(
+                "Overriding training ocean configuration with the inference "
+                "ocean config."
+            )
+            stepper.ocean = self.ocean
+        return stepper
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
