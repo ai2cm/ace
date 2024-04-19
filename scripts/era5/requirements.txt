@@ -1,9 +1,0 @@
-apache_beam[gcp]
-h5netcdf
-xarray
-zarr
-dask
-numpy
-xarray_beam
-cftime
-gcsfs

@@ -51,3 +51,20 @@ be rebuilt and pushed using:
 ```
 make build_dataflow push_dataflow
 ```
+
+## Computing coarsened ERA5 dataset for FME
+
+Once the previous steps have been done, all the necessary data should be available
+in zarr format on Google Cloud Storage. Now it is possible to compute all necessary
+variables on the 1° horizontal resolution and with eight vertical layers. This is
+done using an xarray-beam pipeline similar to the previous step.
+
+First, if not already available, build a docker image using the same instructions
+as in previous step. Additionally, create the local "era5-ingestion" conda
+environment.
+
+Once these steps are done, the workflow can be submitted with
+
+```
+make era5_dataflow
+```
