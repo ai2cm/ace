@@ -65,12 +65,34 @@ class InferenceAggregatorConfig:
 
     Attributes:
         log_histograms: Whether to log histograms of the targets and predictions.
+        log_video: Whether to log videos of the state evolution.
+        log_extended_video: Whether to log wandb videos of the predictions with
+            statistical metrics, only done if log_video is True.
+        log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
+            time dimension.
+        monthly_reference_data: Path to monthly reference data to compare against.
     """
 
     log_histograms: bool = False
+    log_video: bool = False
+    log_extended_video: bool = False
+    log_zonal_mean_images: bool = True
+    monthly_reference_data: Optional[str] = None
 
     def build(self, **kwargs):
-        return InferenceAggregator(log_histograms=self.log_histograms, **kwargs)
+        if self.monthly_reference_data is None:
+            monthly_reference_data = None
+        else:
+            monthly_reference_data = xr.open_dataset(self.monthly_reference_data)
+
+        return InferenceAggregator(
+            log_histograms=self.log_histograms,
+            log_video=self.log_video,
+            enable_extended_videos=self.log_extended_video,
+            log_zonal_mean_images=self.log_zonal_mean_images,
+            monthly_reference_data=monthly_reference_data,
+            **kwargs,
+        )
 
 
 class InferenceAggregator:
