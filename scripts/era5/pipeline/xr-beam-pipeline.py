@@ -46,18 +46,18 @@ def grid_attribute_fix(ds, names_to_fix, reference_name):
     return ds
 
 
-TEMPLATE_PATH = "gs://vcm-ml-scratch/oliwm/2024-04-09-era5-regrid-template.zarr"
+TEMPLATE_PATH = "gs://vcm-ml-scratch/oliwm/2024-04-22-era5-regrid-template.zarr"
 
 OUTPUT_GRID = "F90"  # 1° regular Gaussian grid. See https://confluence.ecmwf.int/display/OIFS/4.+OpenIFS%3A+Grid+and+Resolution  # noqa: E501
 LONGITUDE_SHIFT = 0.5  # amount in degrees to shift longitude to match FV3 grid
 GRAVITY = 9.80665  # value used in metview according to https://metview.readthedocs.io/en/latest/metview/macro/functions/fieldset.html#id0 # noqa: E501
 
-URL_WIND_TEMP = "gs://gcp-public-data-arco-era5/co/model-level-wind.zarr"
-URL_SURFACE = "gs://gcp-public-data-arco-era5/co/single-level-surface.zarr"
+URL_WIND_TEMP = "gs://gcp-public-data-arco-era5/co/model-level-wind.zarr-v2"
+URL_SURFACE = "gs://gcp-public-data-arco-era5/co/single-level-surface.zarr-v2"
 URL_SURFACE_REANALYSIS = (
-    "gs://gcp-public-data-arco-era5/co/single-level-reanalysis.zarr"  # noqa: E501
+    "gs://gcp-public-data-arco-era5/co/single-level-reanalysis.zarr-v2"  # noqa: E501
 )
-URL_MOISTURE = "gs://gcp-public-data-arco-era5/co/model-level-moisture.zarr"
+URL_MOISTURE = "gs://gcp-public-data-arco-era5/co/model-level-moisture.zarr-v2"
 URL_INVARIANT = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.invariant.zarr"  # noqa: E501
 URL_SURFACE_ANALYSIS_LATLON = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.an.sfc.zarr"  # noqa: E501
 URL_MEAN_FLUX = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.fc.sfc.meanflux.zarr"  # noqa: E501
@@ -80,9 +80,18 @@ URLS = {
     MEAN_FLUX: URL_MEAN_FLUX,
 }
 
+# these versions of the zarr datasets have variables with the necessary attrs for
+# Metview to work (just stripping the '-v2' from the ends of the URLs)
+URLS_WITH_REQUIRED_ATTRS = {
+    WIND_TEMP: URL_WIND_TEMP[:-3],
+    SURFACE: URL_SURFACE[:-3],
+    MOISTURE: URL_MOISTURE[:-3],
+    SURFACE_REANALYSIS: URL_SURFACE_REANALYSIS[:-3],
+}
+
 # desired start/end of output dataset, inclusive
 START_TIME = datetime(1979, 1, 1, 0, 0, 0)
-END_TIME = datetime(2021, 8, 31, 18, 0, 0)
+END_TIME = datetime(2022, 12, 31, 18, 0, 0)
 STEP_INTERVAL = 6  # hours
 
 # to properly align mean flux with the output time, these requirements are necessary
@@ -223,6 +232,11 @@ def _open_zarr(key):
     ds = ds.sel(**SEL_INDICES[key])
     if key == INVARIANT:
         ds = ds.drop_vars("time")
+    if key in URLS_WITH_REQUIRED_ATTRS:
+        tmp = xr.open_zarr(URLS_WITH_REQUIRED_ATTRS[key])
+        for name in ds:
+            if name in tmp:
+                ds[name].attrs = tmp[name].attrs
     ds = attribute_fix(ds)
     return ds
 
@@ -316,6 +330,8 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
 
             out_name = f"{short_name}_{output_index}"
             output[out_name] = integrated
+            if short_name == "q":
+                output[out_name].attrs["long_name"] = "Specific total water"
             output[out_name].attrs["long_name"] += f" level-{output_index}"
     del thicknesses
     del variable
@@ -342,6 +358,9 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
             output[name] = output[name].assign_attrs(**attrs)
 
     output = output.drop_vars(SCALAR_COORDS_TO_DROP, errors="ignore")
+
+    # coordinates will be written by template, so drop here to avoid possible conflicts
+    output = output.drop_vars(["latitude", "longitude"])
 
     # MetView creates temporary grib files which need to be deleted manually
     for fs in [
@@ -453,8 +472,8 @@ def _adjust_latlon(ds, shift=LONGITUDE_SHIFT):
     return output
 
 
-def _process_quarter_degree_data_sfc(ds, invariant_ds):
-    logging.info("Renaming and fixing sign conventions for lat-lon sfc data")
+def _process_quarter_degree_data_mean_flux(ds):
+    logging.info("Processing 'mean-flux' quarter degree data")
     xr.set_options(keep_attrs=True)
     output = xr.Dataset()
     output["DSWRFtoa"] = ds.MTDWSWRF
@@ -468,14 +487,28 @@ def _process_quarter_degree_data_sfc(ds, invariant_ds):
     output["LHTFLsfc"] = -ds.MSLHF  # opposite sign convention as FV3
     output["PRATEsfc"] = ds.MTPR
     output["tendency_of_total_water_path_due_to_advection"] = -ds.MVIMD
-    output["sea_ice_fraction"] = ds.CI.fillna(0.0)
+    regridded = _regrid_quarter_degree(output)
 
+    # coordinates will be written by template, so drop here to avoid possible conflicts
+    regridded = regridded.drop_vars(["latitude", "longitude"])
+
+    return regridded
+
+
+def _process_quarter_degree_data_sfc_an(ds, invariant_ds):
+    logging.info("Processing 'surface analysis' quarter degree data")
+    xr.set_options(keep_attrs=True)
+    output = xr.Dataset()
+    output["sea_ice_fraction"] = ds.CI.fillna(0.0)
     output["soil_moisture_0"] = ds.SWVL1
     output["soil_moisture_1"] = ds.SWVL2
     output["soil_moisture_2"] = ds.SWVL3
     output["soil_moisture_3"] = ds.SWVL4
-
     regridded = _regrid_quarter_degree(output)
+
+    # coordinates will be written by template, so drop here to avoid possible conflicts
+    regridded = regridded.drop_vars(["latitude", "longitude"])
+    invariant_ds = invariant_ds.drop_vars(["latitude", "longitude"])
 
     regridded["ocean_fraction"] = (
         1 - invariant_ds.land_fraction - regridded.sea_ice_fraction
@@ -507,17 +540,23 @@ def _process_quarter_degree_data_invariant(ds):
     return regridded
 
 
-def process_quarter_degree_data(key, ds, invariant_ds=None):
-    output_ds = _process_quarter_degree_data_sfc(ds, invariant_ds)
+def process_quarter_degree_data_mean_flux(key, ds):
+    output_ds = _process_quarter_degree_data_mean_flux(ds)
     new_key = key.replace(vars=frozenset(output_ds.keys()))
     return new_key, output_ds
 
 
-def _get_vertical_coordinate(ds, name) -> xr.Dataset:
+def process_quarter_degree_data_sfc_an(key, ds, invariant_ds=None):
+    output_ds = _process_quarter_degree_data_sfc_an(ds, invariant_ds)
+    new_key = key.replace(vars=frozenset(output_ds.keys()))
+    return new_key, output_ds
+
+
+def _get_vertical_coordinate(ds: xr.Dataset, name: str) -> xr.Dataset:
     """Get the ak/bk vertical coordinate on coarse layer interfaces.
 
-    Assuming that ds[name] is a 3D variable which includes the vertical coordinate as
-    an attribute.
+    Assuming that ds[name] is a 3D variable which includes
+    the vertical coordinate as an attribute named 'GRIB_pv'.
     """
     hybrid_sigma_values = ds[name].attrs["GRIB_pv"]
     ak = hybrid_sigma_values[: N_INPUT_LAYERS + 1]
@@ -555,20 +594,20 @@ def _make_template(
         ds_reshaped = _split_and_average_over_forecast_hour(
             ds_meanflux.isel(forecast_initial_time=0), compat="override"
         )
-        ds_merged = xr.merge([ds_reshaped, ds_quarter_degree_sfc])
-        # only process a single timestep, since this step can't be done lazily
-        ds_quarter_degree_inv_regridded = _process_quarter_degree_data_invariant(
+        ds_mean_flux_regridded = _process_quarter_degree_data_mean_flux(ds_reshaped)
+        ds_invariant_regridded = _process_quarter_degree_data_invariant(
             ds_quarter_degree_invariant
         )
-        ds_quarter_degree_sfc_regridded = _process_quarter_degree_data_sfc(
-            ds_merged.isel(time=0), ds_quarter_degree_inv_regridded
+        ds_sfc_an_regridded = _process_quarter_degree_data_sfc_an(
+            ds_quarter_degree_sfc.isel(time=0), ds_invariant_regridded
         )
         ds_native_regridded = _process_native_data(ds_native.isel(time=0))
         ds_regridded = xr.merge(
             [
-                ds_quarter_degree_sfc_regridded,
+                ds_mean_flux_regridded,
+                ds_sfc_an_regridded,
                 ds_native_regridded,
-                ds_quarter_degree_inv_regridded,
+                ds_invariant_regridded,
                 ds_akbk,
             ],
             compat="override",
@@ -576,7 +615,7 @@ def _make_template(
         ).squeeze()
 
         ds_regridded.to_zarr(TEMPLATE_PATH, mode="w")
-        inv_fields = xr.merge([ds_quarter_degree_inv_regridded, ds_akbk])
+        inv_fields = xr.merge([ds_invariant_regridded, ds_akbk])
 
     # manually expand time dim to include full time coordinate
     desired_time = ds_native.time.drop_vars(SCALAR_COORDS_TO_DROP, errors="ignore")
@@ -624,14 +663,6 @@ def _get_parser():
     return parser
 
 
-def _drop_latlon(ds):
-    return ds.drop_vars(["latitude", "longitude"])
-
-
-def drop_latlon(key, ds):
-    return key, _drop_latlon(ds)
-
-
 def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
@@ -670,27 +701,27 @@ def main():
 
     logging.info("Template finished generating. Starting pipeline.")
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
-        mean_flux = (
+        (
             p
             | xbeam.DatasetToChunks(ds_meanflux, chunks={"forecast_initial_time": 1})
             | beam.MapTuple(split_and_average_over_forecast_hour)
             | xbeam.ConsolidateChunks(ncar_process_chunks)
-        )
-
-        quarter_degree = p | "qd_DatasetToChunks" >> xbeam.DatasetToChunks(
-            ds_quarter_degree_sfc, chunks=ncar_process_chunks
+            | beam.MapTuple(process_quarter_degree_data_mean_flux)
+            | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "mean_flux_to_zarr"
+            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
         )
 
         (
-            (mean_flux, quarter_degree)
-            | beam.Flatten()
-            | xbeam.ConsolidateVariables()
+            p
+            | "qd_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_quarter_degree_sfc, chunks=ncar_process_chunks)
             | beam.MapTuple(
-                process_quarter_degree_data, invariant_ds=ds_pt25deg_inv_regridded
+                process_quarter_degree_data_sfc_an,
+                invariant_ds=ds_pt25deg_inv_regridded,
             )
-            | "ncar_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
-            | "ncar_drop_latlon" >> beam.MapTuple(drop_latlon)
-            | "ncar_to_zarr"
+            | "qd_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "qd_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
         )
 
@@ -700,7 +731,6 @@ def main():
             >> xbeam.DatasetToChunks(ds_native, chunks={"time": 1})
             | beam.MapTuple(process_native_data)
             | "native_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
-            | "native_drop_latlon" >> beam.MapTuple(drop_latlon)
             | "native_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
         )
