@@ -5,7 +5,7 @@ import os
 import time
 import warnings
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional
 
 import dacite
 import torch
@@ -76,10 +76,7 @@ class InferenceConfig:
     prediction_loader: Optional[InferenceDataLoaderConfig] = None
     log_video: Optional[bool] = None
     log_extended_video: Optional[bool] = None
-    log_extended_video_netcdfs: Optional[bool] = None
     log_zonal_mean_images: Optional[bool] = None
-    save_prediction_files: Optional[bool] = None
-    save_raw_prediction_names: Optional[Sequence[str]] = None
     forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
@@ -96,22 +93,6 @@ class InferenceConfig:
                 "n_forward_steps must be divisible by steps_in_memory, "
                 f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
             )
-        deprecated_writer_attrs = {
-            k: getattr(self, k)
-            for k in [
-                "log_extended_video_netcdfs",
-                "save_prediction_files",
-                "save_raw_prediction_names",
-            ]
-            if getattr(self, k) is not None
-        }
-        for k, v in deprecated_writer_attrs.items():
-            warnings.warn(
-                f"Inference configuration attribute `{k}` is deprecated. "
-                f"Using its value `{v}`, but please use attribute `data_writer` "
-                "instead."
-            )
-            setattr(self.data_writer, k, v)
         deprecated_aggregator_attrs = {
             k: getattr(self, k)
             for k in [
