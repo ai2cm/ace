@@ -126,7 +126,8 @@ experiment_dir: {results_dir}
 n_forward_steps: 6
 forward_steps_in_memory: 2
 checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
-save_prediction_files: true
+data_writer:
+  save_prediction_files: true
 aggregator:
   log_video: true
 logging:
