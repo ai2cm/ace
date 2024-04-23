@@ -2,6 +2,7 @@ import dataclasses
 from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 import torch
+import torch.linalg
 
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
@@ -185,10 +186,10 @@ class LpLoss(torch.nn.Module):
     def rel(self, x, y):
         num_examples = x.size()[0]
 
-        diff_norms = torch.norm(
-            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), self.p, 1
+        diff_norms = torch.linalg.norm(
+            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), ord=self.p, dim=1
         )
-        y_norms = torch.norm(y.reshape(num_examples, -1), self.p, 1)
+        y_norms = torch.linalg.norm(y.reshape(num_examples, -1), ord=self.p, dim=1)
 
         return torch.mean(diff_norms / y_norms)
 
@@ -303,7 +304,7 @@ class LossConfig:
             relative to the main loss
     """
 
-    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"] = "LpLoss"
+    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Optional[Literal["LpLoss"]] = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
@@ -371,7 +372,7 @@ class WeightedMappingLossConfig:
 
     """
 
-    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "LpLoss"
+    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
     global_mean_type: Optional[Literal["LpLoss"]] = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
