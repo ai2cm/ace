@@ -33,7 +33,7 @@ def test_loss_builds_and_runs(global_mean_type):
     assert isinstance(result, torch.Tensor)
 
 
-def test_loss_of_zeros_is_one():
+def test_loss_of_zeros_is_variance():
     config = LossConfig(global_mean_type=None)
     area = torch.randn(10, 10, device=get_device())
     loss = config.build(area)
@@ -42,7 +42,7 @@ def test_loss_of_zeros_is_one():
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    assert result == 1.0
+    torch.testing.assert_allclose(result, y.var())
 
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
@@ -57,7 +57,9 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    assert result == 1.0 + global_mean_weight
+    torch.testing.assert_allclose(
+        result.cpu(), 1.0 + global_mean_weight, atol=0.01, rtol=0
+    )
 
 
 def test_global_mean_loss():
