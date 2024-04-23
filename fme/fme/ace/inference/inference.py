@@ -9,7 +9,6 @@ from typing import Optional, Sequence
 
 import dacite
 import torch
-import xarray as xr
 import yaml
 
 import fme
@@ -61,15 +60,9 @@ class InferenceConfig:
         prediction_loader: Configuration for prediction data to evaluate. If given,
             model evaluation will not run, and instead predictions will be evaluated.
             Model checkpoint will still be used to determine inputs and outputs.
-        log_video: Whether to log videos of the state evolution.
-        log_extended_video: Whether to log wandb videos of the predictions with
-            statistical metrics, only done if log_video is True.
-        log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
-            time dimension.
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
-        monthly_reference_data: Path to monthly reference data to compare against.
         aggregator: Configuration for inference aggregator.
         ocean: Ocean configuration for running inference with a
             different one than what is used in training.
@@ -81,10 +74,10 @@ class InferenceConfig:
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     prediction_loader: Optional[InferenceDataLoaderConfig] = None
-    log_video: bool = True
-    log_extended_video: bool = False
+    log_video: Optional[bool] = None
+    log_extended_video: Optional[bool] = None
     log_extended_video_netcdfs: Optional[bool] = None
-    log_zonal_mean_images: bool = True
+    log_zonal_mean_images: Optional[bool] = None
     save_prediction_files: Optional[bool] = None
     save_raw_prediction_names: Optional[Sequence[str]] = None
     forward_steps_in_memory: int = 1
@@ -119,6 +112,23 @@ class InferenceConfig:
                 "instead."
             )
             setattr(self.data_writer, k, v)
+        deprecated_aggregator_attrs = {
+            k: getattr(self, k)
+            for k in [
+                "log_video",
+                "log_extended_video",
+                "log_zonal_mean_images",
+                "monthly_reference_data",
+            ]
+            if getattr(self, k) is not None
+        }
+        for k, v in deprecated_aggregator_attrs.items():
+            warnings.warn(
+                f"Inference configuration attribute `{k}` is deprecated. "
+                f"Using its value `{v}`, but please use attribute `aggregator` "
+                "instead."
+            )
+            setattr(self.aggregator, k, v)
         if (self.data_writer.time_coarsen is not None) and (
             self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
             != 0
@@ -219,10 +229,6 @@ def main(
         config.forward_steps_in_memory,
         data_requirements,
     )
-    if config.monthly_reference_data is not None:
-        monthly_reference_data = xr.open_dataset(config.monthly_reference_data)
-    else:
-        monthly_reference_data = None
 
     stepper = config.load_stepper(
         data.area_weights.to(fme.get_device()),
@@ -234,12 +240,8 @@ def main(
         area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
         record_step_20=config.n_forward_steps >= 20,
-        log_video=config.log_video,
-        enable_extended_videos=config.log_extended_video,
-        log_zonal_mean_images=config.log_zonal_mean_images,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
-        monthly_reference_data=monthly_reference_data,
     )
     writer = config.get_data_writer(data)
 
