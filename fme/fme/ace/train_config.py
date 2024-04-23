@@ -169,8 +169,6 @@ class TrainConfig:
         checkpoint_every_n_epochs: (deprecated) how often to save epoch-based
             checkpoints, if save_checkpoint is True. Use checkpoint_save_epochs
             instead.
-        monthly_reference_data: monthly reference data netCDF file for
-            inference metrics
     """
 
     train_loader: DataLoaderConfig
@@ -205,6 +203,15 @@ class TrainConfig:
                 start=0,
                 stop=self.max_epochs,
                 step=self.checkpoint_every_n_epochs,
+            )
+        if self.monthly_reference_data is not None:
+            warnings.warn(
+                "monthly_reference_data is deprecated, use "
+                "inference.aggregator.monthly_reference_data instead.",
+                category=DeprecationWarning,
+            )
+            self.inference.aggregator.monthly_reference_data = (
+                self.monthly_reference_data
             )
 
     @property

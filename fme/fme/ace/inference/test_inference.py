@@ -18,7 +18,7 @@ from fme.ace.inference.inference import InferenceConfig, main
 from fme.ace.registry import ModuleSelector
 from fme.ace.train_config import LoggingConfig
 from fme.core import metrics
-from fme.core.aggregator.inference import annual
+from fme.core.aggregator.inference import InferenceAggregatorConfig, annual
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.inference import (
@@ -192,7 +192,6 @@ def inference_helper(
     else:
         monthly_reference_filename = None
     config = InferenceConfig(
-        monthly_reference_data=monthly_reference_filename,
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
@@ -203,7 +202,9 @@ def inference_helper(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
-        log_video=True,
+        aggregator=InferenceAggregatorConfig(
+            monthly_reference_data=monthly_reference_filename, log_video=True
+        ),
         data_writer=DataWriterConfig(
             save_prediction_files=True,
             log_extended_video_netcdfs=True,
@@ -332,13 +333,8 @@ def test_inference_writer_boundaries(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
-        logging=LoggingConfig(
-            log_to_screen=True,
-            log_to_file=False,
-            log_to_wandb=True,
-        ),
+        logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
-        log_video=True,
         data_writer=DataWriterConfig(
             save_prediction_files=True,
             time_coarsen=None,
@@ -478,7 +474,6 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
             save_histogram_files=True,
         ),
-        log_video=False,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -597,7 +592,6 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        log_video=True,
         save_prediction_files=True,
         forward_steps_in_memory=1,
     )
@@ -677,17 +671,9 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
-        logging=LoggingConfig(
-            log_to_screen=True,
-            log_to_file=False,
-            log_to_wandb=True,
-        ),
+        logging=LoggingConfig(log_to_screen=True, log_to_file=False, log_to_wandb=True),
         loader=data.inference_data_loader_config,
-        log_video=True,
-        data_writer=DataWriterConfig(
-            save_prediction_files=True,
-            time_coarsen=None,
-        ),
+        data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
         forward_steps_in_memory=4,
         ocean=ocean_override,
     )
