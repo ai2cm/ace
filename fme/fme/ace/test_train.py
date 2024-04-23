@@ -75,7 +75,6 @@ def _get_test_yaml_files(
         stepper_config = new_stepper_config
 
     train_string = f"""
-monthly_reference_data: {monthly_data_filename}
 train_loader:
   data_type: "xarray"
   dataset:
@@ -99,6 +98,8 @@ optimization:
 stepper:
 {stepper_config}
 inference:
+  aggregator:
+    monthly_reference_data: {monthly_data_filename}
   loader:
     dataset:
       data_path: '{valid_data_path}'
@@ -125,8 +126,9 @@ experiment_dir: {results_dir}
 n_forward_steps: 6
 forward_steps_in_memory: 2
 checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
-log_video: true
 save_prediction_files: true
+aggregator:
+  log_video: true
 logging:
   log_to_screen: true
   log_to_wandb: {str(log_to_wandb).lower()}
