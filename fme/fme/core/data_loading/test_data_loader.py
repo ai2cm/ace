@@ -291,3 +291,29 @@ def test_inference_data_loader_validate_n_forward_steps(
             forward_steps_in_memory=n_forward_steps_in_memory,
             requirements=requirements,
         )
+
+
+@pytest.mark.parametrize(
+    "start, stop, batch_size, raises_error",
+    [
+        pytest.param(0, 3, 1, False, id="valid"),
+        pytest.param(10000, 10100, 1, True, id="no_samples"),
+        pytest.param(0, 25, 50, True, id="batch_size_larger_than_nsamples"),
+    ],
+)
+def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_error):
+    _create_dataset_on_disk(tmp_path)
+    config = DataLoaderConfig(
+        XarrayDataConfig(data_path=tmp_path, n_repeats=10),
+        batch_size=batch_size,
+        num_data_workers=0,
+        data_type="xarray",
+        subset=Slice(start, stop),
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    if raises_error:
+        with pytest.raises(ValueError):
+            get_data_loader(config, True, requirements)  # type: ignore
+    else:
+        get_data_loader(config, True, requirements)  # type: ignore

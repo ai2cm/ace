@@ -77,6 +77,13 @@ def get_data_loader(
         collate_fn=BatchData.from_sample_tuples,
     )
 
+    if len(dataloader) == 0:
+        raise ValueError(
+            "No batches in dataloader: "
+            f"{len(dataloader.dataset)} samples, {len(dataloader)} batches. "
+            "Batch size is {dataloader.batch_size}"
+        )
+
     return GriddedData(
         loader=dataloader,
         metadata=dataset.metadata,
