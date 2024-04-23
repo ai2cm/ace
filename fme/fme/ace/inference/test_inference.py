@@ -592,7 +592,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=None,
-        save_prediction_files=True,
+        data_writer=DataWriterConfig(save_prediction_files=True),
         forward_steps_in_memory=1,
     )
     config_filename = tmp_path / "config.yaml"
