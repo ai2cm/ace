@@ -11,7 +11,7 @@ The second step, which produces monthly netCDF files locally (e.g. `make fv3gfs_
 To create an interactive session, run the following command from the `scripts/data_process` directory:
 
 ```
-beaker session create --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process
+beaker session create --budget ai2/climate --image beaker://jeremym/fme-2bc0033e --gpus 0 --mount hostPath:///net/nfs/climate=/net/nfs/climate --mount hostpath://$(pwd)=/full-model --workdir /full-model/scripts/data_process
 ```
 
 Doing so will require that your current working directory is a mountable path (e.g. something in /data).
