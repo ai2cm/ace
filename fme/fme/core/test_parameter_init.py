@@ -12,6 +12,7 @@ from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
+from fme.core.wildcard import wildcard_match
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
@@ -176,7 +177,11 @@ def test_builder_with_weights_sfno_init(
         )
 
 
-def get_config(loaded_shape: Tuple[int, int], extra_built_layer: bool, tmpdir: Path):
+def get_config(
+    loaded_shape: Tuple[int, int],
+    extra_built_layer: bool,
+    tmpdir: Path,
+):
     sfno_config_data = {
         "type": "SphericalFourierNeuralOperatorNet",
         "config": {
@@ -332,3 +337,55 @@ def test_frozen_parameter_config_no_overlaps(include, exclude, expect_exception)
             parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
     else:
         parameter_init.FrozenParameterConfig(include=include, exclude=exclude)
+
+
+def test_parameter_init_with_regularizer(tmpdir):
+    """
+    Test that optimizing on the parameter init regularizer will
+    reduce the magnitude of randomly initialized weights, and reduce
+    the distance between the weights and the original state for
+    weights initialized from that state.
+    """
+    device = get_device()
+    saved_module = ComplexModule(10, 20).to(device)
+    weights_path = str(tmpdir / "weights.ckpt")
+    torch.save(
+        {
+            "stepper": {
+                "module": saved_module.state_dict(),
+            },
+        },
+        weights_path,
+    )
+    config = parameter_init.ParameterInitializationConfig(
+        weights_path=weights_path,
+        exclude_parameters=["linear1.linear.weight"],
+        alpha=1.0,
+        beta=1.0,
+    )
+    # new_module = module
+    module = ComplexModule(10, 20).to(device)
+    module, regularizer = config.apply(module, init_weights=True)
+
+    original_state = copy.deepcopy(module.state_dict())
+    # overwrite new_module weights with random values
+    for name, param in module.named_parameters():
+        param.data[:] = torch.randn_like(param.data, device=device)
+    pre_step_state = copy.deepcopy(module.state_dict())
+    optimizer = torch.optim.SGD(module.parameters(), lr=0.01)
+
+    optimizer.zero_grad()
+    loss = regularizer()
+    loss.backward()
+    optimizer.step()
+
+    for name, param in module.named_parameters():
+        if any(wildcard_match(pattern, name) for pattern in config.exclude_parameters):
+            # L2 regularization against 0
+            assert torch.all(param.data**2 < pre_step_state[name] ** 2)
+        else:
+            # L2 regularization against initial value
+            assert torch.all(
+                (param.data - original_state[name]) ** 2
+                < (pre_step_state[name] - original_state[name]) ** 2
+            )
