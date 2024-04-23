@@ -254,9 +254,10 @@ class SingleModuleStepper:
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         )
-        self.module = config.parameter_init.apply(
+        module, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
             self.module, init_weights=init_weights
-        ).to(get_device())
+        )
+        self.module = module.to(get_device())
 
         self._img_shape = img_shape
         self._config = config
@@ -451,6 +452,7 @@ class SingleModuleStepper:
         conservation_metrics, conservation_loss = self._conservation_loss(gen_data)
         metrics.update(conservation_metrics)
         loss += conservation_loss
+        loss += self._l2_sp_tuning_regularizer()
 
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)

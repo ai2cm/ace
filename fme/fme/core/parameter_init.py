@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional
+from typing import Any, Callable, List, Mapping, Optional, Tuple
 
 import torch
 from torch import nn
@@ -56,6 +56,9 @@ def _freeze_weight(module: nn.Module, name: str):
         pass
 
 
+RegularizerFunction = Callable[[], torch.Tensor]
+
+
 @dataclasses.dataclass
 class ParameterInitializationConfig:
     """
@@ -75,6 +78,10 @@ class ParameterInitializationConfig:
             final layer(s) of a model, and only overwrite the weights for
             earlier layers. Takes values like "decoder.2.weight".
         frozen_parameters: configuration for freezing parameters in the built model
+        alpha: L2 regularization coefficient keeping initialized weights
+            close to their intiial values
+        beta: L2 regularization coefficient keeping uninitialized weights
+            close to zero
     """
 
     weights_path: Optional[str] = None
@@ -82,8 +89,12 @@ class ParameterInitializationConfig:
     frozen_parameters: FrozenParameterConfig = dataclasses.field(
         default_factory=lambda: FrozenParameterConfig(exclude=["*"])
     )
+    alpha: float = 0.0
+    beta: float = 0.0
 
-    def apply(self, module: nn.Module, init_weights: bool) -> nn.Module:
+    def apply(
+        self, module: nn.Module, init_weights: bool
+    ) -> Tuple[nn.Module, RegularizerFunction]:
         """
         Apply the weight initialization to a module.
 
@@ -93,6 +104,7 @@ class ParameterInitializationConfig:
 
         Returns:
             a nn.Module with initialization applied
+            a function which returns the regularization loss term
         """
         if init_weights and self.weights_path is not None:
             loaded_state_dict = self.get_base_weights()
@@ -102,8 +114,54 @@ class ParameterInitializationConfig:
                     module,
                     exclude_parameters=self.exclude_parameters,
                 )
+        else:
+            loaded_state_dict = None
         self.frozen_parameters.apply(module)
-        return module
+        device = get_device()
+        if loaded_state_dict is None or (self.alpha == 0 and self.beta == 0):
+
+            def regularizer():
+                return torch.tensor(0.0, device=device)
+
+        else:
+            loaded_state_dict = {
+                name: value.to(device) for name, value in loaded_state_dict.items()
+            }
+            from_names = set(loaded_state_dict.keys())
+            to_names = set(module.state_dict().keys())
+            if not from_names.issubset(to_names):
+                missing_parameters = from_names - to_names
+                raise ValueError(
+                    f"Dest module is missing parameters {missing_parameters}, "
+                    "which is not allowed"
+                )
+
+            def regularizer():
+                loss = torch.tensor(0.0, device=device)
+                for name in from_names:
+                    try:
+                        param = module.get_parameter(name)
+                    except AttributeError:  # non-trainable state data
+                        continue
+                    if any(
+                        wildcard_match(pattern, name)
+                        for pattern in self.exclude_parameters
+                    ):
+                        loss += (
+                            self.beta / 2 * torch.linalg.norm(param.flatten(), ord=2)
+                        )
+                    else:
+                        loss += (
+                            self.alpha
+                            / 2
+                            * torch.linalg.norm(
+                                (param - loaded_state_dict[name]).flatten(),
+                                ord=2,
+                            )
+                        )
+                return loss
+
+        return module, regularizer
 
     def get_base_weights(self) -> Optional[Mapping[str, Any]]:
         """
