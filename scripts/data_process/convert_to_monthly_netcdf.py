@@ -2,6 +2,7 @@ import os
 
 import click
 import numpy as np
+import pandas as pd
 import xarray as xr
 
 
@@ -28,6 +29,8 @@ def main(input_zarr, output_directory, start_date, end_date, nc_format, prepend_
     ds = ds.sel(time=slice(start_date, end_date))
     monthly_ds = ds.resample(time="MS")
     for label, data in monthly_ds:
+        # np.datetime64 times do not have a strftime method, so convert to pd.Timestamp
+        label = pd.Timestamp(label)
         print(f"Processing month {label}")
         filename = os.path.join(output_directory, label.strftime("%Y%m%d%H") + ".nc")
         # use these options to enable opening data with netCDF4.MFDataset
