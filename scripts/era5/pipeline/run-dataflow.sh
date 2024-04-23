@@ -7,7 +7,7 @@
 RUNNER=${1:-DataflowRunner}
 
 python3 xr-beam-pipeline.py \
-    gs://vcm-ml-intermediate/2024-04-15-era5-1deg-8layer.zarr \
+    gs://vcm-ml-intermediate/2024-04-22-era5-1deg-8layer.zarr \
     100 \
     --ncar_process_time_chunksize 10 \
     --project vcm-ml \
