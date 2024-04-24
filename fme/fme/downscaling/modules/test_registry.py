@@ -1,10 +1,12 @@
 import pytest
 import torch
 
+from fme.core.device import get_device
 from fme.downscaling.modules.registry import (
     InterpolateConfig,
     ModuleRegistrySelector,
     SwinirConfig,
+    compute_unet_padding_size,
 )
 
 
@@ -201,3 +203,33 @@ def test_interpolate(
     fine_shape = tuple(s * downscale_factor for s in coarse_shape)
     # Note: interpolate models ignore `n_out_channels`
     assert outputs.shape == (batch_size, n_in_channels, *fine_shape)
+
+
+@pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
+def test_unets_output_shape(type_):
+    coarse_shape = (9, 18)
+    unet = (
+        ModuleRegistrySelector(
+            type_,
+            dict(
+                model_channels=4,
+            ),
+        )
+        .build(
+            n_in_channels=3,
+            n_out_channels=3,
+            coarse_shape=coarse_shape,
+            downscale_factor=2,
+        )
+        .to(get_device())
+    )
+    inputs = torch.rand(2, 3, *coarse_shape).to(get_device())
+    outputs = unet(inputs)
+    assert outputs.shape == (2, 3, *[2 * s for s in coarse_shape])
+
+
+@pytest.mark.parametrize(
+    "value,divisor,expected", [(180, 8, 4), (128, 2, 0), (128, 16, 0), (5, 8, 3)]
+)
+def test_unet_compute_padding_size(value, divisor, expected):
+    assert compute_unet_padding_size(value, divisor) == expected
