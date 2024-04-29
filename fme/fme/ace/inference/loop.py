@@ -15,10 +15,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 
 from .data_writer import DataWriter, NullDataWriter
-from .derived_variables import (
-    compute_derived_quantities,
-    compute_stepped_derived_quantities,
-)
+from .derived_variables import compute_stepped_derived_quantities
 
 
 class WindowStitcher:
@@ -111,7 +108,6 @@ def _inference_internal_loop(
     # for non-initial windows, we want to record only the new data
     # and discard the initial sample of the window
     if i_time > 0:
-        stepped = stepped.remove_initial_condition()
         batch_times = batch_times.isel(time=slice(1, None))
         i_time_aggregator = i_time + 1
     else:
@@ -172,19 +168,27 @@ def run_inference(
             device = get_device()
             window_data = _to_device(window_batch_data.data, device)
 
-            target_data = compute_derived_quantities(
-                window_data, data.sigma_coordinates
-            )
             stitcher.apply_initial_condition(window_data)
+
             stepped = stepper.run_on_batch(
                 window_data,
                 NullOptimization(),
                 n_forward_steps=forward_steps_in_memory,
             )
-            stepped.target_data = target_data
-            stepped.gen_data = compute_derived_quantities(
-                stepped.gen_data, data.sigma_coordinates
+
+            # Prepend initial (pre-first-timestep) output for the first window
+            if i == 0:
+                (
+                    initial_condition,
+                    normed_initial_condition,
+                ) = stepper.get_initial_condition(window_data)
+                stepped = stepped.prepend_initial_condition(
+                    initial_condition, normed_initial_condition
+                )
+            stepped = compute_stepped_derived_quantities(
+                stepped, data.sigma_coordinates
             )
+
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
             _inference_internal_loop(
@@ -200,12 +204,6 @@ def run_inference(
         for name, duration in timers.items():
             logging.info(f"{name} duration: {duration:.2f}s")
     return timers
-
-
-def remove_initial_condition(
-    data: Mapping[str, torch.Tensor]
-) -> Dict[str, torch.Tensor]:
-    return {key: value[:, 1:] for key, value in data.items()}
 
 
 def run_dataset_inference(
@@ -252,6 +250,13 @@ def run_dataset_inference(
         stepped = compute_stepped_derived_quantities(
             stepped, target_data.sigma_coordinates
         )
+
+        # Windows here all include an initial condition at start.
+        # Remove IC for windows >0 to be consistent with run_on_batch
+        # outputs before passing to the shared _inference_internal_loop.
+        if i > 0:
+            stepped = stepped.remove_initial_condition()
+
         timers["run_on_batch"] += time.time() - current_time
         current_time = time.time()
         _inference_internal_loop(
