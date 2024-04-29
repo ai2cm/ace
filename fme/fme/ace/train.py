@@ -341,6 +341,11 @@ class Trainer:
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
                 )
+                # Prepend initial condition back to start of windows
+                # as it's used to compute differenced quantities
+                ic, normed_ic = self.stepper.get_initial_condition(batch.data)
+                stepped = stepped.prepend_initial_condition(ic, normed_ic)
+
                 stepped = compute_stepped_derived_quantities(
                     stepped, self.valid_data.sigma_coordinates
                 )

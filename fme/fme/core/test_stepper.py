@@ -20,6 +20,7 @@ from fme.core.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
+    SteppedData,
 )
 from fme.core.typing_ import TensorDict
 
@@ -139,7 +140,7 @@ def test_run_on_batch_addition_series():
             return x + 1
 
     n_steps = 4
-    data = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    data_with_ic = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
@@ -154,9 +155,12 @@ def test_run_on_batch_addition_series():
     )
     stepper = config.get_stepper((5, 5), area, sigma_coordinates)
     stepped = stepper.run_on_batch(
-        data=data, optimization=MagicMock(), n_forward_steps=n_steps
+        data=data_with_ic, optimization=MagicMock(), n_forward_steps=n_steps
     )
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    # output of run_on_batch does not include the initial condition
+    assert stepped.gen_data["a"].shape == (5, n_steps, 5, 5)
+    data = {k: data_with_ic[k][:, 1:] for k in data_with_ic}
+
     for i in range(n_steps - 1):
         assert torch.allclose(
             stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
@@ -172,14 +176,6 @@ def test_run_on_batch_addition_series():
         )
     assert torch.allclose(stepped.target_data_norm["a"], data["a"])
     assert torch.allclose(stepped.target_data_norm["b"], data["b"])
-    assert torch.allclose(stepped.gen_data["a"][:, 0], data["a"][:, 0])
-    assert torch.allclose(stepped.gen_data["b"][:, 0], data["b"][:, 0])
-    assert torch.allclose(
-        stepped.gen_data_norm["a"][:, 0], stepped.target_data_norm["a"][:, 0]
-    )
-    assert torch.allclose(
-        stepped.gen_data_norm["b"][:, 0], stepped.target_data_norm["b"][:, 0]
-    )
 
 
 def test_run_on_batch_with_prescribed_ocean():
@@ -214,7 +210,7 @@ def test_run_on_batch_with_prescribed_ocean():
     stepped = stepper.run_on_batch(
         data, optimization=MagicMock(), n_forward_steps=n_steps
     )
-    for i in range(n_steps):
+    for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
             stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
@@ -680,3 +676,27 @@ def test_next_step_forcing_names():
     torch.testing.assert_close(
         stepper.module.module.last_input[:, 2, :], forcing_data["c"][:, 1]
     )
+
+
+def test_prepend_initial_condition():
+    nt = 3
+    x = torch.rand(3, nt, 5).to(fme.get_device())
+    x_normed = (x - x.mean()) / x.std()
+    stepped = SteppedData(
+        gen_data={"a": x, "b": x + 1},
+        gen_data_norm={"a": x_normed, "b": x_normed + 1},
+        target_data={"a": x, "b": x + 1},
+        target_data_norm={"a": x_normed, "b": x_normed + 1},
+        metrics={"loss": torch.tensor(0.0)},
+    )
+    ic = {
+        "a": torch.rand(3, 5).to(fme.get_device()),
+        "b": torch.rand(3, 5).to(fme.get_device()),
+    }
+    ic_normed = {k: (v - v.mean()) / v.std() for k, v in ic.items()}
+    prepended = stepped.prepend_initial_condition(ic, ic_normed)
+    for v in ["a", "b"]:
+        assert torch.allclose(prepended.gen_data[v][:, 0], ic[v])
+        assert torch.allclose(prepended.gen_data_norm[v][:, 0], ic_normed[v])
+        assert torch.allclose(prepended.target_data[v][:, 0], ic[v])
+        assert torch.allclose(prepended.target_data_norm[v][:, 0], ic_normed[v])
