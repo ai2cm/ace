@@ -50,6 +50,11 @@ class SingleModuleStepperConfig:
     loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
 
     def __post_init__(self):
+        if self.conservation_loss.dry_air_penalty is not None:
+            raise ValueError(
+                "Conservation loss is no longer supported in this stepper. "
+                "conservation_loss.dry_air_penalty must be None."
+            )
         if self.conserve_dry_air is not None:
             warnings.warn(
                 "conserve_dry_air is deprecated, "
@@ -169,6 +174,13 @@ class ExistingStepperConfig:
         )
 
 
+def _cast_tensordict(
+    data: TensorDict, dtype: Optional[torch.dtype] = None
+) -> TensorDict:
+    device = get_device()
+    return {name: value.to(device, dtype=dtype) for name, value in data.items()}
+
+
 class DummyWrapper(nn.Module):
     """
     Wrapper class for a single pytorch module, which does nothing.
@@ -183,6 +195,15 @@ class DummyWrapper(nn.Module):
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
+
+
+def _prepend_timestep(
+    data: TensorDict, timestep: TensorDict, time_dim: int = 1
+) -> TensorDict:
+    return {
+        k: torch.cat([timestep[k].unsqueeze(time_dim), v], dim=time_dim)
+        for k, v in data.items()
+    }
 
 
 @dataclasses.dataclass
@@ -210,6 +231,29 @@ class SteppedData:
             target_data={k: v for k, v in self.target_data.items()},
             gen_data_norm={k: v for k, v in self.gen_data_norm.items()},
             target_data_norm={k: v for k, v in self.target_data_norm.items()},
+        )
+
+    def prepend_initial_condition(
+        self,
+        initial_condition: TensorDict,
+        normalized_initial_condition: TensorDict,
+    ) -> "SteppedData":
+        """
+        Prepends an initial condition to the existing stepped data.
+        """
+        initial_condition = _cast_tensordict(initial_condition)
+        normalized_initial_condition = _cast_tensordict(normalized_initial_condition)
+
+        return SteppedData(
+            metrics=self.metrics,
+            gen_data=_prepend_timestep(self.gen_data, initial_condition),
+            target_data=_prepend_timestep(self.target_data, initial_condition),
+            gen_data_norm=_prepend_timestep(
+                self.gen_data_norm, normalized_initial_condition
+            ),
+            target_data_norm=_prepend_timestep(
+                self.target_data_norm, normalized_initial_condition
+            ),
         )
 
 
@@ -283,10 +327,7 @@ class SingleModuleStepper:
         self.sigma_coordinates = sigma_coordinates.to(get_device())
 
         self.loss_obj = config.loss.build(self.area, config.out_names, self.CHANNEL_DIM)
-        self._conservation_loss = config.conservation_loss.build(
-            area_weights=self.area,
-            sigma_coordinates=self.sigma_coordinates,
-        )
+
         self._corrector = config.corrector.build(
             area=area, sigma_coordinates=sigma_coordinates
         )
@@ -387,6 +428,10 @@ class SingleModuleStepper:
             )
         return output_timeseries
 
+    def get_initial_condition(self, data: TensorDict) -> Tuple[TensorDict, TensorDict]:
+        ic = {k: v.select(self.TIME_DIM, 0) for k, v in data.items()}
+        return ic, self.normalizer.normalize(ic)
+
     def run_on_batch(
         self,
         data: TensorDict,
@@ -408,10 +453,7 @@ class SingleModuleStepper:
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        device = get_device()
-        data = {
-            name: value.to(device, dtype=torch.float) for name, value in data.items()
-        }
+        data = _cast_tensordict(data, dtype=torch.float)
         time_dim = self.TIME_DIM
         if self.ocean is None:
             forcing_names = self._config.forcing_names
@@ -421,20 +463,22 @@ class SingleModuleStepper:
 
         loss = torch.tensor(0.0, device=get_device())
         metrics = {}
+
         input_data = {
             k: data[k].select(time_dim, 0) for k in self._config.prognostic_names
         }
+        # Remove the initial condition from target data
+        data = {k: data[k][:, 1:] for k in data}
 
         optimization.set_mode(self.module)
         with optimization.autocast():
+            # output from self.predict does not include initial condition
             gen_data = self.predict(input_data, forcing_data, n_forward_steps)
 
-            # compute loss for each timestep except initial condition
+            # compute loss for each timestep
             for step in range(n_forward_steps):
-                # output from self.predict does not include initial condition, hence
-                # using index=step for gen_norm and index=step+1 for full_data_norm
                 gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
-                target_step = {k: v.select(time_dim, step + 1) for k, v in data.items()}
+                target_step = {k: v.select(time_dim, step) for k, v in data.items()}
                 gen_norm_step = self.loss_normalizer.normalize(gen_step)
                 target_norm_step = self.loss_normalizer.normalize(target_step)
 
@@ -442,16 +486,6 @@ class SingleModuleStepper:
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
 
-        # prepend the initial (pre-first-timestep) output data to the generated data
-        initial = {k: data[k].select(time_dim, 0) for k in self.out_packer.names}
-        for name in self.out_packer.names:
-            gen_data[name] = torch.cat(
-                [initial[name].unsqueeze(time_dim), gen_data[name]], dim=time_dim
-            )
-
-        conservation_metrics, conservation_loss = self._conservation_loss(gen_data)
-        metrics.update(conservation_metrics)
-        loss += conservation_loss
         loss += self._l2_sp_tuning_regularizer()
 
         metrics["loss"] = loss.detach()
