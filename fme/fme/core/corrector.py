@@ -7,7 +7,6 @@ from fme.core import metrics
 from fme.core.climate_data import ClimateData
 from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.device import get_device
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -105,8 +104,8 @@ class Corrector:
         sigma_coordinates: SigmaCoordinates,
     ):
         self._config = config
-        self._area = area.to(get_device())
-        self._sigma_coordinates = sigma_coordinates.to(get_device())
+        self._area = area
+        self._sigma_coordinates = sigma_coordinates
 
     def __call__(
         self,
