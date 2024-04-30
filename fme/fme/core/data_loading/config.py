@@ -1,5 +1,7 @@
 import dataclasses
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
+
+import xarray as xr
 
 from fme.core.distributed import Distributed
 
@@ -19,6 +21,26 @@ class Slice:
     @property
     def slice(self) -> slice:
         return slice(self.start, self.stop, self.step)
+
+
+@dataclasses.dataclass
+class TimeSlice:
+    """
+    Configuration of a slice of times. Step is an integer-valued index step.
+
+    Note: start_time and stop_time may be provided as partial time strings and the
+        stop_time will be included in the slice. See more details in `Xarray docs`_.
+
+    .. _Xarray docs:
+       https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range  # noqa
+    """
+
+    start_time: Optional[str] = None
+    stop_time: Optional[str] = None
+    step: Optional[int] = None
+
+    def slice(self, times: xr.CFTimeIndex) -> slice:
+        return times.slice_indexer(self.start_time, self.stop_time, self.step)
 
 
 @dataclasses.dataclass
@@ -54,7 +76,7 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int
     data_type: Literal["xarray", "ensemble_xarray"]
-    subset: Slice = dataclasses.field(default_factory=Slice)
+    subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     n_samples: Optional[int] = None
 
     def __post_init__(self):

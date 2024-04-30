@@ -4,7 +4,7 @@ import os
 from collections import namedtuple
 from glob import glob
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -15,7 +15,7 @@ from fme.core import metrics
 from fme.core.typing_ import TensorDict
 from fme.core.winds import lon_lat_to_xyz
 
-from .config import XarrayDataConfig
+from .config import Slice, TimeSlice, XarrayDataConfig
 from .data_typing import (
     Dataset,
     HorizontalCoordinates,
@@ -47,6 +47,7 @@ VariableNames = namedtuple(
 def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     """Returns a subset of the dataset and propagates other properties."""
     indices = range(len(dataset))[subset]
+    logging.info(f"Subsetting dataset samples according to {subset}.")
     subsetted_dataset = torch.utils.data.Subset(dataset, indices)
     subsetted_dataset.metadata = dataset.metadata
     subsetted_dataset.area_weights = dataset.area_weights
@@ -56,7 +57,9 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
 
 
 def get_datasets_at_path(
-    params: XarrayDataConfig, requirements: DataRequirements, subset: slice
+    params: XarrayDataConfig,
+    requirements: DataRequirements,
+    subset: Union[TimeSlice, Slice],
 ) -> List[Dataset]:
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
     if len(paths) == 0:
@@ -68,8 +71,8 @@ def get_datasets_at_path(
     for path in paths:
         params_curr_member = dataclasses.replace(params, data_path=path)
         dataset = XarrayDataset(params_curr_member, requirements)
-
-        dataset = subset_dataset(dataset, subset)
+        subset_slice = as_index_slice(subset, dataset)
+        dataset = subset_dataset(dataset, subset_slice)
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
         sigma_coords.append(dataset.sigma_coordinates)
@@ -134,12 +137,20 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
     )
 
 
-def get_cumulative_timesteps(paths: List[str]) -> np.ndarray:
-    """Returns a list of cumulative timesteps for each file in paths."""
-    num_timesteps_per_file = [0]
+def get_all_times(paths: List[str]) -> List[np.ndarray]:
+    """Return a list of the time coordinate of each file in paths."""
+    times = []
     for path in paths:
         with xr.open_dataset(path, use_cftime=True) as ds:
-            num_timesteps_per_file.append(len(ds.time))
+            times.append(ds.time.values)
+    return times
+
+
+def get_cumulative_timesteps(times: List[np.ndarray]) -> np.ndarray:
+    """Returns a list of cumulative timesteps for each item in times."""
+    num_timesteps_per_file = [0]
+    for time_coord in times:
+        num_timesteps_per_file.append(len(time_coord))
     return np.array(num_timesteps_per_file).cumsum()
 
 
@@ -246,11 +257,15 @@ class XarrayDataset(Dataset):
 
     def _get_files_stats(self):
         logging.info(f"Opening data at {os.path.join(self.path, '*.nc')}")
-        cum_num_timesteps = get_cumulative_timesteps(self.full_paths)
+        time_coords = get_all_times(self.full_paths)
+        cum_num_timesteps = get_cumulative_timesteps(time_coords)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
         self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
-        del cum_num_timesteps
+        self._time_index = xr.CFTimeIndex(
+            np.concatenate(time_coords)[: self._n_initial_conditions]
+        )
+        del cum_num_timesteps, time_coords
 
         ds = self._open_file(0)
         self._get_metadata(ds)
@@ -320,6 +335,11 @@ class XarrayDataset(Dataset):
             mask_and_scale=False,
         )
 
+    @property
+    def time_index(self) -> xr.CFTimeIndex:
+        """Return cftime index corresponding to start time of each sample."""
+        return self._time_index
+
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
 
@@ -383,3 +403,15 @@ class XarrayDataset(Dataset):
             tensors[name] = tensor.repeat((total_steps, 1, 1))
 
         return tensors, times
+
+
+def as_index_slice(subset: Union[Slice, TimeSlice], dataset: XarrayDataset) -> slice:
+    """Converts a subset defined either as a Slice or TimeSlice into an index slice
+    based on time coordinate in provided dataset."""
+    if isinstance(subset, Slice):
+        index_slice = subset.slice
+    elif isinstance(subset, TimeSlice):
+        index_slice = subset.slice(dataset.time_index)
+    else:
+        raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
+    return index_slice
