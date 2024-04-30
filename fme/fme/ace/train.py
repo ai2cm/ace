@@ -113,6 +113,10 @@ class Trainer:
             n_samples = len(gridded_data.loader.dataset)
             n_batches = len(gridded_data.loader)
             logging.info(f"{name} data: {n_samples} samples, {n_batches} batches")
+            first_time = gridded_data.loader.dataset[0][1].values[0]
+            last_time = gridded_data.loader.dataset[-1][1].values[0]
+            logging.info(f"{name} data: first sample's initial time: {first_time}")
+            logging.info(f"{name} data: last sample's initial time: {last_time}")
 
         self.num_batches_seen = 0
         self.startEpoch = 0

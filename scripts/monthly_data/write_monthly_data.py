@@ -40,7 +40,7 @@ def get_data_loaders(
         datasets = [XarrayDataset(config.dataset, requirements)]
     elif config.data_type == "ensemble_xarray":
         datasets = get_datasets_at_path(
-            config.dataset, requirements, subset=config.subset.slice
+            config.dataset, requirements, subset=config.subset
         )
 
     data_loaders = []
