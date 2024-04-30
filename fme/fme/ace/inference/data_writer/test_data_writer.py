@@ -7,8 +7,8 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
-from fme.ace.inference.data_writer.prediction import get_batch_lead_times_microseconds
+from fme.ace.inference.data_writer.main import DataWriter, DataWriterConfig
+from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
@@ -179,21 +179,15 @@ class TestDataWriter:
         assert dataset["time"].units == "microseconds"
         assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
         assert dataset["init_time"].calendar == calendar
-        for var_name in set(sample_target_data.keys()):
+        for var_name in set(sample_prediction_data.keys()):
             var_data = dataset.variables[var_name][:]
             assert var_data.shape == (
-                2,
                 n_samples,
                 n_timesteps,
                 4,
                 5,
-            )  # source, sample, time, lat, lon
-            assert not np.isnan(var_data[0, :]).any(), "unexpected NaNs in target data"
-            if var_name in sample_prediction_data:
-                assert not np.isnan(
-                    var_data[1, :]
-                ).any(), "unexpected NaNs in prediction data"
-
+            )  # sample, time, lat, lon
+            assert not np.isnan(var_data).any(), "unexpected NaNs in prediction data"
             if var_name in sample_metadata:
                 assert (
                     dataset.variables[var_name].units == sample_metadata[var_name].units
@@ -207,6 +201,11 @@ class TestDataWriter:
                 assert not hasattr(dataset.variables[var_name], "long_name")
 
         dataset.close()
+
+        # Open the target output file and do smaller set of checks
+        dataset = Dataset(tmp_path / "autoregressive_target.nc", "r")
+        coord_names = {"time", "init_time", "valid_time", "lat", "lon"}
+        assert set(dataset.variables) == set(sample_target_data) | coord_names
 
         # Open the file again with xarray and check the time coordinates,
         # since the values opened this way depend on calendar/units
@@ -238,7 +237,7 @@ class TestDataWriter:
                 {"init_time": expected_init_times}
             )
             xr.testing.assert_equal(ds["init_time"], expected_init_times)
-            for var_name in set(sample_target_data.keys()):
+            for var_name in set(sample_prediction_data.keys()):
                 assert "valid_time" in ds[var_name].coords
                 assert "init_time" in ds[var_name].coords
 
@@ -311,12 +310,12 @@ class TestDataWriter:
         writer.flush()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
         expected_variables = (
-            set(save_names)
+            set(save_names).intersection(sample_prediction_data)
             if save_names is not None
-            else set(sample_target_data.keys())
+            else set(sample_prediction_data.keys())
         )
         assert set(dataset.variables.keys()) == expected_variables.union(
-            {"source", "init_time", "time", "lat", "lon", "valid_time"}
+            {"init_time", "time", "lat", "lon", "valid_time"}
         )
         expected_prediction_variables = set(sample_prediction_data.keys())
         if save_names is not None:

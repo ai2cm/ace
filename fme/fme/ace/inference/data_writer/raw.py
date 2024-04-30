@@ -20,9 +20,11 @@ INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
 
 
-class PredictionDataWriter:
+class PairedRawDataWriter:
     """
-    Write raw prediction data to a netCDF file.
+    Wrapper over RawDataWriter to write both target and prediction data.
+
+    Gives the same interface as for our other writers.
     """
 
     def __init__(
@@ -33,22 +35,78 @@ class PredictionDataWriter:
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
+        self._target_writer = RawDataWriter(
+            path=path,
+            label="autoregressive_target.nc",
+            n_samples=n_samples,
+            save_names=save_names,
+            metadata=metadata,
+            coords=coords,
+        )
+        self._prediction_writer = RawDataWriter(
+            path=path,
+            label="autoregressive_predictions.nc",
+            n_samples=n_samples,
+            save_names=save_names,
+            metadata=metadata,
+            coords=coords,
+        )
+
+    def append_batch(
+        self,
+        target: Dict[str, torch.Tensor],
+        prediction: Dict[str, torch.Tensor],
+        start_timestep: int,
+        start_sample: int,
+        batch_times: xr.DataArray,
+    ):
+        self._target_writer.append_batch(
+            data=target,
+            start_timestep=start_timestep,
+            start_sample=start_sample,
+            batch_times=batch_times,
+        )
+        self._prediction_writer.append_batch(
+            data=prediction,
+            start_timestep=start_timestep,
+            start_sample=start_sample,
+            batch_times=batch_times,
+        )
+
+    def flush(self):
+        self._target_writer.flush()
+        self._prediction_writer.flush()
+
+
+class RawDataWriter:
+    """
+    Write raw data to a netCDF file.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        label: str,
+        n_samples: int,
+        save_names: Optional[Sequence[str]],
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ):
         """
         Args:
             filename: Path to write netCDF file(s).
             n_samples: Number of samples to write to the file. This might correspond
                 to a number of initial conditions, or some other grouping of samples.
-            save_names: Names of variables to save in the predictions netcdf file.
-                If None, all predicted variables will be saved.
+            save_names: Names of variables to save in the output file.
+                If None, all provided variables will be saved.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
-        filename = str(Path(path) / "autoregressive_predictions.nc")
+        filename = str(Path(path) / label)
         self._save_names = save_names
         self.metadata = metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
-        self.dataset.createDimension("source", 2)
         self.dataset.createDimension(LEAD_TIME_DIM, None)  # unlimited dimension
         self.dataset.createVariable(LEAD_TIME_DIM, "i8", (LEAD_TIME_DIM,))
         self.dataset.variables[LEAD_TIME_DIM].units = LEAD_TIME_UNITS
@@ -57,8 +115,6 @@ class PredictionDataWriter:
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
         self.dataset.createVariable(VALID_TIME, "i8", (SAMPLE_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
-        self.dataset.createVariable("source", "str", ("source",))
-        self.dataset.variables["source"][:] = np.array(["target", "prediction"])
         self._n_lat: Optional[int] = None
         self._n_lon: Optional[int] = None
 
@@ -69,8 +125,7 @@ class PredictionDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        data: Dict[str, torch.Tensor],
         start_timestep: int,
         start_sample: int,
         batch_times: xr.DataArray,
@@ -79,20 +134,19 @@ class PredictionDataWriter:
         Append a batch of data to the file.
 
         Args:
-            target: Target data.
-            prediction: Prediction data.
+            data: Data to be written to file.
             start_timestep: Timestep (lead time dim) at which to start writing.
             start_sample: Sample (initialization time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
-        n_samples_data = list(target.values())[0].shape[0]
+        n_samples_data = list(data.values())[0].shape[0]
         n_samples_time = batch_times.sizes["sample"]
         if n_samples_data != n_samples_time:
             raise ValueError(
                 f"Batch size mismatch, data has {n_samples_data} samples "
                 f"and times has {n_samples_time} samples."
             )
-        n_times_data = list(target.values())[0].shape[1]
+        n_times_data = list(data.values())[0].shape[1]
         n_times_time = batch_times.sizes["time"]
         if n_times_data != n_times_time:
             raise ValueError(
@@ -101,20 +155,20 @@ class PredictionDataWriter:
             )
 
         if self._n_lat is None:
-            self._n_lat = target[next(iter(target.keys()))].shape[-2]
+            self._n_lat = data[next(iter(data.keys()))].shape[-2]
             self.dataset.createDimension("lat", self._n_lat)
             if "lat" in self.coords:
                 self.dataset.createVariable("lat", "f4", ("lat",))
                 self.dataset.variables["lat"][:] = self.coords["lat"]
         if self._n_lon is None:
-            self._n_lon = target[next(iter(target.keys()))].shape[-1]
+            self._n_lon = data[next(iter(data.keys()))].shape[-1]
             self.dataset.createDimension("lon", self._n_lon)
             if "lon" in self.coords:
                 self.dataset.createVariable("lon", "f4", ("lon",))
                 self.dataset.variables["lon"][:] = self.coords["lon"]
 
-        dims = ("source", SAMPLE_DIM, LEAD_TIME_DIM, "lat", "lon")
-        save_names = self._get_variable_names_to_save(target.keys(), prediction.keys())
+        dims = (SAMPLE_DIM, LEAD_TIME_DIM, "lat", "lon")
+        save_names = self._get_variable_names_to_save(data.keys())
         for variable_name in save_names:
             # define the variable if it doesn't exist
             if variable_name not in self.dataset.variables:
@@ -135,46 +189,23 @@ class PredictionDataWriter:
                     [INIT_TIME, VALID_TIME]
                 )
 
-            # Target and prediction may not have the same variables.
-            # The netCDF contains a "source" dimension for all variables
-            # and will have NaN for missing data.
-            if variable_name in target:
-                target_numpy = target[variable_name].cpu().numpy()
-            else:
-                target_numpy = np.full(
-                    shape=target[next(iter(target.keys()))].shape, fill_value=np.nan
-                )
-            if variable_name in prediction:
-                prediction_numpy = prediction[variable_name].cpu().numpy()
-            else:
-                prediction_numpy = np.full(
-                    shape=prediction[next(iter(prediction.keys()))].shape,
-                    fill_value=np.nan,
-                )
-
-            # Broadcast the corresponding dimension to match with the
-            # 'source' dimension of the variable in the netCDF file
-            target_numpy = np.expand_dims(target_numpy, dims.index("source"))
-            prediction_numpy = np.expand_dims(prediction_numpy, dims.index("source"))
-
-            n_samples_total = self.dataset.variables[variable_name].shape[1]
-            if start_sample + target_numpy.shape[1] > n_samples_total:
+            data_numpy = data[variable_name].cpu().numpy()
+            n_samples_total = self.dataset.variables[variable_name].shape[0]
+            if start_sample + data_numpy.shape[0] > n_samples_total:
                 raise ValueError(
-                    f"Batch size {target_numpy.shape[1]} starting at sample "
+                    f"Batch size {data_numpy.shape[0]} starting at sample "
                     f"{start_sample} "
                     "is too large to fit in the netCDF file with sample "
                     f"dimension of length {n_samples_total}."
                 )
             # Append the data to the variables
             self.dataset.variables[variable_name][
+                start_sample : start_sample + data_numpy.shape[0],
+                start_timestep : start_timestep + data_numpy.shape[1],
                 :,
-                start_sample : start_sample + target_numpy.shape[1],
-                start_timestep : start_timestep + target_numpy.shape[2],
-                :,
-            ] = np.concatenate([target_numpy, prediction_numpy], axis=0)
+            ] = data_numpy
 
         # handle time dimensions
-
         if not hasattr(self.dataset.variables[INIT_TIME], "calendar"):
             self.dataset.variables[INIT_TIME].calendar = batch_times.dt.calendar
         if not hasattr(self.dataset.variables[VALID_TIME], "calendar"):

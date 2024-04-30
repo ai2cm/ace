@@ -10,13 +10,13 @@ from fme.core.data_loading.data_typing import VariableMetadata
 
 from .histograms import HistogramDataWriter
 from .monthly import PairedMonthlyDataWriter
-from .prediction import PredictionDataWriter
+from .raw import PairedRawDataWriter
 from .restart import RestartWriter
 from .time_coarsen import TimeCoarsen, TimeCoarsenConfig
 from .video import VideoDataWriter
 
 Subwriter = Union[
-    PredictionDataWriter,
+    PairedRawDataWriter,
     VideoDataWriter,
     HistogramDataWriter,
     TimeCoarsen,
@@ -140,7 +140,7 @@ class DataWriter:
         if enable_prediction_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
-                    PredictionDataWriter(
+                    PairedRawDataWriter(
                         path=path,
                         n_samples=n_samples,
                         save_names=save_names,

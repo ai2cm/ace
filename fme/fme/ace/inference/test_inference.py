@@ -247,7 +247,7 @@ def inference_helper(
         tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
     )
     np.testing.assert_allclose(
-        prediction_ds["var"].sel(source="prediction").isel(time=-1).values,
+        prediction_ds["var"].isel(time=-1).values,
         restart_ds["var"].values,
     )
 
@@ -364,11 +364,14 @@ def test_inference_writer_boundaries(
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
     )
+    target_ds = xr.open_dataset(
+        tmp_path / "autoregressive_target.nc", decode_timedelta=False
+    )
     assert len(prediction_ds["time"]) == n_forward_steps + 1
     assert not np.any(np.isnan(prediction_ds["var"].values))
 
-    gen = prediction_ds["var"].sel(source="prediction")
-    tar = prediction_ds["var"].sel(source="target")
+    gen = prediction_ds["var"]
+    tar = target_ds["var"]
     gen_time_mean = torch.from_numpy(gen[:, 1:].mean(dim="time").values)
     tar_time_mean = torch.from_numpy(tar[:, 1:].mean(dim="time").values)
     area_weights = metrics.spherical_area_weights(
@@ -389,17 +392,18 @@ def test_inference_writer_boundaries(
     )
 
     prediction_ds = prediction_ds.isel(sample=0)
+    target_ds = target_ds.isel(sample=0)
     ds = xr.open_dataset(data._data_filename)
 
     # the global initial condition should be identical for prediction and target
     np.testing.assert_allclose(
-        prediction_ds["var"].isel(time=0).sel(source="prediction").values,
-        prediction_ds["var"].isel(time=0).sel(source="target").values,
+        prediction_ds["var"].isel(time=0).values,
+        target_ds["var"].isel(time=0).values,
     )
     # the target initial condition should the same as the validation data
     # initial condition
     np.testing.assert_allclose(
-        prediction_ds["var"].isel(time=0).sel(source="target").values,
+        target_ds["var"].isel(time=0).values,
         ds["var"].isel(time=0).values,
     )
     for i in range(0, n_forward_steps + 1):
@@ -426,22 +430,21 @@ def test_inference_writer_boundaries(
 
         # the target obs should be the same as the validation data obs
         np.testing.assert_allclose(
-            prediction_ds["var"].isel(time=i).sel(source="target").values,
+            target_ds["var"].isel(time=i).values,
             ds["var"].isel(time=i).values,
         )
         if i > 0:
             lead_da = prediction_ds["var"].isel(time=i)
             # predictions should be previous condition + 1
             np.testing.assert_allclose(
-                lead_da.sel(source="prediction").values,
-                prediction_ds["var"].sel(source="prediction").isel(time=i - 1).values
-                + 1,
+                lead_da.values,
+                prediction_ds["var"].isel(time=i - 1).values + 1,
             )
             # prediction and target should not have entirely the same values at
             # any lead > 0
             assert not np.allclose(
-                lead_da.sel(source="prediction").values,
-                lead_da.sel(source="target").values,
+                lead_da.values,
+                target_ds["var"].isel(time=i).values,
             )
 
 
