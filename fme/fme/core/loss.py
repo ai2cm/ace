@@ -31,12 +31,8 @@ class MappingLoss:
         predict_dict: TensorDict,
         target_dict: TensorDict,
     ):
-        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim).to(
-            dtype=torch.float
-        )
-        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim).to(
-            dtype=torch.float
-        )
+        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim)
+        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
 
         return self.loss(predict_tensors, target_tensors)
 
@@ -324,7 +320,6 @@ class LossConfig:
             area: A tensor of shape (n_lat, n_lon) containing the area of
                 each grid cell.
         """
-        area = area.to(get_device())
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":

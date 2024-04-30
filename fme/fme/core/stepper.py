@@ -323,13 +323,13 @@ class SingleModuleStepper:
             self.module = DummyWrapper(self.module)
         self._is_distributed = dist.is_distributed()
 
-        self.area = area
+        self.area = area.to(get_device())
         self.sigma_coordinates = sigma_coordinates.to(get_device())
 
         self.loss_obj = config.loss.build(self.area, config.out_names, self.CHANNEL_DIM)
 
         self._corrector = config.corrector.build(
-            area=area, sigma_coordinates=sigma_coordinates
+            area=self.area, sigma_coordinates=self.sigma_coordinates
         )
         if config.loss_normalization is not None:
             self.loss_normalizer = config.loss_normalization.build(
