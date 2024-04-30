@@ -213,9 +213,10 @@ class XarrayDataset(Dataset):
     ):
         self.names = requirements.names
         self.path = config.data_path
+        self.file_pattern = config.file_pattern
         self.engine = "netcdf4" if config.engine is None else config.engine
         # assume that filenames include time ordering
-        self.full_paths = sorted(glob(os.path.join(self.path, "*.nc")))
+        self.full_paths = sorted(glob(os.path.join(self.path, config.file_pattern)))
         if len(self.full_paths) == 0:
             raise ValueError(f"No netCDF files found in '{self.path}'.")
         self.full_paths *= config.n_repeats
@@ -256,7 +257,8 @@ class XarrayDataset(Dataset):
         self._metadata = result
 
     def _get_files_stats(self):
-        logging.info(f"Opening data at {os.path.join(self.path, '*.nc')}")
+        logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
+        cum_num_timesteps = get_cumulative_timesteps(self.full_paths)
         time_coords = get_all_times(self.full_paths)
         cum_num_timesteps = get_cumulative_timesteps(time_coords)
         self.start_indices = cum_num_timesteps[:-1]

@@ -178,7 +178,7 @@ class FV3GFSData:
 
     @property
     def _data_path(self):
-        # data must be in a separate path as loader loads all *.nc files
+        # data must be in a separate path as a default loader loads all *.nc files
         return self.path / "data"
 
     @property
@@ -234,7 +234,7 @@ class MonthlyReferenceData:
 
     @property
     def data_path(self):
-        # data must be in a separate path as loader loads all *.nc files
+        # data must be in a separate path as a default loader loads all *.nc files
         return self.path / "monthly_data"
 
     @property
