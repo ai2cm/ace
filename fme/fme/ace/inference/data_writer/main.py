@@ -11,6 +11,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from .histograms import HistogramDataWriter
 from .monthly import PairedMonthlyDataWriter
 from .prediction import PredictionDataWriter
+from .restart import RestartWriter
 from .time_coarsen import TimeCoarsen, TimeCoarsenConfig
 from .video import VideoDataWriter
 
@@ -20,6 +21,7 @@ Subwriter = Union[
     HistogramDataWriter,
     TimeCoarsen,
     PairedMonthlyDataWriter,
+    RestartWriter,
 ]
 
 
@@ -69,6 +71,7 @@ class DataWriterConfig:
         experiment_dir: str,
         n_samples: int,
         n_timesteps: int,
+        prognostic_names: Sequence[str],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "DataWriter":
@@ -82,6 +85,7 @@ class DataWriterConfig:
             enable_monthly_netcdfs=self.save_monthly_files,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
             save_names=self.save_raw_prediction_names,
+            prognostic_names=prognostic_names,
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
         )
@@ -99,6 +103,7 @@ class DataWriter:
         enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
         save_names: Optional[Sequence[str]],
+        prognostic_names: Sequence[str],
         enable_histogram_netcdfs: bool,
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
@@ -123,7 +128,9 @@ class DataWriter:
         self._writers: List[Subwriter] = []
 
         if time_coarsen is not None:
-            n_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
+            n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
+        else:
+            n_coarsened_timesteps = n_timesteps
 
         def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
             if time_coarsen is not None:
@@ -158,7 +165,7 @@ class DataWriter:
                 _time_coarsen_builder(
                     VideoDataWriter(
                         path=path,
-                        n_timesteps=n_timesteps,
+                        n_timesteps=n_coarsened_timesteps,
                         metadata=metadata,
                         coords=coords,
                     )
@@ -169,12 +176,21 @@ class DataWriter:
                 _time_coarsen_builder(
                     HistogramDataWriter(
                         path=path,
-                        n_timesteps=n_timesteps,
+                        n_timesteps=n_coarsened_timesteps,
                         metadata=metadata,
                         save_names=save_names,
                     )
                 )
             )
+        self._writers.append(
+            RestartWriter(
+                path=path,
+                is_restart_step=lambda i: i == n_timesteps - 1,
+                prognostic_names=prognostic_names,
+                metadata=metadata,
+                coords=coords,
+            )
+        )
 
     def append_batch(
         self,

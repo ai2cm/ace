@@ -5,7 +5,7 @@ import os
 import time
 import warnings
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import dacite
 import torch
@@ -164,11 +164,14 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return _load_stepper_config(self.checkpoint_path)
 
-    def get_data_writer(self, data: GriddedData) -> DataWriter:
+    def get_data_writer(
+        self, data: GriddedData, prognostic_names: Sequence[str]
+    ) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             n_samples=self.loader.n_samples,
             n_timesteps=self.n_forward_steps + 1,
+            prognostic_names=prognostic_names,
             metadata=data.metadata,
             coords=data.coords,
         )
@@ -224,7 +227,8 @@ def main(
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
     )
-    writer = config.get_data_writer(data)
+
+    writer = config.get_data_writer(data, stepper.prognostic_names)
 
     logging.info("Starting inference")
     if config.prediction_loader is not None:
