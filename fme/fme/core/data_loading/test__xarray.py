@@ -12,10 +12,16 @@ import xarray as xr
 
 from fme.core.data_loading._xarray import (
     XarrayDataset,
+    get_all_times,
     get_cumulative_timesteps,
     get_file_local_index,
 )
-from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
+from fme.core.data_loading.config import (
+    DataLoaderConfig,
+    Slice,
+    TimeSlice,
+    XarrayDataConfig,
+)
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import (
@@ -146,7 +152,7 @@ def _get_data(
     else:
         initial_condition_names = ()
 
-    start_indices = get_cumulative_timesteps(filenames)
+    start_indices = get_cumulative_timesteps(get_all_times(filenames))
 
     variable_names = VariableNames(
         time_dependent_names=("foo", "bar", "varying_scalar_var"),
@@ -395,3 +401,24 @@ def test_repeat_dataset_num_timesteps(
     offset = n_timesteps - 1
     expected_length = n_repeats * (len(unrepeated_dataset) + offset) - offset
     assert len(data) == expected_length
+
+
+def test_time_slice():
+    time_slice = TimeSlice("2001-01-01", "2001-01-05", 2)
+    time_index = xr.cftime_range("2000", "2002", freq="D", calendar="noleap")
+    slice_ = time_slice.slice(time_index)
+    assert slice_ == slice(365, 370, 2)
+
+
+def test_time_index(mock_monthly_netcdfs):
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    n_timesteps = 2
+    dataset = XarrayDataset(
+        config,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
+        ),
+    )
+    last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
+    obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
+    assert dataset.time_index.equals(xr.CFTimeIndex(obs_times))
