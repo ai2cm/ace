@@ -48,6 +48,7 @@ class XarrayDataConfig:
     """
     Attributes:
         data_path: Path to the data.
+        file_pattern: Glob pattern to match files in the data_path.
         n_repeats: Number of times to repeat the dataset (in time).
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
@@ -55,6 +56,7 @@ class XarrayDataConfig:
     """
 
     data_path: str
+    file_pattern: str = "*.nc"
     n_repeats: int = 1
     engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
 
