@@ -4,7 +4,6 @@ from typing import Any, Literal, Mapping, Optional
 
 import torch
 import torch.cuda.amp as amp
-from apex import optimizers
 from torch import nn
 
 from fme.core.scheduler import SchedulerConfig
@@ -22,7 +21,7 @@ class Optimization:
         kwargs: Mapping[str, Any],
     ):
         if optimizer_type == "FusedAdam":
-            self.optimizer = optimizers.FusedAdam(parameters, lr=lr, **kwargs)
+            self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
         elif optimizer_type == "Adam":
             self.optimizer = torch.optim.Adam(parameters, lr=lr, **kwargs)
         else:
