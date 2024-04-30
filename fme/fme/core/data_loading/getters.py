@@ -1,12 +1,19 @@
+from typing import Union
+
 import torch.utils.data
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
+from fme.core.data_loading.config import (
+    DataLoaderConfig,
+    Slice,
+    TimeSlice,
+    XarrayDataConfig,
+)
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import XarrayDataset, get_datasets_at_path, subset_dataset
+from ._xarray import XarrayDataset, as_index_slice, get_datasets_at_path, subset_dataset
 from .data_typing import Dataset, GriddedData
 from .inference import InferenceDataLoaderConfig, InferenceDataset
 from .requirements import DataRequirements
@@ -16,7 +23,7 @@ from .utils import BatchData
 def get_ensemble_dataset(
     params: XarrayDataConfig,
     requirements: DataRequirements,
-    subset: slice,
+    subset: Union[Slice, TimeSlice],
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
@@ -36,9 +43,10 @@ def get_dataset(
 ) -> Dataset:
     if config.data_type == "xarray":
         dataset = XarrayDataset(config.dataset, requirements)
-        dataset = subset_dataset(dataset, config.subset.slice)
+        subset_slice = as_index_slice(config.subset, dataset)
+        dataset = subset_dataset(dataset, subset_slice)
     elif config.data_type == "ensemble_xarray":
-        return get_ensemble_dataset(config.dataset, requirements, config.subset.slice)
+        return get_ensemble_dataset(config.dataset, requirements, config.subset)
     else:
         raise NotImplementedError(
             f"{config.data_type} does not have an implemented data loader"
