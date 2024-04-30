@@ -242,6 +242,15 @@ def inference_helper(
         assert not np.any(np.isnan(prediction_ds["var"].isel(time=i + 1).values))
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
+
+    restart_ds = xr.open_dataset(
+        tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
+    )
+    np.testing.assert_allclose(
+        prediction_ds["var"].sel(source="prediction").isel(time=-1).values,
+        restart_ds["var"].values,
+    )
+
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
     assert "var" in metric_ds.data_vars
     assert metric_ds.data_vars["var"].attrs["units"] == "m"
