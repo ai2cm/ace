@@ -403,6 +403,37 @@ def test_repeat_dataset_num_timesteps(
     assert len(data) == expected_length
 
 
+@pytest.mark.parametrize(
+    "glob_pattern, expected_num_files, expected_year_month_tuples",
+    [
+        ("*.nc", None, None),
+        ("2003030100.nc", 1, [(2003, 3)]),
+        ("2003??0100.nc", 10, [(2003, i) for i in range(3, 13)]),
+    ],
+    ids=["all_files", "single_file", "all_2003_files"],
+)
+def test_glob_file_pattern(
+    mock_monthly_netcdfs: MockData,
+    glob_pattern,
+    expected_num_files,
+    expected_year_month_tuples,
+):
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir, file_pattern=glob_pattern
+    )
+    requirements = DataRequirements(
+        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=2
+    )
+    dataset = XarrayDataset(config, requirements)
+    if expected_num_files is None:
+        expected_num_files = len(mock_monthly_netcdfs.start_times)
+    assert expected_num_files == len(dataset.full_paths)
+
+    if expected_year_month_tuples is not None:
+        for i, (year, month) in enumerate(expected_year_month_tuples):
+            assert f"{year}{month:02d}" in dataset.full_paths[i]
+
+
 def test_time_slice():
     time_slice = TimeSlice("2001-01-01", "2001-01-05", 2)
     time_index = xr.cftime_range("2000", "2002", freq="D", calendar="noleap")
