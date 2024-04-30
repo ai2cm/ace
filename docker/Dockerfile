@@ -1,4 +1,4 @@
-FROM nvcr.io/nvidia/pytorch:22.09-py3
+FROM nvcr.io/nvidia/pytorch:23.08-py3
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
