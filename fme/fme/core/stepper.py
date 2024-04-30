@@ -342,6 +342,12 @@ class SingleModuleStepper:
         return self._config.get_data_requirements(n_forward_steps)
 
     @property
+    def prognostic_names(self) -> List[str]:
+        return sorted(
+            list(set(self.out_packer.names).intersection(self.in_packer.names))
+        )
+
+    @property
     def modules(self) -> nn.ModuleList:
         """
         Returns:
