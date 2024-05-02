@@ -1,8 +1,8 @@
 from typing import Union
 
 import torch.utils.data
-from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.sampler import RandomSampler
 
 from fme.core.data_loading.config import (
     DataLoaderConfig,
@@ -62,24 +62,23 @@ def get_data_loader(
     """
     Args:
         config: Parameters for the data loader.
-        train: Whether to use the training or validation data.
+        train: Whether loader is intended for training or validation data; if True,
+            then data will be shuffled.
         requirements: Data requirements for the model.
-        window_time_slice: Time slice within each window to use for the data loader,
-            if given the loader will only return data from this time slice.
-            By default it will return the full windows.
     """
     dataset = get_dataset(config, requirements)
     dist = Distributed.get_instance()
-    sampler = (
-        DistributedSampler(dataset, shuffle=train) if dist.is_distributed() else None
-    )
 
-    dataloader = DataLoader(
+    if dist.is_distributed():
+        sampler = DistributedSampler(dataset, shuffle=train)
+    else:
+        sampler = RandomSampler(dataset) if train else None
+
+    dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=dist.local_batch_size(int(config.batch_size)),
         num_workers=config.num_data_workers,
-        shuffle=(sampler is None) and train,
-        sampler=sampler if train else None,
+        sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
         collate_fn=BatchData.from_sample_tuples,
@@ -118,7 +117,7 @@ def get_inference_data(
     """
     dataset = InferenceDataset(config, forward_steps_in_memory, requirements)
     # we roll our own batching in InferenceDataset, which is why batch_size=None below
-    loader = DataLoader(
+    loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=None,
         num_workers=config.num_data_workers,
