@@ -43,7 +43,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
 
 
 def get_scalar_data(names, value):
-    return {n: torch.tensor([value], device=fme.get_device()) for n in names}
+    return {n: np.array([value], dtype=np.float32) for n in names}
 
 
 @pytest.mark.parametrize(
@@ -190,9 +190,9 @@ def test_run_on_batch_with_prescribed_ocean():
     data["mask"] = torch.zeros_like(data["mask"], dtype=torch.int)
     data["mask"][:, :, :, 0] = 1
     stds = {
-        "a": torch.tensor([2.0], device=fme.get_device()),
-        "b": torch.tensor([3.0], device=fme.get_device()),
-        "mask": torch.tensor([1.0], device=fme.get_device()),
+        "a": np.array([2.0], dtype=np.float32),
+        "b": np.array([3.0], dtype=np.float32),
+        "mask": np.array([1.0], dtype=np.float32),
     }
     area = torch.ones((5, 5), device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
@@ -560,8 +560,8 @@ def _get_stepper(
         in_names=in_names,
         out_names=out_names,
         normalization=NormalizationConfig(
-            means={n: torch.tensor([0.0]) for n in all_names},
-            stds={n: torch.tensor([1.0]) for n in all_names},
+            means={n: np.array([0.0], dtype=np.float32) for n in all_names},
+            stds={n: np.array([1.0], dtype=np.float32) for n in all_names},
         ),
         ocean=ocean_config,
         **kwargs,
