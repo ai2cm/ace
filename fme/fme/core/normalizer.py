@@ -89,8 +89,8 @@ class StandardNormalizer:
         Returns state as a serializable data structure.
         """
         return {
-            "means": {k: float(v.cpu().numpy()) for k, v in self.means.items()},
-            "stds": {k: float(v.cpu().numpy()) for k, v in self.stds.items()},
+            "means": {k: float(v.cpu().numpy().item()) for k, v in self.means.items()},
+            "stds": {k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
         }
 
     @classmethod

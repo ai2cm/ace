@@ -194,7 +194,7 @@ class FV3GFSData:
             start_indices=InferenceInitialConditionIndices(
                 first=0, n_initial_conditions=1, interval=1
             ),
-            num_data_workers=4,
+            num_data_workers=2,
         )
 
 

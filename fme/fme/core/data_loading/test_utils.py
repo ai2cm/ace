@@ -26,7 +26,7 @@ def create_reference_dataset(lon_dim=LON_DIM, lat_dim=LAT_DIM):
     dims = (TIME_DIM, lat_dim, lon_dim)
     sizes = get_sizes(lon_dim=lon_dim, lat_dim=lat_dim)
     shape = tuple(sizes[dim] for dim in dims)
-    data = np.arange(np.product(shape)).reshape(shape)
+    data = np.arange(np.prod(shape)).reshape(shape)
     coords = [np.arange(size) for size in shape]
     full = xr.DataArray(data, dims=dims, coords=coords, name=FULL_NAME)
     constant = full.isel({TIME_DIM: 0}).drop_vars(TIME_DIM).rename(CONSTANT_NAME)

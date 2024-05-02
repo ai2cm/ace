@@ -1,8 +1,10 @@
 """The registry also performs configuration set up so it needs to be tested."""
+
 import copy
 from pathlib import Path
 from typing import Tuple
 
+import numpy as np
 import pytest
 import torch
 
@@ -29,8 +31,8 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
             state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
+                "means": {"x": np.random.randn(1)},
+                "stds": {"x": np.random.randn(1)},
             }
         ),
     }
@@ -60,8 +62,8 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
             state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
+                "means": {"x": np.random.randn(1)},
+                "stds": {"x": np.random.randn(1)},
             }
         ),
     }
@@ -196,8 +198,8 @@ def get_config(
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
             state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
+                "means": {"x": np.random.randn(1)},
+                "stds": {"x": np.random.randn(1)},
             }
         ),
     }
@@ -230,8 +232,8 @@ def get_config(
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
             state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
+                "means": {"x": np.random.randn(1)},
+                "stds": {"x": np.random.randn(1)},
             }
         ),
     }
