@@ -42,7 +42,7 @@ def test_loss_of_zeros_is_variance():
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    torch.testing.assert_allclose(result, y.var())
+    torch.testing.assert_close(result, y.var())
 
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
@@ -57,9 +57,8 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    torch.testing.assert_allclose(
-        result.cpu(), 1.0 + global_mean_weight, atol=0.01, rtol=0
-    )
+    expected = torch.tensor(1.0 + global_mean_weight)
+    torch.testing.assert_close(result.cpu(), expected, atol=0.01, rtol=0)
 
 
 def test_global_mean_loss():
@@ -76,7 +75,7 @@ def test_global_mean_loss():
 
     mse = torch.nn.MSELoss()
     expected = mse(global_weighted_mean(x, area), global_weighted_mean(y, area))
-    torch.testing.assert_allclose(result, expected)
+    torch.testing.assert_close(result, expected)
 
 
 def setup_single_level_conservation_loss(
@@ -200,7 +199,7 @@ def test_area_weighted_mse():
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
     ).mean()
-    torch.testing.assert_allclose(result, expected)
+    torch.testing.assert_close(result, expected)
 
 
 def test__construct_weight_tensor():
@@ -266,7 +265,7 @@ def test_VariableWeightingLoss():
     weighted_loss = VariableWeightingLoss(weights=weights, loss=mse_loss)
 
     x = torch.tensor([[1.0, 2.0]]).to(get_device())
-    y = torch.tensor([2, 2.5]).to(get_device())
+    y = torch.tensor([[2, 2.5]]).to(get_device())
 
     weighted_result = weighted_loss(x, y)
     assert weighted_result == ((16 + 0.25) / 2.0)

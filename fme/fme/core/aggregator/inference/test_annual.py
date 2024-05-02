@@ -14,7 +14,7 @@ from fme.core.testing import DimSizes, MonthlyReferenceData
 
 
 def get_zero_time(shape, dims):
-    return xr.DataArray(np.zeros(shape, dtype="datetime64[ms]"), dims=dims)
+    return xr.DataArray(np.zeros(shape, dtype="datetime64[ns]"), dims=dims)
 
 
 def test_annual_aggregator(tmpdir):

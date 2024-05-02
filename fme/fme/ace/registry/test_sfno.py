@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 import torch
 
@@ -29,8 +30,8 @@ def test_sfno_init(shape):
         "out_names": ["x"],
         "normalization": FromStateNormalizer(
             state={
-                "means": {"x": torch.randn(1)},
-                "stds": {"x": torch.randn(1)},
+                "means": {"x": np.random.randn(1)},
+                "stds": {"x": np.random.randn(1)},
             }
         ),
     }

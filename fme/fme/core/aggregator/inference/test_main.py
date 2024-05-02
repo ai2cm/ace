@@ -10,7 +10,7 @@ from fme.core.device import get_device
 
 
 def get_zero_time(shape, dims):
-    return xr.DataArray(np.zeros(shape, dtype="datetime64[ms]"), dims=dims)
+    return xr.DataArray(np.zeros(shape, dtype="datetime64[ns]"), dims=dims)
 
 
 def test_logs_labels_exist():

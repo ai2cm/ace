@@ -177,7 +177,7 @@ def test_swinir_values(
     inputs = torch.rand(batch_size, n_channels, *coarse_shape)
     outputs = swinir(inputs)
     assert outputs.shape == (batch_size, n_channels, *fine_shape)
-    torch.testing.assert_allclose(
+    torch.testing.assert_close(
         float(torch.sum(outputs)), expected_sum, atol=1e-2, rtol=1e-3
     )
 

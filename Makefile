@@ -39,4 +39,4 @@ create_environment:
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
 
 test:
-	pytest --durations 10 .
+	pytest --durations 20 .
