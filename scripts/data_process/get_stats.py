@@ -35,11 +35,13 @@ DROP_VARIABLES = (
 TIME_INVARIANT_VARIABLES = {
     "FV3GFS": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
     "E3SMV2": ("PHIS", "OCNFRAC", "ICEFRAC", "LANDFRAC"),
+    "ERA5": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
 }
 
 DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
     "E3SMV2": ["time", "lat", "lon"],
+    "ERA5": ["time", "latitude", "longitude"],
 }
 
 
@@ -85,7 +87,10 @@ def compute_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
 @click.option("--start-date", help="For subsetting, e.g. '2016-01-01'")
 @click.option("--end-date", help="For subsetting, e.g. '2016-12-31'")
 @click.option(
-    "--data-type", default="FV3GFS", help="Input data type, e.g., 'FV3GFS' or 'E3SMV2'"
+    "--data-type",
+    default="FV3GFS",
+    type=click.Choice(list(DIMS.keys())),
+    help="Dataset type, used to determine some naming conventions.",
 )
 @click.option(
     "--debug",
