@@ -136,14 +136,14 @@ def test_serialization(tmp_path):
     expected = model.run_on_batch(batch, NullOptimization()).prediction["x"]
 
     model_from_state = Model.from_state(model.get_state(), area_weights)
-    torch.testing.assert_allclose(
+    torch.testing.assert_close(
         expected,
         model_from_state.run_on_batch(batch, NullOptimization()).prediction["x"],
     )
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = Model.from_state(torch.load(tmp_path / "test.ckpt"), area_weights)
-    torch.testing.assert_allclose(
+    torch.testing.assert_close(
         expected,
         model_from_disk.run_on_batch(batch, NullOptimization()).prediction["x"],
     )
