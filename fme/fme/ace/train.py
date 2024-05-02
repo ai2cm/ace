@@ -189,7 +189,7 @@ class Trainer:
         # needed so we can describe the loop even after weights are updated
         for epoch in range(self.startEpoch, segment_max_epochs):
             logging.info(f"Epoch: {epoch+1}")
-            if self.train_data.sampler is not None:
+            if isinstance(self.train_data.sampler, torch.utils.data.DistributedSampler):
                 self.train_data.sampler.set_epoch(epoch)
 
             start_time = time.time()
