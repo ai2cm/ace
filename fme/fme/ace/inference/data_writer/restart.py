@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Dict, Mapping, Optional, Sequence
@@ -96,7 +97,8 @@ class RestartWriter:
             ds.to_netcdf(tmpfile.name)
             # delete the old restart file if it exists, and replace it
             Path(self.restart_filename).unlink(missing_ok=True)
-            Path(tmpfile.name).rename(self.restart_filename)
+
+            shutil.move(tmpfile.name, self.restart_filename)
         finally:
             if Path(tmpfile.name).exists():
                 tmpfile.close()

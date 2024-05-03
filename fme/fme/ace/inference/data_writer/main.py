@@ -1,5 +1,6 @@
 import dataclasses
 import warnings
+from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
@@ -126,6 +127,10 @@ class DataWriter:
             time_coarsen: Configuration for time coarsening of written outputs.
         """
         self._writers: List[Subwriter] = []
+        self.path = path
+        self.coords = coords
+        self.metadata = metadata
+        self.prognostic_names = prognostic_names
 
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
@@ -192,6 +197,28 @@ class DataWriter:
             )
         )
 
+    def save_initial_condition(
+        self,
+        ic_data: Dict[str, torch.Tensor],
+        ic_time: xr.DataArray,
+    ):
+        data_arrays = {}
+        for name in self.prognostic_names:
+            if name not in ic_data:
+                raise KeyError(
+                    f"Initial condition data missing for prognostic variable {name}."
+                )
+            data = ic_data[name].cpu().numpy()
+            data_arrays[name] = xr.DataArray(data, dims=["sample", "lat", "lon"])
+            if name in self.metadata:
+                data_arrays[name].attrs = {
+                    "long_name": self.metadata[name].long_name,
+                    "units": self.metadata[name].units,
+                }
+        data_arrays["time"] = ic_time
+        ds = xr.Dataset(data_arrays, coords=self.coords)
+        ds.to_netcdf(str(Path(self.path) / "initial_condition.nc"))
+
     def append_batch(
         self,
         target: Dict[str, torch.Tensor],
@@ -242,5 +269,12 @@ class NullDataWriter:
         start_timestep: int,
         start_sample: int,
         batch_times: xr.DataArray,
+    ):
+        pass
+
+    def save_initial_condition(
+        self,
+        ic_data: Dict[str, torch.Tensor],
+        ic_time: xr.DataArray,
     ):
         pass
