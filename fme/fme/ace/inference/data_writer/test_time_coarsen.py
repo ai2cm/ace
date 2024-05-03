@@ -86,20 +86,20 @@ def _get_time_array(
     [
         pytest.param(
             1,
-            1,
+            0,
             [0.0, 1.0, 2.0, 3.0],
             get_batch_times(start_time=(2020, 1, 1, 0, 0, 0), n_timesteps=4),
-            1,
+            0,
             id="coarsen_factor_1",
         ),
         pytest.param(
             2,
-            1,
+            0,
             [0.5, 2.5],
             get_batch_times(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
-            1,
+            0,
             id="coarsen_factor_2",
         ),
         pytest.param(
@@ -109,17 +109,17 @@ def _get_time_array(
             get_batch_times(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
-            2,
+            1,
             id="coarsen_factor_2_start_timestep_3",
         ),
         pytest.param(
             4,
-            1,
+            0,
             [1.5],
             get_batch_times(
                 start_time=(2020, 1, 1, 9, 0, 0), n_timesteps=1, freq_hrs=24
             ),
-            1,
+            0,
             id="coarsen_factor_4",
         ),
     ],
