@@ -170,7 +170,7 @@ class InferenceConfig:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             n_samples=self.loader.n_samples,
-            n_timesteps=self.n_forward_steps + 1,
+            n_timesteps=self.n_forward_steps,
             prognostic_names=prognostic_names,
             metadata=data.metadata,
             coords=data.coords,
@@ -207,7 +207,6 @@ def main(
     data_requirements = stepper_config.get_data_requirements(
         n_forward_steps=config.n_forward_steps
     )
-
     data = get_inference_data(
         config.loader,
         config.forward_steps_in_memory,
