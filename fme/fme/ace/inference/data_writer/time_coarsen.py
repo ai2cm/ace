@@ -48,8 +48,8 @@ class TimeCoarsenConfig:
         )
 
     def n_coarsened_timesteps(self, n_timesteps: int) -> int:
-        """Assumes initial condition is in n_timesteps, and is not coarsened"""
-        return ((n_timesteps - 1) // self.coarsen_factor) + 1
+        """Assumes initial condition is NOT in n_timesteps"""
+        return (n_timesteps) // self.coarsen_factor
 
 
 class TimeCoarsen:
@@ -71,25 +71,6 @@ class TimeCoarsen:
         start_sample: int,
         batch_times: xr.DataArray,
     ):
-        if start_timestep == 0:
-            # record the initial condition without coarsening
-            target_inital = tensor_dict_time_select(target, time_slice=slice(None, 1))
-            prediction_initial = tensor_dict_time_select(
-                prediction, time_slice=slice(None, 1)
-            )
-            batch_times_initial = batch_times.isel({TIME_DIM_NAME: slice(None, 1)})
-            self._data_writer.append_batch(
-                target_inital,
-                prediction_initial,
-                start_timestep,
-                start_sample,
-                batch_times_initial,
-            )
-            # then coarsen the rest of the batch
-            target = tensor_dict_time_select(target, time_slice=slice(1, None))
-            prediction = tensor_dict_time_select(prediction, time_slice=slice(1, None))
-            batch_times = batch_times.isel({TIME_DIM_NAME: slice(1, None)})
-            start_timestep = 1
         (
             target_coarsened,
             prediction_coarsened,
@@ -113,7 +94,7 @@ class TimeCoarsen:
     ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], int, xr.DataArray,]:
         target_coarsened = self._coarsen_tensor_dict(target)
         prediction_coarsened = self._coarsen_tensor_dict(prediction)
-        start_timestep = ((start_timestep - 1) // self._coarsen_factor) + 1
+        start_timestep = start_timestep // self._coarsen_factor
         batch_times_coarsened = batch_times.coarsen(
             {TIME_DIM_NAME: self._coarsen_factor}
         ).mean()

@@ -92,6 +92,13 @@ class WindowStitcher:
             for key, value in data.items():
                 value[:, 0] = self._initial_condition[key].to(value.device)
 
+    def save_initial_condition(
+        self,
+        ic_data: Dict[str, torch.Tensor],
+        ic_time: xr.DataArray,
+    ):
+        self.writer.save_initial_condition(ic_data, ic_time)
+
 
 def _inference_internal_loop(
     stepped: SteppedData,
@@ -105,17 +112,30 @@ def _inference_internal_loop(
     This function exists to de-duplicate code between run_inference and
     run_data_inference."""
 
-    # for non-initial windows, we want to record only the new data
-    # and discard the initial sample of the window
-    if i_time > 0:
-        batch_times = batch_times.isel(time=slice(1, None))
-        i_time_aggregator = i_time + 1
-    else:
+    # The first data window includes the IC, while subsequent windows don't.
+    # The aggregators use the full first window including IC.
+    # The data writers exclude the IC from the first window.
+    if i_time == 0:
         i_time_aggregator = i_time
+        stepped_no_ic = stepped.remove_initial_condition()
+        stitcher.save_initial_condition(
+            ic_data={k: v[:, 0] for k, v in stepped.target_data.items()},
+            ic_time=batch_times.isel(time=0),
+        )
+        batch_times_no_ic = batch_times.isel(time=slice(1, None))
+    else:
+        i_time_aggregator = i_time + 1
+        stepped_no_ic = stepped
+        batch_times_no_ic = batch_times
+
     # record raw data for the batch, and store the final state
     # for the next segment
-    stitcher.append(stepped.target_data, stepped.gen_data, batch_times)
-    # record metrics
+    # Do not include the initial condition in the data writers
+    stitcher.append(
+        stepped_no_ic.target_data, stepped_no_ic.gen_data, batch_times_no_ic
+    )
+
+    # record metrics, includes the initial condition
     aggregator.record_batch(
         loss=float(stepped.metrics["loss"]),
         time=batch_times,
@@ -185,19 +205,16 @@ def run_inference(
                 stepped = stepped.prepend_initial_condition(
                     initial_condition, normed_initial_condition
                 )
+                batch_times = window_batch_data.times
+            else:
+                batch_times = window_batch_data.times.isel(time=slice(1, None))
             stepped = compute_stepped_derived_quantities(
                 stepped, data.sigma_coordinates
             )
 
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
-            _inference_internal_loop(
-                stepped,
-                i_time,
-                aggregator,
-                stitcher,
-                window_batch_data.times,
-            )
+            _inference_internal_loop(stepped, i_time, aggregator, stitcher, batch_times)
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
 
@@ -252,10 +269,13 @@ def run_dataset_inference(
         )
 
         # Windows here all include an initial condition at start.
-        # Remove IC for windows >0 to be consistent with run_on_batch
-        # outputs before passing to the shared _inference_internal_loop.
+        # Remove IC and time coord for windows >0 to be consistent with
+        # run_on_batch outputs before passing to the shared _inference_internal_loop.
         if i > 0:
             stepped = stepped.remove_initial_condition()
+            target_times = target.times.isel(time=slice(1, None))
+        else:
+            target_times = target.times
 
         timers["run_on_batch"] += time.time() - current_time
         current_time = time.time()
@@ -264,7 +284,7 @@ def run_dataset_inference(
             i_time,
             aggregator,
             stitcher,
-            target.times,
+            target_times,
         )
         timers["writer_and_aggregator"] += time.time() - current_time
         current_time = time.time()
