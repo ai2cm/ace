@@ -1,11 +1,10 @@
 import dataclasses
 from typing import Literal, Optional, Tuple
 
-from ai2modulus.models.sfno.sfnonet import SphericalFourierNeuralOperatorNet
-
 from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
 )
+from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
 from fme.ace.registry.registry import ModuleConfig, register
 
 
