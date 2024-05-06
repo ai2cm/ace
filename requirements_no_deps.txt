@@ -1,6 +1,0 @@
-# This file is for packages that we want to install using the --no-deps flag
-# In particular, one of the dependencies of nvidia-modulus (nvidia_dali_cuda110)
-# cannot be installed on MacOS. Since we'd like to be able to do dev on Macs, and
-# since we do not currently require the features in modulus that depend on
-# nvidia_dali_cuda110, we choose to install nvidia-modulus with --no-deps
-nvidia-ai2-modulus@git+https://github.com/ai2cm/modulus.git@22df4a9427f5f12ff6ac891083220e7f2f54d229
