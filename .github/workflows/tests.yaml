@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  build:
+  cpu:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -19,16 +19,15 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements_except_torch.txt') }}-${{ hashFiles('requirements_outside_of_docker.txt') }}-${{ hashFiles('requirements_no_deps.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('fme/constraints.txt') }}
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          make install_dependencies
-          make install_local_packages
+          python -m pip install --upgrade uv
+          uv pip install --system -c constraints.txt -e fme[dev]
       - name: Run pytest
         run: |
           make test
-  build-gpu:
+  gpu:
     # These steps run on our self-hosted k8s GPU runners. See below for setup notes
     # https://github.com/ai2cm/long-lived-infrastructure#installing-the-github-actions-runner-controller
     runs-on: arc-runner-set
@@ -40,14 +39,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements_except_torch.txt') }}-${{ hashFiles('requirements_outside_of_docker.txt') }}-${{ hashFiles('requirements_no_deps.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('fme/constraints.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make git
-          python -m pip install --upgrade pip
-          make install_dependencies
-          make install_local_packages
+          python -m pip install --upgrade uv
+          uv pip install --system -c constraints.txt -e fme[dev]
       - name: Run pytest
         run: |
             export PATH=/usr/local/nvidia/bin:${PATH}
