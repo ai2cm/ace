@@ -26,17 +26,11 @@ enter_docker_image: build_docker_image
 launch_beaker_session:
 	./launch-beaker-session.sh $(USERNAME)/$(IMAGE)-$(VERSION)
 
-install_local_packages:
-	./install_local_packages.sh
-
-install_dependencies:
-	./install_dependencies.sh
-
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) ./install_dependencies.sh
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) ./install_local_packages.sh
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) pip install uv
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e fme[dev]
 
 test:
 	pytest --durations 20 .
