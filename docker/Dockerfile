@@ -11,9 +11,7 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 
 # install python deps
 COPY requirements_except_torch.txt /tmp/requirements.txt
-COPY requirements_no_deps.txt /tmp/requirements_no_deps.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
-RUN python3 -m pip install --no-deps -r /tmp/requirements_no_deps.txt
 
 # copy local code
 COPY fme ${FME_DIR}/fme
