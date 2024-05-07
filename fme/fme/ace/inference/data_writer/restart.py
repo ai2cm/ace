@@ -92,16 +92,10 @@ class RestartWriter:
         )
         # first write to a temporary file so we have the old restart even if
         # the job ends or errors while writing the new one
-        try:
-            tmpfile = tempfile.NamedTemporaryFile()
+        with tempfile.NamedTemporaryFile() as tmpfile:
             ds.to_netcdf(tmpfile.name)
-            # delete the old restart file if it exists, and replace it
             Path(self.restart_filename).unlink(missing_ok=True)
-
-            shutil.move(tmpfile.name, self.restart_filename)
-        finally:
-            if Path(tmpfile.name).exists():
-                tmpfile.close()
+            shutil.copy(tmpfile.name, self.restart_filename)
 
     def flush(self):
         pass
