@@ -34,6 +34,9 @@ setup(
         exclude=["*.tests", "*.tests.*", "tests.*", "tests"],
     ),
     install_requires=read_requirements("requirements.txt"),
-    extras_require={"dev": read_requirements("dev-requirements.txt")},
+    extras_require={
+        "dev": read_requirements("dev-requirements.txt"),
+        "docs": read_requirements("docs/requirements.txt"),
+    },
     python_requires=">=3.8",
 )
