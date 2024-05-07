@@ -19,13 +19,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.pythonLocation }}-${{ hashFiles('requirements_except_torch.txt') }}-${{ hashFiles('requirements_outside_of_docker.txt') }}-${{ hashFiles('requirements_no_deps.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('fme/docs/requirements.txt') }}
+          key: ${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/docs/requirements.txt') }}-${{ hashFiles('fme/constraints.txt') }}
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          make install_dependencies
-          make install_local_packages
-          python -m pip install -r fme/docs/requirements.txt
+          python -m pip install --upgrade uv
+          uv pip install --system -c constraints.txt -e fme[docs]
       - name: Build docs
         run: |
           cd fme/docs && make html

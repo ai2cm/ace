@@ -10,15 +10,12 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
   apt-key --keyring /usr/share/keyrings/cloud.google.gpg  add - && apt-get update -y && apt-get install google-cloud-cli -y
 
 # install python deps
-COPY requirements_except_torch.txt /tmp/requirements.txt
+COPY fme/requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
 
-# copy local code
+# copy local code and install
 COPY fme ${FME_DIR}/fme
-COPY install_local_packages.sh ${FME_DIR}/install_local_packages.sh
-
-# install packages in full-model repo
-RUN cd $FME_DIR && ./install_local_packages.sh
+RUN cd $FME_DIR && pip install --no-deps -e fme
 
 # copy after install so editing scripts does not trigger reinstall
 COPY scripts ${FME_DIR}/scripts
