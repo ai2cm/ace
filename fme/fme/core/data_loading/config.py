@@ -80,6 +80,7 @@ class DataLoaderConfig:
     data_type: Literal["xarray", "ensemble_xarray"]
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     n_samples: Optional[int] = None
+    strict_ensemble: bool = True
 
     def __post_init__(self):
         if self.n_samples is not None:
