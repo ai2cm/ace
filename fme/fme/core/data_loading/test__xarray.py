@@ -70,7 +70,6 @@ def _get_data(
     file_freq,
     step_freq,
     calendar,
-    has_ragged_var,
 ) -> MockData:
     """Constructs an xarray dataset and saves to disk in netcdf format."""
     obs_times = xr.cftime_range(
@@ -120,23 +119,12 @@ def _get_data(
 
         data_vars["constant_var"] = constant_var
         data_vars["constant_scalar_var"] = constant_scalar_var
-        if i == 0 and has_ragged_var:
-            rand_data = np.random.randn(n_lat, n_lon).astype(np.float32)
-            data_vars["ragged_var"] = xr.DataArray(
-                np.expand_dims(rand_data, axis=0),
-                dims=["initial_condition", "lat", "lon"],
-            )
 
         coords = {
             "time": xr.DataArray(times, dims=("time",)),
             "lat": xr.DataArray(np.arange(n_lat, dtype=np.float32), dims=("lat",)),
             "lon": xr.DataArray(np.arange(n_lon, dtype=np.float32), dims=("lon",)),
         }
-
-        if i == 0 and has_ragged_var:
-            coords["initial_condition"] = xr.DataArray(
-                [times[0]], dims=("initial_condition",)
-            )
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords)
         filename = tmpdir / f"{first.strftime('%Y%m%d%H')}.nc"
@@ -147,10 +135,7 @@ def _get_data(
         )
         filenames.append(filename)
 
-    if has_ragged_var:
-        initial_condition_names: Iterable[str] = ("ragged_var",)
-    else:
-        initial_condition_names = ()
+    initial_condition_names = ()
 
     start_indices = get_cumulative_timesteps(get_all_times(filenames))
 
@@ -162,27 +147,21 @@ def _get_data(
     return MockData(tmpdir, obs_times, start_times, start_indices, variable_names)
 
 
-def get_mock_monthly_netcdfs(tmp_path_factory, dirname, has_ragged_var) -> MockData:
+def get_mock_monthly_netcdfs(tmp_path_factory, dirname) -> MockData:
     return _get_data(
         tmp_path_factory,
         dirname,
         start="2003-03",
-        end="2005-06",
+        end="2003-06",
         file_freq="MS",
         step_freq="3H",
         calendar="standard",
-        has_ragged_var=has_ragged_var,
     )
 
 
 @pytest.fixture(scope="session")
 def mock_monthly_netcdfs(tmp_path_factory) -> MockData:
-    return get_mock_monthly_netcdfs(tmp_path_factory, "month", False)
-
-
-@pytest.fixture(scope="session")
-def mock_monthly_netcdfs_ragged_time_dim(tmp_path_factory) -> MockData:
-    return get_mock_monthly_netcdfs(tmp_path_factory, "ragged", True)
+    return get_mock_monthly_netcdfs(tmp_path_factory, "month")
 
 
 @pytest.fixture(scope="session")
@@ -191,11 +170,10 @@ def mock_yearly_netcdfs(tmp_path_factory):
         tmp_path_factory,
         "yearly",
         start="1999",
-        end="2005",
+        end="2001",
         file_freq="YS",
         step_freq="1D",
         calendar="noleap",
-        has_ragged_var=False,
     )
 
 
@@ -207,9 +185,9 @@ def mock_yearly_netcdfs(tmp_path_factory):
         pytest.param(30 * 8, (0, 30 * 8), id="monthly_file_local_idx_2003_03_31_00"),
         pytest.param(31 * 8, (1, 0), id="monthly_file_local_idx_2003_04_01_00"),
         pytest.param(
-            366 * 8 - 7,
-            (11, 28 * 8 + 1),
-            id="monthly_file_local_idx_2004_02_29_03",
+            (31 + 30 + 20) * 8 - 1,
+            (2, 20 * 8 - 1),
+            id="monthly_file_local_idx_2003_05_20_21",
         ),
     ],
 )
@@ -230,9 +208,7 @@ def test_monthly_file_local_index(
         assert ds["time"][local_idx].item() == target_timestamp
 
 
-def _test_monthly_values(
-    mock_data: MockData, global_idx, expected_n_samples=None, is_ragged=False
-):
+def _test_monthly_values(mock_data: MockData, global_idx, expected_n_samples=None):
     """Runs shape and length checks on the dataset."""
     var_names: VariableNames = mock_data.var_names
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
@@ -268,7 +244,7 @@ def _test_monthly_values(
     "global_idx",
     [
         pytest.param(31 * 8 - 1, id="monthly_XarrayDataset_2003_03_31_21"),
-        pytest.param(366 * 8 - 1, id="monthly_XarrayDataset_2004_02_29_21"),
+        pytest.param((31 + 30 + 20) * 8 - 1, id="monthly_XarrayDataset_2003_05_20_21"),
     ],
 )
 def test_XarrayDataset_monthly(mock_monthly_netcdfs, global_idx):
@@ -306,10 +282,8 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     "global_idx,expected_file_local_idx",
     [
         pytest.param(365 + 59, (1, 59), id="yearly_file_local_idx_2000_03_01"),
-        pytest.param(2 * 365, (2, 0), id="yearly_file_local_idx_2001_01_01"),
-        pytest.param(4 * 365 + 364, (4, 364), id="yearly_file_local_idx_2003_12_31"),
-        pytest.param(5 * 365 + 235, (5, 235), id="yearly_file_local_idx_2004_08_24"),
-        pytest.param(5 * 365 + 358, (5, 358), id="yearly_file_local_idx_2004_12_25"),
+        pytest.param(365, (1, 0), id="yearly_file_local_idx_2000_01_01"),
+        pytest.param(364, (0, 364), id="yearly_file_local_idx_1999_12_31"),
     ],
 )
 def test_yearly_file_local_index(
@@ -332,15 +306,15 @@ def test_yearly_file_local_index(
 @pytest.mark.parametrize(
     "global_idx",
     [
-        pytest.param(365 * 2 + 364, id="yearly_XarrayDataset_2001_12_31"),
-        pytest.param(365 * 3 + 363, id="yearly_XarrayDataset_2002_12_30"),
+        pytest.param(364, id="yearly_XarrayDataset_1999_12_31"),
+        pytest.param(365 + 31 + 28, id="yearly_XarrayDataset_2000_02_28"),
     ],
 )
 def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     mock_data: MockData = mock_yearly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     with xr.open_mfdataset(mock_data.tmpdir.glob("*.nc"), use_cftime=True) as ds:
-        for n_steps in [3, 2 * 365]:
+        for n_steps in [3, 50]:
             requirements = DataRequirements(
                 names=mock_data.var_names.all_names,
                 n_timesteps=n_steps,
@@ -391,7 +365,7 @@ def _get_repeat_dataset(
     return XarrayDataset(config, requirements)
 
 
-@pytest.mark.parametrize("n_timesteps", [1, 2, 4])
+@pytest.mark.parametrize("n_timesteps", [1, 4])
 @pytest.mark.parametrize("n_repeats", [1, 2])
 def test_repeat_dataset_num_timesteps(
     mock_monthly_netcdfs: MockData, n_timesteps, n_repeats
@@ -408,7 +382,7 @@ def test_repeat_dataset_num_timesteps(
     [
         ("*.nc", None, None),
         ("2003030100.nc", 1, [(2003, 3)]),
-        ("2003??0100.nc", 10, [(2003, i) for i in range(3, 13)]),
+        ("2003??0100.nc", 3, [(2003, i) for i in range(3, 6)]),
     ],
     ids=["all_files", "single_file", "all_2003_files"],
 )

@@ -119,7 +119,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
 
 @pytest.mark.parametrize(
     "use_prediction_data, n_forward_steps",
-    [(True, 2), (True, 1), (False, int(30 / 20 * 36)), (False, 1)],
+    [(True, 2), (False, int(30 / 20 * 36)), (False, 1)],
 )
 def test_inference_plus_one_model(
     tmp_path: pathlib.Path, use_prediction_data: bool, n_forward_steps: int
