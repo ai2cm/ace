@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import os
+import warnings
 from collections import namedtuple
 from glob import glob
 from pathlib import Path
@@ -60,6 +61,7 @@ def get_datasets_at_path(
     params: XarrayDataConfig,
     requirements: DataRequirements,
     subset: Union[TimeSlice, Slice],
+    strict: bool = True,
 ) -> List[Dataset]:
     paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
     if len(paths) == 0:
@@ -78,15 +80,27 @@ def get_datasets_at_path(
         sigma_coords.append(dataset.sigma_coordinates)
 
     if not _all_same(metadatas):
-        raise ValueError("Metadata for each ensemble member should be the same.")
+        if strict:
+            raise ValueError("Metadata for each ensemble member should be the same.")
+        else:
+            warnings.warn(
+                "Metadata for each ensemble member are not the same. You may be "
+                "concatenating incompatible datasets."
+            )
 
     ak, bk = list(
         zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
     )
     if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
-        raise ValueError(
-            "Sigma coordinates for each ensemble member should be the same."
-        )
+        if strict:
+            raise ValueError(
+                "Sigma coordinates for each ensemble member should be the same."
+            )
+        else:
+            warnings.warn(
+                "Vertical coordinates for each ensemble member are not the same. You "
+                "may be concatenating incompatible datasets."
+            )
     return datasets
 
 
