@@ -1,6 +1,7 @@
 import glob
 import os
 import shutil
+import time
 from typing import Any, Mapping, Optional
 
 import numpy as np
@@ -128,9 +129,11 @@ class WandB:
         if self._enabled:
             wandb.watch(modules)
 
-    def log(self, data: Mapping[str, Any], step=None):
+    def log(self, data: Mapping[str, Any], step=None, sleep=None):
         if self._enabled:
             wandb.log(data, step=step)
+            if sleep is not None:
+                time.sleep(sleep)
 
     def Image(self, data_or_path, *args, **kwargs) -> Image:
         if isinstance(data_or_path, np.ndarray):
