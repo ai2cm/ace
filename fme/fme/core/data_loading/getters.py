@@ -24,11 +24,12 @@ def get_ensemble_dataset(
     params: XarrayDataConfig,
     requirements: DataRequirements,
     subset: Union[Slice, TimeSlice],
+    strict: bool = True,
 ) -> Dataset:
     """Returns a dataset that is a concatenation of the datasets for each
     ensemble member.
     """
-    datasets = get_datasets_at_path(params, requirements, subset=subset)
+    datasets = get_datasets_at_path(params, requirements, subset=subset, strict=strict)
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = datasets[0].metadata  # type: ignore
     ensemble.area_weights = datasets[0].area_weights  # type: ignore
@@ -46,7 +47,9 @@ def get_dataset(
         subset_slice = as_index_slice(config.subset, dataset)
         dataset = subset_dataset(dataset, subset_slice)
     elif config.data_type == "ensemble_xarray":
-        return get_ensemble_dataset(config.dataset, requirements, config.subset)
+        return get_ensemble_dataset(
+            config.dataset, requirements, config.subset, config.strict_ensemble
+        )
     else:
         raise NotImplementedError(
             f"{config.data_type} does not have an implemented data loader"
@@ -88,7 +91,7 @@ def get_data_loader(
         raise ValueError(
             "No batches in dataloader: "
             f"{len(dataloader.dataset)} samples, {len(dataloader)} batches. "
-            "Batch size is {dataloader.batch_size}"
+            f"Batch size is {dataloader.batch_size}"
         )
 
     return GriddedData(
