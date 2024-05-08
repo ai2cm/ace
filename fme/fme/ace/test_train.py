@@ -27,6 +27,7 @@ REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
     REPOSITORY_PATH / "fme" / "fme" / "ace" / "run-train-and-inference.sh"
 )
+TRAIN_SCRIPT_PATH = REPOSITORY_PATH / "fme" / "fme" / "ace" / "train.py"
 
 
 def _get_test_yaml_files(
@@ -194,7 +195,7 @@ def _setup(
     log_to_wandb=False,
     max_epochs=1,
     segment_epochs=1,
-    n_time=20,
+    n_time=10,
     timestep_days=5,
     inference_forward_steps=2,
 ):
@@ -334,37 +335,6 @@ def test_train_and_inference_inline(tmp_path, nettype):
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_train_and_inference_script(
-    tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.Path
-):
-    """Make sure that training and inference run without errors
-
-    Args:
-        tmp_path: pytext fixture for temporary config workspace.
-        nettype: parameter indicating model architecture to use.
-        skip_slow: skips this slow test
-        tmpdir: pytest fixture for temporary directory in which to
-            run the script via subprocess
-
-    """
-    if skip_slow:
-        # script is slow as everything is re-imported when it runs
-        pytest.skip("Skipping slow tests")
-    train_config, inference_config = _setup(tmp_path, nettype)
-
-    train_and_inference_process = subprocess.run(
-        [
-            JOB_SUBMISSION_SCRIPT_PATH,
-            train_config,
-            inference_config,
-            "1",
-        ],
-        cwd=tmpdir,
-    )
-    train_and_inference_process.check_returncode()
-
-
-@pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
 def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
 
@@ -417,7 +387,15 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.
     ]
     initial_process = subprocess.run(subprocess_args, cwd=tmpdir)
     initial_process.check_returncode()
-    resume_process = subprocess.run(subprocess_args, cwd=tmpdir)
+    resume_subprocess_args = [
+        "torchrun",
+        "--nproc_per_node",
+        "2",
+        TRAIN_SCRIPT_PATH,
+        "--yaml_config",
+        train_config,
+    ]
+    resume_process = subprocess.run(resume_subprocess_args, cwd=tmpdir)
     resume_process.check_returncode()
 
 

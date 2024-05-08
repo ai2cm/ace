@@ -287,9 +287,7 @@ def main(
         }
         wandb.log({**timers, **duration_logs}, step=0)
         for i, log in enumerate(step_logs):
-            wandb.log(log, step=i)
-            # Sleep to avoid overloading wandb API
-            time.sleep(0.01)
+            wandb.log(log, step=i, sleep=0.01)
 
     config.clean_wandb()
 

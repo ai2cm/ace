@@ -30,7 +30,8 @@ class MockWandB:
             # wandb.watch(modules)
             pass
 
-    def log(self, data: Mapping[str, Any], step: int):
+    def log(self, data: Mapping[str, Any], step: int, sleep=None):
+        # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
 
