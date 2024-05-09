@@ -416,6 +416,13 @@ class Trainer:
             epoch_checkpoint_path = self.config.epoch_checkpoint_path(self._model_epoch)
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
             self.save_checkpoint(epoch_checkpoint_path)
+        if self.config.ema_epoch_checkpoint_enabled(self._model_epoch):
+            ema_epoch_checkpoint_path = self.config.ema_epoch_checkpoint_path(
+                self._model_epoch
+            )
+            logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
+            with self._ema_context():
+                self.save_checkpoint(ema_epoch_checkpoint_path)
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:

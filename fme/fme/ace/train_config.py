@@ -145,16 +145,20 @@ class TrainConfig:
             This is less efficient than true parameter freezing, but layer
             freezing is all-or-nothing for each parameter. By default, no
             weights are copied.
+        ema: configuration for exponential moving average of model weights
+        validate_using_ema: whether to validate using the EMA model
         checkpoint_save_epochs: how often to save epoch-based checkpoints,
             if save_checkpoint is True. If None, checkpoints are only saved
-            for the most recent epoch and the best epoch.
+            for the most recent epoch
+            (and the best epochs if validate_using_ema == False).
+        ema_checkpoint_save_epochs: how often to save epoch-based EMA checkpoints,
+            if save_checkpoint is True. If None, EMA checkpoints are only saved
+            for the most recent epoch
+            (and the best epochs if validate_using_ema == True).
         log_train_every_n_batches: how often to log batch_loss during training
         segment_epochs: (optional) exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
-        checkpoint_every_n_epochs: (deprecated) how often to save epoch-based
-            checkpoints, if save_checkpoint is True. Use checkpoint_save_epochs
-            instead.
     """
 
     train_loader: DataLoaderConfig
@@ -173,6 +177,7 @@ class TrainConfig:
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
     checkpoint_save_epochs: Optional[Slice] = None
+    ema_checkpoint_save_epochs: Optional[Slice] = None
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     monthly_reference_data: Optional[str] = None
@@ -214,9 +219,17 @@ class TrainConfig:
     def epoch_checkpoint_path(self, epoch: int) -> str:
         return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
 
+    def ema_epoch_checkpoint_path(self, epoch: int) -> str:
+        return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
+
     def epoch_checkpoint_enabled(self, epoch: int) -> bool:
         return epoch_checkpoint_enabled(
             epoch, self.max_epochs, self.checkpoint_save_epochs
+        )
+
+    def ema_epoch_checkpoint_enabled(self, epoch: int) -> bool:
+        return epoch_checkpoint_enabled(
+            epoch, self.max_epochs, self.ema_checkpoint_save_epochs
         )
 
     @property
