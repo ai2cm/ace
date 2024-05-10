@@ -81,6 +81,7 @@ def test_evaluator_runs(tmp_path, model_config):
                         means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
                     ),
                 ),
+                use_fine_topography=False,
             ),
             OptimizationConfig(),
             DataLoaderConfig(paths.fine, paths.coarse, "xarray", 2, 1),

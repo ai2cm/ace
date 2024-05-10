@@ -2,8 +2,8 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.data_loading.requirements import DataRequirements
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
+from fme.downscaling.requirements import DataRequirements
 
 from .datasets import BatchData, DataLoaderConfig, PairedDataset
 
@@ -106,7 +106,7 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
     fine_path.mkdir()
     coarse_path.mkdir()
 
-    all_names = ["x", "y"]
+    all_names = ["x", "y", "HGTsfc"]
     num_timesteps = 10
     fine_shape, coarse_shape = (64, 32), (32, 16)
     num_vertical_levels = 1
@@ -128,7 +128,9 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
         1,
     )
 
-    loader = config.build(True, DataRequirements(all_names, 1), None)
+    loader = config.build(
+        True, DataRequirements(all_names, 1, use_fine_topography=False), None
+    )
     assert len(loader.loader) == num_timesteps // batch_size
     assert len(loader.loader.dataset) == num_timesteps  # type: ignore
     assert loader.downscale_factor == 2
