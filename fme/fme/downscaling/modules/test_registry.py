@@ -10,31 +10,6 @@ from fme.downscaling.modules.registry import (
 )
 
 
-def test_module_registry_selector_build():
-    n_in_channels = 3
-    n_out_channels = 3
-    coarse_shape = (16, 16)
-    upscale_factor = 4
-
-    selector = ModuleRegistrySelector(
-        type="swinir",
-        config={
-            "depths": (6,),
-            "embed_dim": 30,
-            "num_heads": (6,),
-        },
-    )
-
-    module = selector.build(
-        n_in_channels=n_in_channels,
-        n_out_channels=n_out_channels,
-        coarse_shape=coarse_shape,
-        downscale_factor=upscale_factor,
-    )
-
-    assert isinstance(module, torch.nn.Module)
-
-
 @pytest.mark.parametrize(
     "coarse_shape, downscale_factor, fine_shape",
     [
@@ -79,6 +54,7 @@ def test_swinir_output_shapes(
         n_out_channels=n_out_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
+        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
@@ -126,6 +102,7 @@ def test_swinir_downscaling_options(
         n_out_channels=n_out_channels,
         coarse_shape=coarse_shape,
         downscale_factor=upscale_factor,
+        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
@@ -172,6 +149,7 @@ def test_swinir_values(
         n_out_channels=n_channels,
         coarse_shape=coarse_shape,
         downscale_factor=upscale_factor,
+        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_channels, *coarse_shape)
@@ -206,8 +184,11 @@ def test_interpolate(
 
 
 @pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
-def test_unets_output_shape(type_):
+@pytest.mark.parametrize("use_topography", [True, False])
+def test_unets_output_shape(type_, use_topography):
     coarse_shape = (9, 18)
+    downscale_factor = 2
+    fine_topography = torch.zeros(1, *[s * downscale_factor for s in coarse_shape])
     unet = (
         ModuleRegistrySelector(
             type_,
@@ -219,7 +200,8 @@ def test_unets_output_shape(type_):
             n_in_channels=3,
             n_out_channels=3,
             coarse_shape=coarse_shape,
-            downscale_factor=2,
+            downscale_factor=downscale_factor,
+            fine_topography=fine_topography if use_topography else None,
         )
         .to(get_device())
     )

@@ -12,15 +12,59 @@ from torch.utils.data.distributed import DistributedSampler
 import fme.core.data_loading.config
 from fme.core.data_loading.data_typing import HorizontalCoordinates, VariableMetadata
 from fme.core.data_loading.getters import get_dataset
-from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.requirements import DataRequirements as CoreDataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
+
+
+def get_topography(
+    path: str, data_type: Literal["xarray", "ensemble_xarray"]
+) -> torch.Tensor:
+    """
+    Load the topography data from the specified path and return the normalized
+    height of the topography values.
+
+    Args:
+        path: The path to the topography data.
+        data_type: The type of data to load.
+
+    Returns:
+        The normalized height of the topography of shape (latitude, longitude).
+    """
+    topography_name = "HGTsfc"
+    dist = Distributed.get_instance()
+    dataset = get_dataset(
+        fme.core.data_loading.config.DataLoaderConfig(
+            dataset=fme.core.data_loading.config.XarrayDataConfig(
+                data_path=path,
+            ),
+            data_type=data_type,
+            # torch doesn't like it when batch_size=1 and num_data_workers=1.
+            # For some reason, this raises a ValueError: batch_size must be
+            # divisible by the number of parallel workers, got 1 and 2
+            batch_size=dist.world_size,
+            num_data_workers=1,
+        ),
+        requirements=CoreDataRequirements(
+            names=[topography_name],
+            n_timesteps=1,
+        ),
+    )
+
+    example, _ = dataset[0]
+    topography = example[topography_name]
+    topography = topography.squeeze()
+    if len(topography.shape) != 2:
+        raise ValueError(f"unexpected shape {topography.shape} for topography")
+    topography_normalized = (topography - topography.mean()) / topography.std()
+    return topography_normalized
 
 
 @dataclasses.dataclass
@@ -82,6 +126,7 @@ class GriddedData:
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
     metadata: Mapping[str, VariableMetadata]
+    fine_topography: torch.Tensor
 
     def __post_init__(self):
         assert (
@@ -121,7 +166,10 @@ class DataLoaderConfig:
                     batch_size=self.batch_size,
                     num_data_workers=self.num_data_workers,
                 ),
-                requirements=requirements,
+                requirements=CoreDataRequirements(
+                    names=requirements.names,
+                    n_timesteps=requirements.n_timesteps,
+                ),
             )
             for path in (self.path_fine, self.path_coarse)
         ]
@@ -172,10 +220,13 @@ class DataLoaderConfig:
         assert dataset_fine.metadata == dataset_coarse.metadata, "Metadata must match."
         metadata = dataset_fine.metadata
 
+        fine_topography = get_topography(self.path_fine, self.data_type)
+
         return GriddedData(
             dataloader,
             area_weights,
             horizontal_coordinates,
             img_shape,
             metadata,
+            fine_topography=fine_topography,
         )
