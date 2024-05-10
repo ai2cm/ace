@@ -80,7 +80,7 @@ def data_paths_helper(tmp_path):
         fine={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
         coarse={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
     )
-    variable_names = ["x", "y"]
+    variable_names = ["x", "y", "HGTsfc"]
     fine_path = tmp_path / "fine"
     coarse_path = tmp_path / "coarse"
     fine_path.mkdir()

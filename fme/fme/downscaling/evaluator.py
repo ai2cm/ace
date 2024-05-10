@@ -11,7 +11,6 @@ import yaml
 from fme.ace.train import count_parameters
 from fme.ace.train_config import LoggingConfig
 from fme.ace.utils import logging_utils
-from fme.core.data_loading.requirements import DataRequirements
 from fme.core.dicts import to_flat_dict
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -25,6 +24,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -64,7 +64,11 @@ class Evaluator:
 
 class Config(abc.ABC):
     @abc.abstractmethod
-    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
+    def build(
+        self,
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
+    ) -> Model:
         pass
 
     @property
@@ -80,7 +84,11 @@ class InterpolateModelConfig(Config):
     in_names: List[str]
     out_names: List[str]
 
-    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
+    def build(
+        self,
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
+    ) -> Model:
         del area_weights  # unused
         module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
         var_names = list(set(self.in_names).union(set(self.out_names)))
@@ -103,13 +111,20 @@ class InterpolateModelConfig(Config):
             self.in_names,
             self.out_names,
             normalization_config,
-        ).build((-1, -1), self.downscale_factor, area_weights)
+            use_fine_topography=False,  # topography is irrelevant for interpolation
+        ).build(
+            (-1, -1),
+            self.downscale_factor,
+            area_weights,
+            fine_topography,
+        )
 
     @property
     def data_requirements(self) -> DataRequirements:
         return DataRequirements(
             names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
+            use_fine_topography=False,  # topography is irrelevant for interpolation
         )
 
 
@@ -150,8 +165,14 @@ class CheckpointModelConfig(Config):
         checkpoint_dict = clean_checkpoint_dict(checkpoint_dict)
         self.checkpoint_dict: Mapping[str, Any] = checkpoint_dict
 
-    def build(self, area_weights: FineResCoarseResPair[torch.Tensor]) -> Model:
-        return Model.from_state(self.checkpoint_dict["model"], area_weights)
+    def build(
+        self,
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
+    ) -> Model:
+        return Model.from_state(
+            self.checkpoint_dict["model"], area_weights, fine_topography
+        )
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -160,6 +181,7 @@ class CheckpointModelConfig(Config):
         return DataRequirements(
             names=list(set(in_names).union(out_names)),
             n_timesteps=1,
+            use_fine_topography=self.checkpoint_dict.get("use_fine_topography", False),
         )
 
 
@@ -184,7 +206,7 @@ class EvaluatorConfig:
 
     def build(self) -> Evaluator:
         dataset = self.data.build(False, requirements=self.model.data_requirements)
-        model = self.model.build(dataset.area_weights)
+        model = self.model.build(dataset.area_weights, dataset.fine_topography)
         return Evaluator(
             dataset,
             model,

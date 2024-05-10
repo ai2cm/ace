@@ -4,7 +4,6 @@ from typing import Any, List, Mapping, Tuple, Union
 import dacite
 import torch
 
-from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -13,6 +12,7 @@ from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -50,20 +50,24 @@ class DownscalingModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
+    use_fine_topography: bool
 
     def build(
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine)
+
         module = self.module.build(
             n_in_channels=len(self.in_names),
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
+            fine_topography=fine_topography if self.use_fine_topography else None,
         )
         return Model(
             module,
@@ -88,6 +92,7 @@ class DownscalingModelConfig:
         return DataRequirements(
             names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
+            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -154,11 +159,17 @@ class Model:
 
     @classmethod
     def from_state(
-        cls, state: Mapping[str, Any], area_weights: FineResCoarseResPair[torch.Tensor]
+        cls,
+        state: Mapping[str, Any],
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
     ) -> "Model":
         config = DownscalingModelConfig.from_state(state["config"])
         model = config.build(
-            state["coarse_shape"], state["downscale_factor"], area_weights
+            state["coarse_shape"],
+            state["downscale_factor"],
+            area_weights,
+            fine_topography,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

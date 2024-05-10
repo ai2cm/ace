@@ -37,7 +37,9 @@ def save_checkpoint(trainer: "Trainer", path: str) -> None:
 
 def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
     checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
-    trainer.model.from_state(checkpoint["model"], trainer.area_weights)
+    trainer.model.from_state(
+        checkpoint["model"], trainer.area_weights, trainer.fine_topography
+    )
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -64,6 +66,7 @@ class Trainer:
         self.checkpoint_dir = checkpoint_dir
         self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.lat.cpu()
+        self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
@@ -200,6 +203,7 @@ class TrainerConfig:
             train_data.img_shape.coarse,
             train_data.downscale_factor,
             train_data.area_weights,
+            train_data.fine_topography,
         )
 
         optimization = self.optimization.build(
