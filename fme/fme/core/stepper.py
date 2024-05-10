@@ -531,7 +531,11 @@ class SingleModuleStepper:
             state: The state to load.
         """
         if "module" in state:
-            self.module.load_state_dict(state["module"])
+            module = state["module"]
+            if "module.device_buffer" in module:
+                # for backwards compatibility with old checkpoints
+                del module["module.device_buffer"]
+            self.module.load_state_dict(module)
 
     @classmethod
     def from_state(
