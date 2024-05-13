@@ -69,7 +69,9 @@ from fme.core.aggregator import (
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
+from fme.core.ema import EMATracker
 from fme.core.optimization import NullOptimization
+from fme.core.stepper import SingleModuleStepper
 from fme.core.wandb import WandB
 
 
@@ -146,7 +148,9 @@ class Trainer:
 
         if config.resuming:
             logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)
-            self.restore_checkpoint(config.latest_checkpoint_path)
+            self.restore_checkpoint(
+                config.latest_checkpoint_path, config.ema_checkpoint_path
+            )
 
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
@@ -400,12 +404,13 @@ class Trainer:
                 "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
                 "optimization": self.optimization.get_state(),
+                "ema": self._ema.get_state(),
             },
             checkpoint_path,
         )
 
-    def restore_checkpoint(self, checkpoint_path):
-        _restore_checkpoint(self, checkpoint_path)
+    def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
+        _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
 
     def save_all_checkpoints(self, valid_loss: float, inference_error: Optional[float]):
         logging.info(
@@ -455,7 +460,7 @@ class Trainer:
             self.save_checkpoint(self.config.ema_checkpoint_path)
 
 
-def _restore_checkpoint(trainer: Trainer, checkpoint_path):
+def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     # separated into a function only to make it easier to mock
     checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
     # restore checkpoint is used for finetuning as well as resuming.
@@ -467,6 +472,13 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path):
     trainer.startEpoch = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
+    ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
+    ema_stepper: SingleModuleStepper = SingleModuleStepper.from_state(
+        ema_checkpoint["stepper"],
+        area=trainer.train_data.area_weights,
+        sigma_coordinates=trainer.train_data.sigma_coordinates,
+    )
+    trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)
 
 
 def main(yaml_config: str):
