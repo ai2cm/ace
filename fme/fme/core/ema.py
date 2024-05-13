@@ -153,3 +153,35 @@ class EMATracker:
         """
         for c_param, param in zip(self._stored_params, parameters):
             param.data.copy_(c_param.data)
+
+    def get_state(self):
+        """
+        Get the state of the EMA tracker, excluding weights.
+
+        Returns:
+            The state of the EMA tracker.
+        """
+        return {
+            "decay": self.decay,
+            "num_updates": self.num_updates,
+            "faster_decay_at_start": self._faster_decay_at_start,
+            "module_name_to_ema_name": self._module_name_to_ema_name,
+        }
+
+    @classmethod
+    def from_state(cls, state, model) -> "EMATracker":
+        """
+        Create an EMA tracker from a state.
+
+        Args:
+            state: The state of the EMA tracker.
+            model: The model whose parameters should be tracked, used to
+                initialize the EMA weights. Should come from an EMA checkpoint.
+
+        Returns:
+            The EMA tracker.
+        """
+        ema = cls(model, state["decay"], state["faster_decay_at_start"])
+        ema.num_updates = state["num_updates"]
+        ema._module_name_to_ema_name = state["module_name_to_ema_name"]
+        return ema
