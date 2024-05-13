@@ -12,7 +12,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from .histograms import HistogramDataWriter
 from .monthly import PairedMonthlyDataWriter
 from .raw import PairedRawDataWriter
-from .restart import RestartWriter
+from .restart import PairedRestartWriter
 from .time_coarsen import TimeCoarsen, TimeCoarsenConfig
 from .video import VideoDataWriter
 
@@ -22,7 +22,7 @@ Subwriter = Union[
     HistogramDataWriter,
     TimeCoarsen,
     PairedMonthlyDataWriter,
-    RestartWriter,
+    PairedRestartWriter,
 ]
 
 
@@ -188,7 +188,7 @@ class DataWriter:
                 )
             )
         self._writers.append(
-            RestartWriter(
+            PairedRestartWriter(
                 path=path,
                 is_restart_step=lambda i: i == n_timesteps - 1,
                 prognostic_names=prognostic_names,

@@ -10,6 +10,54 @@ import xarray as xr
 from fme.core.data_loading.data_typing import VariableMetadata
 
 
+class PairedRestartWriter:
+    """Wrapper around RestartWriter to handle generated and target data."""
+
+    def __init__(
+        self,
+        path: str,
+        is_restart_step: Callable[[int], bool],
+        prognostic_names: Sequence[str],
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ):
+        """
+        Args:
+            path: Path to the directory in which to save the file.
+            is_restart_step: Function that returns True if the given timestep is a
+                restart step.
+            prognostic_names: Names of prognostic variables to write to the file.
+            metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
+        """
+        self._writer = RestartWriter(
+            path, is_restart_step, prognostic_names, metadata, coords
+        )
+
+    def append_batch(
+        self,
+        target: Dict[str, torch.Tensor],
+        prediction: Dict[str, torch.Tensor],
+        start_timestep: int,
+        start_sample: int,
+        batch_times: xr.DataArray,
+    ):
+        """
+        Append a batch of data to the file.
+
+        Args:
+            target: Target data. Ignored for this data writer.
+            prediction: Prediction data.
+            start_timestep: Timestep (lead time dim) at which to start writing.
+            start_sample: Sample (initialization time dim) at which to start writing.
+            batch_times: Time coordinates for each sample in the batch.
+        """
+        self._writer.append_batch(prediction, start_timestep, start_sample, batch_times)
+
+    def flush(self):
+        pass
+
+
 class RestartWriter:
     """
     Write raw prediction data to a netCDF file.
@@ -40,7 +88,6 @@ class RestartWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
         start_sample: int,
@@ -50,7 +97,6 @@ class RestartWriter:
         Append a batch of data to the file.
 
         Args:
-            target: Target data. Ignored for this data writer.
             prediction: Prediction data.
             start_timestep: Timestep (lead time dim) at which to start writing.
             start_sample: Sample (initialization time dim) at which to start writing.
