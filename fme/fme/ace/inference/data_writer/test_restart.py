@@ -35,7 +35,6 @@ def test_restart_saves_last_step(tmpdir):
         ),
     )
     writer.append_batch(
-        target=None,  # target should not be depended on
         prediction=data,
         start_timestep=0,
         start_sample=0,
@@ -85,7 +84,6 @@ def test_restart_saves_configured_step(tmpdir):
         ),
     )
     writer.append_batch(
-        target=None,  # target should not be depended on
         prediction=data,
         start_timestep=i_time_start,
         start_sample=0,
@@ -139,7 +137,6 @@ def test_restart_does_not_save(tmpdir):
         ),
     )
     writer.append_batch(
-        target=None,  # target should not be depended on
         prediction=data,
         start_timestep=0,
         start_sample=0,
