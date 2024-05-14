@@ -23,7 +23,6 @@ class NoOpDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,  # unused
         batch_times: xr.DataArray,
     ):
         pass

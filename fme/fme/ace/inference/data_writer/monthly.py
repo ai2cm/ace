@@ -68,20 +68,11 @@ class PairedMonthlyDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         del start_timestep  # unused
-        self._target_writer.append_batch(
-            data=target,
-            start_sample=start_sample,
-            batch_times=batch_times,
-        )
-        self._prediction_writer.append_batch(
-            data=prediction,
-            start_sample=start_sample,
-            batch_times=batch_times,
-        )
+        self._target_writer.append_batch(data=target, batch_times=batch_times)
+        self._prediction_writer.append_batch(data=prediction, batch_times=batch_times)
 
     def flush(self):
         self._target_writer.flush()
@@ -149,15 +140,14 @@ class MonthlyDataWriter:
 
     def _get_initial_year_and_month(
         self,
-        start_sample: int,
         years: np.ndarray,
         months: np.ndarray,
         calendar: str,
     ) -> Tuple[np.ndarray, np.ndarray]:
         reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
-        if self._init_years[start_sample] == -1:
-            self._init_years[start_sample : start_sample + years.shape[0]] = years
-            self._init_months[start_sample : start_sample + months.shape[0]] = months
+        if self._init_years[0] == -1:
+            self._init_years[:] = years
+            self._init_months[:] = months
             n_months = self.dataset.variables[LEAD_TIME_DIM].shape[0]
             days_since_reference = get_days_since_reference(
                 years=years,
@@ -166,24 +156,12 @@ class MonthlyDataWriter:
                 reference_date=reference_date,
                 calendar=calendar,
             )
-            self.dataset.variables[INIT_TIME][
-                start_sample : start_sample + months.shape[0]
-            ] = days_since_reference[:, 0]
-            self.dataset.variables[VALID_TIME][
-                start_sample : start_sample + months.shape[0]
-            ] = (
-                # use the 15th of each month, which is 14 days into the month
-                days_since_reference
-                + 14
-            )
-        return (
-            self._init_years[start_sample : start_sample + years.shape[0]],
-            self._init_months[start_sample : start_sample + months.shape[0]],
-        )
+            self.dataset.variables[INIT_TIME][:] = days_since_reference[:, 0]
+            # use the 15th of each month, which is 14 days into the month
+            self.dataset.variables[VALID_TIME][:, :] = days_since_reference + 14
+        return (self._init_years, self._init_months)
 
-    def _get_month_indices(
-        self, start_sample: int, batch_times: xr.DataArray
-    ) -> np.ndarray:
+    def _get_month_indices(self, batch_times: xr.DataArray) -> np.ndarray:
         """
         Get the month indices for the batch of data.
 
@@ -192,7 +170,6 @@ class MonthlyDataWriter:
         indices in this and future calls.
 
         Args:
-            start_sample: Sample (ensemble member dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch, of shape
                 [ensemble_member, lead_time].
 
@@ -204,7 +181,7 @@ class MonthlyDataWriter:
         # datetime months are 1-indexed, we want 0-indexed
         months = batch_times.dt.month.values - 1
         init_years, init_months = self._get_initial_year_and_month(
-            start_sample, years=years[:, 0], months=months[:, 0], calendar=calendar
+            years=years[:, 0], months=months[:, 0], calendar=calendar
         )
         return 12 * (years - init_years[:, None]) + (months - init_months[:, None])
 
@@ -216,7 +193,6 @@ class MonthlyDataWriter:
     def append_batch(
         self,
         data: Dict[str, torch.Tensor],
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -224,7 +200,6 @@ class MonthlyDataWriter:
 
         Args:
             data: Values to store.
-            start_sample: Sample (ensemble member dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
         n_samples_data = list(data.values())[0].shape[0]
@@ -257,7 +232,7 @@ class MonthlyDataWriter:
 
         dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, "lat", "lon")
         save_names = self._get_variable_names_to_save(data.keys())
-        months = self._get_month_indices(start_sample, batch_times)
+        months = self._get_month_indices(batch_times)
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
         count_data = self.dataset.variables[COUNTS][
@@ -286,15 +261,6 @@ class MonthlyDataWriter:
 
             array = data[variable_name].cpu().numpy()
 
-            n_samples_total = self.dataset.variables[variable_name].shape[0]
-            if start_sample + array.shape[0] > n_samples_total:
-                raise ValueError(
-                    f"Batch size {array.shape[0]} starting at sample "
-                    f"{start_sample} "
-                    "is too large to fit in the netCDF file with sample "
-                    f"dimension of length {n_samples_total}."
-                )
-
             # Add the data to the variable totals
             # Have to extract the data and write it back as `.at` does not play nicely
             # with netCDF4
@@ -313,7 +279,7 @@ class MonthlyDataWriter:
             ] = month_data
         # counts must be added after data, as we use the base counts when updating means
         for i_sample in range(n_samples_data):
-            self.dataset.variables[COUNTS][start_sample + i_sample] += np.bincount(
+            self.dataset.variables[COUNTS][i_sample] += np.bincount(
                 months[i_sample], minlength=self.dataset.variables[COUNTS].shape[1]
             )
 

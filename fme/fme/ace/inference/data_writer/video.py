@@ -44,7 +44,6 @@ class VideoDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -54,7 +53,6 @@ class VideoDataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing. Unused.
             batch_times: Time coordinates for each sample in the batch. Unused.
         """
         self._video.record_batch(

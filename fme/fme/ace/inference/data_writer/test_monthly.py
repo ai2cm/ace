@@ -60,11 +60,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     dims=["sample", "time"],
                 )
                 assert times.shape == (n_samples, window_size)
-                writer.append_batch(
-                    data=month_data,
-                    start_sample=0,
-                    batch_times=times,
-                )
+                writer.append_batch(data=month_data, batch_times=times)
     writer.flush()
     written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)

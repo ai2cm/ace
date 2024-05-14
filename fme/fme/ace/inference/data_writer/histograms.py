@@ -129,7 +129,6 @@ class HistogramDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -139,10 +138,9 @@ class HistogramDataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
-        del start_sample, batch_times
+        del batch_times
         self._histogram.record_batch(
             target_data=target,
             prediction_data=prediction,
