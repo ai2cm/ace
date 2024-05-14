@@ -39,7 +39,6 @@ class PairedRestartWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -49,10 +48,9 @@ class PairedRestartWriter:
             target: Target data. Ignored for this data writer.
             prediction: Prediction data.
             start_timestep: Timestep (lead time dim) at which to start writing.
-            start_sample: Sample (initialization time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
-        self._writer.append_batch(prediction, start_timestep, start_sample, batch_times)
+        self._writer.append_batch(prediction, start_timestep, batch_times)
 
     def flush(self):
         pass
@@ -90,7 +88,6 @@ class RestartWriter:
         self,
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -99,7 +96,6 @@ class RestartWriter:
         Args:
             prediction: Prediction data.
             start_timestep: Timestep (lead time dim) at which to start writing.
-            start_sample: Sample (initialization time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
         n_times = prediction[list(prediction.keys())[0]].shape[1]
