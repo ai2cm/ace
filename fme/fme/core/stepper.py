@@ -133,7 +133,7 @@ class SingleModuleStepperConfig:
         """Names of all variables required, including auxiliary ones."""
         extra_names = []
         if self.ocean is not None:
-            extra_names.extend(self.ocean.names)
+            extra_names.extend(self.ocean.forcing_names)
         all_names = list(set(self.in_names).union(self.out_names).union(extra_names))
         return all_names
 
@@ -411,7 +411,7 @@ class SingleModuleStepper:
         output_list = []
         state = initial_condition
         forcing_names = self._config.forcing_names
-        ocean_target_names = self.ocean.target_names if self.ocean is not None else []
+        ocean_forcing_names = self.ocean.forcing_names if self.ocean is not None else []
         for step in range(n_forward_steps):
             current_step_forcing = {
                 k: (
@@ -422,7 +422,7 @@ class SingleModuleStepper:
                 for k in forcing_names
             }
             next_step_ocean_data = {
-                k: forcing_data[k][:, step + 1] for k in ocean_target_names
+                k: forcing_data[k][:, step + 1] for k in ocean_forcing_names
             }
             input_data = {**state, **current_step_forcing}
             state = self.step(input_data, next_step_ocean_data)
@@ -464,7 +464,7 @@ class SingleModuleStepper:
         if self.ocean is None:
             forcing_names = self._config.forcing_names
         else:
-            forcing_names = self._config.forcing_names + self.ocean.target_names
+            forcing_names = self._config.forcing_names + self.ocean.forcing_names
         forcing_data = {k: data[k] for k in forcing_names}
 
         loss = torch.tensor(0.0, device=get_device())
