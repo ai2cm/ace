@@ -14,7 +14,6 @@ class _DataWriter(Protocol):
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         pass
@@ -68,7 +67,6 @@ class TimeCoarsen:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         (
@@ -81,7 +79,6 @@ class TimeCoarsen:
             target_coarsened,
             prediction_coarsened,
             start_timestep,
-            start_sample,
             batch_times_coarsened,
         )
 

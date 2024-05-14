@@ -57,19 +57,16 @@ class PairedRawDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
             start_timestep=start_timestep,
-            start_sample=start_sample,
             batch_times=batch_times,
         )
         self._prediction_writer.append_batch(
             data=prediction,
             start_timestep=start_timestep,
-            start_sample=start_sample,
             batch_times=batch_times,
         )
 
@@ -127,7 +124,6 @@ class RawDataWriter:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -136,7 +132,6 @@ class RawDataWriter:
         Args:
             data: Data to be written to file.
             start_timestep: Timestep (lead time dim) at which to start writing.
-            start_sample: Sample (initialization time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
         n_samples_data = list(data.values())[0].shape[0]
@@ -190,17 +185,9 @@ class RawDataWriter:
                 )
 
             data_numpy = data[variable_name].cpu().numpy()
-            n_samples_total = self.dataset.variables[variable_name].shape[0]
-            if start_sample + data_numpy.shape[0] > n_samples_total:
-                raise ValueError(
-                    f"Batch size {data_numpy.shape[0]} starting at sample "
-                    f"{start_sample} "
-                    "is too large to fit in the netCDF file with sample "
-                    f"dimension of length {n_samples_total}."
-                )
             # Append the data to the variables
             self.dataset.variables[variable_name][
-                start_sample : start_sample + data_numpy.shape[0],
+                :,
                 start_timestep : start_timestep + data_numpy.shape[1],
                 :,
             ] = data_numpy
@@ -218,13 +205,9 @@ class RawDataWriter:
                 units=self.dataset.variables[INIT_TIME].units,
                 calendar=self.dataset.variables[INIT_TIME].calendar,
             )
-            self.dataset.variables[INIT_TIME][
-                start_sample : start_sample + batch_times.sizes["sample"]
-            ] = init_times_numeric
+            self.dataset.variables[INIT_TIME][:] = init_times_numeric
         else:
-            init_times_numeric = self.dataset.variables[INIT_TIME][
-                start_sample : start_sample + batch_times.sizes["sample"]
-            ]
+            init_times_numeric = self.dataset.variables[INIT_TIME][:]
             init_times_numeric = (
                 init_times_numeric.filled()
             )  # convert masked array to ndarray
@@ -247,7 +230,7 @@ class RawDataWriter:
             calendar=self.dataset.variables[VALID_TIME].calendar,
         )
         self.dataset.variables[VALID_TIME][
-            start_sample : start_sample + batch_times.sizes["sample"],
+            :,
             start_timestep : start_timestep + lead_times_microseconds.shape[0],
         ] = valid_times_numeric
 

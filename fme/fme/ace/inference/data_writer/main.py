@@ -224,7 +224,6 @@ class DataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -234,7 +233,6 @@ class DataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
         for writer in self._writers:
@@ -242,7 +240,6 @@ class DataWriter:
                 target=target,
                 prediction=prediction,
                 start_timestep=start_timestep,
-                start_sample=start_sample,
                 batch_times=batch_times,
             )
 
@@ -267,7 +264,6 @@ class NullDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        start_sample: int,
         batch_times: xr.DataArray,
     ):
         pass

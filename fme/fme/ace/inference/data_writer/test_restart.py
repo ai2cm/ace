@@ -37,7 +37,6 @@ def test_restart_saves_last_step(tmpdir):
     writer.append_batch(
         prediction=data,
         start_timestep=0,
-        start_sample=0,
         batch_times=batch_times,
     )
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
@@ -86,7 +85,6 @@ def test_restart_saves_configured_step(tmpdir):
     writer.append_batch(
         prediction=data,
         start_timestep=i_time_start,
-        start_sample=0,
         batch_times=batch_times,
     )
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
@@ -139,7 +137,6 @@ def test_restart_does_not_save(tmpdir):
     writer.append_batch(
         prediction=data,
         start_timestep=0,
-        start_sample=0,
         batch_times=batch_times,
     )
     assert not (tmpdir / "restart.nc").exists()

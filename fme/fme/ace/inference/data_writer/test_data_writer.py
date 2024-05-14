@@ -111,7 +111,7 @@ class TestDataWriter:
         tmp_path,
         calendar,
     ):
-        n_samples = 4
+        n_samples = 2
         n_timesteps = 6
         writer = DataWriter(
             str(tmp_path),
@@ -132,21 +132,13 @@ class TestDataWriter:
             start_time=start_time,
             end_time=end_time,
             freq="6H",
-            n_samples=n_samples // 2,
+            n_samples=n_samples,
             calendar=calendar,
         )
         writer.append_batch(
             sample_target_data,
             sample_prediction_data,
             start_timestep=0,
-            start_sample=0,
-            batch_times=batch_times,
-        )
-        writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
-            start_timestep=0,
-            start_sample=2,
             batch_times=batch_times,
         )
         start_time_2 = (2020, 1, 1, 18, 0, 0)
@@ -155,21 +147,13 @@ class TestDataWriter:
             start_time=start_time_2,
             end_time=end_time_2,
             freq="6H",
-            n_samples=n_samples // 2,
+            n_samples=n_samples,
             calendar=calendar,
         )
         writer.append_batch(
             sample_target_data,
             sample_prediction_data,
             start_timestep=3,
-            start_sample=0,
-            batch_times=batch_times,
-        )
-        writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
-            start_timestep=3,
-            start_sample=2,
             batch_times=batch_times,
         )
         writer.flush()
@@ -304,7 +288,6 @@ class TestDataWriter:
             sample_target_data,
             sample_prediction_data,
             start_timestep=0,
-            start_sample=0,
             batch_times=batch_times,
         )
         writer.flush()
@@ -346,54 +329,6 @@ class TestDataWriter:
         expected_bin_edge_names = {f"{name}_bin_edges" for name in expected_names}
         assert set(histograms) == expected_names.union(expected_bin_edge_names)
 
-    def test_append_batch_past_end_of_samples(
-        self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
-    ):
-        n_samples = 4
-        writer = DataWriter(
-            str(tmp_path),
-            n_samples=n_samples,
-            n_timesteps=4,  # unused
-            metadata=sample_metadata,
-            coords={"lat": np.arange(4), "lon": np.arange(5)},
-            enable_prediction_netcdfs=True,
-            enable_video_netcdfs=False,
-            enable_monthly_netcdfs=True,
-            save_names=None,
-            enable_histogram_netcdfs=True,
-            prognostic_names=[],
-        )
-        start_time = (2020, 1, 1, 0, 0, 0)
-        end_time = (2020, 1, 1, 12, 0, 0)
-        batch_times = self.get_batch_times(
-            start_time=start_time,
-            end_time=end_time,
-            freq="6H",
-            n_samples=n_samples // 2,
-        )
-        writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
-            start_timestep=0,
-            start_sample=0,
-            batch_times=batch_times,
-        )
-        writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
-            start_timestep=0,
-            start_sample=2,
-            batch_times=batch_times,
-        )
-        with pytest.raises(ValueError):
-            writer.append_batch(
-                sample_target_data,
-                sample_prediction_data,
-                start_timestep=0,
-                start_sample=4,
-                batch_times=batch_times,
-            )
-
     def test_append_batch_data_time_mismatch(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
@@ -424,7 +359,6 @@ class TestDataWriter:
                 sample_target_data,
                 sample_prediction_data,
                 start_timestep=0,
-                start_sample=0,
                 batch_times=batch_times,
             )
 
