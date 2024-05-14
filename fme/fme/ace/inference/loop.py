@@ -60,7 +60,6 @@ class WindowStitcher:
             target=data,
             prediction=gen_data,
             start_timestep=self.i_time,
-            start_sample=0,
             batch_times=batch_times,
         )
         self.i_time += tensor_shape[1]
