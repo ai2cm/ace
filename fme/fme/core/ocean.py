@@ -50,9 +50,11 @@ class OceanConfig:
         return Ocean(config=self)
 
     @property
-    def names(self) -> List[str]:
-        names = [self.surface_temperature_name, self.ocean_fraction_name]
-        if self.slab is not None:
+    def forcing_names(self) -> List[str]:
+        names = [self.ocean_fraction_name]
+        if self.slab is None:
+            names.append(self.surface_temperature_name)
+        else:
             names.extend(self.slab.names)
         return list(set(names))
 
@@ -73,21 +75,13 @@ class Ocean:
             mask_value=1,
             interpolate=config.interpolate,
         )
+        self._forcing_names = config.forcing_names
         if config.slab is None:
             self.type = "prescribed"
-            self._target_names = [
-                self.surface_temperature_name,
-                self.ocean_fraction_name,
-            ]
         else:
             self.type = "slab"
             self.mixed_layer_depth_name = config.slab.mixed_layer_depth_name
             self.q_flux_name = config.slab.q_flux_name
-            self._target_names = [
-                self.ocean_fraction_name,
-                self.mixed_layer_depth_name,
-                self.q_flux_name,
-            ]
 
     def __call__(
         self,
@@ -127,9 +121,9 @@ class Ocean:
         )
 
     @property
-    def target_names(self) -> List[str]:
-        """These are the variables required from the target data."""
-        return self._target_names
+    def forcing_names(self) -> List[str]:
+        """These are the variables required from the forcing data."""
+        return self._forcing_names
 
 
 def mixed_layer_temperature_tendency(
