@@ -6,7 +6,9 @@ Welcome to full-model's documentation!
    :caption: Contents:
 
    installation
-   usage
+   quickstart
+   inference_config
+   training_config
    api
 
 Indices and tables
