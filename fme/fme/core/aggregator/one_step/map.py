@@ -18,7 +18,7 @@ class MapAggregator:
     _captions = {
         "full-field": (
             "{name} one step mean full field; "
-            "(left) generated and (right) target [{units}]"
+            "(top) generated and (bottom) target [{units}]"
         ),
         "error": (
             "{name} one step mean full field error (generated - target) " "[{units}]"
