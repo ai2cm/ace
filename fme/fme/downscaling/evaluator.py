@@ -14,7 +14,6 @@ from fme.ace.utils import logging_utils
 from fme.core.dicts import to_flat_dict
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.optimization import NullOptimization
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import DataLoaderConfig, GriddedData
@@ -34,7 +33,6 @@ class Evaluator:
     ) -> None:
         self.data = data
         self.model = model
-        self.optimization = NullOptimization()
         self.experiment_dir = experiment_dir
 
     def run(self):
@@ -46,7 +44,7 @@ class Evaluator:
         for batch in self.data.loader:
             inputs = FineResCoarseResPair(batch.fine, batch.coarse)
             with torch.no_grad():
-                outputs = self.model.run_on_batch(inputs, self.optimization)
+                outputs = self.model.generate_on_batch(inputs)
                 aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
                 )

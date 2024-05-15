@@ -89,7 +89,7 @@ class Trainer:
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
             inputs = FineResCoarseResPair(batch.fine, batch.coarse)
-            outputs = self.model.run_on_batch(inputs, self.optimization)
+            outputs = self.model.train_on_batch(inputs, self.optimization)
             self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
@@ -117,7 +117,7 @@ class Trainer:
                     batch.fine,
                     batch.coarse,
                 )
-                outputs = self.model.run_on_batch(inputs, self.null_optimization)
+                outputs = self.model.generate_on_batch(inputs)
                 validation_aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
                 )
