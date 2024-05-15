@@ -5,7 +5,7 @@ import torch
 
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.optimization import NullOptimization, OptimizationConfig
+from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
     DownscalingModelConfig,
@@ -45,7 +45,7 @@ class LinearDownscaling(torch.nn.Module):
 
 @pytest.mark.parametrize("use_opt", [True, False])
 @pytest.mark.parametrize("use_fine_topography", [True, False])
-def test_run_on_batch(use_opt, use_fine_topography):
+def test_train_and_generate(use_opt, use_fine_topography):
     fine_shape = (8, 16)
     coarse_shape = (4, 8)
     upscaling_factor = 2
@@ -89,10 +89,10 @@ def test_run_on_batch(use_opt, use_fine_topography):
     )
     if use_opt:
         optimization = OptimizationConfig().build(model.module.parameters(), 2)
+        outputs = model.train_on_batch(batch, optimization)
     else:
-        optimization = NullOptimization()
+        outputs = model.generate_on_batch(batch)
 
-    outputs = model.run_on_batch(batch, optimization)
     assert outputs.prediction.keys() == outputs.target.keys()
     for k in outputs.prediction:
         assert outputs.prediction[k].shape == outputs.target[k].shape
@@ -165,14 +165,14 @@ def test_serialization(tmp_path):
         fine={"x": torch.ones(batch_size, *fine_shape)},
         coarse={"x": torch.ones(batch_size, *coarse_shape)},
     )
-    expected = model.run_on_batch(batch, NullOptimization()).prediction["x"]
+    expected = model.generate_on_batch(batch).prediction["x"]
 
     model_from_state = Model.from_state(
         model.get_state(), area_weights, fine_topography
     )
     torch.testing.assert_allclose(
         expected,
-        model_from_state.run_on_batch(batch, NullOptimization()).prediction["x"],
+        model_from_state.generate_on_batch(batch).prediction["x"],
     )
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
@@ -181,5 +181,5 @@ def test_serialization(tmp_path):
     )
     torch.testing.assert_allclose(
         expected,
-        model_from_disk.run_on_batch(batch, NullOptimization()).prediction["x"],
+        model_from_disk.generate_on_batch(batch).prediction["x"],
     )

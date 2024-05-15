@@ -116,6 +116,7 @@ class Model:
         self.in_packer = Packer(in_names)
         self.out_packer = Packer(out_names)
         self.config = config
+        self.null_optimization = NullOptimization()
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -125,7 +126,17 @@ class Model:
         """
         return torch.nn.ModuleList([self.module])
 
-    def run_on_batch(
+    def train_on_batch(
+        self, batch: FineResCoarseResPair[TensorMapping], optimization: Optimization
+    ) -> ModelOutputs:
+        return self._run_on_batch(batch, optimization)
+
+    def generate_on_batch(
+        self, batch: FineResCoarseResPair[TensorMapping]
+    ) -> ModelOutputs:
+        return self._run_on_batch(batch, self.null_optimization)
+
+    def _run_on_batch(
         self,
         batch: FineResCoarseResPair[TensorMapping],
         optimizer: Union[Optimization, NullOptimization],
