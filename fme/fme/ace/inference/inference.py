@@ -12,7 +12,7 @@ import torch
 import yaml
 
 import fme
-from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.loop import run_dataset_inference, run_inference
 from fme.ace.train_config import LoggingConfig
 from fme.ace.utils import logging_utils
@@ -166,8 +166,8 @@ class InferenceConfig:
 
     def get_data_writer(
         self, data: GriddedData, prognostic_names: Sequence[str]
-    ) -> DataWriter:
-        return self.data_writer.build(
+    ) -> PairedDataWriter:
+        return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_samples=self.loader.n_samples,
             n_timesteps=self.n_forward_steps,

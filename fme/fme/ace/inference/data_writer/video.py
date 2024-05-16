@@ -9,7 +9,7 @@ from fme.core.aggregator.inference.video import VideoAggregator
 from fme.core.data_loading.data_typing import VariableMetadata
 
 
-class VideoDataWriter:
+class PairedVideoDataWriter:
     """
     Write [time, lat, lon] metric data to a netCDF file.
     """
