@@ -101,7 +101,7 @@ class _HistogramAggregator:
         return xr.Dataset(data)
 
 
-class HistogramDataWriter:
+class PairedHistogramDataWriter:
     """
     Write [time, bin] histogram data for each variable to a netCDF file.
     """
