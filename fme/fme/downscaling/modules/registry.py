@@ -82,6 +82,21 @@ def compute_unet_padding_size(value: int, divisor: int) -> int:
     return divisor - remainder
 
 
+def pad_right(tensor: torch.Tensor, target_shape: Tuple[int, int]) -> torch.Tensor:
+    """Pad the right side of the tensor with zeros to match the target shape."""
+    return torch.nn.functional.pad(
+        tensor,
+        [
+            0,
+            target_shape[-1] - tensor.shape[-1],
+            0,
+            target_shape[-2] - tensor.shape[-2],
+        ],
+        mode="constant",
+        value=0,
+    )
+
+
 class UNetRegressionModule(torch.nn.Module):
     """
     Performs downscaling by (1) bicubic interpolation to the fine grid (see [1]
@@ -125,19 +140,7 @@ class UNetRegressionModule(torch.nn.Module):
             mode="bicubic",
             align_corners=True,
         )
-        fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
-
-        inputs = torch.nn.functional.pad(
-            inputs,
-            [
-                0,
-                self.target_shape[-1] - fine_shape[-1],
-                0,
-                self.target_shape[-2] - fine_shape[-2],
-            ],
-            mode="constant",
-            value=0,
-        )
+        inputs = pad_right(inputs, self.target_shape)
 
         if self.fine_topography is not None:
             batch_size = inputs.shape[0]
@@ -146,20 +149,11 @@ class UNetRegressionModule(torch.nn.Module):
                 .expand(batch_size, -1, -1, -1)
                 .to(get_device())
             )
-            topography = torch.nn.functional.pad(
-                topography,
-                [
-                    0,
-                    self.target_shape[-1] - fine_shape[-1],
-                    0,
-                    self.target_shape[-2] - fine_shape[-2],
-                ],
-                mode="constant",
-                value=0,
-            )
+            topography = pad_right(topography, self.target_shape)
             inputs = torch.concat((inputs, topography), dim=1)
 
         outputs = self.unet(inputs, torch.tensor([0], device=get_device()), None)
+        fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
         return outputs[..., : fine_shape[0], : fine_shape[1]]
 
 
