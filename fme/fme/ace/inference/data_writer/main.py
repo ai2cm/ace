@@ -9,25 +9,23 @@ import xarray as xr
 
 from fme.core.data_loading.data_typing import VariableMetadata
 
-from .histograms import HistogramDataWriter
+from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
 from .restart import PairedRestartWriter, RestartWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
-from .video import VideoDataWriter
+from .video import PairedVideoDataWriter
 
-Subwriter = Union[
+PairedSubwriter = Union[
     PairedRawDataWriter,
-    VideoDataWriter,
-    HistogramDataWriter,
+    PairedVideoDataWriter,
+    PairedHistogramDataWriter,
     PairedTimeCoarsen,
     PairedMonthlyDataWriter,
     PairedRestartWriter,
 ]
 
-PredictionOnlySubwriter = Union[
-    MonthlyDataWriter, RawDataWriter, RestartWriter, TimeCoarsen
-]
+Subwriter = Union[MonthlyDataWriter, RawDataWriter, RestartWriter, TimeCoarsen]
 
 
 @dataclasses.dataclass
@@ -71,7 +69,7 @@ class DataWriterConfig:
                 "save subsettable output files are False."
             )
 
-    def build(
+    def build_paired(
         self,
         experiment_dir: str,
         n_samples: int,
@@ -79,8 +77,8 @@ class DataWriterConfig:
         prognostic_names: Sequence[str],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
-    ) -> "DataWriter":
-        return DataWriter(
+    ) -> "PairedDataWriter":
+        return PairedDataWriter(
             path=experiment_dir,
             n_samples=n_samples,
             n_timesteps=n_timesteps,
@@ -95,7 +93,7 @@ class DataWriterConfig:
             time_coarsen=self.time_coarsen,
         )
 
-    def build_prediction_only(
+    def build(
         self,
         experiment_dir: str,
         n_samples: int,
@@ -103,7 +101,7 @@ class DataWriterConfig:
         prognostic_names: Sequence[str],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
-    ) -> "PredictionOnlyDataWriter":
+    ) -> "DataWriter":
         if self.save_histogram_files:
             raise NotImplementedError(
                 "Saving histograms is not supported for prediction-only data writers. "
@@ -114,7 +112,7 @@ class DataWriterConfig:
                 "Saving 'extended video' netCDFs is not supported for prediction-only "
                 "data writers. Make sure to set `log_extended_video_netcdfs=False`."
             )
-        return PredictionOnlyDataWriter(
+        return DataWriter(
             path=experiment_dir,
             n_samples=n_samples,
             n_timesteps=n_timesteps,
@@ -128,7 +126,7 @@ class DataWriterConfig:
         )
 
 
-class DataWriter:
+class PairedDataWriter:
     def __init__(
         self,
         path: str,
@@ -162,7 +160,7 @@ class DataWriter:
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
-        self._writers: List[Subwriter] = []
+        self._writers: List[PairedSubwriter] = []
         self.path = path
         self.coords = coords
         self.metadata = metadata
@@ -173,9 +171,9 @@ class DataWriter:
         else:
             n_coarsened_timesteps = n_timesteps
 
-        def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
+        def _time_coarsen_builder(data_writer: PairedSubwriter) -> PairedSubwriter:
             if time_coarsen is not None:
-                return time_coarsen.build(data_writer)
+                return time_coarsen.build_paired(data_writer)
             return data_writer
 
         if enable_prediction_netcdfs:
@@ -204,7 +202,7 @@ class DataWriter:
         if enable_video_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
-                    VideoDataWriter(
+                    PairedVideoDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
                         metadata=metadata,
@@ -215,7 +213,7 @@ class DataWriter:
         if enable_histogram_netcdfs:
             self._writers.append(
                 _time_coarsen_builder(
-                    HistogramDataWriter(
+                    PairedHistogramDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
                         metadata=metadata,
@@ -287,7 +285,7 @@ class DataWriter:
             writer.flush()
 
 
-class PredictionOnlyDataWriter:
+class DataWriter:
     def __init__(
         self,
         path: str,
@@ -315,13 +313,11 @@ class PredictionOnlyDataWriter:
                 and monthly netCDF files.
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
-        self._writers: List[PredictionOnlySubwriter] = []
+        self._writers: List[Subwriter] = []
 
-        def _time_coarsen_builder(
-            data_writer: PredictionOnlySubwriter,
-        ) -> PredictionOnlySubwriter:
+        def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
             if time_coarsen is not None:
-                return time_coarsen.build_prediction_only(data_writer)
+                return time_coarsen.build(data_writer)
             return data_writer
 
         if enable_prediction_netcdfs:

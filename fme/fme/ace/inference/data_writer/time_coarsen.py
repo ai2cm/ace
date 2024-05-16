@@ -8,7 +8,7 @@ TIME_DIM_NAME = "time"
 TIME_DIM = 1  # sample, time, lat, lon
 
 
-class _DataWriter(Protocol):
+class _PairedDataWriter(Protocol):
     def append_batch(
         self,
         target: Dict[str, torch.Tensor],
@@ -22,7 +22,7 @@ class _DataWriter(Protocol):
         pass
 
 
-class _PredictionOnlyDataWriter(Protocol):
+class _DataWriter(Protocol):
     def append_batch(
         self,
         data: Dict[str, torch.Tensor],
@@ -53,15 +53,13 @@ class TimeCoarsenConfig:
 
     coarsen_factor: int
 
-    def build(self, data_writer: _DataWriter) -> "PairedTimeCoarsen":
+    def build_paired(self, data_writer: _PairedDataWriter) -> "PairedTimeCoarsen":
         return PairedTimeCoarsen(
             data_writer=data_writer,
             coarsen_factor=self.coarsen_factor,
         )
 
-    def build_prediction_only(
-        self, data_writer: _PredictionOnlyDataWriter
-    ) -> "TimeCoarsen":
+    def build(self, data_writer: _DataWriter) -> "TimeCoarsen":
         return TimeCoarsen(
             data_writer=data_writer,
             coarsen_factor=self.coarsen_factor,
@@ -77,10 +75,10 @@ class PairedTimeCoarsen:
 
     def __init__(
         self,
-        data_writer: _DataWriter,
+        data_writer: _PairedDataWriter,
         coarsen_factor: int,
     ):
-        self._data_writer: _DataWriter = data_writer
+        self._data_writer: _PairedDataWriter = data_writer
         self._coarsen_factor: int = coarsen_factor
 
     def append_batch(
@@ -112,10 +110,10 @@ class TimeCoarsen:
 
     def __init__(
         self,
-        data_writer: _PredictionOnlyDataWriter,
+        data_writer: _DataWriter,
         coarsen_factor: int,
     ):
-        self._data_writer: _PredictionOnlyDataWriter = data_writer
+        self._data_writer: _DataWriter = data_writer
         self._coarsen_factor: int = coarsen_factor
 
     def append_batch(
