@@ -7,8 +7,13 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.inference.data_writer.main import DataWriter, DataWriterConfig
+from fme.ace.inference.data_writer.main import (
+    DataWriter,
+    DataWriterConfig,
+    PredictionOnlyDataWriter,
+)
 from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
+from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
@@ -361,6 +366,72 @@ class TestDataWriter:
                 start_timestep=0,
                 batch_times=batch_times,
             )
+
+    def test_prediction_only_append_batch(self, sample_metadata, tmp_path, calendar):
+        n_samples = 2
+        n_timesteps = 8
+        coarsen_factor = 2
+        prediction_data = {
+            "temp": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
+            "pressure": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
+        }
+        writer = PredictionOnlyDataWriter(
+            str(tmp_path),
+            n_samples=n_samples,
+            n_timesteps=n_timesteps,
+            metadata=sample_metadata,
+            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            enable_prediction_netcdfs=True,
+            enable_monthly_netcdfs=True,
+            save_names=None,
+            prognostic_names=["temp"],
+            time_coarsen=TimeCoarsenConfig(coarsen_factor),
+        )
+        start_time = (2020, 1, 1, 0, 0, 0)
+        end_time = (2020, 1, 1, 18, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time,
+            end_time=end_time,
+            freq="6H",
+            n_samples=n_samples,
+            calendar=calendar,
+        )
+        writer.append_batch(
+            prediction_data,
+            start_timestep=0,
+            batch_times=batch_times,
+        )
+        start_time_2 = (2020, 1, 2, 0, 0, 0)
+        end_time_2 = (2020, 1, 2, 18, 0, 0)
+        batch_times = self.get_batch_times(
+            start_time=start_time_2,
+            end_time=end_time_2,
+            freq="6H",
+            n_samples=n_samples,
+            calendar=calendar,
+        )
+        writer.append_batch(
+            prediction_data,
+            start_timestep=4,
+            batch_times=batch_times,
+        )
+        writer.flush()
+
+        with xr.open_dataset(tmp_path / "autoregressive_predictions.nc") as ds:
+            assert "temp" in ds
+            expected_shape = (n_samples, n_timesteps // coarsen_factor, 4, 5)
+            assert ds.temp.shape == expected_shape
+            assert ds.valid_time.shape == expected_shape[:2]
+
+        with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
+            assert ds.counts.sum() == n_samples * n_timesteps
+            assert np.sum(np.isnan(ds["temp"])) == 0
+            assert np.sum(np.isnan(ds["pressure"])) == 0
+            assert np.all(ds.init_time.dt.year.values > 0)
+            assert np.all(ds.init_time.dt.year.values >= 0)
+            assert np.all(ds.valid_time.dt.month.values >= 0)
+
+        xr.open_dataset(tmp_path / "restart.nc")
 
 
 @pytest.mark.parametrize(
