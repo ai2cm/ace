@@ -70,9 +70,12 @@ class PairedMonthlyDataWriter:
         start_timestep: int,
         batch_times: xr.DataArray,
     ):
-        del start_timestep  # unused
-        self._target_writer.append_batch(data=target, batch_times=batch_times)
-        self._prediction_writer.append_batch(data=prediction, batch_times=batch_times)
+        self._target_writer.append_batch(
+            data=target, start_timestep=start_timestep, batch_times=batch_times
+        )
+        self._prediction_writer.append_batch(
+            data=prediction, start_timestep=start_timestep, batch_times=batch_times
+        )
 
     def flush(self):
         self._target_writer.flush()
@@ -193,6 +196,7 @@ class MonthlyDataWriter:
     def append_batch(
         self,
         data: Dict[str, torch.Tensor],
+        start_timestep: int,
         batch_times: xr.DataArray,
     ):
         """
@@ -200,8 +204,10 @@ class MonthlyDataWriter:
 
         Args:
             data: Values to store.
+            start_timestep: Timestep index for the start of the batch, unused.
             batch_times: Time coordinates for each sample in the batch.
         """
+        del start_timestep  # unused
         n_samples_data = list(data.values())[0].shape[0]
         n_samples_time = batch_times.sizes["sample"]
         if n_samples_data != n_samples_time:
