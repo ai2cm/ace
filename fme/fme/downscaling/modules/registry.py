@@ -108,14 +108,13 @@ class UNetRegressionModule(torch.nn.Module):
     [2] https://arxiv.org/abs/2309.15214
 
     Args:
-        architecture: The U-Net architecture to use.
-        coarse_shape: height and width of the coarse input.
-        target_shape: height and width of the (padded) target outputs.
-        n_in_channels: The number of input channels.
-        n_out_channels: The number of output channels.
-        downscale_factor: The downscale factor.
-        **config: Additional configuration parameters to be passed to
-            the `architecture` constructor
+        unet: The U-Net model.
+        coarse_shape: The shape of the coarse input.
+        target_shape: The input and output shape required by the u-net.
+        downscale_factor: The factor by which the coarse input is downscaled to
+            the target output.
+        fine_topography: Optional fine topography to condition the latent
+            variables on.
     """
 
     def __init__(
