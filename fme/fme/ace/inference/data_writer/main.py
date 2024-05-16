@@ -10,19 +10,23 @@ import xarray as xr
 from fme.core.data_loading.data_typing import VariableMetadata
 
 from .histograms import HistogramDataWriter
-from .monthly import PairedMonthlyDataWriter
-from .raw import PairedRawDataWriter
-from .restart import PairedRestartWriter
-from .time_coarsen import TimeCoarsen, TimeCoarsenConfig
+from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
+from .raw import PairedRawDataWriter, RawDataWriter
+from .restart import PairedRestartWriter, RestartWriter
+from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import VideoDataWriter
 
 Subwriter = Union[
     PairedRawDataWriter,
     VideoDataWriter,
     HistogramDataWriter,
-    TimeCoarsen,
+    PairedTimeCoarsen,
     PairedMonthlyDataWriter,
     PairedRestartWriter,
+]
+
+PredictionOnlySubwriter = Union[
+    MonthlyDataWriter, RawDataWriter, RestartWriter, TimeCoarsen
 ]
 
 
@@ -88,6 +92,38 @@ class DataWriterConfig:
             save_names=self.save_raw_prediction_names,
             prognostic_names=prognostic_names,
             enable_histogram_netcdfs=self.save_histogram_files,
+            time_coarsen=self.time_coarsen,
+        )
+
+    def build_prediction_only(
+        self,
+        experiment_dir: str,
+        n_samples: int,
+        n_timesteps: int,
+        prognostic_names: Sequence[str],
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ) -> "PredictionOnlyDataWriter":
+        if self.save_histogram_files:
+            raise NotImplementedError(
+                "Saving histograms is not supported for prediction-only data writers. "
+                "Make sure to set `save_histogram_files=False`."
+            )
+        if self.log_extended_video_netcdfs:
+            raise NotImplementedError(
+                "Saving 'extended video' netCDFs is not supported for prediction-only "
+                "data writers. Make sure to set `log_extended_video_netcdfs=False`."
+            )
+        return PredictionOnlyDataWriter(
+            path=experiment_dir,
+            n_samples=n_samples,
+            n_timesteps=n_timesteps,
+            metadata=metadata,
+            coords=coords,
+            enable_prediction_netcdfs=self.save_prediction_files,
+            enable_monthly_netcdfs=self.save_monthly_files,
+            save_names=self.save_raw_prediction_names,
+            prognostic_names=prognostic_names,
             time_coarsen=self.time_coarsen,
         )
 
@@ -242,6 +278,105 @@ class DataWriter:
                 start_timestep=start_timestep,
                 batch_times=batch_times,
             )
+
+    def flush(self):
+        """
+        Flush the data to disk.
+        """
+        for writer in self._writers:
+            writer.flush()
+
+
+class PredictionOnlyDataWriter:
+    def __init__(
+        self,
+        path: str,
+        n_samples: int,
+        n_timesteps: int,
+        metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+        enable_prediction_netcdfs: bool,
+        enable_monthly_netcdfs: bool,
+        save_names: Optional[Sequence[str]],
+        prognostic_names: Sequence[str],
+        time_coarsen: Optional[TimeCoarsenConfig] = None,
+    ):
+        """
+        Args:
+            path: Directory within which to write netCDF file(s).
+            n_samples: Number of samples to write to the file.
+            n_timesteps: Number of timesteps to write to the file.
+            metadata: Metadata for each variable to be written to the file.
+            coords: Coordinate data to be written to the file.
+            enable_prediction_netcdfs: Whether to enable writing of netCDF files
+                containing the predictions and target values.
+            enable_monthly_netcdfs: Whether to enable writing of netCDF files
+            save_names: Names of variables to save in the prediction, histogram,
+                and monthly netCDF files.
+            time_coarsen: Configuration for time coarsening of raw outputs.
+        """
+        self._writers: List[PredictionOnlySubwriter] = []
+
+        def _time_coarsen_builder(
+            data_writer: PredictionOnlySubwriter,
+        ) -> PredictionOnlySubwriter:
+            if time_coarsen is not None:
+                return time_coarsen.build_prediction_only(data_writer)
+            return data_writer
+
+        if enable_prediction_netcdfs:
+            self._writers.append(
+                _time_coarsen_builder(
+                    RawDataWriter(
+                        path=path,
+                        label="autoregressive_predictions.nc",
+                        n_samples=n_samples,
+                        save_names=save_names,
+                        metadata=metadata,
+                        coords=coords,
+                    )
+                )
+            )
+
+        if enable_monthly_netcdfs:
+            self._writers.append(
+                MonthlyDataWriter(
+                    path=path,
+                    label="predictions",
+                    n_samples=n_samples,
+                    n_months=months_for_timesteps(n_timesteps),
+                    save_names=save_names,
+                    metadata=metadata,
+                    coords=coords,
+                )
+            )
+
+        self._writers.append(
+            RestartWriter(
+                path=path,
+                is_restart_step=lambda i: i == n_timesteps - 1,
+                prognostic_names=prognostic_names,
+                metadata=metadata,
+                coords=coords,
+            )
+        )
+
+    def append_batch(
+        self,
+        data: Dict[str, torch.Tensor],
+        start_timestep: int,
+        batch_times: xr.DataArray,
+    ):
+        """
+        Append a batch of data to the file.
+        Args:
+            data: Data to write.
+            start_timestep: Timestep at which to start writing.
+            start_sample: Sample at which to start writing.
+            batch_times: Time coordinates for each sample in the batch.
+        """
+        for writer in self._writers:
+            writer.append_batch(data, start_timestep, batch_times)
 
     def flush(self):
         """

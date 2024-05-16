@@ -34,11 +34,7 @@ def test_restart_saves_last_step(tmpdir):
             "time",
         ),
     )
-    writer.append_batch(
-        prediction=data,
-        start_timestep=0,
-        batch_times=batch_times,
-    )
+    writer.append_batch(data, 0, batch_times)
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
     np.testing.assert_allclose(ds.a.values, data["a"][:, -1].cpu().numpy())
     np.testing.assert_allclose(ds.b.values, data["b"][:, -1].cpu().numpy())
@@ -82,11 +78,7 @@ def test_restart_saves_configured_step(tmpdir):
             "time",
         ),
     )
-    writer.append_batch(
-        prediction=data,
-        start_timestep=i_time_start,
-        batch_times=batch_times,
-    )
+    writer.append_batch(data, i_time_start, batch_times)
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
     np.testing.assert_allclose(
         ds.a.values, data["a"][:, i_time_target - i_time_start].cpu().numpy()
@@ -134,9 +126,5 @@ def test_restart_does_not_save(tmpdir):
             "time",
         ),
     )
-    writer.append_batch(
-        prediction=data,
-        start_timestep=0,
-        batch_times=batch_times,
-    )
+    writer.append_batch(data, 0, batch_times)
     assert not (tmpdir / "restart.nc").exists()

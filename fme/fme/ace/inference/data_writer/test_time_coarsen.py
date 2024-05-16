@@ -1,34 +1,15 @@
 from datetime import timedelta
-from typing import Dict, Sequence
+from typing import Sequence
 
 import cftime
 import pytest
 import torch
 import xarray as xr
 
-from .time_coarsen import TimeCoarsenConfig
+from .time_coarsen import coarsen_batch
 
 DIM_SIZES = (2, 4, 2, 2)  # n_samples_in_batch, n_timesteps_in_window, n_lat, n_lon
 VARNAME = "foo"
-
-
-class NoOpDataWriter:
-    """Mocks a sub data writer class object, but does nothing."""
-
-    def __init__(self):
-        pass
-
-    def append_batch(
-        self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
-        start_timestep: int,
-        batch_times: xr.DataArray,
-    ):
-        pass
-
-    def flush(self):
-        pass
 
 
 def get_windowed_batch(dim_sizes: Sequence[int], start_time: Sequence[int]):
@@ -40,9 +21,8 @@ def get_windowed_batch(dim_sizes: Sequence[int], start_time: Sequence[int]):
         .movedim(3, 1)
     )
     target = {VARNAME: data}
-    prediction = {VARNAME: data}
     times = get_batch_times(n_timesteps, start_time, n_samples=n_samples)
-    return target, prediction, times
+    return target, times
 
 
 def get_batch_times(
@@ -131,30 +111,23 @@ def test_time_coarsen(
     expected_coarsened_start_timestep: int,
     dim_sizes: Sequence[int] = DIM_SIZES,
 ):
-    target, prediction, times = get_windowed_batch(
+    target, times = get_windowed_batch(
         dim_sizes=dim_sizes, start_time=(2020, 1, 1, 0, 0, 0)
-    )
-    data_time_coarsen = TimeCoarsenConfig(coarsen_factor=coarsen_factor).build(
-        data_writer=NoOpDataWriter()
     )
     (
         target_coarsened,
-        prediction_coarsened,
         coarsened_start_timestep,
         times_coarsened,
-    ) = data_time_coarsen.coarsen_batch(
-        target=target,
-        prediction=prediction,
+    ) = coarsen_batch(
+        data=target,
         start_timestep=start_timestep,
         batch_times=times,
+        coarsen_factor=coarsen_factor,
     )
     # check the coarsened data time dim size
     assert target_coarsened[VARNAME].size(dim=1) == len(
         expected_coarsened_data
     ), "target coarsened time dim"
-    assert prediction_coarsened[VARNAME].size(dim=1) == len(
-        expected_coarsened_data
-    ), "prediction coarsened time dim"
     assert times_coarsened.sizes["time"] == len(
         expected_coarsened_data
     ), "times coarsened time dim"
@@ -166,12 +139,6 @@ def test_time_coarsen(
         .repeat(n_samples, n_lat, n_lon, 1)
         .movedim(3, 1),
     ), "target coarsened value"
-    torch.testing.assert_close(
-        prediction_coarsened[VARNAME],
-        torch.tensor(expected_coarsened_data, dtype=torch.float64)
-        .repeat(n_samples, n_lat, n_lon, 1)
-        .movedim(3, 1),
-    ), "prediction coarsened value"
     # check the coarsened start timestep
     assert coarsened_start_timestep == expected_coarsened_start_timestep
     # check the coarsened data time coordinate values

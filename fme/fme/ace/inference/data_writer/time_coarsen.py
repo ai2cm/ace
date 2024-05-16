@@ -22,6 +22,19 @@ class _DataWriter(Protocol):
         pass
 
 
+class _PredictionOnlyDataWriter(Protocol):
+    def append_batch(
+        self,
+        data: Dict[str, torch.Tensor],
+        start_timestep: int,
+        batch_times: xr.DataArray,
+    ):
+        pass
+
+    def flush(self):
+        pass
+
+
 @dataclasses.dataclass
 class TimeCoarsenConfig:
     """
@@ -40,7 +53,15 @@ class TimeCoarsenConfig:
 
     coarsen_factor: int
 
-    def build(self, data_writer: _DataWriter) -> "TimeCoarsen":
+    def build(self, data_writer: _DataWriter) -> "PairedTimeCoarsen":
+        return PairedTimeCoarsen(
+            data_writer=data_writer,
+            coarsen_factor=self.coarsen_factor,
+        )
+
+    def build_prediction_only(
+        self, data_writer: _PredictionOnlyDataWriter
+    ) -> "TimeCoarsen":
         return TimeCoarsen(
             data_writer=data_writer,
             coarsen_factor=self.coarsen_factor,
@@ -51,7 +72,7 @@ class TimeCoarsenConfig:
         return (n_timesteps) // self.coarsen_factor
 
 
-class TimeCoarsen:
+class PairedTimeCoarsen:
     """Wraps a data writer and coarsens its arguments in time before passing them on."""
 
     def __init__(
@@ -69,12 +90,12 @@ class TimeCoarsen:
         start_timestep: int,
         batch_times: xr.DataArray,
     ):
-        (
-            target_coarsened,
-            prediction_coarsened,
-            start_timestep,
-            batch_times_coarsened,
-        ) = self.coarsen_batch(target, prediction, start_timestep, batch_times)
+        (target_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
+            target, start_timestep, batch_times, self._coarsen_factor
+        )
+        (prediction_coarsened, _, _) = coarsen_batch(
+            prediction, start_timestep, batch_times, self._coarsen_factor
+        )
         self._data_writer.append_batch(
             target_coarsened,
             prediction_coarsened,
@@ -82,40 +103,59 @@ class TimeCoarsen:
             batch_times_coarsened,
         )
 
-    def coarsen_batch(
+    def flush(self):
+        self._data_writer.flush()
+
+
+class TimeCoarsen:
+    """Wraps a data writer and coarsens its arguments in time before passing them on."""
+
+    def __init__(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        data_writer: _PredictionOnlyDataWriter,
+        coarsen_factor: int,
+    ):
+        self._data_writer: _PredictionOnlyDataWriter = data_writer
+        self._coarsen_factor: int = coarsen_factor
+
+    def append_batch(
+        self,
+        data: Dict[str, torch.Tensor],
         start_timestep: int,
         batch_times: xr.DataArray,
-    ) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor], int, xr.DataArray,]:
-        target_coarsened = self._coarsen_tensor_dict(target)
-        prediction_coarsened = self._coarsen_tensor_dict(prediction)
-        start_timestep = start_timestep // self._coarsen_factor
-        batch_times_coarsened = batch_times.coarsen(
-            {TIME_DIM_NAME: self._coarsen_factor}
-        ).mean()
-        return (
-            target_coarsened,
-            prediction_coarsened,
+    ):
+        (data_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
+            data, start_timestep, batch_times, self._coarsen_factor
+        )
+        self._data_writer.append_batch(
+            data_coarsened,
             start_timestep,
             batch_times_coarsened,
         )
-
-    def _coarsen_tensor_dict(
-        self, tensor_dict: Dict[str, torch.Tensor]
-    ) -> Dict[str, torch.Tensor]:
-        """Coarsen each tensor along a given axis by a given factor."""
-        coarsened_tensor_dict = {}
-        for name, tensor in tensor_dict.items():
-            coarsened_tensor_dict[name] = tensor.unfold(
-                dimension=TIME_DIM, size=self._coarsen_factor, step=self._coarsen_factor
-            ).mean(dim=-1)
-        return coarsened_tensor_dict
 
     def flush(self):
         self._data_writer.flush()
 
 
-def tensor_dict_time_select(tensor_dict: Dict[str, torch.Tensor], time_slice: slice):
-    return {name: tensor[:, time_slice] for name, tensor in tensor_dict.items()}
+def coarsen_batch(
+    data: Dict[str, torch.Tensor],
+    start_timestep: int,
+    batch_times: xr.DataArray,
+    coarsen_factor: int,
+) -> Tuple[Dict[str, torch.Tensor], int, xr.DataArray]:
+    data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
+    start_timestep = start_timestep // coarsen_factor
+    batch_times_coarsened = batch_times.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
+    return data_coarsened, start_timestep, batch_times_coarsened
+
+
+def _coarsen_tensor_dict(
+    tensor_dict: Dict[str, torch.Tensor], coarsen_factor: int
+) -> Dict[str, torch.Tensor]:
+    """Coarsen each tensor along a given axis by a given factor."""
+    coarsened_tensor_dict = {}
+    for name, tensor in tensor_dict.items():
+        coarsened_tensor_dict[name] = tensor.unfold(
+            dimension=TIME_DIM, size=coarsen_factor, step=coarsen_factor
+        ).mean(dim=-1)
+    return coarsened_tensor_dict
