@@ -10,7 +10,7 @@ from netCDF4 import Dataset
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
-    PredictionOnlyDataWriter,
+    PairedDataWriter,
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
@@ -118,7 +118,7 @@ class TestDataWriter:
     ):
         n_samples = 2
         n_timesteps = 6
-        writer = DataWriter(
+        writer = PairedDataWriter(
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=n_timesteps,
@@ -268,7 +268,7 @@ class TestDataWriter:
         save_names,
     ):
         n_samples = 2
-        writer = DataWriter(
+        writer = PairedDataWriter(
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=4,  # unused
@@ -338,7 +338,7 @@ class TestDataWriter:
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):
         n_samples = 2
-        writer = DataWriter(
+        writer = PairedDataWriter(
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=3,
@@ -375,7 +375,7 @@ class TestDataWriter:
             "temp": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
             "pressure": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
         }
-        writer = PredictionOnlyDataWriter(
+        writer = DataWriter(
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=n_timesteps,

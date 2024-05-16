@@ -14,7 +14,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 
-from .data_writer import DataWriter, NullDataWriter
+from .data_writer import NullDataWriter, PairedDataWriter
 from .derived_variables import compute_stepped_derived_quantities
 
 
@@ -31,7 +31,7 @@ class WindowStitcher:
     def __init__(
         self,
         n_forward_steps: int,
-        writer: Union[DataWriter, NullDataWriter],
+        writer: Union[PairedDataWriter, NullDataWriter],
     ):
         self.i_time = 0
         self.n_forward_steps = n_forward_steps
@@ -158,7 +158,7 @@ def run_inference(
     data: GriddedData,
     n_forward_steps: int,
     forward_steps_in_memory: int,
-    writer: Optional[Union[DataWriter, NullDataWriter]] = None,
+    writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
@@ -229,7 +229,7 @@ def run_dataset_inference(
     target_data: GriddedData,
     n_forward_steps: int,
     forward_steps_in_memory: int,
-    writer: Optional[Union[DataWriter, NullDataWriter]] = None,
+    writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
