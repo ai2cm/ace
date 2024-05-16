@@ -163,7 +163,9 @@ def run(config: Config):
             window_batch_data.data, data.sigma_coordinates
         )
         writer.append_batch(
-            data=window_batch_data.data, batch_times=window_batch_data.times
+            data=window_batch_data.data,
+            start_timestep=-1,  # ignored
+            batch_times=window_batch_data.times,
         )
         if i % 10 == 0:
             logging.info(f"Writing batch {i+1} of {n_batches}.")

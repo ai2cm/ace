@@ -86,7 +86,7 @@ class RestartWriter:
 
     def append_batch(
         self,
-        prediction: Dict[str, torch.Tensor],
+        data: Dict[str, torch.Tensor],
         start_timestep: int,
         batch_times: xr.DataArray,
     ):
@@ -94,18 +94,18 @@ class RestartWriter:
         Append a batch of data to the file.
 
         Args:
-            prediction: Prediction data.
+            data: Data to write to the file.
             start_timestep: Timestep (lead time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
-        n_times = prediction[list(prediction.keys())[0]].shape[1]
+        n_times = data[list(data.keys())[0]].shape[1]
         restart_step = get_last_restart_step(
             start_timestep, n_times, self.is_restart_step
         )
         if restart_step is not None:
             window_step = restart_step - start_timestep
             self._write_restart_data(
-                prediction, window_step, restart_step, batch_times[:, window_step]
+                data, window_step, restart_step, batch_times[:, window_step]
             )
 
     def _write_restart_data(
