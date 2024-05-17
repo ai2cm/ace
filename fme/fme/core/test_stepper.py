@@ -13,7 +13,7 @@ from fme.core import ClimateData, metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.stepper import (
@@ -21,6 +21,7 @@ from fme.core.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
     SteppedData,
+    _combine_normalizers,
 )
 from fme.core.typing_ import TensorDict
 
@@ -700,3 +701,78 @@ def test_prepend_initial_condition():
         assert torch.allclose(prepended.gen_data_norm[v][:, 0], ic_normed[v])
         assert torch.allclose(prepended.target_data[v][:, 0], ic[v])
         assert torch.allclose(prepended.target_data_norm[v][:, 0], ic_normed[v])
+
+
+def test__combine_normalizers():
+    vars = ["prog_0", "prog_1", "diag_0"]
+    full_field_normalizer = StandardNormalizer(
+        means={var: torch.rand(3) for var in vars},
+        stds={var: torch.rand(3) for var in vars},
+    )
+    residual_normalizer = StandardNormalizer(
+        means={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
+        stds={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
+    )
+    combined_normalizer = _combine_normalizers(
+        residual_normalizer=residual_normalizer, model_normalizer=full_field_normalizer
+    )
+    for var in combined_normalizer.means:
+        if "prog" in var:
+            assert torch.allclose(
+                combined_normalizer.means[var], residual_normalizer.means[var]
+            )
+            assert torch.allclose(
+                combined_normalizer.stds[var], residual_normalizer.stds[var]
+            )
+        else:
+            assert torch.allclose(
+                combined_normalizer.means[var], full_field_normalizer.means[var]
+            )
+            assert torch.allclose(
+                combined_normalizer.stds[var], full_field_normalizer.stds[var]
+            )
+
+
+def test_stepper_from_state_using_resnorm_has_correct_normalizer():
+    # If originally configured with a residual normalizer, the
+    # stepper loaded from state should have the appropriately combined
+    # full field and residual values in its loss_normalizer
+    torch.manual_seed(0)
+    full_field_normalization = {
+        "means": {"a": 0.0, "b": 0.0, "diagnostic": 0.0},
+        "stds": {"a": 1.0, "b": 1.0, "diagnostic": 1.0},
+    }
+    # residual scalings might have diagnostic variables but the stepper
+    # should detect which prognostic variables to use from the set
+    residual_normalization = {
+        "means": {"a": 1.0, "b": 1.0, "diagnostic": 1.0},
+        "stds": {"a": 2.0, "b": 2.0, "diagnostic": 2.0},
+    }
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+        in_names=["a", "b"],
+        out_names=["a", "b", "diagnostic"],
+        normalization=NormalizationConfig(**full_field_normalization),
+        residual_normalization=NormalizationConfig(**residual_normalization),
+    )
+    shapes = {
+        "a": (1, 1, 5, 5),
+        "b": (1, 1, 5, 5),
+        "diagnostic": (1, 1, 5, 5),
+    }
+    area = torch.ones((5, 5), device=fme.get_device())
+    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    orig_stepper = config.get_stepper(
+        img_shape=shapes["a"][-2:],
+        area=area,
+        sigma_coordinates=sigma_coordinates,
+    )
+    stepper_from_state = SingleModuleStepper.from_state(
+        orig_stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates
+    )
+
+    for stepper in [orig_stepper, stepper_from_state]:
+        assert stepper.loss_normalizer.means == {"a": 1.0, "b": 1.0, "diagnostic": 0.0}
+        assert stepper.loss_normalizer.stds == {"a": 2.0, "b": 2.0, "diagnostic": 1.0}

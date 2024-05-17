@@ -14,7 +14,11 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
-from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
+from fme.core.normalizer import (
+    FromStateNormalizer,
+    NormalizationConfig,
+    StandardNormalizer,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.packer import Packer
 from fme.core.prescriber import PrescriberConfig
@@ -48,6 +52,9 @@ class SingleModuleStepperConfig:
     prescriber: Optional[PrescriberConfig] = None
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
+    residual_normalization: Optional[
+        Union[NormalizationConfig, FromStateNormalizer]
+    ] = None
 
     def __post_init__(self):
         if self.conservation_loss.dry_air_penalty is not None:
@@ -76,7 +83,6 @@ class SingleModuleStepperConfig:
                 interpolate=self.prescriber.interpolate,
             )
             del self.prescriber
-        self.prognostic_names = set(self.in_names).intersection(self.out_names)
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -86,6 +92,18 @@ class SingleModuleStepperConfig:
                 raise ValueError(
                     f"next_step_forcing_name is an output variable: '{name}'"
                 )
+        if (
+            self.residual_normalization is not None
+            and self.loss_normalization is not None
+        ):
+            raise ValueError(
+                "Only one of residual_normalization, loss_normalization can "
+                "be provided."
+                "If residual_normalization is provided, it will be used for all "
+                "*prognostic* variables in loss scalng. "
+                "If loss_normalization is provided, it will be used for all variables "
+                "in loss scaling."
+            )
 
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -147,6 +165,11 @@ class SingleModuleStepperConfig:
         """Names of variables which are inputs only."""
         return list(set(self.in_names) - set(self.out_names))
 
+    @property
+    def prognostic_names(self) -> List[str]:
+        """Names of variables which both inputs and outputs."""
+        return list(set(self.out_names).intersection(self.in_names))
+
 
 @dataclasses.dataclass
 class ExistingStepperConfig:
@@ -172,6 +195,19 @@ class ExistingStepperConfig:
             area=area,
             sigma_coordinates=sigma_coordinates,
         )
+
+
+def _combine_normalizers(
+    residual_normalizer: StandardNormalizer,
+    model_normalizer: StandardNormalizer,
+) -> StandardNormalizer:
+    # Combine residual and model normalizers by overwriting the model normalizer
+    # values that are present in residual normalizer. The residual normalizer
+    # is assumed to have a subset of prognostic keys only.
+    means, stds = model_normalizer.means, model_normalizer.stds
+    means.update(residual_normalizer.means)
+    stds.update(residual_normalizer.stds)
+    return StandardNormalizer(means=means, stds=stds)
 
 
 def _cast_tensordict(
@@ -334,6 +370,15 @@ class SingleModuleStepper:
         if config.loss_normalization is not None:
             self.loss_normalizer = config.loss_normalization.build(
                 names=config.normalize_names
+            )
+        elif config.residual_normalization is not None:
+            # Use residual norm for prognostic variables and input/output
+            # normalizer for diagnostic variables in loss
+            self.loss_normalizer = _combine_normalizers(
+                residual_normalizer=config.residual_normalization.build(
+                    config.prognostic_names
+                ),
+                model_normalizer=self.normalizer,
             )
         else:
             self.loss_normalizer = self.normalizer
@@ -555,9 +600,13 @@ class SingleModuleStepper:
         """
         config = {**state["config"]}  # make a copy to avoid mutating input
         config["normalization"] = FromStateNormalizer(state["normalizer"])
-        # for backwards compatibility with previous steppers w/o loss_normalizer
-        loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
-        config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
+
+        # for backwards compatibility with previous steppers created w/o
+        # loss_normalization or residual_normalization
+        if config.get("residual_normalization") is None:
+            loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
+            config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
+
         area = state.get("area", area)
         if "sigma_coordinates" in state:
             sigma_coordinates = dacite.from_dict(
