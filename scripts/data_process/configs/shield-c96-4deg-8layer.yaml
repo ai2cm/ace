@@ -12,6 +12,11 @@ dataset_computation:
     - [49, 58]
     - [58, 67]
     - [67, 79]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
   variable_sources:
     fluxes_2d.zarr:
       - PRATEsfc
@@ -50,3 +55,7 @@ dataset_computation:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
+      - specific_humidity_at_two_meters
+      - air_temperature_at_two_meters
+      - northward_wind_at_ten_meters
+      - eastward_wind_at_ten_meters

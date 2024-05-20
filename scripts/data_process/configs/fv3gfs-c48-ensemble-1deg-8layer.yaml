@@ -12,6 +12,8 @@ dataset_computation:
     - [41, 47]
     - [47, 53]
     - [53, 63]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
   variable_sources:
     fluxes_2d.zarr:
       - PRATEsfc
@@ -31,6 +33,23 @@ dataset_computation:
     fourcastnet_vanilla.zarr:
       - PRESsfc
       - HGTsfc
+      - RH500
+      - RH850
+      - TMP500
+      - TMP850
+      - UGRD500
+      - UGRD850
+      - UGRD1000
+      - VGRD500
+      - VGRD850
+      - VGRD1000
+      - h50
+      - h500
+      - h850
+      - h1000
+      - TMP2m
+      - UGRD10m
+      - VGRD10m
     full_state.zarr:
       - surface_temperature
       - air_temperature
@@ -44,6 +63,7 @@ dataset_computation:
       - eastward_wind
       - pressure_thickness_of_atmospheric_layer
       - soil_moisture
+      - specific_humidity_at_two_meters
     encoded_surface_type.zarr:
       - land_fraction
       - ocean_fraction
