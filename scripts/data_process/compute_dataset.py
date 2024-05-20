@@ -104,6 +104,7 @@ class DatasetComputationConfig:
         roundtrip_fraction_kept: (optional) fraction of spherical harmonics to
             keep in roundtrip transform. Must be between 0 and 1. If omitted,
             the default, no roundtrip transform is applied.
+        renaming: (optional) mapping of names in dataset to renamed output
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
     """
@@ -112,6 +113,7 @@ class DatasetComputationConfig:
     vertical_coarsening_indices: Sequence[Tuple[int, int]]
     variable_sources: Mapping[str, Sequence[str]]
     n_split: int = 65
+    renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
     standard_names: StandardNameMapping = StandardNameMapping()
 
@@ -423,6 +425,7 @@ def construct_lazy_dataset(
         "p_i pressure corresponds to the interface at the top of the i'th finite "
         "volume layer, counting down from the top of atmosphere."
     )
+    ds = ds.rename(config.renaming)
     return ds
 
 
