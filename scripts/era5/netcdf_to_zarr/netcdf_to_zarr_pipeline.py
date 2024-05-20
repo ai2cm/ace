@@ -27,7 +27,7 @@ INVARIANT = "e5.oper.invariant"
 
 TARGET_CHUNKS = {
     FC_SFC_MEANFLUX: {
-        "forecast_initial_time": 2,
+        "forecast_initial_time": 1,
         "forecast_hour": 12,
         "latitude": 721,
         "longitude": 1440,
@@ -39,7 +39,7 @@ TARGET_CHUNKS = {
 TARGET_SPLIT_CHUNKS = {
     FC_SFC_MEANFLUX: {
         "forecast_initial_time": 1,
-        "forecast_hour": 12,
+        "forecast_hour": 1,
         "latitude": 721,
         "longitude": 1440,
     },
@@ -77,14 +77,14 @@ VARIABLES = {
 # the dataset, while "start_time" refers to the first time in an individual
 # file.
 INITIAL_TIME = {
-    FC_SFC_MEANFLUX: "1978-12-16T06",
-    AN_SFC: "1978-12",
+    FC_SFC_MEANFLUX: "1940-01-01T06",
+    AN_SFC: "1940-01",
     INVARIANT: "1979-01-01",
 }
 
 PERIODS = {
-    FC_SFC_MEANFLUX: 1058,
-    AN_SFC: 530,
+    FC_SFC_MEANFLUX: 2 * 12 * 84,  # two files per month, 84 years
+    AN_SFC: 12 * 84,  # one file per month, 84 years
     INVARIANT: 1,
 }
 
@@ -184,7 +184,7 @@ def _get_key_and_ds(start_time, end_time, variable, category, path):
     # Open files as in pangeo-forge and as recommended by xarray-beam (i.e.
     # with the default chunks=None to prevent using dask). This makes Dataflow
     # jobs much less expensive.
-    ds = xr.open_dataset(path, engine="h5netcdf")
+    ds = xr.open_dataset(path, engine="h5netcdf", cache=False)
 
     # Drop utc_date variable, which is present in every Dataset, but is
     # redundant with the time coordinate.
