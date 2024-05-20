@@ -40,8 +40,8 @@ class DataWriterConfig:
             containing the predictions and target values.
         save_monthly_files: Whether to enable writing of netCDF files
             containing the monthly predictions and target values.
-        save_raw_prediction_names: Names of variables to save in the prediction,
-            histogram, and monthly netCDF files.
+        names: Names of variables to save in the prediction, histogram, and monthly
+            netCDF files.
         save_histogram_files: Enable writing of netCDF files containing histograms.
         time_coarsen: Configuration for time coarsening of written outputs.
     """
@@ -50,10 +50,17 @@ class DataWriterConfig:
     save_prediction_files: bool = True
     save_monthly_files: bool = True
     save_raw_prediction_names: Optional[Sequence[str]] = None
+    names: Optional[Sequence[str]] = None
     save_histogram_files: bool = False
     time_coarsen: Optional[TimeCoarsenConfig] = None
 
     def __post_init__(self):
+        if self.save_raw_prediction_names is not None:
+            warnings.warn(
+                "The DataWriterConfig field `save_raw_prediction_names` "
+                "is deprecated. Use `names` instead."
+            )
+            self.names = self.save_raw_prediction_names
         if (
             not any(
                 [
@@ -62,10 +69,10 @@ class DataWriterConfig:
                     self.save_histogram_files,
                 ]
             )
-            and self.save_raw_prediction_names is not None
+            and self.names is not None
         ):
             warnings.warn(
-                "save_raw_prediction_names provided but all options to "
+                "names provided but all options to "
                 "save subsettable output files are False."
             )
 
@@ -87,7 +94,7 @@ class DataWriterConfig:
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
-            save_names=self.save_raw_prediction_names,
+            save_names=self.names,
             prognostic_names=prognostic_names,
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
@@ -120,7 +127,7 @@ class DataWriterConfig:
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
-            save_names=self.save_raw_prediction_names,
+            save_names=self.names,
             prognostic_names=prognostic_names,
             time_coarsen=self.time_coarsen,
         )
