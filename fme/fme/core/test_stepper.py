@@ -776,3 +776,5 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     for stepper in [orig_stepper, stepper_from_state]:
         assert stepper.loss_normalizer.means == {"a": 1.0, "b": 1.0, "diagnostic": 0.0}
         assert stepper.loss_normalizer.stds == {"a": 2.0, "b": 2.0, "diagnostic": 1.0}
+        assert stepper.normalizer.means == full_field_normalization["means"]
+        assert stepper.normalizer.stds == full_field_normalization["stds"]

@@ -1,5 +1,6 @@
 import dataclasses
 import warnings
+from copy import copy
 from typing import Any, List, Mapping, Optional, Tuple, Union
 
 import dacite
@@ -204,7 +205,7 @@ def _combine_normalizers(
     # Combine residual and model normalizers by overwriting the model normalizer
     # values that are present in residual normalizer. The residual normalizer
     # is assumed to have a subset of prognostic keys only.
-    means, stds = model_normalizer.means, model_normalizer.stds
+    means, stds = copy(model_normalizer.means), copy(model_normalizer.stds)
     means.update(residual_normalizer.means)
     stds.update(residual_normalizer.stds)
     return StandardNormalizer(means=means, stds=stds)
