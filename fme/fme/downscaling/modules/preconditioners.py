@@ -22,27 +22,22 @@ import torch
 
 class EDMPrecond(torch.nn.Module):
     def __init__(self,
-        img_resolution,                     # Image resolution.
-        img_channels,                       # Number of color channels.
+        model,                              # The underlying neural network model. Add by <gideond@allenai.org>
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
-        sigma_min       = 0,                # Minimum supported noise level.
+        sigma_min       = 0.0,              # Minimum supported noise level.
         sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
-        model_type      = 'DhariwalUNet',   # Class name of the underlying model.
-        **model_kwargs,                     # Keyword arguments for the underlying model.
     ):
         super().__init__()
-        self.img_resolution = img_resolution
-        self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
         self.sigma_min = sigma_min
         self.sigma_max = sigma_max
         self.sigma_data = sigma_data
-        self.model = globals()[model_type](img_resolution=img_resolution, in_channels=img_channels, out_channels=img_channels, label_dim=label_dim, **model_kwargs)
+        self.model = model
 
-    def forward(self, x, sigma, class_labels=None, force_fp32=False, **model_kwargs):
+    def forward(self, x, sigma, class_labels=None, force_fp32=False):
         x = x.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
         class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
@@ -53,12 +48,12 @@ class EDMPrecond(torch.nn.Module):
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
         c_noise = sigma.log() / 4
 
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels, **model_kwargs)
+        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels)
         assert F_x.dtype == dtype
-        D_x = c_skip * x + c_out * F_x.to(torch.float32)
+        # matches how UNetDiffusionModule concatenates (latent, inputs)
+        n_latent_channels = F_x.shape[1]
+        D_x = c_skip * x[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)
         return D_x
 
     def round_sigma(self, sigma):
         return torch.as_tensor(sigma)
-
-# ----------------------------------------------------------------------------
