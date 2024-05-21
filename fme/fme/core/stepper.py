@@ -8,7 +8,6 @@ import torch
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 
-from fme.ace.registry import ModuleSelector
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
@@ -23,6 +22,7 @@ from fme.core.normalizer import (
 )
 from fme.core.ocean import OceanConfig
 from fme.core.packer import Packer
+from fme.core.registry import ModuleSelector
 
 from .optimization import NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
@@ -34,6 +34,23 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 @dataclasses.dataclass
 class SingleModuleStepperConfig:
+    """
+    Configuration for a single module stepper.
+
+    Attributes:
+        builder: The module builder.
+        in_names: Names of input variables.
+        out_names: Names of output variables.
+        normalization: The normalization configuration.
+        parameter_init: The parameter initialization configuration.
+        ocean: The ocean configuration.
+        loss: The loss configuration.
+        corrector: The corrector configuration.
+        conservation_loss: The conservation loss configuration.
+        next_step_forcing_names: Names of forcing variables for the next timestep.
+        loss_normalization: The normalization configuration for the loss.
+    """
+
     builder: ModuleSelector
     in_names: List[str]
     out_names: List[str]

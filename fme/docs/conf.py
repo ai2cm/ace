@@ -24,6 +24,7 @@ import sys
 sys.path.insert(0, os.path.abspath(".."))
 
 import fme  # noqa
+import fme.ace
 
 # -- General configuration ---------------------------------------------
 
@@ -31,7 +32,16 @@ import fme  # noqa
 #
 # needs_sphinx = '1.0'
 
-language = "en"
+# Fetch the dynamic data
+module_types = fme.ace.get_available_module_types()
+
+# Create a dynamic rst snippet that can be included in your documentation
+rst_snippet = f".. code-block:: text\n\n   {module_types}"
+
+# Save the rst snippet to a file that can be included in your Sphinx documentation
+with open("available_modules.rst", "w") as f:
+    f.write(rst_snippet)
+
 
 # Add any Sphinx extension module names here, as strings. They can be
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
@@ -68,7 +78,7 @@ release = fme.__version__
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -98,7 +108,7 @@ html_theme = "sphinx_rtd_theme"
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ["_static"]
+html_static_path = []
 
 
 # -- Options for HTMLHelp output ---------------------------------------

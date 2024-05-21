@@ -20,7 +20,7 @@ class CopyWeightsConfig:
     All parameters must be covered by either the include or exclude list,
     but not both.
 
-    Args:
+    Attributes:
         include: list of wildcard patterns to overwrite
         exclude: list of wildcard patterns to exclude from overwriting
     """
