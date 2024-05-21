@@ -2,13 +2,14 @@ Welcome to full-model's documentation!
 ======================================
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Contents:
 
    installation
    quickstart
    inference_config
    training_config
+   modules
    api
 
 Indices and tables
