@@ -15,6 +15,8 @@ from fme.ace.inference.data_writer.monthly import (
 )
 from fme.core.data_loading.data_typing import VariableMetadata
 
+TIMESTEP = datetime.timedelta(hours=6)
+
 
 @pytest.mark.parametrize(
     "window_size",
@@ -88,7 +90,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     ],
 )
 def test_months_for_timesteps(n_timesteps: int, min_expected: int):
-    assert months_for_timesteps(n_timesteps) >= min_expected
+    assert months_for_timesteps(n_timesteps, TIMESTEP) >= min_expected
 
 
 def test_get_days_since_reference():

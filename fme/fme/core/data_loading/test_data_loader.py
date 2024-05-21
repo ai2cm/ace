@@ -144,6 +144,17 @@ def test_xarray_loader(tmp_path):
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
+def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
+    _create_dataset_on_disk(tmp_path)
+    with pytest.raises(ValueError, match="infer_timestep must be True"):
+        DataLoaderConfig(
+            XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False),
+            batch_size=1,
+            num_data_workers=0,
+            data_type="xarray",
+        )
+
+
 def test_inference_data_loader(tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
     batch_size = 2

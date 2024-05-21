@@ -138,6 +138,7 @@ class Trainer:
             img_shape=img_shape,
             area=self.train_data.area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
+            timestep=self.train_data.timestep,
         )
         self.optimization = config.optimization.build(
             self.stepper.module.parameters(), config.max_epochs
@@ -355,7 +356,9 @@ class Trainer:
                 stepped = stepped.prepend_initial_condition(ic, normed_ic)
 
                 stepped = compute_stepped_derived_quantities(
-                    stepped, self.valid_data.sigma_coordinates
+                    stepped,
+                    self.valid_data.sigma_coordinates,
+                    self.valid_data.timestep,
                 )
                 aggregator.record_batch(
                     loss=stepped.metrics["loss"],
@@ -372,6 +375,7 @@ class Trainer:
         aggregator = aggregator_config.build(
             area_weights=self.train_data.area_weights.to(fme.get_device()),
             sigma_coordinates=self.train_data.sigma_coordinates,
+            timestep=self.train_data.timestep,
             record_step_20=record_step_20,
             n_timesteps=self.config.inference.n_forward_steps + 1,
             metadata=self.train_data.metadata,

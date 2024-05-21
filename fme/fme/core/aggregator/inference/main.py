@@ -1,10 +1,10 @@
 import dataclasses
+import datetime
 from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
 import xarray as xr
 
-from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
@@ -19,6 +19,7 @@ from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
 
 wandb = WandB.get_instance()
+APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 
 
 class _Aggregator(Protocol):
@@ -107,6 +108,7 @@ class InferenceAggregator:
         self,
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
         n_timesteps: int,
         record_step_20: bool = False,
         log_video: bool = False,
@@ -120,6 +122,7 @@ class InferenceAggregator:
         Args:
             area_weights: Area weights for each grid cell.
             sigma_coordinates: Data sigma coordinates
+            timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
@@ -179,9 +182,10 @@ class InferenceAggregator:
             ),
         }
 
-        if n_timesteps * TIMESTEP_SECONDS > (60 * 60 * 24 * 365 * 2):
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
                 area_weights=area_weights,
+                timestep=timestep,
                 metadata=metadata,
                 monthly_reference_data=monthly_reference_data,
             )

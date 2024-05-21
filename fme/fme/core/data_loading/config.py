@@ -49,16 +49,26 @@ class XarrayDataConfig:
     Attributes:
         data_path: Path to the data.
         file_pattern: Glob pattern to match files in the data_path.
-        n_repeats: Number of times to repeat the dataset (in time).
+        n_repeats: Number of times to repeat the dataset (in time). It is up
+            to the user to ensure that the input dataset to repeat results in
+            data that is reasonably continuous across repetitions.
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
+        infer_timestep: Whether to infer the timestep from the provided data.
+            This should be set to True (the default) for ACE training. It may
+            be useful to toggle this to False for applications like downscaling,
+            which do not depend on the timestep of the data and therefore lack
+            the additional requirement that the data be ordered and evenly
+            spaced in time. It must be set to True if n_repeats > 1 in order
+            to be able to infer the full time coordinate.
     """
 
     data_path: str
     file_pattern: str = "*.nc"
     n_repeats: int = 1
     engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
+    infer_timestep: bool = True
 
 
 @dataclasses.dataclass
@@ -97,3 +107,8 @@ class DataLoaderConfig:
 
         if self.dataset.n_repeats != 1 and self.data_type == "ensemble_xarray":
             raise ValueError("n_repeats must be 1 when using ensemble_xarray")
+
+        if self.dataset.n_repeats > 1 and not self.dataset.infer_timestep:
+            raise ValueError(
+                "infer_timestep must be True if n_repeats is greater than 1"
+            )

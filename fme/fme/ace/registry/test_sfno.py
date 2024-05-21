@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
@@ -6,6 +8,8 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
+
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 @pytest.mark.parametrize(
@@ -44,5 +48,6 @@ def test_sfno_init(shape):
         img_shape=shape,
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     assert len(stepper.module.module.blocks) == num_layers

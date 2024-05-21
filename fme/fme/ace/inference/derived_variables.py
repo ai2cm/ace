@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import logging
 from typing import Callable, Dict, MutableMapping
 
@@ -7,14 +8,13 @@ from toolz import curry
 
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
-from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
 
 @dataclasses.dataclass
 class DerivedVariableRegistryEntry:
-    func: Callable[[ClimateData, SigmaCoordinates], torch.Tensor]
+    func: Callable[[ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor]
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = {}
@@ -22,7 +22,7 @@ _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = 
 
 @curry
 def register(
-    func: Callable[[ClimateData, SigmaCoordinates], torch.Tensor],
+    func: Callable[[ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor],
 ):
     """Decorator for registering a function that computes a derived variable."""
     label = func.__name__
@@ -34,14 +34,18 @@ def register(
 
 @register()
 def lowest_layer_air_temperature(
-    data: ClimateData, sigma_coordinates: SigmaCoordinates
+    data: ClimateData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return data.air_temperature.select(-1, -1)
 
 
 @register()
 def surface_pressure_due_to_dry_air(
-    data: ClimateData, sigma_coordinates: SigmaCoordinates
+    data: ClimateData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return metrics.surface_pressure_due_to_dry_air(
         data.specific_total_water,
@@ -53,7 +57,9 @@ def surface_pressure_due_to_dry_air(
 
 @register()
 def total_water_path(
-    data: ClimateData, sigma_coordinates: SigmaCoordinates
+    data: ClimateData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return metrics.vertical_integral(
         data.specific_total_water,
@@ -65,7 +71,9 @@ def total_water_path(
 
 @register()
 def total_water_path_budget_residual(
-    data: ClimateData, sigma_coordinates: SigmaCoordinates
+    data: ClimateData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
 ):
     total_water_path = metrics.vertical_integral(
         data.specific_total_water,
@@ -74,7 +82,7 @@ def total_water_path_budget_residual(
         sigma_coordinates.bk,
     )
     twp_total_tendency = (total_water_path[:, 1:] - total_water_path[:, :-1]) / (
-        TIMESTEP_SECONDS
+        timestep.total_seconds()
     )
     twp_budget_residual = torch.zeros_like(total_water_path)
     # no budget residual on initial step
@@ -89,6 +97,7 @@ def total_water_path_budget_residual(
 def _compute_derived_variable(
     data: Dict[str, torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
     label: str,
     derived_variable: DerivedVariableRegistryEntry,
 ) -> Dict[str, torch.Tensor]:
@@ -100,6 +109,7 @@ def _compute_derived_variable(
     Args:
         data: dictionary of data add the derived variable to.
         sigma_coordinates: the vertical coordinate.
+        timestep: Timestep of the model.
         label: the name of the derived variable.
         derived_variable: class indicating required names and function to compute.
 
@@ -117,7 +127,7 @@ def _compute_derived_variable(
     new_data = data.copy()
     climate_data = ClimateData(data)
     try:
-        output = derived_variable.func(climate_data, sigma_coordinates)
+        output = derived_variable.func(climate_data, sigma_coordinates, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
@@ -128,6 +138,7 @@ def _compute_derived_variable(
 def compute_derived_quantities(
     data: Dict[str, torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
     registry: MutableMapping[
         str, DerivedVariableRegistryEntry
     ] = _DERIVED_VARIABLE_REGISTRY,
@@ -136,7 +147,7 @@ def compute_derived_quantities(
 
     for label, derived_variable in registry.items():
         data = _compute_derived_variable(
-            data, sigma_coordinates, label, derived_variable
+            data, sigma_coordinates, timestep, label, derived_variable
         )
     return data
 
@@ -144,14 +155,15 @@ def compute_derived_quantities(
 def compute_stepped_derived_quantities(
     stepped: SteppedData,
     sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
     registry: MutableMapping[
         str, DerivedVariableRegistryEntry
     ] = _DERIVED_VARIABLE_REGISTRY,
 ) -> SteppedData:
     stepped.gen_data = compute_derived_quantities(
-        stepped.gen_data, sigma_coordinates, registry
+        stepped.gen_data, sigma_coordinates, timestep, registry
     )
     stepped.target_data = compute_derived_quantities(
-        stepped.target_data, sigma_coordinates, registry
+        stepped.target_data, sigma_coordinates, timestep, registry
     )
     return stepped

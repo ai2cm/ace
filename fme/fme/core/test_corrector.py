@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
@@ -11,6 +13,8 @@ from fme.core.corrector import (
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.loss import get_dry_air_nonconservation
+
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def test_force_no_global_mean_moisture_advection():
@@ -121,6 +125,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
     original_budget_residual = total_water_path_budget_residual(
         ClimateData(data),
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )[
         :, 1
     ]  # no meaning for initial value data, want first timestep
@@ -143,6 +148,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         out_data,
         sigma_coordinates=sigma_coordinates,
         area=area_weights,
+        timestep=TIMESTEP,
         terms_to_modify=terms_to_modify,
     )
     new_data = {
@@ -151,6 +157,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
     new_budget_residual = total_water_path_budget_residual(
         ClimateData(new_data),
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )[
         :, 1
     ]  # no meaning for initial value data, want first timestep

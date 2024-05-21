@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import logging
 import os
 import warnings
@@ -54,6 +55,7 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     subsetted_dataset.area_weights = dataset.area_weights
     subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
     subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
+    subsetted_dataset.timestep = dataset.timestep
     return subsetted_dataset
 
 
@@ -69,7 +71,7 @@ def get_datasets_at_path(
             f"No directories found in {params.data_path}. "
             "Check path and whether you meant to use 'ensemble_xarray' data_type."
         )
-    datasets, metadatas, sigma_coords = [], [], []
+    datasets, metadatas, sigma_coords, timestep = [], [], [], []
     for path in paths:
         params_curr_member = dataclasses.replace(params, data_path=path)
         dataset = XarrayDataset(params_curr_member, requirements)
@@ -78,6 +80,7 @@ def get_datasets_at_path(
         datasets.append(dataset)
         metadatas.append(dataset.metadata)
         sigma_coords.append(dataset.sigma_coordinates)
+        timestep.append(dataset.timestep)
 
     if not _all_same(metadatas):
         if strict:
@@ -151,13 +154,28 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
     )
 
 
-def get_all_times(paths: List[str]) -> List[np.ndarray]:
-    """Return a list of the time coordinate of each file in paths."""
+def get_raw_times(paths: List[str]) -> List[np.ndarray]:
     times = []
     for path in paths:
         with xr.open_dataset(path, use_cftime=True) as ds:
             times.append(ds.time.values)
     return times
+
+
+def repeat_and_increment_times(
+    raw_times: List[np.ndarray], n_repeats: int, timestep: datetime.timedelta
+) -> List[np.ndarray]:
+    """Repeats and increments a collection of arrays of evenly spaced times."""
+    n_timesteps = sum(len(times) for times in raw_times)
+    timespan = timestep * n_timesteps
+
+    repeated_and_incremented_times = []
+    for repeats in range(n_repeats):
+        increment = repeats * timespan
+        for times in raw_times:
+            incremented_times = times + increment
+            repeated_and_incremented_times.append(incremented_times)
+    return repeated_and_incremented_times
 
 
 def get_cumulative_timesteps(times: List[np.ndarray]) -> np.ndarray:
@@ -230,12 +248,12 @@ class XarrayDataset(Dataset):
         self.file_pattern = config.file_pattern
         self.engine = "netcdf4" if config.engine is None else config.engine
         # assume that filenames include time ordering
-        self.full_paths = sorted(glob(os.path.join(self.path, config.file_pattern)))
-        if len(self.full_paths) == 0:
+        self._raw_paths = sorted(glob(os.path.join(self.path, config.file_pattern)))
+        if len(self._raw_paths) == 0:
             raise ValueError(f"No netCDF files found in '{self.path}'.")
-        self.full_paths *= config.n_repeats
+        self.full_paths = self._raw_paths * config.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
-        self._get_files_stats()
+        self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
             decode_times=False,
@@ -270,10 +288,20 @@ class XarrayDataset(Dataset):
                 )
         self._metadata = result
 
-    def _get_files_stats(self):
+    def _get_files_stats(self, n_repeats: int, infer_timestep: bool):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
-        cum_num_timesteps = get_cumulative_timesteps(self.full_paths)
-        time_coords = get_all_times(self.full_paths)
+        raw_times = get_raw_times(self._raw_paths)
+
+        self._timestep: Optional[datetime.timedelta]
+        if infer_timestep:
+            self._timestep = get_timestep(np.concatenate(raw_times))
+            time_coords = repeat_and_increment_times(
+                raw_times, n_repeats, self.timestep
+            )
+        else:
+            self._timestep = None
+            time_coords = raw_times
+
         cum_num_timesteps = get_cumulative_timesteps(time_coords)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
@@ -338,6 +366,17 @@ class XarrayDataset(Dataset):
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
         return self._sigma_coordinates
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        if self._timestep is None:
+            raise ValueError(
+                "Timestep was not inferred in the data loader. Note "
+                "XarrayDataConfig.infer_timestep must be set to True for this "
+                "to occur."
+            )
+        else:
+            return self._timestep
 
     def __len__(self):
         return self._n_initial_conditions
@@ -431,3 +470,28 @@ def as_index_slice(subset: Union[Slice, TimeSlice], dataset: XarrayDataset) -> s
     else:
         raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
     return index_slice
+
+
+def get_timestep(times: np.ndarray) -> datetime.timedelta:
+    """Computes the timestep of an array of times.
+
+    Raises an error if the times are not separated by a positive constant
+    interval, or if the array has one or fewer times.
+    """
+    assert len(times.shape) == 1, "times must be a 1D array"
+
+    if len(times) > 1:
+        timesteps = np.diff(times)
+        timestep = timesteps[0]
+
+        if not (timestep > datetime.timedelta(days=0)):
+            raise ValueError("Timestep of data must be greater than zero.")
+
+        if not np.all(timesteps == timestep):
+            raise ValueError("Time coordinate does not have a uniform timestep.")
+
+        return timestep
+    else:
+        raise ValueError(
+            "Time coordinate does not have enough times to infer a timestep."
+        )

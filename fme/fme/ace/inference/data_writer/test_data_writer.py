@@ -1,3 +1,4 @@
+import datetime
 from typing import NamedTuple
 
 import cftime
@@ -23,6 +24,7 @@ CALENDAR_CFTIME = {
 
 SECONDS_PER_HOUR = 3600
 MICROSECONDS_PER_SECOND = 1_000_000
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def test_data_writer_config_save_names():
@@ -122,6 +124,7 @@ class TestDataWriter:
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=n_timesteps,
+            timestep=TIMESTEP,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
@@ -272,6 +275,7 @@ class TestDataWriter:
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=4,  # unused
+            timestep=TIMESTEP,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
@@ -342,6 +346,7 @@ class TestDataWriter:
             str(tmp_path),
             n_samples=n_samples,
             n_timesteps=3,
+            timestep=TIMESTEP,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
             enable_prediction_netcdfs=True,
@@ -381,6 +386,7 @@ class TestDataWriter:
             n_timesteps=n_timesteps,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
+            timestep=TIMESTEP,
             enable_prediction_netcdfs=True,
             enable_monthly_netcdfs=True,
             save_names=None,

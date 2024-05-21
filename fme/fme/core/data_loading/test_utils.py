@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
@@ -7,6 +9,8 @@ from fme.core.data_loading.utils import (
     _get_indexers,
     _load_variable,
     as_broadcasted_tensor,
+    decode_timestep,
+    encode_timestep,
     infer_horizontal_dimension_names,
 )
 
@@ -125,3 +129,10 @@ def test_as_broadcasted_tensor(variable_dims):
     expected = torch.as_tensor(xarray_broadcast.values)
 
     assert torch.equal(result, expected)
+
+
+def test_encode_decode_timestep_roundtrip():
+    timestep = datetime.timedelta(days=1, microseconds=1)
+    encoded = encode_timestep(timestep)
+    roundtripped = decode_timestep(encoded)
+    assert roundtripped == timestep

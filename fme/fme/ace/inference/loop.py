@@ -208,7 +208,7 @@ def run_inference(
             else:
                 batch_times = window_batch_data.times.isel(time=slice(1, None))
             stepped = compute_stepped_derived_quantities(
-                stepped, data.sigma_coordinates
+                stepped, data.sigma_coordinates, data.timestep
             )
 
             timers["run_on_batch"] += time.time() - current_time
@@ -264,7 +264,7 @@ def run_dataset_inference(
             normalizer.normalize(target_window_data),
         )
         stepped = compute_stepped_derived_quantities(
-            stepped, target_data.sigma_coordinates
+            stepped, target_data.sigma_coordinates, target_data.timestep
         )
 
         # Windows here all include an initial condition at start.
