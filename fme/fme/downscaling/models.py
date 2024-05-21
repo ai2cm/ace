@@ -60,7 +60,7 @@ class DownscalingModelConfig:
         fine_topography: torch.Tensor,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.fine)
+        loss = self.loss.build(area_weights.fine, reduction="mean")
 
         module = self.module.build(
             n_in_channels=len(self.in_names),
