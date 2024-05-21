@@ -1,20 +1,24 @@
 """This file contains unit tests of XarrayDataset."""
 
 import dataclasses
+import datetime
 from collections import namedtuple
 from typing import Dict, Iterable, List, Union
 
 import cftime
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import (
     XarrayDataset,
-    get_all_times,
     get_cumulative_timesteps,
     get_file_local_index,
+    get_raw_times,
+    get_timestep,
+    repeat_and_increment_times,
 )
 from fme.core.data_loading.config import (
     DataLoaderConfig,
@@ -30,6 +34,7 @@ from fme.core.data_loading.utils import (
 )
 
 SLICE_NONE = slice(None)
+MOCK_DATA_FREQ = "3H"
 
 
 @dataclasses.dataclass
@@ -136,8 +141,7 @@ def _get_data(
         filenames.append(filename)
 
     initial_condition_names = ()
-
-    start_indices = get_cumulative_timesteps(get_all_times(filenames))
+    start_indices = get_cumulative_timesteps(get_raw_times(filenames))
 
     variable_names = VariableNames(
         time_dependent_names=("foo", "bar", "varying_scalar_var"),
@@ -154,7 +158,7 @@ def get_mock_monthly_netcdfs(tmp_path_factory, dirname) -> MockData:
         start="2003-03",
         end="2003-06",
         file_freq="MS",
-        step_freq="3H",
+        step_freq=MOCK_DATA_FREQ,
         calendar="standard",
     )
 
@@ -427,3 +431,94 @@ def test_time_index(mock_monthly_netcdfs):
     last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
     obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
     assert dataset.time_index.equals(xr.CFTimeIndex(obs_times))
+
+
+@pytest.mark.parametrize("infer_timestep", [True, False])
+def test_XarrayDataset_timestep(mock_monthly_netcdfs, infer_timestep):
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir, infer_timestep=infer_timestep
+    )
+    n_timesteps = 2
+    dataset = XarrayDataset(
+        config,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
+        ),
+    )
+    if infer_timestep:
+        expected_timestep = pd.Timedelta(MOCK_DATA_FREQ).to_pytimedelta()
+        assert dataset.timestep == expected_timestep
+    else:
+        with pytest.raises(ValueError, match="Timestep was not inferred"):
+            assert dataset.timestep
+
+
+@pytest.mark.parametrize(
+    ("periods", "freq", "reverse", "expected", "exception"),
+    [
+        pytest.param(
+            2,
+            "3H",
+            False,
+            datetime.timedelta(hours=3),
+            None,
+            id="2 timesteps, regular freq",
+        ),
+        pytest.param(
+            3,
+            "9H",
+            False,
+            datetime.timedelta(hours=9),
+            None,
+            id="3 timesteps, regular freq",
+        ),
+        pytest.param(3, "3H", True, None, ValueError, id="3 timesteps, negative freq"),
+        pytest.param(
+            3, "MS", False, None, ValueError, id="3 timesteps, irregular freq"
+        ),
+        pytest.param(1, "D", False, None, ValueError, id="1 timestep"),
+    ],
+)
+def test_get_timestep(periods, freq, reverse, expected, exception):
+    index = xr.cftime_range("2000", periods=periods, freq=freq)
+
+    if reverse:
+        index = index[::-1]
+
+    if exception is None:
+        result = get_timestep(index.values)
+        assert result == expected
+    else:
+        with pytest.raises(exception):
+            get_timestep(index.values)
+
+
+@pytest.mark.parametrize("n_repeats", [1, 3])
+def test_repeat_and_increment_times(n_repeats):
+    freq = "5H"
+    delta = pd.Timedelta(freq).to_pytimedelta()
+
+    start_a = cftime.DatetimeGregorian(2000, 1, 1)
+    periods_a = 2
+    segment_a = xr.cftime_range(start_a, periods=periods_a, freq=freq).values
+
+    start_b = segment_a[-1] + delta
+    periods_b = 3
+    segment_b = xr.cftime_range(start_b, periods=periods_b, freq=freq).values
+
+    raw_times = [segment_a, segment_b]
+    raw_periods = [periods_a, periods_b]
+    raw_total_periods = sum(raw_periods)
+
+    result = repeat_and_increment_times(raw_times, n_repeats, delta)
+    full_periods = [len(times) for times in result]
+    full_total_periods = sum(full_periods)
+
+    result_concatenated = np.concatenate(result)
+    expected_concatenated = xr.cftime_range(
+        start_a, periods=full_total_periods, freq=freq
+    ).values
+
+    assert full_periods == n_repeats * raw_periods
+    assert full_total_periods == n_repeats * raw_total_periods
+    np.testing.assert_equal(result_concatenated, expected_concatenated)

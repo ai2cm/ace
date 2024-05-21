@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import warnings
 from typing import List, Optional, Sequence, Tuple
 
@@ -162,3 +163,11 @@ class BatchData:
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
         return cls(batch_data, batch_times)
+
+
+def decode_timestep(microseconds: int) -> datetime.timedelta:
+    return datetime.timedelta(microseconds=microseconds)
+
+
+def encode_timestep(timedelta: datetime.timedelta) -> int:
+    return timedelta // datetime.timedelta(microseconds=1)

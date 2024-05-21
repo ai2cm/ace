@@ -12,6 +12,8 @@ from fme.core.aggregator.inference.annual import GlobalMeanAnnualAggregator
 from fme.core.device import get_device
 from fme.core.testing import DimSizes, MonthlyReferenceData
 
+TIMESTEP = datetime.timedelta(hours=6)
+
 
 def get_zero_time(shape, dims):
     return xr.DataArray(np.zeros(shape, dtype="datetime64[ns]"), dims=dims)
@@ -39,6 +41,7 @@ def test_annual_aggregator(tmpdir):
     monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
     agg = GlobalMeanAnnualAggregator(
         area_weights=area_weights,
+        timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
     )
     target_data = {

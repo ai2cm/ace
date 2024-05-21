@@ -1,6 +1,7 @@
 """The registry also performs configuration set up so it needs to be tested."""
 
 import copy
+import datetime
 from pathlib import Path
 from typing import Tuple
 
@@ -15,6 +16,8 @@ from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
+
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def test_builder_with_weights_loads_same_state(tmpdir):
@@ -45,6 +48,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         img_shape=(16, 32),
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     torch.save(
         {
@@ -73,6 +77,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         img_shape=(16, 32),
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     assert_same_state(
         with_builder_stepper.module.state_dict(),
@@ -154,6 +159,7 @@ def test_builder_with_weights_sfno_init(
                 img_shape=built_shape,
                 area=area,
                 sigma_coordinates=sigma_coordinates,
+                timestep=TIMESTEP,
             )
     else:
         with_builder_stepper = SingleModuleStepperConfig.from_state(
@@ -162,6 +168,7 @@ def test_builder_with_weights_sfno_init(
             img_shape=built_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
+            timestep=TIMESTEP,
         )
         if extra_built_layer:
             with pytest.raises(AssertionError):
@@ -212,6 +219,7 @@ def get_config(
         img_shape=loaded_shape,
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     built_sfno_config_data = copy.deepcopy(sfno_config_data)
     if extra_built_layer:
@@ -251,6 +259,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
         img_shape=img_shape,
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights

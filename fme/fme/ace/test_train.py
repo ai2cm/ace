@@ -1,4 +1,3 @@
-import contextlib
 import datetime
 import pathlib
 import subprocess
@@ -13,12 +12,10 @@ import torch
 import xarray as xr
 import yaml
 
-import fme.core.aggregator.inference.annual
 from fme.ace.inference.inference import main as inference_main
 from fme.ace.train import _restore_checkpoint, count_parameters
 from fme.ace.train import main as train_main
 from fme.ace.train_config import epoch_checkpoint_enabled
-from fme.core import constants
 from fme.core.data_loading.config import Slice
 from fme.core.testing import DimSizes, MonthlyReferenceData
 from fme.core.testing.wandb import mock_wandb
@@ -272,19 +269,6 @@ def _setup(
     return train_config_filename, inference_config_filename
 
 
-@contextlib.contextmanager
-def patch_timestep_seconds(new):
-    original = constants.TIMESTEP_SECONDS
-    original_min_samples = fme.core.aggregator.inference.annual.MIN_SAMPLES
-    try:
-        constants.TIMESTEP_SECONDS = new
-        fme.core.aggregator.inference.annual.MIN_SAMPLES = 362 * int(24 * 60 * 60 / new)
-        yield
-    finally:
-        constants.TIMESTEP_SECONDS = original
-        fme.core.aggregator.inference.annual.MIN_SAMPLES = original_min_samples
-
-
 @pytest.mark.parametrize(
     "nettype", ["SphericalFourierNeuralOperatorNet", "SFNO-v0.1.0"]
 )
@@ -306,16 +290,15 @@ def test_train_and_inference_inline(tmp_path, nettype):
     )
 
     # using pdb requires calling main functions directly
-    with patch_timestep_seconds(20 * 24 * 3600):
-        train_main(
-            yaml_config=train_config,
-        )
-        # inference should not require stats files
-        (tmp_path / "stats" / "stats-mean.nc").unlink()
-        (tmp_path / "stats" / "stats-stddev.nc").unlink()
-        inference_logs = inference_main(
-            yaml_config=inference_config,
-        )
+    train_main(
+        yaml_config=train_config,
+    )
+    # inference should not require stats files
+    (tmp_path / "stats" / "stats-mean.nc").unlink()
+    (tmp_path / "stats" / "stats-stddev.nc").unlink()
+    inference_logs = inference_main(
+        yaml_config=inference_config,
+    )
     assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
     prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     assert prediction_output_path.exists()

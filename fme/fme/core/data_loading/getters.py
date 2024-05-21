@@ -34,6 +34,7 @@ def get_ensemble_dataset(
     ensemble.metadata = datasets[0].metadata  # type: ignore
     ensemble.area_weights = datasets[0].area_weights  # type: ignore
     ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
+    ensemble.timestep = datasets[0].timestep  # type: ignore
     ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
     return ensemble
 
@@ -100,6 +101,7 @@ def get_data_loader(
         area_weights=dataset.area_weights,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
+        timestep=dataset.timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
 
@@ -132,5 +134,6 @@ def get_inference_data(
         metadata=dataset.metadata,
         area_weights=dataset.area_weights,
         sigma_coordinates=dataset.sigma_coordinates,
+        timestep=dataset.timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
