@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 from typing import List, Optional
 
 import torch
@@ -6,7 +7,7 @@ import torch
 from fme.core.typing_ import TensorDict
 
 from .climate_data import ClimateData
-from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER, TIMESTEP_SECONDS
+from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER
 from .prescriber import Prescriber
 
 
@@ -38,7 +39,12 @@ class OceanConfig:
     interpolate: bool = False
     slab: Optional[SlabOceanConfig] = None
 
-    def build(self, in_names: List[str], out_names: List[str]):
+    def build(
+        self,
+        in_names: List[str],
+        out_names: List[str],
+        timestep: datetime.timedelta,
+    ):
         if not (
             self.surface_temperature_name in in_names
             and self.surface_temperature_name in out_names
@@ -47,7 +53,7 @@ class OceanConfig:
                 "To use a surface ocean model, the surface temperature must be present"
                 f" in_names and out_names, but {self.surface_temperature_name} is not."
             )
-        return Ocean(config=self)
+        return Ocean(config=self, timestep=timestep)
 
     @property
     def forcing_names(self) -> List[str]:
@@ -62,10 +68,11 @@ class OceanConfig:
 class Ocean:
     """Overwrite sea surface temperature with that predicted from some ocean model."""
 
-    def __init__(self, config: OceanConfig):
+    def __init__(self, config: OceanConfig, timestep: datetime.timedelta):
         """
         Args:
             config: Configuration for the surface ocean model.
+            timestep: Timestep of the model.
         """
         self.surface_temperature_name = config.surface_temperature_name
         self.ocean_fraction_name = config.ocean_fraction_name
@@ -82,6 +89,7 @@ class Ocean:
             self.type = "slab"
             self.mixed_layer_depth_name = config.slab.mixed_layer_depth_name
             self.q_flux_name = config.slab.q_flux_name
+        self.timestep = timestep
 
     def __call__(
         self,
@@ -109,7 +117,7 @@ class Ocean:
             )
             next_step_temperature = (
                 input_data[self.surface_temperature_name]
-                + temperature_tendency * TIMESTEP_SECONDS
+                + temperature_tendency * self.timestep.total_seconds()
             )
         else:
             raise NotImplementedError(f"Ocean type={self.type} is not implemented")

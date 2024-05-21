@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import warnings
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence, Union
@@ -81,6 +82,7 @@ class DataWriterConfig:
         experiment_dir: str,
         n_samples: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -89,6 +91,7 @@ class DataWriterConfig:
             path=experiment_dir,
             n_samples=n_samples,
             n_timesteps=n_timesteps,
+            timestep=timestep,
             metadata=metadata,
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
@@ -105,6 +108,7 @@ class DataWriterConfig:
         experiment_dir: str,
         n_samples: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -125,6 +129,7 @@ class DataWriterConfig:
             n_timesteps=n_timesteps,
             metadata=metadata,
             coords=coords,
+            timestep=timestep,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
             save_names=self.names,
@@ -141,6 +146,7 @@ class PairedDataWriter:
         n_timesteps: int,
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
@@ -201,6 +207,7 @@ class PairedDataWriter:
                     path=path,
                     n_samples=n_samples,
                     n_timesteps=n_timesteps,
+                    timestep=timestep,
                     save_names=save_names,
                     metadata=metadata,
                     coords=coords,
@@ -300,6 +307,7 @@ class DataWriter:
         n_timesteps: int,
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         save_names: Optional[Sequence[str]],
@@ -313,6 +321,7 @@ class DataWriter:
             n_timesteps: Number of timesteps to write to the file.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            timestep: Timestep of the model.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
                 containing the predictions and target values.
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
@@ -347,7 +356,7 @@ class DataWriter:
                     path=path,
                     label="predictions",
                     n_samples=n_samples,
-                    n_months=months_for_timesteps(n_timesteps),
+                    n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
                     metadata=metadata,
                     coords=coords,

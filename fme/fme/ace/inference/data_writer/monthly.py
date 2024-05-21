@@ -1,3 +1,4 @@
+import datetime
 from math import ceil
 from pathlib import Path
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
@@ -9,7 +10,6 @@ import xarray as xr
 from netCDF4 import Dataset
 
 from fme.ace.inference.data_writer.utils import get_all_names
-from fme.core import constants
 from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -21,8 +21,8 @@ TIME_UNITS = "days since 1970-01-01 00:00:00"
 COUNTS = "counts"
 
 
-def months_for_timesteps(n_timesteps: int) -> int:
-    steps_per_day = 24 * 60 * 60 / constants.TIMESTEP_SECONDS
+def months_for_timesteps(n_timesteps: int, timestep: datetime.timedelta) -> int:
+    steps_per_day = datetime.timedelta(days=1) / timestep
     return ceil(n_timesteps * (12.0 / (365.24 * steps_per_day))) + 2
 
 
@@ -39,11 +39,12 @@ class PairedMonthlyDataWriter:
         path: str,
         n_samples: int,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         save_names: Optional[Sequence[str]],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
-        n_months = months_for_timesteps(n_timesteps)
+        n_months = months_for_timesteps(n_timesteps, timestep)
         self._target_writer = MonthlyDataWriter(
             path=path,
             label="target",

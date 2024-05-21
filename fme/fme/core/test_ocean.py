@@ -1,6 +1,7 @@
+import datetime
+
 import torch
 
-from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.ocean import (
     Ocean,
     OceanConfig,
@@ -8,10 +9,12 @@ from fme.core.ocean import (
     mixed_layer_temperature_tendency,
 )
 
+TIMESTEP = datetime.timedelta(hours=6)
+
 
 def test_ocean_prescribed():
     config = OceanConfig(surface_temperature_name="sst", ocean_fraction_name="of")
-    ocean = Ocean(config)
+    ocean = Ocean(config, timestep=TIMESTEP)
     target_data = {"sst": torch.tensor([22.0, 25.0]), "of": torch.tensor([0.2, 0.8])}
     input_data = {"sst": torch.tensor([20.0, 21.0]), "foo": torch.tensor([1, 2])}
     gen_data = {"sst": torch.tensor([23.0, 26.0]), "foo": torch.tensor([2, 3])}
@@ -41,7 +44,7 @@ def test_ocean_slab():
     ]
     fluxes = {k: torch.tensor([2.0]) for k in names_for_net_surface_energy_flux}
     expected_net_surface_energy_flux = torch.tensor([-4.0])
-    ocean = Ocean(config)
+    ocean = Ocean(config, timestep=TIMESTEP)
     target_data = {
         "mld": torch.tensor([25.0]),
         "of": torch.tensor([0.8]),
@@ -53,7 +56,8 @@ def test_ocean_slab():
     expected_sst_tendency = mixed_layer_temperature_tendency(
         expected_net_surface_energy_flux, target_data["qf"], target_data["mld"]
     )
-    expected_sst = input_data["sst"] + TIMESTEP_SECONDS * expected_sst_tendency
+    timestep_seconds = TIMESTEP / datetime.timedelta(seconds=1)
+    expected_sst = input_data["sst"] + timestep_seconds * expected_sst_tendency
     expected_output = {**fluxes, "sst": expected_sst}
     assert set(output_data) == set(expected_output)
     for name in output_data:

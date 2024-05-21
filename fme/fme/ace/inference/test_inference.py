@@ -32,6 +32,7 @@ from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 
 DIR = pathlib.Path(__file__).parent
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 class PlusOne(torch.nn.Module):
@@ -55,6 +56,7 @@ def save_plus_one_stepper(
     mean: float,
     std: float,
     data_shape: Tuple[int, int, int],
+    timestep: datetime.timedelta = TIMESTEP,
 ):
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
@@ -74,6 +76,7 @@ def save_plus_one_stepper(
         img_shape=data_shape[-2:],
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=timestep,
     )
     torch.save({"stepper": stepper.get_state()}, path)
 
@@ -141,7 +144,12 @@ def test_inference_plus_one_model(
     else:
         std = 1.0
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=std, data_shape=dim_sizes.shape_2d
+        stepper_path,
+        names=all_names,
+        mean=0.0,
+        std=std,
+        data_shape=dim_sizes.shape_2d,
+        timestep=datetime.timedelta(days=20),
     )
     inference_helper(
         tmp_path,
@@ -217,7 +225,7 @@ def inference_helper(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
 
-    with mock_wandb() as wandb, patch_annual_aggregator_min_samples(0):
+    with mock_wandb() as wandb:
         inference_logs = main(
             yaml_config=str(config_filename),
         )
@@ -542,7 +550,9 @@ def test_compute_derived_quantities(has_required_fields):
         ak=torch.linspace(0, 1, nz + 1, device=get_device()),
         bk=torch.linspace(0, 1, nz + 1, device=get_device()),
     )
-    derived_stepped = compute_stepped_derived_quantities(stepped, sigma_coords)
+    derived_stepped = compute_stepped_derived_quantities(
+        stepped, sigma_coords, TIMESTEP
+    )
 
     dry_air_name = "surface_pressure_due_to_dry_air"
     water_path_name = "total_water_path"
@@ -697,3 +707,36 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         == ocean_override.surface_temperature_name
     )
     assert stepper.ocean.ocean_fraction_name == ocean_override.ocean_fraction_name
+
+
+def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
+    """Test that inference with a model trained with a different timestep than
+    the forcing data raises an error.
+    """
+    in_names = ["var"]
+    out_names = ["var"]
+    all_names = list(set(in_names).union(out_names))
+    stepper_path = tmp_path / "stepper_test_data"
+    dim_sizes = DimSizes(
+        n_time=8, n_lat=4, n_lon=8, nz_interface=2, timestep=datetime.timedelta(hours=3)
+    )
+    std = 1.0
+    save_plus_one_stepper(
+        stepper_path,
+        names=all_names,
+        mean=0.0,
+        std=std,
+        data_shape=dim_sizes.shape_2d,
+        timestep=TIMESTEP,
+    )
+    use_prediction_data = False
+    n_forward_steps = 2
+    with pytest.raises(ValueError, match="Timestep of the loaded stepper"):
+        inference_helper(
+            tmp_path,
+            all_names,
+            use_prediction_data,
+            dim_sizes,
+            n_forward_steps,
+            stepper_path,
+        )

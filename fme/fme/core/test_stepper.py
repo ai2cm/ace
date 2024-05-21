@@ -1,3 +1,4 @@
+import datetime
 from collections import namedtuple
 from typing import Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock
@@ -26,6 +27,7 @@ from fme.core.stepper import (
 from fme.core.typing_ import TensorDict
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
@@ -105,7 +107,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
     stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
@@ -115,7 +117,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 3.0),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
     stepped_double_std = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
@@ -154,7 +156,7 @@ def test_run_on_batch_addition_series():
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates)
+    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
     stepped = stepper.run_on_batch(
         data=data_with_ic, optimization=MagicMock(), n_forward_steps=n_steps
     )
@@ -207,7 +209,7 @@ def test_run_on_batch_with_prescribed_ocean():
         ),
         ocean=OceanConfig("b", "mask"),
     )
-    stepper = config.get_stepper(area.shape, area, sigma_coordinates)
+    stepper = config.get_stepper(area.shape, area, sigma_coordinates, TIMESTEP)
     stepped = stepper.run_on_batch(
         data, optimization=MagicMock(), n_forward_steps=n_steps
     )
@@ -252,6 +254,7 @@ def test_reloaded_stepper_gives_same_prediction():
         img_shape=shapes["a"][-2:],
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=fme.get_device())
     new_stepper = SingleModuleStepper.from_state(
@@ -339,7 +342,7 @@ def _setup_and_run_on_batch(
         ),
         ocean=ocean_config,
     )
-    stepper = config.get_stepper(area.shape, area, sigma_coordinates)
+    stepper = config.get_stepper(area.shape, area, sigma_coordinates, TIMESTEP)
     return stepper.run_on_batch(
         data, optimization=optimization, n_forward_steps=n_forward_steps
     )
@@ -459,6 +462,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
         img_shape=data["PRESsfc"].shape[2:],
         area=area_weights,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     # run the stepper on the data
     with torch.no_grad():
@@ -469,8 +473,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
         )
 
     stepped = compute_stepped_derived_quantities(
-        stepped,
-        sigma_coordinates=sigma_coordinates,
+        stepped, sigma_coordinates=sigma_coordinates, timestep=TIMESTEP
     )
 
     # check that the budget residual is zero
@@ -567,7 +570,7 @@ def _get_stepper(
         ocean=ocean_config,
         **kwargs,
     )
-    return config.get_stepper((5, 5), area, sigma_coordinates)
+    return config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
 
 
 def test_step():
@@ -768,6 +771,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         img_shape=shapes["a"][-2:],
         area=area,
         sigma_coordinates=sigma_coordinates,
+        timestep=TIMESTEP,
     )
     stepper_from_state = SingleModuleStepper.from_state(
         orig_stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates

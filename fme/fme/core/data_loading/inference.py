@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 
 import numpy as np
 import torch
@@ -70,6 +71,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._metadata = dataset.metadata
         self._area_weights = dataset.area_weights
         self._horizontal_coordinates = dataset.horizontal_coordinates
+        self._timestep = dataset.timestep
         self._forward_steps_in_memory = forward_steps_in_memory
         self._total_steps = requirements.n_timesteps - 1
         if self._total_steps % self._forward_steps_in_memory != 0:
@@ -120,6 +122,10 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         return self._horizontal_coordinates
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self._timestep
 
     def _validate_n_forward_steps(self):
         max_steps = self._dataset.total_timesteps - self._start_indices[-1] - 1

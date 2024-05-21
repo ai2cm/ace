@@ -1,3 +1,5 @@
+import datetime
+
 import pytest
 import torch
 
@@ -11,15 +13,17 @@ from .derived_variables import (
     compute_stepped_derived_quantities,
 )
 
+TIMESTEP = datetime.timedelta(hours=6)
+
 
 def test_compute_derived_variable():
     fake_data = {"PRESsfc": torch.tensor([1.0]), "PRATEsfc": torch.tensor([2.0])}
     sigma_coordinates = None
     derived_variable = DerivedVariableRegistryEntry(
-        func=lambda data, _: data.surface_pressure + data.precipitation_rate
+        func=lambda data, *_: data.surface_pressure + data.precipitation_rate
     )
     output_data = _compute_derived_variable(
-        fake_data, sigma_coordinates, "c", derived_variable
+        fake_data, sigma_coordinates, TIMESTEP, "c", derived_variable
     )
     torch.testing.assert_close(output_data["c"], torch.tensor([3.0]))
 
@@ -32,7 +36,7 @@ def test_compute_derived_variable_raises_value_error_when_overwriting():
     )
     with pytest.raises(ValueError):
         _compute_derived_variable(
-            fake_data, sigma_coordinates, "PRATEsfc", derived_variable
+            fake_data, sigma_coordinates, TIMESTEP, "PRATEsfc", derived_variable
         )
 
 
@@ -57,7 +61,7 @@ def test_compute_derived_quantities():
         ak=torch.tensor([0.0, 0.5, 0.0]),
         bk=torch.tensor([0.0, 0.5, 1.0]),
     )
-    out_data = compute_stepped_derived_quantities(data, sigma_coordinates)
+    out_data = compute_stepped_derived_quantities(data, sigma_coordinates, TIMESTEP)
     for name in (
         "total_water_path_budget_residual",
         "total_water_path",
@@ -76,7 +80,7 @@ def test_lowest_layer_air_temperature():
     sigma_coordinates = SigmaCoordinates(
         ak=torch.ones(n_layers + 1), bk=torch.ones(n_layers + 1)
     )
-    derived_data = compute_derived_quantities(fake_data, sigma_coordinates)
+    derived_data = compute_derived_quantities(fake_data, sigma_coordinates, TIMESTEP)
     assert torch.allclose(
         derived_data["lowest_layer_air_temperature"], fake_data["air_temperature_4"]
     )

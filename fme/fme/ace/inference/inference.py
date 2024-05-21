@@ -148,9 +148,7 @@ class InferenceConfig:
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = _load_stepper(
-            self.checkpoint_path,
-            area=area,
-            sigma_coordinates=sigma_coordinates,
+            self.checkpoint_path, area=area, sigma_coordinates=sigma_coordinates
         )
         if self.ocean is not None:
             logging.info(
@@ -171,6 +169,7 @@ class InferenceConfig:
             experiment_dir=self.experiment_dir,
             n_samples=self.loader.n_samples,
             n_timesteps=self.n_forward_steps,
+            timestep=data.timestep,
             prognostic_names=prognostic_names,
             metadata=data.metadata,
             coords=data.coords,
@@ -217,11 +216,17 @@ def main(
         data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
+    if stepper.timestep != data.timestep:
+        raise ValueError(
+            f"Timestep of the loaded stepper, {stepper.timestep}, does not "
+            f"match that of the forcing data, {data.timestep}."
+        )
 
     aggregator_config: InferenceAggregatorConfig = config.aggregator
     aggregator = aggregator_config.build(
         area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
+        timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
