@@ -1,11 +1,11 @@
 import dataclasses
+import datetime
 from typing import Literal, Optional
 
 import torch
 
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
-from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -91,9 +91,17 @@ class CorrectorConfig:
     ] = None
 
     def build(
-        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+        self,
+        area: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
     ) -> Optional["Corrector"]:
-        return Corrector(config=self, area=area, sigma_coordinates=sigma_coordinates)
+        return Corrector(
+            config=self,
+            area=area,
+            sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
+        )
 
 
 class Corrector:
@@ -102,10 +110,12 @@ class Corrector:
         config: CorrectorConfig,
         area: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
     ):
         self._config = config
         self._area = area
         self._sigma_coordinates = sigma_coordinates
+        self._timestep = timestep
 
     def __call__(
         self,
@@ -130,6 +140,7 @@ class Corrector:
                 gen_data=gen_data,
                 area=self._area,
                 sigma_coordinates=self._sigma_coordinates,
+                timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
         return gen_data
@@ -225,6 +236,7 @@ def _force_conserve_moisture(
     gen_data: TensorMapping,
     area: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
     terms_to_modify: Literal[
         "precipitation",
         "evaporation",
@@ -247,6 +259,7 @@ def _force_conserve_moisture(
         area: (n_lat, n_lon) array containing relative gridcell area, in any
             units including unitless.
         sigma_coordinates: The sigma coordinates.
+        timestep: Timestep of the model.
         terms_to_modify: Which terms to modify, in addition to modifying surface
             pressure to conserve dry air mass. One of:
             - "precipitation": modify precipitation only
@@ -258,9 +271,10 @@ def _force_conserve_moisture(
     gen = ClimateData(gen_data)
 
     gen_total_water_path = gen.total_water_path(sigma_coordinates)
+    timestep_seconds = timestep / datetime.timedelta(seconds=1)
     twp_total_tendency = (
         gen_total_water_path - input.total_water_path(sigma_coordinates)
-    ) / TIMESTEP_SECONDS
+    ) / timestep_seconds
     twp_tendency_global_mean = metrics.weighted_mean(
         twp_total_tendency, weights=area, dim=(-2, -1)
     )

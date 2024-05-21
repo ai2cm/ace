@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 import warnings
 from copy import copy
 from typing import Any, List, Mapping, Optional, Tuple, Union
@@ -12,6 +13,7 @@ from fme.ace.registry import ModuleSelector
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
@@ -27,6 +29,9 @@ from fme.core.prescriber import PrescriberConfig
 from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
 from .typing_ import TensorDict, TensorMapping
+
+DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
+DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @dataclasses.dataclass
@@ -133,12 +138,14 @@ class SingleModuleStepperConfig:
         img_shape: Tuple[int, int],
         area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
     ):
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
         )
 
     @classmethod
@@ -189,7 +196,7 @@ class ExistingStepperConfig:
             self._load_checkpoint()["stepper"]["config"]
         ).get_base_weights()
 
-    def get_stepper(self, img_shape, area, sigma_coordinates):
+    def get_stepper(self, img_shape, area, sigma_coordinates, timestep):
         del img_shape  # unused
         return SingleModuleStepper.from_state(
             self._load_checkpoint()["stepper"],
@@ -308,6 +315,7 @@ class SingleModuleStepper:
         img_shape: Tuple[int, int],
         area: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
         init_weights: bool = True,
     ):
         """
@@ -317,6 +325,7 @@ class SingleModuleStepper:
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
             sigma_coordinates: The sigma coordinates.
+            timestep: Timestep of the model.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
@@ -327,7 +336,7 @@ class SingleModuleStepper:
         self.out_packer = Packer(config.out_names)
         self.normalizer = config.normalization.build(config.normalize_names)
         if config.ocean is not None:
-            self.ocean = config.ocean.build(config.in_names, config.out_names)
+            self.ocean = config.ocean.build(config.in_names, config.out_names, timestep)
         else:
             self.ocean = None
         self.module = config.builder.build(
@@ -362,11 +371,14 @@ class SingleModuleStepper:
 
         self.area = area.to(get_device())
         self.sigma_coordinates = sigma_coordinates.to(get_device())
+        self.timestep = timestep
 
         self.loss_obj = config.loss.build(self.area, config.out_names, self.CHANNEL_DIM)
 
         self._corrector = config.corrector.build(
-            area=self.area, sigma_coordinates=self.sigma_coordinates
+            area=self.area,
+            sigma_coordinates=self.sigma_coordinates,
+            timestep=timestep,
         )
         if config.loss_normalization is not None:
             self.loss_normalizer = config.loss_normalization.build(
@@ -566,6 +578,7 @@ class SingleModuleStepper:
             "config": self._config.get_state(),
             "area": self.area,
             "sigma_coordinates": self.sigma_coordinates.as_dict(),
+            "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
         }
 
@@ -585,7 +598,10 @@ class SingleModuleStepper:
 
     @classmethod
     def from_state(
-        cls, state, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+        cls,
+        state,
+        area: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
     ) -> "SingleModuleStepper":
         """
         Load the state of the stepper.
@@ -615,6 +631,8 @@ class SingleModuleStepper:
                 data=state["sigma_coordinates"],
                 config=dacite.Config(strict=True),
             )
+        encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
+        timestep = decode_timestep(encoded_timestep)
         if "img_shape" in state:
             img_shape = state["img_shape"]
         else:
@@ -627,6 +645,7 @@ class SingleModuleStepper:
             img_shape=img_shape,
             area=area,
             sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
             # don't need to initialize weights, we're about to load_state
             init_weights=False,
         )

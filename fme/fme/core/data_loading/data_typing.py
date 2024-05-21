@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import datetime
 from collections import namedtuple
 from typing import Mapping, Optional, Tuple
 
@@ -114,6 +115,7 @@ class GriddedData:
         sigma_coordinates: Sigma coordinates for each grid cell, used for computing
             pressure levels.
         horizontal_coordinates: Lat/lon coordinates for the data.
+        timestep: Timestep of the model.
         sampler: Optional sampler for the data loader. Provided to allow support for
             distributed training.
     """
@@ -123,6 +125,7 @@ class GriddedData:
     area_weights: torch.Tensor
     sigma_coordinates: SigmaCoordinates
     horizontal_coordinates: HorizontalCoordinates
+    timestep: datetime.timedelta
     sampler: Optional[torch.utils.data.Sampler] = None
 
     @property

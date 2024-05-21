@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
@@ -6,26 +7,23 @@ import torch
 import xarray as xr
 from matplotlib.figure import Figure
 
-from fme.core.constants import TIMESTEP_SECONDS
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import weighted_mean
 from fme.core.typing_ import TensorMapping
 
-_STEPS_PER_DAY = int(24 * 60 * 60 / TIMESTEP_SECONDS)
-
-MIN_SAMPLES = 362 * _STEPS_PER_DAY
-
 
 class GlobalMeanAnnualAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
+        timestep: datetime.timedelta,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
     ):
         self.area_weights = area_weights
+        self.timestep = timestep
         self.metadata = metadata
         self._target_datasets: Optional[List[xr.Dataset]] = None
         self._gen_datasets: Optional[List[xr.Dataset]] = None
@@ -117,8 +115,9 @@ class GlobalMeanAnnualAggregator:
         if target is None or gen is None:
             return None  # we are not root rank
         # filter out data with insufficient samples
-        target = target.where(target["counts"] > MIN_SAMPLES, drop=True)
-        gen = gen.where(gen["counts"] > MIN_SAMPLES, drop=True)
+        min_samples = _get_min_samples(self.timestep)
+        target = target.where(target["counts"] > min_samples, drop=True)
+        gen = gen.where(gen["counts"] > min_samples, drop=True)
         target = target / target["counts"]
         gen = gen / gen["counts"]
         return target, gen
@@ -283,3 +282,8 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
         data_vars[name] = (["sample", "time"], tensor)
     data_vars["counts"] = (["sample", "time"], np.ones(shape=time.shape))
     return xr.Dataset(data_vars, coords={"valid_time": time})
+
+
+def _get_min_samples(timestep: datetime.timedelta) -> int:
+    steps_per_day = datetime.timedelta(days=1) // timestep
+    return 362 * steps_per_day

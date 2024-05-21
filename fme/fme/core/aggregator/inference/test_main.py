@@ -1,3 +1,5 @@
+import datetime
+
 import numpy as np
 import pytest
 import torch
@@ -7,6 +9,8 @@ import fme
 from fme.core.aggregator.inference import InferenceAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+
+TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_zero_time(shape, dims):
@@ -26,6 +30,7 @@ def test_logs_labels_exist():
     agg = InferenceAggregator(
         area_weights,
         sigma_coordinates,
+        TIMESTEP,
         record_step_20=True,
         log_video=True,
         log_zonal_mean_images=True,
@@ -74,6 +79,7 @@ def test_inference_logs_labels_exist():
     agg = InferenceAggregator(
         area_weights,
         sigma_coordinates,
+        TIMESTEP,
         record_step_20=True,
         log_video=True,
         n_timesteps=n_time,
@@ -120,6 +126,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     agg = InferenceAggregator(
         area_weights,
         sigma_coordinates,
+        TIMESTEP,
         n_timesteps=(window_len - overlap) * n_windows + 1,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
@@ -167,6 +174,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     agg = InferenceAggregator(
         area_weights,
         sigma_coordinates,
+        TIMESTEP,
         n_timesteps=(window_len - overlap) * n_windows + overlap,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
