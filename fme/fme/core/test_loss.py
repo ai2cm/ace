@@ -25,7 +25,7 @@ from fme.core.packer import Packer
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area)
+    loss = config.build(area, reduction="mean")
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -36,7 +36,7 @@ def test_loss_builds_and_runs(global_mean_type):
 def test_loss_of_zeros_is_variance():
     config = LossConfig(global_mean_type=None)
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area)
+    loss = config.build(area, reduction="mean")
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -51,7 +51,7 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         global_mean_type="LpLoss", global_mean_weight=global_mean_weight
     )
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area)
+    loss = config.build(area, reduction="mean")
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -278,7 +278,7 @@ def test_WeightedMappingLossConfig_no_weights():
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
     mapping_loss_config = WeightedMappingLossConfig()
-    loss = loss_config.build(area)
+    loss = loss_config.build(area, reduction="mean")
     mapping_loss = mapping_loss_config.build(area, out_names, channel_dim)
     packer = Packer(out_names)
 
