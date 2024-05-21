@@ -13,6 +13,10 @@ from fme.ace.registry.registry import ModuleConfig, register
 @register("SphericalFourierNeuralOperatorNet")
 @dataclasses.dataclass
 class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
+    """
+    Configuration for the SFNO architecture used in FourCastNet-SFNO.
+    """
+
     spectral_transform: str = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
@@ -54,6 +58,10 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
 @register("SFNO-v0.1.0")
 @dataclasses.dataclass
 class SFNO_V0_1_0(ModuleConfig):
+    """
+    Configuration for the SFNO architecture in modulus-makani version 0.1.0.
+    """
+
     spectral_transform: str = "sht"
     filter_type: Literal["linear"] = "linear"
     operator_type: str = "dhconv"

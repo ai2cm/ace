@@ -17,6 +17,11 @@ from fme.core.distributed import Distributed
 class InferenceInitialConditionIndices:
     """
     Configuration of the indices for initial conditions during inference.
+
+    Attributes:
+        n_initial_conditions: Number of initial conditions to use.
+        first: Index of the first initial condition.
+        interval: Interval between initial conditions.
     """
 
     n_initial_conditions: int

@@ -9,7 +9,6 @@ import torch
 
 import fme
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
-from fme.ace.registry import ModuleSelector
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
@@ -17,6 +16,7 @@ from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
+from fme.core.registry import ModuleSelector
 from fme.core.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
