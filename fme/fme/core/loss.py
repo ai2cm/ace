@@ -314,7 +314,7 @@ class LossConfig:
         if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
             raise NotImplementedError(self.global_mean_type)
 
-    def build(self, area: torch.Tensor) -> Any:
+    def build(self, area: torch.Tensor, reduction: Literal["mean", "none"]) -> Any:
         """
         Args:
             area: A tensor of shape (n_lat, n_lon) containing the area of
@@ -323,9 +323,9 @@ class LossConfig:
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
         elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction="mean")
+            main_loss = torch.nn.L1Loss(reduction=reduction)
         elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction="mean")
+            main_loss = torch.nn.MSELoss(reduction=reduction)
         elif self.type == "AreaWeightedMSE":
             main_loss = AreaWeightedMSELoss(area)
         elif self.type == "NaN":
@@ -388,7 +388,7 @@ class WeightedMappingLossConfig:
     def build(
         self, area: torch.Tensor, out_names: List[str], channel_dim: int = -3
     ) -> Any:
-        loss = self.loss_config.build(area)
+        loss = self.loss_config.build(area, reduction="mean")
         weighted_loss = VariableWeightingLoss(
             weights=_construct_weight_tensor(
                 self.weights, out_names, channel_dim=channel_dim
