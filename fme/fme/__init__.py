@@ -2,6 +2,7 @@ __version__ = "0.1.0"
 
 import torch_harmonics
 
+from . import ace
 from .core import Packer, StandardNormalizer, get_device, get_normalizer, using_gpu
 from .core.metrics import (
     gradient_magnitude,

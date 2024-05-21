@@ -1,3 +1,5 @@
+import sys
+
 from fme.ace.inference.inference import (
     DataWriterConfig,
     InferenceAggregatorConfig,
@@ -26,3 +28,8 @@ from .train_config import (
     Slice,
     TrainConfig,
 )
+
+# Get all the names defined in the current module
+module = sys.modules[__name__]
+__all__ = [name for name in dir(module) if not name.startswith("_")]
+del sys, module
