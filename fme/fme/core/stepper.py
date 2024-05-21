@@ -1,8 +1,7 @@
 import dataclasses
 import datetime
-import warnings
 from copy import copy
-from typing import Any, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -24,9 +23,8 @@ from fme.core.normalizer import (
 )
 from fme.core.ocean import OceanConfig
 from fme.core.packer import Packer
-from fme.core.prescriber import PrescriberConfig
 
-from .optimization import DisabledOptimizationConfig, NullOptimization, Optimization
+from .optimization import NullOptimization, Optimization
 from .parameter_init import ParameterInitializationConfig
 from .typing_ import TensorDict, TensorMapping
 
@@ -43,19 +41,13 @@ class SingleModuleStepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    optimization: Optional[DisabledOptimizationConfig] = None
     ocean: Optional[OceanConfig] = None
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    conserve_dry_air: Optional[bool] = None
     corrector: CorrectorConfig = dataclasses.field(
         default_factory=lambda: CorrectorConfig()
     )
-    conservation_loss: ConservationLossConfig = dataclasses.field(
-        default_factory=lambda: ConservationLossConfig()
-    )
-    prescriber: Optional[PrescriberConfig] = None
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
     residual_normalization: Optional[
@@ -63,32 +55,6 @@ class SingleModuleStepperConfig:
     ] = None
 
     def __post_init__(self):
-        if self.conservation_loss.dry_air_penalty is not None:
-            raise ValueError(
-                "Conservation loss is no longer supported in this stepper. "
-                "conservation_loss.dry_air_penalty must be None."
-            )
-        if self.conserve_dry_air is not None:
-            warnings.warn(
-                "conserve_dry_air is deprecated, "
-                "use corrector.conserve_dry_air instead",
-                category=DeprecationWarning,
-            )
-            self.corrector.conserve_dry_air = self.conserve_dry_air
-        if self.prescriber is not None:
-            warnings.warn(
-                "Directly configuring prescriber is deprecated, "
-                "use 'ocean' option instead.",
-                category=DeprecationWarning,
-            )
-            if self.ocean is not None:
-                raise ValueError("Cannot specify both prescriber and ocean.")
-            self.ocean = OceanConfig(
-                surface_temperature_name=self.prescriber.prescribed_name,
-                ocean_fraction_name=self.prescriber.mask_name,
-                interpolate=self.prescriber.interpolate,
-            )
-            del self.prescriber
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(
@@ -150,6 +116,7 @@ class SingleModuleStepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
@@ -177,6 +144,40 @@ class SingleModuleStepperConfig:
     def prognostic_names(self) -> List[str]:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).intersection(self.in_names))
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+        _unsupported_key_defaults = {
+            "conserve_dry_air": False,
+            "optimization": None,
+            "conservation_loss": dataclasses.asdict(ConservationLossConfig()),
+        }
+        state_copy = state.copy()
+        for key, default in _unsupported_key_defaults.items():
+            if key in state_copy:
+                if state_copy[key] == default or state_copy[key] is None:
+                    del state_copy[key]
+                else:
+                    raise ValueError(
+                        f"The stepper config option {key} is deprecated and the setting"
+                        f" provided, {state_copy[key]}, is no longer implemented. The "
+                        "SingleModuleStepper being loaded from state cannot be run by "
+                        "this version of the code."
+                    )
+        if "prescriber" in state_copy:
+            # want to maintain backwards compatibility for this particular feature
+            if state_copy["prescriber"] is not None:
+                if state_copy.get("ocean") is not None:
+                    raise ValueError("Cannot specify both prescriber and ocean.")
+                state_copy["ocean"] = {
+                    "surface_temperature_name": state_copy["prescriber"][
+                        "prescribed_name"
+                    ],
+                    "ocean_fraction_name": state_copy["prescriber"]["mask_name"],
+                    "interpolate": state_copy["prescriber"]["interpolate"],
+                }
+            del state_copy["prescriber"]
+        return state_copy
 
 
 @dataclasses.dataclass
