@@ -3,12 +3,14 @@
 API Reference
 =============
 
-.. automodule:: fme.ace
-   :members:
-   :undoc-members:
-   :show-inheritance:
+fme
+===
 
 .. automodule:: fme
    :members:
-   :undoc-members:
-   :show-inheritance:
+
+fme.ace
+=======
+
+.. automodule:: fme.ace
+   :members:
