@@ -4,7 +4,6 @@ import os
 import warnings
 from typing import Any, Mapping, Optional, Union
 
-from fme.core import SingleModuleStepperConfig
 from fme.core.aggregator import InferenceAggregatorConfig
 from fme.core.data_loading.config import DataLoaderConfig, Slice
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
@@ -12,13 +11,25 @@ from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.optimization import OptimizationConfig
-from fme.core.stepper import ExistingStepperConfig
+from fme.core.stepper import ExistingStepperConfig, SingleModuleStepperConfig
 from fme.core.wandb import WandB
 from fme.core.weight_ops import CopyWeightsConfig
 
 
 @dataclasses.dataclass
 class LoggingConfig:
+    """
+    Configuration for logging.
+
+    Attributes:
+        project: name of the project in Weights & Biases
+        entity: name of the entity in Weights & Biases
+        log_to_screen: whether to log to the screen
+        log_to_file: whether to log to a file
+        log_to_wandb: whether to log to Weights & Biases
+        log_format: format of the log messages
+    """
+
     project: str = "ace"
     entity: str = "ai2cm"
     log_to_screen: bool = True

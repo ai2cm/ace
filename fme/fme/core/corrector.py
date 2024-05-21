@@ -12,14 +12,15 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 @dataclasses.dataclass
 class CorrectorConfig:
-    """
+    r"""
     Configuration for the post-step state corrector.
 
-    conserve_dry_air enforces the constraint that:
+    ``conserve_dry_air`` enforces the constraint that:
 
-        global_dry_air = global_mean(
-            ps - sum_k((ak_diff + bk_diff * ps) * wat_k)
-        )
+    .. math::
+
+        global\_dry\_air = global\_mean(ps -
+        sum_k((ak\_diff + bk\_diff \* ps) \* wat_k))
 
     in the generated data is equal to its value in the input data. This is done
     by adding a globally-constant correction to the surface pressure in each
@@ -27,32 +28,34 @@ class CorrectorConfig:
     this can cause changes in total water or energy. Note all global means here
     are area-weighted.
 
-    zero_global_mean_moisture_advection enforces the constraint that:
+    ``zero_global_mean_moisture_advection`` enforces the constraint that:
 
-        global_mean(tendency_of_total_water_path_due_to_advection) = 0
+    .. math::
+
+        global\_mean(tendency\_of\_total\_water\_path\_due\_to\_advection) = 0
 
     in the generated data. This is done by adding a globally-constant correction
     to the moisture advection tendency in each column.
 
-    moisture_budget_correction enforces closure of the moisture budget equation:
+    ``moisture_budget_correction`` enforces closure of the moisture budget equation:
 
-        tendency_of_total_water_path = (
-            evaporation_rate - precipitation_rate
-            + tendency_of_total_water_path_due_to_advection
-        )
+    .. math::
 
-    in the generated data, where tendency_of_total_water_path is the difference
+        tendency\_of\_total\_water\_path = (evaporation\_rate - precipitation\_rate
+        + tendency\_of\_total\_water\_path\_due\_to\_advection)
+
+    in the generated data, where ``tendency_of_total_water_path`` is the difference
     between the total water path at the current timestep and the previous
     timestep divided by the time difference. This is done by modifying the
     precipitation, evaporation, and/or moisture advection tendency fields as
-    described in the moisture_budget_correction attribute. When
+    described in the ``moisture_budget_correction`` attribute. When
     advection tendency is modified, this budget equation is enforced in each
     column, while when only precipitation or evaporation are modified, only
     the global mean of the budget equation is enforced.
 
     When enforcing moisture budget closure, we assume the global mean moisture
-    advection is zero. Therefore zero_global_mean_moisture_advection must be
-    True if using a moisture_budget_correction option other tha None.
+    advection is zero. Therefore ``zero_global_mean_moisture_advection`` must be
+    True if using a ``moisture_budget_correction`` option other than ``None``.
 
     Attributes:
         conserve_dry_air: If True, force the generated data to conserve dry air
@@ -62,19 +65,19 @@ class CorrectorConfig:
         zero_global_mean_moisture_advection: If True, force the generated data to
             have zero global mean moisture advection by subtracting a constant
             offset from the moisture advection tendency of each column.
-        moisture_budget_correction: If not "none", force the generated data to
+        moisture_budget_correction: If not "None", force the generated data to
             conserve global or column-local moisture by modifying budget fields.
-            One of:
+            Options include:
                 - "precipitation": multiply precipitation by a scale factor
-                    to close the global moisture budget
+                    to close the global moisture budget.
                 - "evaporation": multiply evaporation by a scale factor
-                    to close the global moisture budget
+                    to close the global moisture budget.
                 - "advection_and_precipitation": after applying the "precipitation"
-                    global-mean correction above, we recompute the column-integrated
+                    global-mean correction above, recompute the column-integrated
                     advective tendency as the budget residual,
                     ensuring column budget closure.
                 - "advection_and_evaporation": after applying the "evaporation"
-                    global-mean correction above, we recompute the column-integrated
+                    global-mean correction above, recompute the column-integrated
                     advective tendency as the budget residual,
                     ensuring column budget closure.
     """

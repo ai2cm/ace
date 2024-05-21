@@ -4,7 +4,7 @@ from typing import Iterable, Tuple
 import pytest
 import torch
 
-from fme.ace.registry import registry
+from fme.core import registry
 
 
 class MockModule(torch.nn.Module):

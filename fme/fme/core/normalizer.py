@@ -12,6 +12,20 @@ from fme.core.typing_ import TensorDict
 
 @dataclasses.dataclass
 class NormalizationConfig:
+    """
+    Configuration for normalizing data.
+
+    Either global_means_path and global_stds_path or explicit means and stds
+    must be provided.
+
+    Attributes:
+        global_means_path: Path to a netCDF file containing global means.
+        global_stds_path: Path to a netCDF file containing global stds.
+        exclude_names: Names to exclude from normalization.
+        means: Mapping from variable names to means.
+        stds: Mapping from variable names to stds.
+    """
+
     global_means_path: Optional[str] = None
     global_stds_path: Optional[str] = None
     exclude_names: Optional[List[str]] = None

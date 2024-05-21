@@ -12,6 +12,11 @@ class Slice:
     Configuration of a python `slice` built-in.
 
     Required because `slice` cannot be initialized directly by dacite.
+
+    Attributes:
+        start: Start index of the slice.
+        stop: Stop index of the slice.
+        step: Step of the slice.
     """
 
     start: Optional[int] = None
@@ -30,6 +35,11 @@ class TimeSlice:
 
     Note: start_time and stop_time may be provided as partial time strings and the
         stop_time will be included in the slice. See more details in `Xarray docs`_.
+
+    Attributes:
+        start_time: Start time of the slice.
+        stop_time: Stop time of the slice.
+        step: Step of the slice.
 
     .. _Xarray docs:
        https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range  # noqa
@@ -82,6 +92,8 @@ class DataLoaderConfig:
         subset: Slice defining a subset of the XarrayDataset to load. For
             data_type="ensemble_xarray" case this will be applied to each ensemble
             member before concatenation.
+        strict_ensemble: Whether to enforce that the ensemble members have the same
+            dimensions and coordinates.
     """
 
     dataset: XarrayDataConfig

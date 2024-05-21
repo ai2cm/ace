@@ -1,0 +1,23 @@
+# this is used when doing inference after training completes
+# in the beaker-train-and-inference.yaml workflow
+experiment_dir: /output
+n_forward_steps: 14600  # 10 years
+forward_steps_in_memory: 50
+checkpoint_path: /output/training_checkpoints/best_inference_ckpt.tar
+log_video: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: fourcastnet
+  entity: ai2cm
+loader:
+  start_indices:
+    first: 0
+    n_initial_conditions: 1
+  dataset:
+    data_path: /validdata
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

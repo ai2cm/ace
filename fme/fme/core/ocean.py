@@ -25,7 +25,7 @@ class SlabOceanConfig:
 class OceanConfig:
     """Configuration for determining sea surface temperature from an ocean model.
 
-    Args:
+    Attributes:
         surface_temperature_name: Name of the sea surface temperature field.
         ocean_fraction_name: Name of the ocean fraction field.
         interpolate: If True, interpolate between ML-predicted surface temperature and
