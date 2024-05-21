@@ -68,7 +68,6 @@ def save_plus_one_stepper(
                 "stds": {name: std for name in names},
             }
         ),
-        prescriber=None,
     )
     area = torch.ones(data_shape[-2:], device=get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))

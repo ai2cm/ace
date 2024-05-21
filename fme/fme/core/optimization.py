@@ -82,12 +82,12 @@ class Optimization:
         """
         state = {
             "optimizer_state_dict": self.optimizer.state_dict(),
-            "scheduler_state_dict": self.scheduler.state_dict()
-            if self.scheduler is not None
-            else None,
-            "gscaler_state_dict": self.gscaler.state_dict()
-            if self.gscaler is not None
-            else None,
+            "scheduler_state_dict": (
+                self.scheduler.state_dict() if self.scheduler is not None else None
+            ),
+            "gscaler_state_dict": (
+                self.gscaler.state_dict() if self.gscaler is not None else None
+            ),
         }
         return state
 
@@ -105,32 +105,6 @@ class Optimization:
         with torch.no_grad():
             if torch.isnan(loss):
                 raise ValueError("Loss is NaN-valued during training.")
-
-
-@dataclasses.dataclass
-class DisabledOptimizationConfig:
-    """
-    Configuration for optimization, kept only for backwards compatibility when
-    loading configuration. Cannot be used to build, will raise an exception.
-    """
-
-    optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
-    lr: float = 0.001
-    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    enable_automatic_mixed_precision: bool = True
-    scheduler: SchedulerConfig = dataclasses.field(
-        default_factory=lambda: SchedulerConfig()
-    )
-
-    def build(self, parameters, max_epochs: int) -> Optimization:
-        raise RuntimeError("Cannot build DisabledOptimizationConfig")
-
-    def get_state(self) -> Mapping[str, Any]:
-        return dataclasses.asdict(self)
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "DisabledOptimizationConfig":
-        return cls(**state)
 
 
 @dataclasses.dataclass
