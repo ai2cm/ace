@@ -7,15 +7,18 @@ class AddNoiseModule(torch.nn.Module):
     """Simple module for testing."""
 
     def __init__(self, n_output_channels):
-        self.n_output_channels = n_output_channels
         super(AddNoiseModule, self).__init__()
+        self.n_output_channels = n_output_channels
+        self.param = torch.nn.Parameter(torch.zeros(1))
 
-    def forward(self, inputs, noise, ignored=None):
-        output = inputs + noise
+    def forward(self, latents, coarse, sigma=None):
+        output = latents + coarse + self.param
+        if sigma:
+            output = output * sigma
         return output[:, : self.n_output_channels, ...]
 
 
-def test_UNetDiffusionModule_runs():
+def test_UNetDiffusionModule_forward_pass():
     downscale_factor = 2
     coarse_shape = (8, 16)
     fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
@@ -29,4 +32,4 @@ def test_UNetDiffusionModule_runs():
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise = torch.randn(batch_size, 1, 1, 1)
 
-    assert (batch_size, n_channels, *fine_shape) == module(coarse, latent, noise).shape
+    assert (batch_size, n_channels, *fine_shape) == module(latent, coarse, noise).shape

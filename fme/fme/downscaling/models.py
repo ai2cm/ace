@@ -11,6 +11,7 @@ from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -181,6 +182,180 @@ class Model:
             state["downscale_factor"],
             area_weights,
             fine_topography,
+        )
+        model.module.load_state_dict(state["module"], strict=True)
+        return model
+
+
+@dataclasses.dataclass
+class DiffusionModelConfig:
+    module: DiffusionModuleRegistrySelector
+    loss: LossConfig
+    in_names: List[str]
+    out_names: List[str]
+    normalization: PairedNormalizationConfig
+    use_fine_topography: bool
+    # sampling options
+    p_std: float = 1.2
+    p_mean: float = -1.2
+
+    def build(
+        self,
+        coarse_shape: Tuple[int, int],
+        downscale_factor: int,
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
+        sigma_data: float,
+    ) -> "DiffusionModel":
+        normalizer = self.normalization.build(self.in_names, self.out_names)
+        loss = self.loss.build(area_weights.fine, "none")
+        module = self.module.build(
+            n_in_channels=len(self.in_names),
+            n_out_channels=len(self.out_names),
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+            fine_topography=fine_topography if self.use_fine_topography else None,
+        )
+        return DiffusionModel(
+            self,
+            module,
+            normalizer,
+            loss,
+            coarse_shape,
+            downscale_factor,
+            sigma_data,
+        )
+
+    def get_state(self) -> Mapping[str, Any]:
+        return dataclasses.asdict(self)
+
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "DiffusionModelConfig":
+        return dacite.from_dict(data_class=cls, data=state)
+
+    @property
+    def data_requirements(self) -> DataRequirements:
+        return DataRequirements(
+            names=list(set(self.in_names).union(self.out_names)),
+            n_timesteps=1,
+            use_fine_topography=self.use_fine_topography,
+        )
+
+
+class DiffusionModel:
+    """Diffusion model class."""
+
+    def __init__(
+        self,
+        config: DiffusionModelConfig,
+        module: torch.nn.Module,
+        normalizer: FineResCoarseResPair[StandardNormalizer],
+        loss: torch.nn.Module,
+        coarse_shape: Tuple[int, int],
+        downscale_factor: int,
+        sigma_data: float,
+    ) -> None:
+        """
+        Args:
+            module: The neural network module.
+            normalizer: The normalizer for fine and coarse data.
+            loss: The loss function.
+            in_names: The names of the input coarse-grain variables.
+            out_names: The names of the output fine-grain variables.
+            coarse_shape: The shape of the coarse-resolution data.
+            downscale_factor: The downscale factor.
+            p_std: The standard deviation of the noise used during training.
+            p_mean: The mean of the noise used during training.
+            sigma_data: The standard deviation of the training data.
+            config: The configuration for the diffusion model.
+        """
+        self.coarse_shape = coarse_shape
+        self.downscale_factor = downscale_factor
+        self.module = module.to(get_device())
+        self.normalizer = normalizer
+        self.loss = loss
+        self.in_packer = Packer(config.in_names)
+        self.out_packer = Packer(config.out_names)
+        self.config = config
+        self.p_std = config.p_std
+        self.p_mean = config.p_mean
+        self.sigma_data = sigma_data
+
+    @property
+    def modules(self) -> torch.nn.ModuleList:
+        """
+        Returns:
+            A list of modules being trained.
+        """
+        return torch.nn.ModuleList([self.module])
+
+    def train_on_batch(
+        self,
+        batch: FineResCoarseResPair[TensorMapping],
+        optimizer: Optimization,
+    ) -> ModelOutputs:
+        """Performs a denoising training step on a batch of data."""
+
+        channel_axis = -3
+        coarse, fine = _tensor_mapping_to_device(
+            batch.coarse, get_device()
+        ), _tensor_mapping_to_device(batch.fine, get_device())
+        coarse_norm = self.in_packer.pack(
+            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
+        )
+        targets_norm = self.out_packer.pack(
+            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
+        )
+
+        rnd_normal = torch.randn(
+            [targets_norm.shape[0], 1, 1, 1], device=targets_norm.device
+        )
+        # This is taken from EDM's original implementation in EDMLoss:
+        # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
+        sigma = (rnd_normal * self.p_std + self.p_mean).exp()
+        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+        noise = torch.randn_like(targets_norm) * sigma
+        latents = targets_norm + noise
+
+        denoised_norm = self.module(latents, coarse_norm, sigma)
+        batch_size = len(weight)
+        loss = torch.sum(weight * self.loss(targets_norm, denoised_norm)) / batch_size
+
+        optimizer.step_weights(loss)
+        target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        denoised = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(denoised_norm, axis=channel_axis)
+        )
+        return ModelOutputs(prediction=denoised, target=target, loss=loss)
+
+    def generate_on_batch(
+        self, batch: FineResCoarseResPair[TensorMapping]
+    ) -> ModelOutputs:
+        raise NotImplementedError()
+
+    def get_state(self) -> Mapping[str, Any]:
+        return {
+            "config": self.config.get_state(),
+            "module": self.module.state_dict(),
+            "coarse_shape": self.coarse_shape,
+            "downscale_factor": self.downscale_factor,
+            "sigma_data": self.sigma_data,
+        }
+
+    @classmethod
+    def from_state(
+        cls,
+        state: Mapping[str, Any],
+        area_weights: FineResCoarseResPair[torch.Tensor],
+        fine_topography: torch.Tensor,
+    ) -> "DiffusionModel":
+        config = DiffusionModelConfig.from_state(state["config"])
+        model = config.build(
+            state["coarse_shape"],
+            state["downscale_factor"],
+            area_weights,
+            fine_topography,
+            state["sigma_data"],
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
