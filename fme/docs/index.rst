@@ -9,6 +9,7 @@ Welcome to full-model's documentation!
    quickstart
    inference_config
    training_config
+   builder
    modules
    api
 
