@@ -41,7 +41,7 @@ class UNetDiffusionModule(torch.nn.Module):
         self.fine_topography = fine_topography
 
     def forward(
-        self, coarse: torch.Tensor, latent: torch.Tensor, noise_level: torch.Tensor
+        self, latent: torch.Tensor, coarse: torch.Tensor, noise_level: torch.Tensor
     ) -> torch.Tensor:
         """
         Forward pass of the UNetDiffusion module.

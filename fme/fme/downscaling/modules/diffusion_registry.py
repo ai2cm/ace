@@ -5,7 +5,11 @@ import dacite
 import torch
 
 from fme.downscaling.modules.preconditioners import EDMPrecond
-from fme.downscaling.modules.registry import ModuleConfig, compute_unet_padding_size
+from fme.downscaling.modules.registry import (
+    ModuleConfig,
+    PreBuiltBuilder,
+    compute_unet_padding_size,
+)
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.unets import SongUNet
 
@@ -109,5 +113,6 @@ class DiffusionModuleRegistrySelector:
 
 
 NET_REGISTRY: Mapping[str, Type[ModuleConfig]] = {
-    "unet_diffusion_song": UNetDiffusionSong
+    "unet_diffusion_song": UNetDiffusionSong,
+    "prebuilt": PreBuiltBuilder,
 }

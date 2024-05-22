@@ -8,11 +8,15 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
+    DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
 )
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.modules.test_unet_diffusion import AddNoiseModule
+from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -183,3 +187,47 @@ def test_serialization(tmp_path):
         expected,
         model_from_disk.generate_on_batch(batch).prediction["x"],
     )
+
+
+def test_diffusion_model_train():
+    fine_shape = (16, 32)
+    coarse_shape = (8, 16)
+    downscale_factor = 2
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    area_weights = FineResCoarseResPair(
+        torch.ones(*fine_shape), torch.ones(*coarse_shape)
+    )
+    fine_topography = torch.zeros(*fine_shape)
+
+    n_channels = 1
+    model = DiffusionModelConfig(
+        DiffusionModuleRegistrySelector(
+            "prebuilt",
+            {
+                "module": UNetDiffusionModule(
+                    AddNoiseModule(n_channels),
+                    coarse_shape,
+                    (16, 32),
+                    downscale_factor,
+                    None,
+                )
+            },
+        ),
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalizer,
+        use_fine_topography=False,
+    ).build(coarse_shape, downscale_factor, area_weights, fine_topography, 1.0)
+
+    batch_size = 2
+    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
+        {"x": torch.ones(batch_size, *fine_shape)},
+        {"x": torch.ones(batch_size, *coarse_shape)},
+    )
+    optimization = OptimizationConfig().build(model.module.parameters(), 2)
+    train_outputs = model.train_on_batch(batch, optimization)
+    assert torch.allclose(train_outputs.target["x"], batch.fine["x"])
