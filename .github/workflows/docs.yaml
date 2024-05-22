@@ -26,4 +26,4 @@ jobs:
           uv pip install --system -c constraints.txt -e fme[docs]
       - name: Build docs
         run: |
-          cd fme/docs && make html
+          cd fme/docs && make doctest html
