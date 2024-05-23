@@ -263,18 +263,16 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     if len(mock_data.var_names.initial_condition_names) != 0:
         return
     config = DataLoaderConfig(
-        XarrayDataConfig(data_path=mock_data.tmpdir),
+        [XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=n_samples))],
         1,
         0,
-        "xarray",
-        Slice(stop=n_samples),
     )
     n_forward_steps = 4
     requirements = DataRequirements(
         names=mock_data.var_names.all_names + ["x"],
         n_timesteps=n_forward_steps + 1,
     )
-    dataset = get_dataset(config, requirements)
+    dataset = get_dataset(config.dataset, requirements)
     if n_samples is None:
         assert len(dataset) == len(mock_data.obs_times) - n_forward_steps
     else:
@@ -345,12 +343,9 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = DataLoaderConfig(
-        XarrayDataConfig(
-            data_path=mock_data.tmpdir,
-        ),
+        [XarrayDataConfig(data_path=mock_data.tmpdir)],
         batch_size=1,
         num_data_workers=0,
-        data_type="xarray",
     )
     requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=15)
     data = get_data_loader(config=config, train=False, requirements=requirements)

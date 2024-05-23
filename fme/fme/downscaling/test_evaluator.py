@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from fme.ace.train_config import LoggingConfig
+from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
@@ -32,8 +33,8 @@ def create_evaluator_config(tmp_path, model: Mapping[str, Any]):
     experiment_dir.mkdir()
     with open(file_path, "r") as file:
         config = yaml.safe_load(file)
-    config["data"]["path_fine"] = str(paths.fine)
-    config["data"]["path_coarse"] = str(paths.coarse)
+    config["data"]["fine"] = [{"data_path": str(paths.fine)}]
+    config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
     config["experiment_dir"] = str(experiment_dir)
     config["model"] = model
 
@@ -65,6 +66,13 @@ def test_evaluator_runs(tmp_path, model_config):
     paths = data_paths_helper(tmp_path)
 
     if "checkpoint" in model_config:
+        data_loader_config = DataLoaderConfig(
+            fine=[XarrayDataConfig(paths.fine)],
+            coarse=[XarrayDataConfig(paths.coarse)],
+            batch_size=2,
+            num_data_workers=1,
+            strict_ensemble=False,
+        )
         trainer = TrainerConfig(
             DownscalingModelConfig(
                 ModuleRegistrySelector(
@@ -84,8 +92,8 @@ def test_evaluator_runs(tmp_path, model_config):
                 use_fine_topography=False,
             ),
             OptimizationConfig(),
-            DataLoaderConfig(paths.fine, paths.coarse, "xarray", 2, 1),
-            DataLoaderConfig(paths.fine, paths.coarse, "xarray", 2, 1),
+            data_loader_config,
+            data_loader_config,
             1,
             "/experiment_dir",
             False,

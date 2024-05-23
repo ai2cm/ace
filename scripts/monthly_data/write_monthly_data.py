@@ -18,9 +18,9 @@ from fme.ace.inference.data_writer.monthly import (
 from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.train_config import LoggingConfig
 from fme.ace.utils import logging_utils
-from fme.core.data_loading._xarray import XarrayDataset, get_datasets_at_path
 from fme.core.data_loading.config import DataLoaderConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.getters import get_datasets
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.device import using_gpu
@@ -37,12 +37,8 @@ def get_data_loaders(
             "Data loading for write_monthly_data.py is not "
             "supported in distributed mode."
         )
-    if config.data_type == "xarray":
-        datasets = [XarrayDataset(config.dataset, requirements)]
-    elif config.data_type == "ensemble_xarray":
-        datasets = get_datasets_at_path(
-            config.dataset, requirements, subset=config.subset
-        )
+
+    datasets = get_datasets(config.dataset, requirements)
 
     data_loaders = []
     for dataset in datasets:

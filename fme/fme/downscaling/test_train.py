@@ -135,10 +135,13 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
-    config["train_data"]["path_fine"] = str(train_data_paths.fine)
-    config["train_data"]["path_coarse"] = str(train_data_paths.coarse)
-    config["validation_data"]["path_fine"] = str(validation_data_paths.fine)
-    config["validation_data"]["path_coarse"] = str(validation_data_paths.coarse)
+    config["train_data"]["fine"] = [{"data_path": str(train_data_paths.fine)}]
+    config["train_data"]["coarse"] = [{"data_path": str(train_data_paths.coarse)}]
+    config["validation_data"]["fine"] = [{"data_path": str(validation_data_paths.fine)}]
+    config["validation_data"]["coarse"] = [
+        {"data_path": str(validation_data_paths.coarse)}
+    ]
+
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
 

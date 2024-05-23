@@ -2,6 +2,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 from fme.downscaling.requirements import DataRequirements
 
@@ -92,14 +93,7 @@ def test_downscaling_dataset_validate(
         PairedDataset(fine_data, coarse_data)
 
 
-@pytest.mark.parametrize(
-    "path_extension, data_type",
-    [
-        pytest.param("", "ensemble_xarray", id="ensemble"),
-        pytest.param("data", "xarray", id="xarray"),
-    ],
-)
-def test_dataloader_build(tmp_path, path_extension, data_type):
+def test_dataloader_build(tmp_path):
     """Integration test that creates test data on disk."""
 
     fine_path, coarse_path = tmp_path / "fine", tmp_path / "coarse"
@@ -121,11 +115,11 @@ def test_dataloader_build(tmp_path, path_extension, data_type):
     ]
     batch_size = 2
     config = DataLoaderConfig(
-        str(fine_data.path / path_extension),
-        str(coarse_data.path / path_extension),
-        data_type,
-        batch_size,
-        1,
+        fine=[XarrayDataConfig(str(fine_data.path / "data"))],
+        coarse=[XarrayDataConfig(str(coarse_data.path / "data"))],
+        batch_size=batch_size,
+        num_data_workers=1,
+        strict_ensemble=False,
     )
 
     loader = config.build(

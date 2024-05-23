@@ -16,14 +16,18 @@ def test_write_monthly_data(tmp_path: pathlib.Path):
         n_lon=8,
         nz_interface=2,
     )
-    write_ensemble_dataset(tmp_path / "data", 3, all_names, dim_sizes)
+    n_members = 3
+    write_ensemble_dataset(tmp_path / "data", n_members, all_names, dim_sizes)
+    dataset = [
+        XarrayDataConfig(data_path=str(tmp_path / "data" / f"ic_{i:04}"))
+        for i in range(n_members)
+    ]
     config = Config(
         experiment_dir=str(tmp_path),
         data_loader=DataLoaderConfig(
-            dataset=XarrayDataConfig(data_path=str(tmp_path / "data")),
+            dataset=dataset,
             batch_size=1,
             num_data_workers=1,
-            data_type="ensemble_xarray",
         ),
         logging=LoggingConfig(
             log_to_screen=True,

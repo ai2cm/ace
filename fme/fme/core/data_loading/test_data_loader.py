@@ -81,13 +81,12 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         ic_path = tmp_path / f"ic{i}"
         ic_path.mkdir()
         _create_dataset_on_disk(ic_path)
-        netcdfs.append(ic_path / "data")
+        netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        [XarrayDataConfig(data_path=str(path)) for path in netcdfs],
         batch_size=1,
         num_data_workers=0,
-        data_type="ensemble_xarray",
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
@@ -112,15 +111,17 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         ic_path = tmp_path / f"ic{i}"
         ic_path.mkdir()
         _create_dataset_on_disk(ic_path)
-        netcdfs.append(ic_path / "data")
+        netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        [
+            XarrayDataConfig(data_path=str(path), subset=Slice(stop=n_samples))
+            for path in netcdfs
+        ],
         batch_size=1,
         num_data_workers=0,
-        data_type="ensemble_xarray",
-        subset=Slice(stop=n_samples),
     )
+
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
 
@@ -133,10 +134,9 @@ def test_xarray_loader(tmp_path):
     """Checks that sigma coordinates are present."""
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        XarrayDataConfig(data_path=tmp_path, n_repeats=1),
+        [XarrayDataConfig(data_path=tmp_path, n_repeats=1)],
         batch_size=1,
         num_data_workers=0,
-        data_type="xarray",
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
@@ -148,10 +148,9 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
     _create_dataset_on_disk(tmp_path)
     with pytest.raises(ValueError, match="infer_timestep must be True"):
         DataLoaderConfig(
-            XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False),
+            [XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False)],
             batch_size=1,
             num_data_workers=0,
-            data_type="xarray",
         )
 
 
@@ -207,13 +206,9 @@ def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
     config = DataLoaderConfig(
-        XarrayDataConfig(
-            data_path=tmp_path,
-        ),
+        [XarrayDataConfig(data_path=tmp_path, subset=Slice(stop=n_samples))],
         batch_size=n_samples,
         num_data_workers=0,
-        data_type="xarray",
-        subset=Slice(stop=n_samples),
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
@@ -315,11 +310,9 @@ def test_inference_data_loader_validate_n_forward_steps(
 def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_error):
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        XarrayDataConfig(data_path=tmp_path, n_repeats=10),
+        [XarrayDataConfig(data_path=tmp_path, n_repeats=10, subset=Slice(start, stop))],
         batch_size=batch_size,
         num_data_workers=0,
-        data_type="xarray",
-        subset=Slice(start, stop),
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)

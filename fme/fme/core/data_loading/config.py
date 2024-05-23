@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Sequence, Union
 
 import xarray as xr
 
@@ -65,6 +65,7 @@ class XarrayDataConfig:
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
+        subset: Slice defining a subset of the XarrayDataset to load.
         infer_timestep: Whether to infer the timestep from the provided data.
             This should be set to True (the default) for ACE training. It may
             be useful to toggle this to False for applications like downscaling,
@@ -78,7 +79,14 @@ class XarrayDataConfig:
     file_pattern: str = "*.nc"
     n_repeats: int = 1
     engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
+    subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
+
+    def __post_init__(self):
+        if self.n_repeats > 1 and not self.infer_timestep:
+            raise ValueError(
+                "infer_timestep must be True if n_repeats is greater than 1"
+            )
 
 
 @dataclasses.dataclass
@@ -88,19 +96,13 @@ class DataLoaderConfig:
         dataset: Parameters to define the dataset.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
-        data_type: Type of data to load.
-        subset: Slice defining a subset of the XarrayDataset to load. For
-            data_type="ensemble_xarray" case this will be applied to each ensemble
-            member before concatenation.
         strict_ensemble: Whether to enforce that the ensemble members have the same
             dimensions and coordinates.
     """
 
-    dataset: XarrayDataConfig
+    dataset: Sequence[XarrayDataConfig]
     batch_size: int
     num_data_workers: int
-    data_type: Literal["xarray", "ensemble_xarray"]
-    subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     n_samples: Optional[int] = None
     strict_ensemble: bool = True
 
@@ -115,12 +117,4 @@ class DataLoaderConfig:
             raise ValueError(
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
-            )
-
-        if self.dataset.n_repeats != 1 and self.data_type == "ensemble_xarray":
-            raise ValueError("n_repeats must be 1 when using ensemble_xarray")
-
-        if self.dataset.n_repeats > 1 and not self.dataset.infer_timestep:
-            raise ValueError(
-                "infer_timestep must be True if n_repeats is greater than 1"
             )
