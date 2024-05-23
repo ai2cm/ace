@@ -6,13 +6,12 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 import dacite
 import torch
 from torch import nn
-from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
-from fme.core.device import get_device, using_gpu
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
 from fme.core.normalizer import (
@@ -243,22 +242,6 @@ def _cast_tensordict(
     return {name: value.to(device, dtype=dtype) for name, value in data.items()}
 
 
-class DummyWrapper(nn.Module):
-    """
-    Wrapper class for a single pytorch module, which does nothing.
-
-    Exists so we have an identical module structure to the case where we use
-    a DistributedDataParallel wrapper.
-    """
-
-    def __init__(self, module):
-        super().__init__()
-        self.module = module
-
-    def forward(self, *args, **kwargs):
-        return self.module(*args, **kwargs)
-
-
 def _prepend_timestep(
     data: TensorDict, timestep: TensorDict, time_dim: int = 1
 ) -> TensorDict:
@@ -347,7 +330,6 @@ class SingleModuleStepper:
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
-        dist = Distributed.get_instance()
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
@@ -371,21 +353,9 @@ class SingleModuleStepper:
         self._config = config
         self._no_optimization = NullOptimization()
 
-        if dist.is_distributed():
-            if using_gpu():
-                device_ids = [dist.local_rank]
-                output_device = [dist.local_rank]
-            else:
-                device_ids = None
-                output_device = None
-            self.module = DistributedDataParallel(
-                self.module,
-                device_ids=device_ids,
-                output_device=output_device,
-            )
-        else:
-            self.module = DummyWrapper(self.module)
+        dist = Distributed.get_instance()
         self._is_distributed = dist.is_distributed()
+        self.module = dist.wrap_module(self.module)
 
         self.area = area.to(get_device())
         self.sigma_coordinates = sigma_coordinates.to(get_device())
