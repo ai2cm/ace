@@ -13,11 +13,13 @@ model:
 # model:
 #   checkpoint: /will/be/overwritten
 data:
-  path_fine: /will/be/overwritten
-  path_coarse: /will/be/overwritten
-  data_type: "xarray"
+  fine:
+    - data_path: /will/be/overwritten
+  coarse:
+    - data_path: /will/be/overwritten
   batch_size: 2
   num_data_workers: 2
+  strict_ensemble: False
 logging:
   log_to_screen: true
   log_to_wandb: true

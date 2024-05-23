@@ -9,17 +9,21 @@ logging:
 optimization:
   lr: 0.0001
 train_data:
-  path_fine: /will/be/overwritten
-  path_coarse: /will/be/overwritten
-  data_type: "xarray"
+  fine:
+    - data_path: /will/be/overwritten
+  coarse:
+    - data_path: /will/be/overwritten
   batch_size: 2
   num_data_workers: 2
+  strict_ensemble: False
 validation_data:
-  path_fine: /will/be/overwritten
-  path_coarse: /will/be/overwritten
-  data_type: "xarray"
+  fine:
+    - data_path: /will/be/overwritten
+  coarse:
+    - data_path: /will/be/overwritten
   batch_size: 2
   num_data_workers: 2
+  strict_ensemble: False
 model:
   loss:
     type: "L1"

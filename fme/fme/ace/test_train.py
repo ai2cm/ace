@@ -74,15 +74,13 @@ def _get_test_yaml_files(
 
     train_string = f"""
 train_loader:
-  data_type: "xarray"
   dataset:
-    data_path: '{train_data_path}'
+    - data_path: '{train_data_path}'
   batch_size: 2
   num_data_workers: 1
 validation_loader:
-  data_type: "xarray"
   dataset:
-    data_path: '{valid_data_path}'
+    - data_path: '{valid_data_path}'
   batch_size: 2
   num_data_workers: 1
 optimization:
@@ -100,7 +98,7 @@ inference:
     monthly_reference_data: {monthly_data_filename}
   loader:
     dataset:
-      data_path: '{valid_data_path}'
+        data_path: '{valid_data_path}'
     start_indices:
       first: 0
       n_initial_conditions: 2
