@@ -2,9 +2,8 @@
 experiment_dir: /workdir/jeremym/monthly_data
 data_loader:
   dataset:
-    data_path: /workdir/shared/2023-12-20-vertically-resolved-4deg-fme-amip-ensemble-dataset/train
+    - data_path: /workdir/shared/2023-12-20-vertically-resolved-4deg-fme-amip-ensemble-dataset/train
   batch_size: 1
-  data_type: ensemble_xarray
   num_data_workers: 1
 logging:
   log_to_screen: true

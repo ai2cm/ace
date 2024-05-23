@@ -1,35 +1,73 @@
-from typing import Union
+import warnings
+from typing import List, Sequence
 
+import numpy as np
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.data_loading.config import (
-    DataLoaderConfig,
-    Slice,
-    TimeSlice,
-    XarrayDataConfig,
-)
+from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import XarrayDataset, as_index_slice, get_datasets_at_path, subset_dataset
-from .data_typing import Dataset, GriddedData
+from ._xarray import XarrayDataset, as_index_slice, subset_dataset
+from .data_typing import GriddedData
 from .inference import InferenceDataLoaderConfig, InferenceDataset
 from .requirements import DataRequirements
 from .utils import BatchData
 
 
-def get_ensemble_dataset(
-    params: XarrayDataConfig,
+def _all_same(iterable, cmp=lambda x, y: x == y):
+    it = iter(iterable)
+    try:
+        first = next(it)
+    except StopIteration:
+        return True
+    return all(cmp(first, rest) for rest in it)
+
+
+def get_datasets(
+    dataset_configs: Sequence[XarrayDataConfig], requirements: DataRequirements
+) -> List[XarrayDataset]:
+    datasets = []
+    for config in dataset_configs:
+        dataset = XarrayDataset(config, requirements)
+        index_slice = as_index_slice(config.subset, dataset)
+        dataset = subset_dataset(dataset, index_slice)
+        datasets.append(dataset)
+    return datasets
+
+
+def get_dataset(
+    dataset_configs: Sequence[XarrayDataConfig],
     requirements: DataRequirements,
-    subset: Union[Slice, TimeSlice],
     strict: bool = True,
-) -> Dataset:
-    """Returns a dataset that is a concatenation of the datasets for each
-    ensemble member.
-    """
-    datasets = get_datasets_at_path(params, requirements, subset=subset, strict=strict)
+) -> torch.utils.data.ConcatDataset[XarrayDataset]:
+    datasets = get_datasets(dataset_configs, requirements)
+
+    if not _all_same([d.metadata for d in datasets]):
+        if strict:
+            raise ValueError("Metadata for each ensemble member should be the same.")
+        else:
+            warnings.warn(
+                "Metadata for each ensemble member are not the same. You may be "
+                "concatenating incompatible datasets."
+            )
+    sigma_coords = [d.sigma_coordinates for d in datasets]
+    ak, bk = list(
+        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
+    )
+    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
+        if strict:
+            raise ValueError(
+                "Sigma coordinates for each ensemble member should be the same."
+            )
+        else:
+            warnings.warn(
+                "Vertical coordinates for each ensemble member are not the same. You "
+                "may be concatenating incompatible datasets."
+            )
+
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = datasets[0].metadata  # type: ignore
     ensemble.area_weights = datasets[0].area_weights  # type: ignore
@@ -37,25 +75,6 @@ def get_ensemble_dataset(
     ensemble.timestep = datasets[0].timestep  # type: ignore
     ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
     return ensemble
-
-
-def get_dataset(
-    config: DataLoaderConfig,
-    requirements: DataRequirements,
-) -> Dataset:
-    if config.data_type == "xarray":
-        dataset = XarrayDataset(config.dataset, requirements)
-        subset_slice = as_index_slice(config.subset, dataset)
-        dataset = subset_dataset(dataset, subset_slice)
-    elif config.data_type == "ensemble_xarray":
-        return get_ensemble_dataset(
-            config.dataset, requirements, config.subset, config.strict_ensemble
-        )
-    else:
-        raise NotImplementedError(
-            f"{config.data_type} does not have an implemented data loader"
-        )
-    return dataset
 
 
 def get_data_loader(
@@ -70,7 +89,7 @@ def get_data_loader(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
-    dataset = get_dataset(config, requirements)
+    dataset = get_dataset(config.dataset, requirements, strict=config.strict_ensemble)
     dist = Distributed.get_instance()
 
     if dist.is_distributed():

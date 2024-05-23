@@ -1,11 +1,8 @@
-import dataclasses
 import datetime
 import logging
 import os
-import warnings
 from collections import namedtuple
 from glob import glob
-from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Tuple, Union
 
 import numpy as np
@@ -57,63 +54,6 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
     subsetted_dataset.timestep = dataset.timestep
     return subsetted_dataset
-
-
-def get_datasets_at_path(
-    params: XarrayDataConfig,
-    requirements: DataRequirements,
-    subset: Union[TimeSlice, Slice],
-    strict: bool = True,
-) -> List[Dataset]:
-    paths = sorted([str(d) for d in Path(params.data_path).iterdir() if d.is_dir()])
-    if len(paths) == 0:
-        raise ValueError(
-            f"No directories found in {params.data_path}. "
-            "Check path and whether you meant to use 'ensemble_xarray' data_type."
-        )
-    datasets, metadatas, sigma_coords, timestep = [], [], [], []
-    for path in paths:
-        params_curr_member = dataclasses.replace(params, data_path=path)
-        dataset = XarrayDataset(params_curr_member, requirements)
-        subset_slice = as_index_slice(subset, dataset)
-        dataset = subset_dataset(dataset, subset_slice)
-        datasets.append(dataset)
-        metadatas.append(dataset.metadata)
-        sigma_coords.append(dataset.sigma_coordinates)
-        timestep.append(dataset.timestep)
-
-    if not _all_same(metadatas):
-        if strict:
-            raise ValueError("Metadata for each ensemble member should be the same.")
-        else:
-            warnings.warn(
-                "Metadata for each ensemble member are not the same. You may be "
-                "concatenating incompatible datasets."
-            )
-
-    ak, bk = list(
-        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
-    )
-    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
-        if strict:
-            raise ValueError(
-                "Sigma coordinates for each ensemble member should be the same."
-            )
-        else:
-            warnings.warn(
-                "Vertical coordinates for each ensemble member are not the same. You "
-                "may be concatenating incompatible datasets."
-            )
-    return datasets
-
-
-def _all_same(iterable, cmp=lambda x, y: x == y):
-    it = iter(iterable)
-    try:
-        first = next(it)
-    except StopIteration:
-        return True
-    return all(cmp(first, rest) for rest in it)
 
 
 def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
