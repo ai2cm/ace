@@ -2,10 +2,27 @@ import os
 from typing import List, Optional
 
 import torch.distributed
+from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import using_gpu
 
 singleton: Optional["Distributed"] = None
+
+
+class DummyWrapper(torch.nn.Module):
+    """
+    Wrapper class for a single pytorch module, which does nothing.
+
+    Exists so we have an identical module structure to the case where we use
+    a DistributedDataParallel wrapper.
+    """
+
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def forward(self, *args, **kwargs):
+        return self.module(*args, **kwargs)
 
 
 class Distributed:
@@ -154,3 +171,22 @@ class Distributed:
         with more than 1 worker.
         """
         return self._distributed and self.world_size > 1
+
+    def wrap_module(self, module: torch.nn.Module) -> torch.nn.Module:
+        """
+        Wrap a model with DistributedDataParallel if running in a distributed context.
+        """
+        if self.is_distributed():
+            if using_gpu():
+                device_ids = [self.local_rank]
+                output_device = [self.local_rank]
+            else:
+                device_ids = None
+                output_device = None
+            return DistributedDataParallel(
+                module,
+                device_ids=device_ids,
+                output_device=output_device,
+            )
+        else:
+            return DummyWrapper(module)
