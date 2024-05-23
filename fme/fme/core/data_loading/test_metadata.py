@@ -1,7 +1,5 @@
 import datetime
-import tempfile
-from pathlib import Path
-from typing import Literal, Mapping, Optional
+from typing import Mapping, Optional
 
 import cftime
 import numpy as np
@@ -81,45 +79,25 @@ def _save_netcdf(
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
 
 
-def _save_netcdf_ensemble(
-    basename,
-    metadata: Mapping[str, Optional[VariableMetadata]],
-    num_members=1,
-    member_prefix="member",
-):
-    for i in range(num_members):
-        member_path = basename / f"{member_prefix}{i}"
-        member_path.mkdir()
-        _save_netcdf(member_path / "data.nc", metadata)
-
-
-def _create_data(path, metadata, data_type: Literal["xarray", "ensemble_xarray"]):
-    """Looks up function to create toy data for the given data type and runs it."""
-    thunks = dict(
-        xarray=lambda: _save_netcdf(path / "data.nc", metadata),
-        ensemble_xarray=lambda: _save_netcdf_ensemble(path, metadata, num_members=2),
-    )
-    create_data_fn = thunks[data_type]
-    create_data_fn()
-
-
+@pytest.mark.parametrize("n_ensemble_members", [1, 2])
 @pytest.mark.parametrize("metadata", METADATA)
-@pytest.mark.parametrize("data_type", ["xarray", "ensemble_xarray"])
-def test_metadata(metadata, data_type):
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir)
-        _create_data(path, metadata, data_type)
+def test_metadata(tmp_path, metadata, n_ensemble_members):
+    paths = []
+    for i in range(n_ensemble_members):
+        path = tmp_path / f"ic{i}"
+        path.mkdir(exist_ok=True)
+        paths.append(path)
+        _save_netcdf(path / "data.nc", metadata)
 
-        config = DataLoaderConfig(
-            XarrayDataConfig(data_path=str(path)),
-            batch_size=1,
-            num_data_workers=0,
-            data_type=data_type,
-        )
-        var_names = list(metadata.keys())
-        requirements = DataRequirements(names=var_names, n_timesteps=2)
-        data = get_data_loader(config=config, train=True, requirements=requirements)
-        target_metadata = {
-            name: metadata[name] for name in metadata if metadata[name] is not None
-        }
-        assert data.metadata == target_metadata  # type: ignore
+    config = DataLoaderConfig(
+        [XarrayDataConfig(data_path=str(path)) for path in paths],
+        batch_size=1,
+        num_data_workers=0,
+    )
+    var_names = list(metadata.keys())
+    requirements = DataRequirements(names=var_names, n_timesteps=2)
+    data = get_data_loader(config=config, train=True, requirements=requirements)
+    target_metadata = {
+        name: metadata[name] for name in metadata if metadata[name] is not None
+    }
+    assert data.metadata == target_metadata  # type: ignore

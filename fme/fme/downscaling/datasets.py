@@ -1,7 +1,7 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-from typing import Literal, Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 import torch
 import torch.utils.data
@@ -9,7 +9,8 @@ import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-import fme.core.data_loading.config
+from fme.core.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
+from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import HorizontalCoordinates, VariableMetadata
 from fme.core.data_loading.getters import get_dataset
 from fme.core.data_loading.requirements import DataRequirements as CoreDataRequirements
@@ -24,40 +25,22 @@ def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
-def get_topography(
-    path: str, data_type: Literal["xarray", "ensemble_xarray"]
-) -> torch.Tensor:
+def get_topography(config: CoreDataLoaderConfig) -> torch.Tensor:
     """
     Load the topography data from the specified path and return the normalized
     height of the topography values.
 
     Args:
-        path: The path to the topography data.
-        data_type: The type of data to load.
+        config: Data loader configuration corresponding to the desired
+            topography data.
 
     Returns:
         The normalized height of the topography of shape (latitude, longitude).
     """
     topography_name = "HGTsfc"
-    dist = Distributed.get_instance()
     dataset = get_dataset(
-        fme.core.data_loading.config.DataLoaderConfig(
-            dataset=fme.core.data_loading.config.XarrayDataConfig(
-                data_path=path,
-            ),
-            data_type=data_type,
-            # torch doesn't like it when batch_size=1 and num_data_workers=1.
-            # For some reason, this raises a ValueError: batch_size must be
-            # divisible by the number of parallel workers, got 1 and 2
-            batch_size=dist.world_size,
-            num_data_workers=1,
-        ),
-        requirements=CoreDataRequirements(
-            names=[topography_name],
-            n_timesteps=1,
-        ),
+        config.dataset, CoreDataRequirements(names=[topography_name], n_timesteps=1)
     )
-
     example, _ = dataset[0]
     topography = example[topography_name]
     topography = topography.squeeze()
@@ -141,11 +124,11 @@ class GriddedData:
 
 @dataclasses.dataclass
 class DataLoaderConfig:
-    path_fine: str
-    path_coarse: str
-    data_type: Literal["xarray", "ensemble_xarray"]
+    fine: Sequence[XarrayDataConfig]
+    coarse: Sequence[XarrayDataConfig]
     batch_size: int
     num_data_workers: int
+    strict_ensemble: bool
 
     def build(
         self,
@@ -158,23 +141,14 @@ class DataLoaderConfig:
 
         dataset_fine, dataset_coarse = [
             get_dataset(
-                fme.core.data_loading.config.DataLoaderConfig(
-                    dataset=fme.core.data_loading.config.XarrayDataConfig(
-                        data_path=path,
-                    ),
-                    data_type=self.data_type,
-                    batch_size=self.batch_size,
-                    num_data_workers=self.num_data_workers,
-                ),
-                requirements=CoreDataRequirements(
-                    names=requirements.names,
-                    n_timesteps=requirements.n_timesteps,
-                ),
+                dataset_configs,
+                CoreDataRequirements(requirements.names, requirements.n_timesteps),
+                strict=self.strict_ensemble,
             )
-            for path in (self.path_fine, self.path_coarse)
+            for dataset_configs in [self.fine, self.coarse]
         ]
 
-        dataset = PairedDataset(dataset_fine, dataset_coarse)
+        dataset = PairedDataset(dataset_fine, dataset_coarse)  # type: ignore
 
         sampler: Optional[DistributedSampler] = (
             DistributedSampler(dataset, shuffle=train)
@@ -220,7 +194,13 @@ class DataLoaderConfig:
         assert dataset_fine.metadata == dataset_coarse.metadata, "Metadata must match."
         metadata = dataset_fine.metadata
 
-        fine_topography = get_topography(self.path_fine, self.data_type)
+        fine_topography = get_topography(
+            CoreDataLoaderConfig(
+                dataset=self.fine,
+                batch_size=self.batch_size,
+                num_data_workers=self.num_data_workers,
+            )
+        )
 
         return GriddedData(
             dataloader,
