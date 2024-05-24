@@ -179,6 +179,9 @@ def run_inference(
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
             i_time = i * forward_steps_in_memory
+            forward_steps_in_memory = (
+                list(window_batch_data.data.values())[0].size(1) - 1
+            )
             logging.info(
                 f"Inference: starting window spanning {i_time}"
                 f" to {i_time + forward_steps_in_memory} steps, "
@@ -210,7 +213,6 @@ def run_inference(
             stepped = compute_stepped_derived_quantities(
                 stepped, data.sigma_coordinates, data.timestep
             )
-
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
             _inference_internal_loop(stepped, i_time, aggregator, stitcher, batch_times)

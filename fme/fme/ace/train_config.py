@@ -103,11 +103,6 @@ class InlineInferenceConfig:
     )
 
     def __post_init__(self):
-        if self.n_forward_steps % self.forward_steps_in_memory != 0:
-            raise ValueError(
-                "n_forward_steps must be divisible by steps_in_memory, "
-                f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
-            )
         dist = Distributed.get_instance()
         if self.loader.start_indices.n_initial_conditions % dist.world_size != 0:
             raise ValueError(

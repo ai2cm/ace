@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+from math import ceil
 
 import numpy as np
 import torch
@@ -79,14 +80,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._timestep = dataset.timestep
         self._forward_steps_in_memory = forward_steps_in_memory
         self._total_steps = requirements.n_timesteps - 1
-        if self._total_steps % self._forward_steps_in_memory != 0:
-            raise ValueError(
-                f"Total number of steps ({self._total_steps}) must be divisible by "
-                f"forward_steps_in_memory ({self._forward_steps_in_memory})."
-            )
         self.n_samples = config.n_samples  # public attribute
         self._start_indices = config.start_indices.as_indices()
-
         self._validate_n_forward_steps()
 
     def __getitem__(self, index) -> BatchData:
@@ -99,18 +94,21 @@ class InferenceDataset(torch.utils.data.Dataset):
                 continue
             i_window_start = i_start + self._start_indices[i_sample]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
+            if i_window_end > (self._total_steps + self._start_indices[i_sample]):
+                i_window_end = self._total_steps + self._start_indices[i_sample] + 1
             window_time_slice = slice(i_window_start, i_window_end)
             sample_tuples.append(
                 self._dataset.get_sample_by_time_slice(window_time_slice)
             )
-            assert sample_tuples[-1][1].shape[0] == self._forward_steps_in_memory + 1
         result = BatchData.from_sample_tuples(sample_tuples)
-        assert result.times.shape[1] == self._forward_steps_in_memory + 1
         assert result.times.shape[0] == self.n_samples // dist.world_size
         return result
 
     def __len__(self) -> int:
-        return self._total_steps // self._forward_steps_in_memory
+        # The ceil is necessary so if the last batch is smaller
+        # than the rest the ratio will be rounded up and the last batch
+        # will be included in the loading
+        return int(ceil(self._total_steps / self._forward_steps_in_memory))
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
