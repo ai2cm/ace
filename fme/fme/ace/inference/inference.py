@@ -88,11 +88,6 @@ class InferenceConfig:
     ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
-        if self.n_forward_steps % self.forward_steps_in_memory != 0:
-            raise ValueError(
-                "n_forward_steps must be divisible by steps_in_memory, "
-                f"got {self.n_forward_steps} and {self.forward_steps_in_memory}"
-            )
         deprecated_aggregator_attrs = {
             k: getattr(self, k)
             for k in [
