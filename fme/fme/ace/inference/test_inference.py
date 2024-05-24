@@ -329,7 +329,9 @@ def inference_helper(
         assert "inference/annual/r2_target_var" in inference_logs[-1]
 
 
-@pytest.mark.parametrize("n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10)])
+@pytest.mark.parametrize(
+    "n_forward_steps,forward_steps_in_memory", [(10, 2), (10, 10), (15, 4)]
+)
 def test_inference_writer_boundaries(
     tmp_path: pathlib.Path, n_forward_steps: int, forward_steps_in_memory: int
 ):
@@ -626,16 +628,14 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
 
 
 @pytest.mark.parametrize(
-    ["forward_steps_in_memory", "time_coarsen"],
+    ["time_coarsen"],
     [
-        pytest.param(5, 1, id="invalid_steps_in_memory"),
-        pytest.param(4, 3, id="non_factor_time_coarsen"),
-        pytest.param(4, -1, id="invalid_time_coarsen"),
+        pytest.param(3, id="non_factor_time_coarsen"),
+        pytest.param(-1, id="invalid_time_coarsen"),
     ],
 )
-def test_inference_config_raises_incompatible_timesteps(
-    forward_steps_in_memory, time_coarsen
-):
+def test_inference_config_raises_incompatible_timesteps(time_coarsen):
+    forward_steps_in_memory = 4
     n_forward_steps = 12
     base_config_dict = dict(
         experiment_dir="./some_dir",
