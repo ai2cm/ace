@@ -152,3 +152,32 @@ def test_derived_missing_surface_pressure():
 
     assert target.shape == () and torch.isnan(target).all()
     assert gen.shape == () and torch.isnan(target).all()
+
+
+def test__get_loss_scaled_mse_components():
+    x = torch.ones(10).to(get_device())
+    loss_scaling = {
+        "a": torch.tensor(1.0),
+        "b": torch.tensor(0.5),
+    }
+    agg = OneStepAggregator(
+        area_weights=torch.ones(10).to(get_device()),
+        sigma_coordinates=SigmaCoordinates(x, x),
+        loss_scaling=loss_scaling,
+    )
+
+    logs = {
+        "test/mean/weighted_rmse/a": 1.0,
+        "test/mean/weighted_rmse/b": 4.0,
+        "test/mean/weighted_rmse/c": 0.0,
+    }
+    result = agg._get_loss_scaled_mse_components(logs, "test")
+    scaled_squared_errors_sum = (1.0 / 1.0) ** 2 + (4.0 / 0.5) ** 2
+    assert (
+        result["test/mean/mse_fractional_components/a"] == 1 / scaled_squared_errors_sum
+    )
+    assert (
+        result["test/mean/mse_fractional_components/b"]
+        == 64 / scaled_squared_errors_sum
+    )
+    assert "test/mean/mse_fractional_components/c" not in result
