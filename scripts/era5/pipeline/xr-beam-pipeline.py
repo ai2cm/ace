@@ -1,7 +1,7 @@
 import argparse
+import datetime
 import logging
 import os
-from datetime import datetime, timedelta
 
 import apache_beam as beam
 import metview
@@ -49,18 +49,22 @@ def grid_attribute_fix(ds, names_to_fix, reference_name):
 TEMPLATE_PATH = "gs://vcm-ml-scratch/oliwm/2024-04-22-era5-regrid-template.zarr"
 
 OUTPUT_GRID = "F90"  # 1° regular Gaussian grid. See https://confluence.ecmwf.int/display/OIFS/4.+OpenIFS%3A+Grid+and+Resolution  # noqa: E501
-LONGITUDE_SHIFT = 0.5  # amount in degrees to shift longitude to match FV3 grid
+TIME_STEP = 6  # in same units as resolution of time coordinate of data (i.e. hours)
 GRAVITY = 9.80665  # value used in metview according to https://metview.readthedocs.io/en/latest/metview/macro/functions/fieldset.html#id0 # noqa: E501
 
-URL_WIND_TEMP = "gs://gcp-public-data-arco-era5/co/model-level-wind.zarr-v2"
-URL_SURFACE = "gs://gcp-public-data-arco-era5/co/single-level-surface.zarr-v2"
-URL_SURFACE_REANALYSIS = (
-    "gs://gcp-public-data-arco-era5/co/single-level-reanalysis.zarr-v2"  # noqa: E501
+URL_GOOGLE_ARCO_ERA5 = "gs://gcp-public-data-arco-era5/co"
+URL_WIND_TEMP = f"{URL_GOOGLE_ARCO_ERA5}/model-level-wind.zarr-v2"
+URL_SURFACE = f"{URL_GOOGLE_ARCO_ERA5}/single-level-surface.zarr-v2"
+URL_SURFACE_REANALYSIS = f"{URL_GOOGLE_ARCO_ERA5}/single-level-reanalysis.zarr-v2"
+URL_MOISTURE = f"{URL_GOOGLE_ARCO_ERA5}/model-level-moisture.zarr-v2"
+URL_GOOGLE_LATLON = (
+    "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
-URL_MOISTURE = "gs://gcp-public-data-arco-era5/co/model-level-moisture.zarr-v2"
-URL_INVARIANT = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.invariant.zarr"  # noqa: E501
-URL_SURFACE_ANALYSIS_LATLON = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.an.sfc.zarr"  # noqa: E501
-URL_MEAN_FLUX = "gs://vcm-ml-intermediate/2024-04-09-era5-025deg-2D-variables-from-NCAR-as-zarr-v1/e5.oper.fc.sfc.meanflux.zarr"  # noqa: E501
+
+URL_NCAR_ERA5 = "gs://vcm-ml-intermediate/2024-05-17-era5-025deg-2D-variables-from-NCAR-as-zarr"  # noqa: E501
+URL_INVARIANT = f"{URL_NCAR_ERA5}/e5.oper.invariant.zarr"
+URL_SURFACE_ANALYSIS_LATLON = f"{URL_NCAR_ERA5}/e5.oper.an.sfc.zarr"
+URL_MEAN_FLUX = f"{URL_NCAR_ERA5}/e5.oper.fc.sfc.meanflux.zarr"
 
 WIND_TEMP = "wind_temp"
 SURFACE = "surface"
@@ -69,6 +73,7 @@ MOISTURE = "moisture"
 INVARIANT = "invariant_latlon"
 SURFACE_ANALYSIS_LATLON = "surface_analysis_latlon"
 MEAN_FLUX = "mean_flux_latlon"
+GOOGLE_LATLON = "google_latlon"
 
 URLS = {
     WIND_TEMP: URL_WIND_TEMP,
@@ -78,6 +83,7 @@ URLS = {
     INVARIANT: URL_INVARIANT,
     SURFACE_ANALYSIS_LATLON: URL_SURFACE_ANALYSIS_LATLON,
     MEAN_FLUX: URL_MEAN_FLUX,
+    GOOGLE_LATLON: URL_GOOGLE_LATLON,
 }
 
 # these versions of the zarr datasets have variables with the necessary attrs for
@@ -87,32 +93,6 @@ URLS_WITH_REQUIRED_ATTRS = {
     SURFACE: URL_SURFACE[:-3],
     MOISTURE: URL_MOISTURE[:-3],
     SURFACE_REANALYSIS: URL_SURFACE_REANALYSIS[:-3],
-}
-
-# desired start/end of output dataset, inclusive
-START_TIME = datetime(1979, 1, 1, 0, 0, 0)
-END_TIME = datetime(2022, 12, 31, 18, 0, 0)
-STEP_INTERVAL = 6  # hours
-
-# to properly align mean flux with the output time, these requirements are necessary
-assert START_TIME.hour == 0 or START_TIME.hour == 12
-assert END_TIME.hour == 6 or END_TIME.hour == 18
-
-# mean flux forecast initial times are at 6Z and 18Z, and we label by the
-# end of the time-averaging periods
-START_TIME_MEAN_FLUX = START_TIME - timedelta(hours=6)
-END_TIME_MEAN_FLUX = END_TIME - timedelta(hours=12)
-
-SEL_INDICES = {
-    WIND_TEMP: dict(time=slice(START_TIME, END_TIME, STEP_INTERVAL)),
-    SURFACE: dict(time=slice(START_TIME, END_TIME, STEP_INTERVAL)),
-    SURFACE_REANALYSIS: dict(time=slice(START_TIME, END_TIME, STEP_INTERVAL)),
-    MOISTURE: dict(time=slice(START_TIME, END_TIME, STEP_INTERVAL)),
-    INVARIANT: dict(time="1979-01-01T00:00:00"),
-    SURFACE_ANALYSIS_LATLON: dict(time=slice(START_TIME, END_TIME, STEP_INTERVAL)),
-    MEAN_FLUX: dict(
-        forecast_initial_time=slice(START_TIME_MEAN_FLUX, END_TIME_MEAN_FLUX)
-    ),
 }
 
 VARIABLE_NAMES = {
@@ -137,6 +117,13 @@ VARIABLE_NAMES = {
         "MTPR",
         "MVIMD",
     ],
+    GOOGLE_LATLON: [
+        "specific_humidity",
+        "temperature",
+        "u_component_of_wind",
+        "v_component_of_wind",
+        "geopotential",
+    ],
 }
 
 VALUE_COORD_NAME = {
@@ -155,6 +142,7 @@ SCALAR_COORDS_TO_DROP = [
     "surface",
     "entireAtmosphere",
     "depthBelowLandLayer",
+    "level",
 ]
 
 DESIRED_ATTRS = {
@@ -183,10 +171,11 @@ DESIRED_ATTRS = {
     "sea_ice_fraction": {"long_name": "sea ice fraction"},
     "ocean_fraction": {"long_name": "ocean fraction"},
     "PRESsfc": {"long_name": "Surface pressure", "units": "Pa"},
-    "T2m": {"long_name": "2m air temperature", "units": "K"},
+    "TMP2m": {"long_name": "2m air temperature", "units": "K"},
+    "Q2m": {"long_name": "2m specific humidity", "units": "kg/kg"},
     "DPT2m": {"long_name": "2m dewpoint temperature", "units": "K"},
-    "U10m": {"long_name": "10m U component of wind", "units": "m/s"},
-    "V10m": {"long_name": "10m V component of wind", "units": "m/s"},
+    "UGRD10m": {"long_name": "10m U component of wind", "units": "m/s"},
+    "VGRD10m": {"long_name": "10m V component of wind", "units": "m/s"},
 }
 
 # The input data is on the L137 ECMWF grid. See
@@ -198,22 +187,41 @@ N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
 OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
 assert OUTPUT_LAYER_INDICES[-1] == N_INPUT_LAYERS
 N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
+OUTPUT_PRESSURE_LEVELS = [850, 500, 200]  # additionally save these pressure levels
 
 RENAME_Q = {f"q_{i}": f"specific_total_water_{i}" for i in range(N_OUTPUT_LAYERS)}
 RENAME_T = {f"t_{i}": f"air_temperature_{i}" for i in range(N_OUTPUT_LAYERS)}
 RENAME_U = {f"u_{i}": f"eastward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
 RENAME_V = {f"v_{i}": f"northward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
+RENAME_Q_PRES = {f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVELS}
+RENAME_T_PRES = {f"temperature_{p}": f"TMP{p}" for p in OUTPUT_PRESSURE_LEVELS}
+RENAME_U_PRES = {f"u_component_of_wind_{p}": f"UGRD{p}" for p in OUTPUT_PRESSURE_LEVELS}
+RENAME_V_PRES = {f"v_component_of_wind_{p}": f"VGRD{p}" for p in OUTPUT_PRESSURE_LEVELS}
+RENAME_Z_PRES = {f"geopotential_{p}": f"h{p}" for p in OUTPUT_PRESSURE_LEVELS}
 RENAME_ETC = {
     "skt": "surface_temperature",
-    "t2m": "T2m",
-    "u10": "U10m",
-    "v10": "V10m",
+    "t2m": "TMP2m",
+    "u10": "UGRD10m",
+    "v10": "VGRD10m",
     "d2m": "DPT2m",
 }
-RENAME = {**RENAME_Q, **RENAME_T, **RENAME_U, **RENAME_V, **RENAME_ETC}
+RENAME_NATIVE = {
+    **RENAME_Q,
+    **RENAME_T,
+    **RENAME_U,
+    **RENAME_V,
+    **RENAME_ETC,
+}
+RENAME_PRESSURE_LEVEL = {
+    **RENAME_Q_PRES,
+    **RENAME_T_PRES,
+    **RENAME_U_PRES,
+    **RENAME_V_PRES,
+    **RENAME_Z_PRES,
+}
 
 
-def _open_zarr(key):
+def _open_zarr(key, sel_indices):
     ds = xr.open_zarr(URLS[key], chunks=None)
     ds = ds[VARIABLE_NAMES[key]]
     if key in VALUE_COORD_NAME:
@@ -221,15 +229,15 @@ def _open_zarr(key):
     # xarray does not raise an error if selecting beyond bounds of time coord
     # so we manually check here that all desired data is available.
     if key != INVARIANT:
-        dims = list(SEL_INDICES[key])
+        dims = list(sel_indices[key])
         for dim in dims:
-            desired_start = SEL_INDICES[key][dim].start
-            desired_stop = SEL_INDICES[key][dim].stop
+            desired_start = sel_indices[key][dim].start
+            desired_stop = sel_indices[key][dim].stop
             ds_start = pd.Timestamp(ds[dim].min().values.item())
             ds_stop = pd.Timestamp(ds[dim].max().values.item())
             assert desired_start >= ds_start, f"{key} dataset {dim} start out of bounds"
             assert desired_stop <= ds_stop, f"{key} dataset {dim} stop out of bounds"
-    ds = ds.sel(**SEL_INDICES[key])
+    ds = ds.sel(**sel_indices[key])
     if key == INVARIANT:
         ds = ds.drop_vars("time")
     if key in URLS_WITH_REQUIRED_ATTRS:
@@ -241,29 +249,28 @@ def _open_zarr(key):
     return ds
 
 
-def open_native_datasets() -> xr.Dataset:
+def open_native_datasets(indices) -> xr.Dataset:
     native_dataset_keys = [WIND_TEMP, SURFACE, SURFACE_REANALYSIS, MOISTURE]
-    datasets = [_open_zarr(k) for k in native_dataset_keys]
+    datasets = [_open_zarr(k, indices) for k in native_dataset_keys]
     merged = xr.merge(datasets, compat="override", join="override")
     merged = grid_attribute_fix(merged, VARIABLE_NAMES[SURFACE_REANALYSIS], "q")
     return merged
 
 
-def open_meanflux_dataset() -> xr.Dataset:
-    ds = _open_zarr(MEAN_FLUX)
+def open_google_latlon_dataset(indices) -> xr.Dataset:
+    ds = _open_zarr(GOOGLE_LATLON, indices)
     return ds
 
 
-def open_quarter_degree_datasets() -> xr.Dataset:
-    sfc = _open_zarr(SURFACE_ANALYSIS_LATLON)
-    invariant = _open_zarr(INVARIANT)
+def open_meanflux_dataset(indices) -> xr.Dataset:
+    ds = _open_zarr(MEAN_FLUX, indices)
+    return ds
+
+
+def open_quarter_degree_datasets(indices) -> xr.Dataset:
+    sfc = _open_zarr(SURFACE_ANALYSIS_LATLON, indices)
+    invariant = _open_zarr(INVARIANT, indices)
     return sfc, invariant
-
-
-def rename_to_final_vars(key, ds):
-    ds = ds.rename(RENAME)
-    new_key = key.replace(vars=frozenset(ds.keys()))
-    return new_key, ds
 
 
 def _to_dataset(fs: metview.Fieldset) -> xr.Dataset:
@@ -280,6 +287,68 @@ def _delete_fs(fs: metview.Fieldset):
     if os.path.exists(path):
         os.remove(path)
     del fs
+
+
+def _saturation_vapor_pressure(t: xr.DataArray) -> xr.DataArray:
+    """https://metview.readthedocs.io/en/latest/api/functions/saturation_vapour_pressure.html"""  # noqa: E501
+    a1 = 611.21
+    a2 = 273.16
+    a3 = 17.502
+    a4 = 32.19
+    return a1 * np.exp(a3 * (t - a2) / (t - a4))
+
+
+def _specific_humidity_from_dewpoint(
+    dewpoint: xr.DataArray, pressure: xr.DataArray
+) -> xr.DataArray:
+    """https://metview.readthedocs.io/en/latest/api/functions/specific_humidity_from_dewpoint.html
+    https://metview.readthedocs.io/en/latest/api/functions/vapour_pressure.html"""
+    ewsat = _saturation_vapor_pressure(dewpoint)
+    eps = 0.621981
+    result = eps * ewsat / (pressure - (1 - eps) * ewsat)
+    result.attrs["units"] = "kg / kg"
+    result.attrs["long_name"] = "Specific humidity"
+    return result
+
+
+def _to_geopotential_height(geopotential: xr.DataArray) -> xr.DataArray:
+    output = geopotential / GRAVITY
+    output.attrs["long_name"] = "Geopotential height"
+    output.attrs["units"] = "m"
+    output.attrs["standard_name"] = "geopotential_height"
+    return output
+
+
+def _process_pressure_level_data(ds: xr.Dataset) -> xr.Dataset:
+    """Select pressure levels from 0.25° pressure level dataset."""
+    # convert to 2D fields at desired pressure levels
+    select_levels = xr.Dataset()
+    for pressure in OUTPUT_PRESSURE_LEVELS:
+        for name in ds.data_vars:
+            logging.info(f"Selecting {name} at {pressure} hPa")
+            out_name = f"{name}_{pressure}"
+            select_levels[out_name] = ds[name].sel(level=pressure)
+            if name == "geopotential":
+                select_levels[out_name] = _to_geopotential_height(
+                    select_levels[out_name]
+                )
+            select_levels[out_name].attrs["long_name"] += f" at {pressure} hPa"
+
+    regridded = _regrid_quarter_degree(select_levels)
+    regridded = regridded.rename(RENAME_PRESSURE_LEVEL)
+    # coordinates will be written by template, so drop here to avoid possible conflicts
+    regridded = regridded.drop_vars(["latitude", "longitude"])
+
+    return regridded
+
+
+def process_pressure_level_data(key, ds):
+    output = _process_pressure_level_data(ds)
+    new_key = key.replace(
+        offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
+        vars=frozenset(output.keys()),
+    )
+    return new_key, output
 
 
 def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
@@ -332,6 +401,7 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
             output[out_name] = integrated
             if short_name == "q":
                 output[out_name].attrs["long_name"] = "Specific total water"
+                output[out_name].attrs["standard_name"] = "specific_total_water"
             output[out_name].attrs["long_name"] += f" level-{output_index}"
     del thicknesses
     del variable
@@ -342,17 +412,26 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
     )
 
     logging.info("Regridding additional 2D fields and inserting into output dataset")
-    names = ["skt", "u10", "v10", "t2m", "d2m"]
-    grib_names = {"skt": "skt", "u10": "u", "v10": "v", "t2m": "t", "d2m": "dpt"}
-    fieldset_2d = metview.dataset_to_fieldset(ds[names].load())
+    # keys are names in zarr dataset, values are what metview change the names to
+    grib_names = {
+        "skt": "skt",
+        "u10": "u",
+        "v10": "v",
+        "t2m": "t",
+        "d2m": "dpt",
+    }
+    fieldset_2d = metview.dataset_to_fieldset(ds[list(grib_names)].load())
     fieldset_2d_gg = metview.regrid(data=fieldset_2d, grid=OUTPUT_GRID)
     dataset_2d_gg = _to_dataset(fieldset_2d_gg)
-    for name in names:
+    for name in grib_names:
         output[name] = dataset_2d_gg[grib_names[name]]
+
+    # insert 2m specific humidity
+    output["Q2m"] = _specific_humidity_from_dewpoint(output["d2m"], output["PRESsfc"])
 
     output = _adjust_latlon(output)
 
-    output = output.rename(RENAME)
+    output = output.rename(RENAME_NATIVE)
     for name, attrs in DESIRED_ATTRS.items():
         if name in output:
             output[name] = output[name].assign_attrs(**attrs)
@@ -458,16 +537,17 @@ def _regrid_quarter_degree(ds):
     return regridded
 
 
-def _adjust_latlon(ds, shift=LONGITUDE_SHIFT):
-    """Linearly interpolate to new shifted longitude coordinate and flip latitude."""
-    desired_lon = ds.longitude.values + shift
+def _adjust_latlon(ds):
+    """Linearly interpolate to centerpoint between longitudes and flip latitude."""
+    longitude_shift = 0.5 * (ds.longitude.values[1] - ds.longitude.values[0])
     # add cyclic point to avoid extrapolation
     cyclic_point = ds.isel(longitude=0)
     cyclic_point["longitude"] = 360 + cyclic_point.longitude
     ds = xr.concat([ds, cyclic_point], dim="longitude")
-    output = ds.interp(longitude=desired_lon, method="linear", assume_sorted=True)
-    # scipy interp converts to float64, so go back to single precision
-    output = output.astype(np.float32, casting="same_kind", copy=False)
+    output = ds.rolling(dim={"longitude": 2}).mean()
+    # outputs of rolling mean are labeled by right side of window so first value is NaN
+    output = output.isel(longitude=slice(1, None))
+    output["longitude"] = output.longitude - longitude_shift
     output = output.reindex(latitude=output.latitude[::-1])
     return output
 
@@ -577,6 +657,7 @@ def _make_template(
     ds_meanflux,
     ds_quarter_degree_sfc,
     ds_quarter_degree_invariant,
+    ds_google_latlon,
     ds_akbk,
     output_chunks,
     reuse_template,
@@ -602,12 +683,16 @@ def _make_template(
             ds_quarter_degree_sfc.isel(time=0), ds_invariant_regridded
         )
         ds_native_regridded = _process_native_data(ds_native.isel(time=0))
+        ds_google_latlon_regridded = _process_pressure_level_data(
+            ds_google_latlon.isel(time=0)
+        )
         ds_regridded = xr.merge(
             [
                 ds_mean_flux_regridded,
                 ds_sfc_an_regridded,
                 ds_native_regridded,
                 ds_invariant_regridded,
+                ds_google_latlon_regridded,
                 ds_akbk,
             ],
             compat="override",
@@ -637,6 +722,8 @@ def _get_parser():
     parser.add_argument(
         "output_path", type=str, help="Output path for the processed zarr dataset"
     )
+    parser.add_argument("start_time", type=str, help="Desired start of output dataset")
+    parser.add_argument("end_time", type=str, help="Desired end of output dataset")
     parser.add_argument(
         "output_time_chunksize",
         type=int,
@@ -667,6 +754,34 @@ def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
 
+    # desired start/end of output dataset, inclusive
+    start_time = datetime.datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%S")
+    end_time = datetime.datetime.strptime(args.end_time, "%Y-%m-%dT%H:%M:%S")
+
+    # to properly align mean flux with the output time, these requirements are necessary
+    assert start_time.hour == 0 or start_time.hour == 12
+    assert end_time.hour == 6 or end_time.hour == 18
+
+    # mean flux forecast initial times are at 6Z and 18Z, and we label by the
+    # end of the time-averaging periods
+    start_time_mean_flux = start_time - datetime.timedelta(hours=6)
+    end_time_mean_flux = end_time - datetime.timedelta(hours=12)
+
+    regular_time_slice = {"time": slice(start_time, end_time, TIME_STEP)}
+    forecast_time_slice = {
+        "forecast_initial_time": slice(start_time_mean_flux, end_time_mean_flux)
+    }
+    sel_indices = {
+        WIND_TEMP: regular_time_slice,
+        SURFACE: regular_time_slice,
+        SURFACE_REANALYSIS: regular_time_slice,
+        MOISTURE: regular_time_slice,
+        INVARIANT: dict(time="1979-01-01T00:00:00"),
+        SURFACE_ANALYSIS_LATLON: regular_time_slice,
+        MEAN_FLUX: forecast_time_slice,
+        GOOGLE_LATLON: regular_time_slice,
+    }
+
     msg = (
         "ncar_process_time_chunksize must be a multiple of 2, "
         f"got {args.ncar_process_time_chunksize}"
@@ -681,10 +796,12 @@ def main():
     ncar_process_chunks = {"time": args.ncar_process_time_chunksize}
 
     logging.info("Opening datasets")
-    ds_native = open_native_datasets()
-    ds_meanflux = open_meanflux_dataset()
-    ds_quarter_degree_sfc, ds_quarter_degree_inv = open_quarter_degree_datasets()
-
+    ds_native = open_native_datasets(sel_indices)
+    ds_meanflux = open_meanflux_dataset(sel_indices)
+    ds_quarter_degree_sfc, ds_quarter_degree_inv = open_quarter_degree_datasets(
+        sel_indices
+    )
+    ds_google_latlon = open_google_latlon_dataset(sel_indices)
     logging.info("Getting vertical coordinate")
     ds_akbk = _get_vertical_coordinate(ds_native, "t")
 
@@ -694,6 +811,7 @@ def main():
         ds_meanflux,
         ds_quarter_degree_sfc,
         ds_quarter_degree_inv,
+        ds_google_latlon,
         ds_akbk,
         output_chunks,
         args.reuse_template,
@@ -722,6 +840,16 @@ def main():
             )
             | "qd_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
             | "qd_to_zarr"
+            >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
+        )
+
+        (
+            p
+            | "pl_DatasetToChunks"
+            >> xbeam.DatasetToChunks(ds_google_latlon, chunks=ncar_process_chunks)
+            | beam.MapTuple(process_pressure_level_data)
+            | "pl_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
+            | "pl_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
         )
 
