@@ -39,13 +39,23 @@ class OneStepAggregator:
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        loss_scaling: Optional[TensorMapping] = None,
     ):
+        """
+        Args:
+            area_weights: Weights for each horizontal grid coordinate
+            sigma_coordinates: Coordinates for defining pressure levels.
+            metadata: Metadata for each variable.
+            loss_scaling: Dictionary of variables and their scaling factors
+                used in loss computation.
+        """
         self._aggregators: Mapping[str, _Aggregator] = {
             "snapshot": SnapshotAggregator(metadata),
             "mean": MeanAggregator(area_weights),
             "derived": DerivedMetricsAggregator(area_weights, sigma_coordinates),
             "mean_map": MapAggregator(metadata),
         }
+        self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()
     def record_batch(
@@ -82,4 +92,30 @@ class OneStepAggregator:
         for agg_label in self._aggregators:
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
+        logs.update(
+            self._get_loss_scaled_mse_components(
+                validation_metrics=logs,
+                label=label,
+            )
+        )
         return logs
+
+    def _get_loss_scaled_mse_components(
+        self,
+        validation_metrics: Mapping[str, float],
+        label: str,
+    ):
+        scaled_squared_errors = {}
+
+        for var in self._loss_scaling:
+            rmse_key = f"{label}/mean/weighted_rmse/{var}"
+            if rmse_key in validation_metrics:
+                scaled_squared_errors[var] = (
+                    validation_metrics[rmse_key] / self._loss_scaling[var].item()
+                ) ** 2
+        scaled_squared_errors_sum = sum(scaled_squared_errors.values())
+        fractional_contribs = {
+            f"{label}/mean/mse_fractional_components/{k}": v / scaled_squared_errors_sum
+            for k, v in scaled_squared_errors.items()
+        }
+        return fractional_contribs
