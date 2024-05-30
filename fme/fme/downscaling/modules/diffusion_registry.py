@@ -1,17 +1,42 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional, Tuple, Type
+from typing import Any, List, Mapping, Optional, Protocol, Tuple, Type
 
 import dacite
 import torch
 
 from fme.downscaling.modules.preconditioners import EDMPrecond
-from fme.downscaling.modules.registry import (
-    ModuleConfig,
-    PreBuiltBuilder,
-    compute_unet_padding_size,
-)
+from fme.downscaling.modules.registry import compute_unet_padding_size
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.unets import SongUNet
+
+
+class ModuleConfig(Protocol):
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        coarse_shape: Tuple[int, int],
+        downscale_factor: int,
+        fine_topography: Optional[torch.Tensor],
+        sigma_data: float,
+    ) -> torch.nn.Module:
+        ...
+
+
+@dataclasses.dataclass
+class PreBuiltBuilder:
+    module: torch.nn.Module
+
+    def build(
+        self,
+        n_in_channels: int,
+        n_out_channels: int,
+        coarse_shape: Tuple[int, int],
+        downscale_factor: int,
+        fine_topography: Optional[torch.Tensor],
+        sigma_data: float,
+    ) -> torch.nn.Module:
+        return self.module
 
 
 @dataclasses.dataclass
@@ -31,11 +56,6 @@ class UNetDiffusionSong:
     decoder_type: str = "standard"
     resample_filter: List[int] = dataclasses.field(default_factory=lambda: [1, 1])
 
-    # diffusion parameters
-    sigma_min: float = 0.0
-    sigma_max: float = float("inf")
-    sigma_data: float = 0.5
-
     def build(
         self,
         n_in_channels: int,
@@ -43,6 +63,7 @@ class UNetDiffusionSong:
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         fine_topography: Optional[torch.Tensor],
+        sigma_data: float,
     ):
         divisor = 2 ** (len(self.channel_mult) - 1)
         target_height, target_width = [
@@ -75,9 +96,9 @@ class UNetDiffusionSong:
         return UNetDiffusionModule(
             EDMPrecond(
                 unet,
-                sigma_min=self.sigma_min,
-                sigma_max=self.sigma_max,
-                sigma_data=self.sigma_data,
+                sigma_min=None,  # type: ignore
+                sigma_max=None,  # type: ignore
+                sigma_data=sigma_data,
             ),
             coarse_shape,
             (target_height, target_width),
@@ -98,6 +119,7 @@ class DiffusionModuleRegistrySelector:
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         fine_topography: Optional[torch.Tensor],
+        sigma_data: float,
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -109,6 +131,7 @@ class DiffusionModuleRegistrySelector:
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             fine_topography=fine_topography,
+            sigma_data=sigma_data,
         )
 
 

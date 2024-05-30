@@ -209,9 +209,9 @@ def test_diffusion_model_train():
         out_names=["x"],
         normalization=normalizer,
         use_fine_topography=False,
-    ).build(
-        coarse_shape, downscale_factor, area_weights, fine_topography, sigma_data=1.0
-    )
+        p_mean=-1.0,
+        p_std=1.0,
+    ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
 
     batch_size = 2
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(

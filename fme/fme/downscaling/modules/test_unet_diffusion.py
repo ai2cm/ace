@@ -17,6 +17,7 @@ def test_UNetDiffusionModule_forward_pass():
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
         fine_topography=None,
+        sigma_data=1.0,
     )
 
     batch_size = 1
