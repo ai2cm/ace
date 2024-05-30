@@ -15,8 +15,6 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.modules.test_unet_diffusion import AddNoiseModule
-from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -202,26 +200,18 @@ def test_diffusion_model_train():
     )
     fine_topography = torch.zeros(*fine_shape)
 
-    n_channels = 1
     model = DiffusionModelConfig(
-        DiffusionModuleRegistrySelector(
-            "prebuilt",
-            {
-                "module": UNetDiffusionModule(
-                    AddNoiseModule(n_channels),
-                    coarse_shape,
-                    (16, 32),
-                    downscale_factor,
-                    None,
-                )
-            },
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
         ),
-        LossConfig(type="MSE"),
-        ["x"],
-        ["x"],
-        normalizer,
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
         use_fine_topography=False,
-    ).build(coarse_shape, downscale_factor, area_weights, fine_topography, 1.0)
+    ).build(
+        coarse_shape, downscale_factor, area_weights, fine_topography, sigma_data=1.0
+    )
 
     batch_size = 2
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
