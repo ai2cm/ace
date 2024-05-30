@@ -67,7 +67,6 @@ class TimeMeanAggregator:
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        log_individual_channels: bool = True,
     ):
         """
         Args:
@@ -76,11 +75,9 @@ class TimeMeanAggregator:
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
-            log_individual_channels: Whether to log individual channels.
         """
         self._area_weights = area_weights
         self._target = target
-        self._log_individual_channels = log_individual_channels
         self._dist = Distributed.get_instance()
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
@@ -191,23 +188,24 @@ class TimeMeanAggregator:
             )
             plt.close("all")
             rmse_all_channels[pred.name] = pred.rmse(weights=self._area_weights)
-            if self._log_individual_channels:
+            logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
+            if self._target == "denorm":
                 logs.update(
                     {
                         f"{bias_map_key}/{pred.name}": bias_image,
                         f"{gen_map_key}/{pred.name}": prediction_image,
-                        f"rmse/{pred.name}": rmse_all_channels[pred.name],
                         f"bias/{pred.name}": pred.weighted_mean_bias(
                             weights=self._area_weights
                         ),
                     }
                 )
-        logs.update(
-            {
-                f"rmse/channel_mean": sum(rmse_all_channels.values())
-                / len(rmse_all_channels),
-            }
-        )
+        if self._target == "norm":
+            logs.update(
+                {
+                    f"rmse/channel_mean": sum(rmse_all_channels.values())
+                    / len(rmse_all_channels),
+                }
+            )
 
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
