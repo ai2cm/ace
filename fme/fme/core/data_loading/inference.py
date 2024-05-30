@@ -130,6 +130,10 @@ class InferenceDataset(torch.utils.data.Dataset):
     def timestep(self) -> datetime.timedelta:
         return self._timestep
 
+    @property
+    def n_forward_steps(self) -> int:
+        return self._total_steps
+
     def _validate_n_forward_steps(self):
         max_steps = self._dataset.total_timesteps - self._start_indices[-1] - 1
         if self._total_steps > max_steps:
