@@ -78,6 +78,10 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
     def sigma_coordinates(self) -> SigmaCoordinates:
         ...
 
+    @abc.abstractproperty
+    def is_remote(self) -> bool:
+        ...
+
     @abc.abstractmethod
     def get_sample_by_time_slice(
         self, time_slice: slice

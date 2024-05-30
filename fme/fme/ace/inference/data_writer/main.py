@@ -415,6 +415,9 @@ class NullDataWriter:
     ):
         pass
 
+    def flush(self):
+        pass
+
     def save_initial_condition(
         self,
         ic_data: Dict[str, torch.Tensor],

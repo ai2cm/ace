@@ -78,7 +78,7 @@ class XarrayDataConfig:
     data_path: str
     file_pattern: str = "*.nc"
     n_repeats: int = 1
-    engine: Optional[Literal["netcdf4", "h5netcdf"]] = None
+    engine: Optional[Literal["netcdf4", "h5netcdf", "zarr"]] = None
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
 
@@ -96,6 +96,8 @@ class DataLoaderConfig:
         dataset: Parameters to define the dataset.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
+        prefetch_factor: how many batches a single data worker will attempt to
+            hold in host memory at a given time.
         strict_ensemble: Whether to enforce that the ensemble members have the same
             dimensions and coordinates.
     """
@@ -103,6 +105,7 @@ class DataLoaderConfig:
     dataset: Sequence[XarrayDataConfig]
     batch_size: int
     num_data_workers: int
+    prefetch_factor: Optional[int] = None
     n_samples: Optional[int] = None
     strict_ensemble: bool = True
 

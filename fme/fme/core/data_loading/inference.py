@@ -80,6 +80,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._timestep = dataset.timestep
         self._forward_steps_in_memory = forward_steps_in_memory
         self._total_steps = requirements.n_timesteps - 1
+        self._is_remote = dataset.is_remote
         self.n_samples = config.n_samples  # public attribute
         self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()
@@ -129,6 +130,10 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def timestep(self) -> datetime.timedelta:
         return self._timestep
+
+    @property
+    def is_remote(self) -> bool:
+        return self._is_remote
 
     @property
     def n_forward_steps(self) -> int:

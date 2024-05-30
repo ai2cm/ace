@@ -53,6 +53,7 @@ import time
 from typing import Optional
 
 import dacite
+import dask
 import torch
 import yaml
 
@@ -73,6 +74,9 @@ from fme.core.ema import EMATracker
 from fme.core.optimization import NullOptimization
 from fme.core.stepper import SingleModuleStepper
 from fme.core.wandb import WandB
+
+# dask used on individual workers to load batches
+dask.config.set(scheduler="synchronous")
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -515,4 +519,5 @@ if __name__ == "__main__":
     parser.add_argument("--yaml_config", required=True, type=str)
 
     args = parser.parse_args()
+
     main(yaml_config=args.yaml_config)
