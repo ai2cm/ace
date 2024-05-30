@@ -11,6 +11,7 @@ torch
 torch-harmonics@git+https://github.com/NVIDIA/torch-harmonics.git@8826246cacf6c37b600cdd63fde210815ba238fd
 zarr
 gcsfs
+s3fs
 plotly
 matplotlib
 dask

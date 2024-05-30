@@ -4,7 +4,6 @@ import warnings
 from typing import List, Optional, Sequence, Tuple
 
 import cftime
-import dask
 import numpy as np
 import torch
 import xarray as xr
@@ -63,30 +62,32 @@ def _get_indexers(
     return tuple(indexers)
 
 
-def _load_variable(variable: xr.Variable, time_slice) -> np.ndarray:
-    """Load data from a variable into memory.
-
-    This function leverages xarray's lazy loading to load only the time slice
-    of a variable we need. It assumes that, if present, "time" is the leading
-    dimension of the array.
-    """
-    if "time" in variable.dims:
-        return variable[time_slice, ...].values
-    else:
-        return variable.values
-
-
 def as_broadcasted_tensor(
     variable: xr.Variable,
     dims: Sequence[str],
     shape: Sequence[int],
-    time_slice: slice = SLICE_NONE,
 ) -> torch.tensor:
     """Load data from variable and broadcast to tensor with the given shape."""
-    arr = _load_variable(variable, time_slice)
+    arr = variable.values
     indexers = _get_indexers(variable, dims)
     tensor = torch.as_tensor(arr[indexers])
     return torch.broadcast_to(tensor, shape)
+
+
+def _load_all_variables(
+    ds: xr.Dataset, variables: Sequence[str], time_slice: slice = SLICE_NONE
+) -> xr.Dataset:
+    """Load data from a variables into memory.
+
+    This function leverages xarray's lazy loading to load only the time slice
+    (or chunk[s] for the time slice) of the variables we need.
+
+    Consolidating the dask tasks into a single call of .compute() sped up remote
+    zarr loads by nearly a factor of 2.
+    """
+    if "time" in ds.dims:
+        ds = ds.isel(time=time_slice)
+    return ds[variables].compute()
 
 
 def load_series_data(
@@ -99,13 +100,12 @@ def load_series_data(
     lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
     dims = ("time", lat_dim, lon_dim)
     shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
-    # disable dask threading to avoid warnings
-    with dask.config.set(scheduler="synchronous"):
-        arrays = {}
-        for n in names:
-            variable = ds[n].variable
-            arrays[n] = as_broadcasted_tensor(variable, dims, shape, time_slice)
-        return arrays
+    loaded = _load_all_variables(ds, names, time_slice)
+    arrays = {}
+    for n in names:
+        variable = loaded[n].variable
+        arrays[n] = as_broadcasted_tensor(variable, dims, shape)
+    return arrays
 
 
 def get_lons_and_lats(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
