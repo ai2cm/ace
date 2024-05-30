@@ -386,8 +386,6 @@ class Trainer:
                 aggregator=aggregator,
                 stepper=self.stepper,
                 data=self._inference_data,
-                n_forward_steps=self.config.inference.n_forward_steps,
-                forward_steps_in_memory=self.config.inference.forward_steps_in_memory,
             )
         logs = aggregator.get_logs(label="inference")
         if "inference/mean/series" in logs:

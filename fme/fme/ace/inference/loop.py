@@ -156,12 +156,11 @@ def run_inference(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
     data: GriddedData,
-    n_forward_steps: int,
-    forward_steps_in_memory: int,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
+    n_forward_steps = data.loader.dataset.n_forward_steps
     stitcher = WindowStitcher(n_forward_steps, writer)
 
     with torch.no_grad():
@@ -175,10 +174,10 @@ def run_inference(
 
         timers: Dict[str, float] = defaultdict(float)
         current_time = time.time()
+        i_time = 0
         for i, window_batch_data in enumerate(data.loader):
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
-            i_time = i * forward_steps_in_memory
             forward_steps_in_memory = (
                 list(window_batch_data.data.values())[0].size(1) - 1
             )
@@ -218,6 +217,7 @@ def run_inference(
             _inference_internal_loop(stepped, i_time, aggregator, stitcher, batch_times)
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
+            i_time += forward_steps_in_memory
 
         for name, duration in timers.items():
             logging.info(f"{name} duration: {duration:.2f}s")
@@ -229,12 +229,11 @@ def run_dataset_inference(
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
-    n_forward_steps: int,
-    forward_steps_in_memory: int,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ) -> Dict[str, float]:
     if writer is None:
         writer = NullDataWriter()
+    n_forward_steps = target_data.loader.dataset.n_forward_steps
     stitcher = WindowStitcher(n_forward_steps, writer)
 
     device = get_device()
@@ -247,10 +246,11 @@ def run_dataset_inference(
     # for the next time window.
     timers: Dict[str, float] = defaultdict(float)
     current_time = time.time()
+    i_time = 0
     for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
         timers["data_loading"] += time.time() - current_time
         current_time = time.time()
-        i_time = i * forward_steps_in_memory
+        forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
             f"Inference: starting window spanning {i_time}"
             f" to {i_time + forward_steps_in_memory} steps,"
@@ -289,6 +289,7 @@ def run_dataset_inference(
         )
         timers["writer_and_aggregator"] += time.time() - current_time
         current_time = time.time()
+        i_time += forward_steps_in_memory
     for name, duration in timers.items():
         logging.info(f"{name} duration: {duration:.2f}s")
     return timers
