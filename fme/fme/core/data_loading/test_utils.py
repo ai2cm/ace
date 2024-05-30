@@ -7,7 +7,6 @@ import xarray as xr
 
 from fme.core.data_loading.utils import (
     _get_indexers,
-    _load_variable,
     as_broadcasted_tensor,
     decode_timestep,
     encode_timestep,
@@ -85,16 +84,6 @@ def test__get_indexers(variable_dims, expected):
     assert result == expected
 
 
-@pytest.mark.parametrize("name", [FULL_NAME, CONSTANT_NAME])
-def test__load_variable(name):
-    ds = create_reference_dataset()
-    time_slice = slice(1, 3)
-
-    result = _load_variable(ds[name].variable, time_slice)
-    expected = ds.isel({TIME_DIM: time_slice})[name].values
-    np.testing.assert_equal(result, expected)
-
-
 @pytest.mark.parametrize(
     "variable_dims",
     [
@@ -113,12 +102,10 @@ def test_as_broadcasted_tensor(variable_dims):
     da = xr.DataArray(variable)
 
     dims = ds[FULL_NAME].dims
-    shape = (2, ds.sizes[LAT_DIM], ds.sizes[LON_DIM])
-    time_slice = slice(1, 3)
-    result = as_broadcasted_tensor(variable, dims, shape, time_slice)
+    shape = (ds.sizes[TIME_DIM], ds.sizes[LAT_DIM], ds.sizes[LON_DIM])
+    result = as_broadcasted_tensor(variable, dims, shape)
 
     xarray_broadcast = da.broadcast_like(ds[FULL_NAME]).transpose(*dims)
-    xarray_broadcast = xarray_broadcast.isel({TIME_DIM: time_slice})
 
     # Suppress read-only warning when casting to a tensor; note this is only
     # an issue following an xarray broadcast, which is used for convenience
