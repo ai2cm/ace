@@ -156,7 +156,6 @@ class InferenceAggregator:
                 area_weights,
                 target="norm",
                 metadata=metadata,
-                log_individual_channels=False,
             ),
         }
         if record_step_20:

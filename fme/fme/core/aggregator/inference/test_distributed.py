@@ -49,5 +49,4 @@ def test_time_mean_metrics_call_distributed():
         # different data above.
         assert logs["metrics/rmse/a"] == 0.0
         assert logs["metrics/bias/a"] == 0.0
-        assert logs["metrics/rmse/channel_mean"] == 0.0
         assert mock.reduce_called
