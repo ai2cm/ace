@@ -1,21 +1,6 @@
 import torch
 
-from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
-
-
-class AddNoiseModule(torch.nn.Module):
-    """Simple module for testing."""
-
-    def __init__(self, n_output_channels):
-        super(AddNoiseModule, self).__init__()
-        self.n_output_channels = n_output_channels
-        self.param = torch.nn.Parameter(torch.zeros(1))
-
-    def forward(self, latents, coarse, sigma=None):
-        output = latents + coarse + self.param
-        if sigma:
-            output = output * sigma
-        return output[:, : self.n_output_channels, ...]
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 
 
 def test_UNetDiffusionModule_forward_pass():
@@ -24,8 +9,15 @@ def test_UNetDiffusionModule_forward_pass():
     fine_shape = coarse_shape[0] * downscale_factor, coarse_shape[1] * downscale_factor
     n_channels = 3
 
-    net = AddNoiseModule(n_channels)
-    module = UNetDiffusionModule(net, coarse_shape, (16, 32), downscale_factor, None)
+    module = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song", {"model_channels": 4}
+    ).build(
+        n_in_channels=n_channels,
+        n_out_channels=n_channels,
+        coarse_shape=coarse_shape,
+        downscale_factor=downscale_factor,
+        fine_topography=None,
+    )
 
     batch_size = 1
     coarse = torch.randn(batch_size, n_channels, *coarse_shape)
