@@ -242,8 +242,6 @@ def main(
             normalizer=stepper.normalizer,
             prediction_data=prediction_data,
             target_data=data,
-            n_forward_steps=config.n_forward_steps,
-            forward_steps_in_memory=config.forward_steps_in_memory,
             writer=writer,
         )
     else:
@@ -252,8 +250,6 @@ def main(
             writer=writer,
             stepper=stepper,
             data=data,
-            n_forward_steps=config.n_forward_steps,
-            forward_steps_in_memory=config.forward_steps_in_memory,
         )
 
     final_flush_start_time = time.time()
