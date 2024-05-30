@@ -36,6 +36,7 @@ class LoggingConfig:
     log_to_file: bool = True
     log_to_wandb: bool = True
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level: Union[str, int] = logging.INFO
 
     def __post_init__(self):
         self._dist = Distributed.get_instance()
@@ -45,7 +46,7 @@ class LoggingConfig:
         Configure the global `logging` module based on this LoggingConfig.
         """
         if self.log_to_screen and self._dist.is_root():
-            logging.basicConfig(format=self.log_format, level=logging.INFO)
+            logging.basicConfig(format=self.log_format, level=self.level)
         elif self._dist.is_root():
             logging.basicConfig(level=logging.WARNING)
         else:  # we are not root
@@ -59,7 +60,7 @@ class LoggingConfig:
                 )
             log_path = os.path.join(experiment_dir, log_filename)
             fh = logging.FileHandler(log_path)
-            fh.setLevel(logging.INFO)
+            fh.setLevel(self.level)
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
