@@ -204,3 +204,13 @@ e3smv2_1deg_climSST_dataset:
 	--time-invariant-input-dir /global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant \
 	--zarr $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr \
 	--output-dir $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr
+
+.PHONY: era5_1deg_stats_beaker_dataset
+era5_1deg_stats_beaker_dataset:
+	./generate_beaker_stats_dataset_fv3gfs.sh \
+	--input-url gs://vcm-ml-intermediate/2024-05-29-era5-1deg-8layer-1940-2022.zarr \
+	--start-date 1990-01-01 \
+	--end-date 2019-12-31 \
+	--name "era5-1deg-8layer-stats-1990-2019" \
+	--desc "Coefficients for normalization for 8-level vertically resolved 1degree ERA5 dataset, computed from years 1990-2019." \
+	--script-flags '--data-type ERA5'
