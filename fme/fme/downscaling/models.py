@@ -189,15 +189,28 @@ class Model:
 
 @dataclasses.dataclass
 class DiffusionModelConfig:
+    """
+    Configuration class for the DiffusionModel.
+
+    Attributes:
+        module: The module registry selector for the diffusion model.
+        loss:  The loss configuration for the diffusion model.
+        in_names: The input variable names for the diffusion model.
+        out_names: The output variable names for the diffusion model.
+        normalization: The normalization configurations for the diffusion model.
+        use_fine_topography: Indicates whether to use the fine topography.
+        p_mean: The mean of noise distribution used during training.
+        p_std: The std of the noise distribution used during training.
+    """
+
     module: DiffusionModuleRegistrySelector
     loss: LossConfig
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
     use_fine_topography: bool
-    # sampling options
-    p_std: float = 1.2
-    p_mean: float = -1.2
+    p_mean: float
+    p_std: float
 
     def build(
         self,
@@ -205,25 +218,30 @@ class DiffusionModelConfig:
         downscale_factor: int,
         area_weights: FineResCoarseResPair[torch.Tensor],
         fine_topography: torch.Tensor,
-        sigma_data: float,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine, "none")
+        # We always use standard score normalization, so sigma_data is
+        # always 1.0. See below for standard score normalization:
+        # https://en.wikipedia.org/wiki/Standard_score
+        sigma_data = 1.0
+
         module = self.module.build(
             n_in_channels=len(self.in_names),
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             fine_topography=fine_topography if self.use_fine_topography else None,
+            sigma_data=sigma_data,
         )
         return DiffusionModel(
-            self,
-            module,
-            normalizer,
-            loss,
-            coarse_shape,
-            downscale_factor,
-            sigma_data,
+            config=self,
+            module=module,
+            normalizer=normalizer,
+            loss=loss,
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+            sigma_data=sigma_data,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -257,6 +275,7 @@ class DiffusionModel:
     ) -> None:
         """
         Args:
+            config: The configuration for the diffusion model.
             module: The neural network module.
             normalizer: The normalizer for fine and coarse data.
             loss: The loss function.
@@ -264,22 +283,18 @@ class DiffusionModel:
             out_names: The names of the output fine-grain variables.
             coarse_shape: The shape of the coarse-resolution data.
             downscale_factor: The downscale factor.
-            p_std: The standard deviation of the noise used during training.
-            p_mean: The mean of the noise used during training.
-            sigma_data: The standard deviation of the training data.
-            config: The configuration for the diffusion model.
+            sigma_data: The standard deviation of the normalized fine grid
+                variables.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
+        self.sigma_data = sigma_data
         self.module = module.to(get_device())
         self.normalizer = normalizer
         self.loss = loss
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
         self.config = config
-        self.p_std = config.p_std
-        self.p_mean = config.p_mean
-        self.sigma_data = sigma_data
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -312,7 +327,7 @@ class DiffusionModel:
         )
         # This is taken from EDM's original implementation in EDMLoss:
         # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-        sigma = (rnd_normal * self.p_std + self.p_mean).exp()
+        sigma = (rnd_normal * self.config.p_std + self.config.p_mean).exp()
         weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
         noise = torch.randn_like(targets_norm) * sigma
         latents = targets_norm + noise
@@ -339,7 +354,6 @@ class DiffusionModel:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
-            "sigma_data": self.sigma_data,
         }
 
     @classmethod
@@ -355,7 +369,6 @@ class DiffusionModel:
             state["downscale_factor"],
             area_weights,
             fine_topography,
-            state["sigma_data"],
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

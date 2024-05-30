@@ -27,6 +27,7 @@ def test_diffusion_unet_shapes(use_topography):
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             fine_topography=fine_topography if use_topography else None,
+            sigma_data=1.0,
         )
         .to(get_device())
     )
