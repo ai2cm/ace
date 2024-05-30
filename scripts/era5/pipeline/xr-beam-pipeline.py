@@ -48,7 +48,8 @@ def grid_attribute_fix(ds, names_to_fix, reference_name):
 
 TEMPLATE_PATH = "gs://vcm-ml-scratch/oliwm/2024-04-22-era5-regrid-template.zarr"
 
-OUTPUT_GRID = "F90"  # 1° regular Gaussian grid. See https://confluence.ecmwf.int/display/OIFS/4.+OpenIFS%3A+Grid+and+Resolution  # noqa: E501
+GRID_DOCS_URL = "https://confluence.ecmwf.int/display/OIFS/4.3+OpenIFS%3A+Horizontal+Resolution+and+Configurations"  # noqa: E501
+DEFAULT_OUTPUT_GRID = "F90"  # 1° regular Gaussian grid. See GRID_DOCS_URL linked above.
 TIME_STEP = 6  # in same units as resolution of time coordinate of data (i.e. hours)
 GRAVITY = 9.80665  # value used in metview according to https://metview.readthedocs.io/en/latest/metview/macro/functions/fieldset.html#id0 # noqa: E501
 
@@ -319,7 +320,7 @@ def _to_geopotential_height(geopotential: xr.DataArray) -> xr.DataArray:
     return output
 
 
-def _process_pressure_level_data(ds: xr.Dataset) -> xr.Dataset:
+def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     """Select pressure levels from 0.25° pressure level dataset."""
     # convert to 2D fields at desired pressure levels
     select_levels = xr.Dataset()
@@ -334,7 +335,7 @@ def _process_pressure_level_data(ds: xr.Dataset) -> xr.Dataset:
                 )
             select_levels[out_name].attrs["long_name"] += f" at {pressure} hPa"
 
-    regridded = _regrid_quarter_degree(select_levels)
+    regridded = _regrid_quarter_degree(select_levels, output_grid)
     regridded = regridded.rename(RENAME_PRESSURE_LEVEL)
     # coordinates will be written by template, so drop here to avoid possible conflicts
     regridded = regridded.drop_vars(["latitude", "longitude"])
@@ -342,8 +343,8 @@ def _process_pressure_level_data(ds: xr.Dataset) -> xr.Dataset:
     return regridded
 
 
-def process_pressure_level_data(key, ds):
-    output = _process_pressure_level_data(ds)
+def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
+    output = _process_pressure_level_data(ds, output_grid)
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
         vars=frozenset(output.keys()),
@@ -351,7 +352,7 @@ def process_pressure_level_data(key, ds):
     return new_key, output
 
 
-def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
+def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     xr.set_options(keep_attrs=True)
     # singleton time dimension interferes with metview
     ds = ds.squeeze()
@@ -359,7 +360,7 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
     logging.info("Starting calculation of horizontal winds on output grid")
     vort_div_fieldset = metview.dataset_to_fieldset(ds[["d", "vo"]].load())
     winds_spharm = metview.uvwind(data=vort_div_fieldset)
-    winds_gg = metview.regrid(data=winds_spharm, grid=OUTPUT_GRID, truncation="none")
+    winds_gg = metview.regrid(data=winds_spharm, grid=output_grid, truncation="none")
 
     logging.info("Starting calculation of total specific water")
     total_specific_water = ds.q + ds.clwc + ds.ciwc + ds.crwc + ds.cswc
@@ -370,7 +371,7 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
     names = ["total_specific_water", "t", "lnsp"]
     # next step converts total_specific_water to q because of attributes
     fieldset = metview.dataset_to_fieldset(ds[names].load())
-    fieldset_gg = metview.regrid(data=fieldset, grid=OUTPUT_GRID, truncation="none")
+    fieldset_gg = metview.regrid(data=fieldset, grid=output_grid, truncation="none")
 
     logging.info("Merging with wind fieldset")
     fieldset_gg = fieldset_gg.merge(winds_gg)
@@ -421,7 +422,7 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
         "d2m": "dpt",
     }
     fieldset_2d = metview.dataset_to_fieldset(ds[list(grib_names)].load())
-    fieldset_2d_gg = metview.regrid(data=fieldset_2d, grid=OUTPUT_GRID)
+    fieldset_2d_gg = metview.regrid(data=fieldset_2d, grid=output_grid)
     dataset_2d_gg = _to_dataset(fieldset_2d_gg)
     for name in grib_names:
         output[name] = dataset_2d_gg[grib_names[name]]
@@ -457,8 +458,8 @@ def _process_native_data(ds: xr.Dataset) -> xr.Dataset:
     return output
 
 
-def process_native_data(key, ds):
-    output = _process_native_data(ds)
+def process_native_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
+    output = _process_native_data(ds, output_grid)
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
         vars=frozenset(output.keys()),
@@ -498,7 +499,7 @@ def split_and_average_over_forecast_hour(key, ds):
     return new_key, output_ds
 
 
-def _regrid_quarter_degree(ds):
+def _regrid_quarter_degree(ds, output_grid):
     for name, attrs in DESIRED_ATTRS.items():
         if name in ds:
             ds[name] = ds[name].assign_attrs(**attrs)
@@ -515,7 +516,7 @@ def _regrid_quarter_degree(ds):
     for name in ds.data_vars:
         logging.info(f"Regridding {name} to output grid")
         fieldset = metview.dataset_to_fieldset(ds[[name]].load())
-        fieldset_regridded = metview.regrid(data=fieldset, grid=OUTPUT_GRID)
+        fieldset_regridded = metview.regrid(data=fieldset, grid=output_grid)
         # for some reason, metview always sets the name to "t" when regridding
         # this may have something to do with the attrs of the input dataset
         regridded[name] = _to_dataarray(fieldset_regridded, "t")
@@ -552,7 +553,7 @@ def _adjust_latlon(ds):
     return output
 
 
-def _process_quarter_degree_data_mean_flux(ds):
+def _process_quarter_degree_data_mean_flux(ds, output_grid):
     logging.info("Processing 'mean-flux' quarter degree data")
     xr.set_options(keep_attrs=True)
     output = xr.Dataset()
@@ -567,7 +568,7 @@ def _process_quarter_degree_data_mean_flux(ds):
     output["LHTFLsfc"] = -ds.MSLHF  # opposite sign convention as FV3
     output["PRATEsfc"] = ds.MTPR
     output["tendency_of_total_water_path_due_to_advection"] = -ds.MVIMD
-    regridded = _regrid_quarter_degree(output)
+    regridded = _regrid_quarter_degree(output, output_grid)
 
     # coordinates will be written by template, so drop here to avoid possible conflicts
     regridded = regridded.drop_vars(["latitude", "longitude"])
@@ -575,7 +576,7 @@ def _process_quarter_degree_data_mean_flux(ds):
     return regridded
 
 
-def _process_quarter_degree_data_sfc_an(ds, invariant_ds):
+def _process_quarter_degree_data_sfc_an(ds, invariant_ds, output_grid):
     logging.info("Processing 'surface analysis' quarter degree data")
     xr.set_options(keep_attrs=True)
     output = xr.Dataset()
@@ -584,7 +585,7 @@ def _process_quarter_degree_data_sfc_an(ds, invariant_ds):
     output["soil_moisture_1"] = ds.SWVL2
     output["soil_moisture_2"] = ds.SWVL3
     output["soil_moisture_3"] = ds.SWVL4
-    regridded = _regrid_quarter_degree(output)
+    regridded = _regrid_quarter_degree(output, output_grid)
 
     # coordinates will be written by template, so drop here to avoid possible conflicts
     regridded = regridded.drop_vars(["latitude", "longitude"])
@@ -608,26 +609,28 @@ def _process_quarter_degree_data_sfc_an(ds, invariant_ds):
     return regridded
 
 
-def _process_quarter_degree_data_invariant(ds):
+def _process_quarter_degree_data_invariant(ds, output_grid):
     logging.info("Renaming and fixing sign conventions for lat-lon invariant data")
 
     output = xr.Dataset()
     output["HGTsfc"] = ds.Z / GRAVITY
     output["land_fraction"] = ds.LSM
 
-    regridded = _regrid_quarter_degree(output)
+    regridded = _regrid_quarter_degree(output, output_grid)
 
     return regridded
 
 
-def process_quarter_degree_data_mean_flux(key, ds):
-    output_ds = _process_quarter_degree_data_mean_flux(ds)
+def process_quarter_degree_data_mean_flux(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
+    output_ds = _process_quarter_degree_data_mean_flux(ds, output_grid)
     new_key = key.replace(vars=frozenset(output_ds.keys()))
     return new_key, output_ds
 
 
-def process_quarter_degree_data_sfc_an(key, ds, invariant_ds=None):
-    output_ds = _process_quarter_degree_data_sfc_an(ds, invariant_ds)
+def process_quarter_degree_data_sfc_an(
+    key, ds, invariant_ds=None, output_grid=DEFAULT_OUTPUT_GRID
+):
+    output_ds = _process_quarter_degree_data_sfc_an(ds, invariant_ds, output_grid)
     new_key = key.replace(vars=frozenset(output_ds.keys()))
     return new_key, output_ds
 
@@ -661,6 +664,7 @@ def _make_template(
     ds_akbk,
     output_chunks,
     reuse_template,
+    output_grid,
 ):
     """Here we (mostly) lazily process the data to make a reference zarr store
     for the output. This function mirrors what the pipeline does."""
@@ -675,16 +679,18 @@ def _make_template(
         ds_reshaped = _split_and_average_over_forecast_hour(
             ds_meanflux.isel(forecast_initial_time=0), compat="override"
         )
-        ds_mean_flux_regridded = _process_quarter_degree_data_mean_flux(ds_reshaped)
+        ds_mean_flux_regridded = _process_quarter_degree_data_mean_flux(
+            ds_reshaped, output_grid
+        )
         ds_invariant_regridded = _process_quarter_degree_data_invariant(
-            ds_quarter_degree_invariant
+            ds_quarter_degree_invariant, output_grid
         )
         ds_sfc_an_regridded = _process_quarter_degree_data_sfc_an(
-            ds_quarter_degree_sfc.isel(time=0), ds_invariant_regridded
+            ds_quarter_degree_sfc.isel(time=0), ds_invariant_regridded, output_grid
         )
-        ds_native_regridded = _process_native_data(ds_native.isel(time=0))
+        ds_native_regridded = _process_native_data(ds_native.isel(time=0), output_grid)
         ds_google_latlon_regridded = _process_pressure_level_data(
-            ds_google_latlon.isel(time=0)
+            ds_google_latlon.isel(time=0), output_grid
         )
         ds_regridded = xr.merge(
             [
@@ -725,8 +731,18 @@ def _get_parser():
     parser.add_argument("start_time", type=str, help="Desired start of output dataset")
     parser.add_argument("end_time", type=str, help="Desired end of output dataset")
     parser.add_argument(
-        "output_time_chunksize",
+        "--output_grid",
+        type=str,
+        default="F90",
+        help=(
+            "Output grid specification according to ECMWF nomenclature. E.g. 'F90' for "
+            f"1° Gaussian Grid. See more information at {GRID_DOCS_URL}"
+        ),
+    )
+    parser.add_argument(
+        "--output_time_chunksize",
         type=int,
+        default=50,
         help="Number of times per output chunk.",
     )
     parser.add_argument(
@@ -815,6 +831,7 @@ def main():
         ds_akbk,
         output_chunks,
         args.reuse_template,
+        args.output_grid,
     )
 
     logging.info("Template finished generating. Starting pipeline.")
@@ -824,7 +841,9 @@ def main():
             | xbeam.DatasetToChunks(ds_meanflux, chunks={"forecast_initial_time": 1})
             | beam.MapTuple(split_and_average_over_forecast_hour)
             | xbeam.ConsolidateChunks(ncar_process_chunks)
-            | beam.MapTuple(process_quarter_degree_data_mean_flux)
+            | beam.MapTuple(
+                process_quarter_degree_data_mean_flux, output_grid=args.output_grid
+            )
             | "mean_flux_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
             | "mean_flux_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
@@ -837,6 +856,7 @@ def main():
             | beam.MapTuple(
                 process_quarter_degree_data_sfc_an,
                 invariant_ds=ds_pt25deg_inv_regridded,
+                output_grid=args.output_grid,
             )
             | "qd_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
             | "qd_to_zarr"
@@ -857,7 +877,7 @@ def main():
             p
             | "native_DatasetToChunks"
             >> xbeam.DatasetToChunks(ds_native, chunks={"time": 1})
-            | beam.MapTuple(process_native_data)
+            | beam.MapTuple(process_native_data, output_grid=args.output_grid)
             | "native_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
             | "native_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
