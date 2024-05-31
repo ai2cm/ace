@@ -84,7 +84,11 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
     bk_list = [bk_mapping[k] for k in sorted(bk_mapping.keys())]
 
     if len(ak_list) == 0 or len(bk_list) == 0:
-        raise ValueError("Dataset does not contain ak and bk sigma coordinates.")
+        logger.warning("Dataset does not contain ak and bk coordinates.")
+        return SigmaCoordinates(
+            ak=torch.tensor([], device=fme.get_device()),
+            bk=torch.tensor([], device=fme.get_device()),
+        )
 
     if len(ak_list) != len(bk_list):
         raise ValueError(
