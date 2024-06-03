@@ -5,6 +5,7 @@ import dacite
 import torch
 
 from fme.core.device import get_device
+from fme.core.distributed import Distributed
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
@@ -64,12 +65,15 @@ class DownscalingModelConfig:
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine, reduction="mean")
 
-        module = self.module.build(
-            n_in_channels=len(self.in_names),
-            n_out_channels=len(self.out_names),
-            coarse_shape=coarse_shape,
-            downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
+        dist = Distributed.get_instance()
+        module = dist.wrap_module(
+            self.module.build(
+                n_in_channels=len(self.in_names),
+                n_out_channels=len(self.out_names),
+                coarse_shape=coarse_shape,
+                downscale_factor=downscale_factor,
+                fine_topography=fine_topography if self.use_fine_topography else None,
+            )
         )
         return Model(
             module,
@@ -237,13 +241,16 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
-        module = self.module.build(
-            n_in_channels=len(self.in_names),
-            n_out_channels=len(self.out_names),
-            coarse_shape=coarse_shape,
-            downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
-            sigma_data=sigma_data,
+        dist = Distributed.get_instance()
+        module = dist.wrap_module(
+            self.module.build(
+                n_in_channels=len(self.in_names),
+                n_out_channels=len(self.out_names),
+                coarse_shape=coarse_shape,
+                downscale_factor=downscale_factor,
+                fine_topography=fine_topography if self.use_fine_topography else None,
+                sigma_data=sigma_data,
+            )
         )
         return DiffusionModel(
             config=self,
