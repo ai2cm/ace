@@ -87,6 +87,12 @@ def main():
                 "2024-05-09-C384-reference-ensemble-downscaling"
                 f"/{outpaths[resolution]}/{ic}.zarr"
             )
+
+            if resolution == "coarse":
+                ds = ds.rename(
+                    {"grid_yt_coarse": "grid_yt", "grid_xt_coarse": "grid_xt"}
+                )
+
             ds = ds.chunk({"time": 1})
             ds.to_zarr(store=outpath, mode="w")
 
