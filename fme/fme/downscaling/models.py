@@ -14,6 +14,7 @@ from fme.downscaling.metrics_and_maths import filter_tensor_mapping
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.samplers import edm_sampler
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -190,7 +191,9 @@ class Model:
 @dataclasses.dataclass
 class DiffusionModelConfig:
     """
-    Configuration class for the DiffusionModel.
+    This class implements or wraps the algorithms described in `EDM`_.
+
+    .. _EDM: https://arxiv.org/abs/2206.00364
 
     Attributes:
         module: The module registry selector for the diffusion model.
@@ -201,6 +204,10 @@ class DiffusionModelConfig:
         use_fine_topography: Indicates whether to use the fine topography.
         p_mean: The mean of noise distribution used during training.
         p_std: The std of the noise distribution used during training.
+        sigma_min: Min noise level for generation.
+        sigma_max: Max noise level for generation.
+        churn: The amount of stochasticity during generation.
+        num_diffusion_generation_steps: Number of diffusion generation steps.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -211,6 +218,10 @@ class DiffusionModelConfig:
     use_fine_topography: bool
     p_mean: float
     p_std: float
+    sigma_min: float
+    sigma_max: float
+    churn: float
+    num_diffusion_generation_steps: int
 
     def build(
         self,
@@ -261,8 +272,6 @@ class DiffusionModelConfig:
 
 
 class DiffusionModel:
-    """Diffusion model class."""
-
     def __init__(
         self,
         config: DiffusionModelConfig,
@@ -273,19 +282,6 @@ class DiffusionModel:
         downscale_factor: int,
         sigma_data: float,
     ) -> None:
-        """
-        Args:
-            config: The configuration for the diffusion model.
-            module: The neural network module.
-            normalizer: The normalizer for fine and coarse data.
-            loss: The loss function.
-            in_names: The names of the input coarse-grain variables.
-            out_names: The names of the output fine-grain variables.
-            coarse_shape: The shape of the coarse-resolution data.
-            downscale_factor: The downscale factor.
-            sigma_data: The standard deviation of the normalized fine grid
-                variables.
-        """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
         self.sigma_data = sigma_data
@@ -298,10 +294,6 @@ class DiffusionModel:
 
     @property
     def modules(self) -> torch.nn.ModuleList:
-        """
-        Returns:
-            A list of modules being trained.
-        """
         return torch.nn.ModuleList([self.module])
 
     def train_on_batch(
@@ -343,10 +335,39 @@ class DiffusionModel:
         )
         return ModelOutputs(prediction=denoised, target=target, loss=loss)
 
+    @torch.no_grad()
     def generate_on_batch(
         self, batch: FineResCoarseResPair[TensorMapping]
     ) -> ModelOutputs:
-        raise NotImplementedError()
+        channel_axis = -3
+        coarse, fine = _tensor_mapping_to_device(
+            batch.coarse, get_device()
+        ), _tensor_mapping_to_device(batch.fine, get_device())
+        coarse_norm = self.in_packer.pack(
+            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
+        )
+        targets_norm = self.out_packer.pack(
+            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
+        )
+        latents = torch.rand_like(targets_norm)
+        samples_norm = edm_sampler(
+            self.module,
+            latents,
+            coarse_norm,
+            S_churn=self.config.churn,
+            sigma_min=self.config.sigma_min,
+            sigma_max=self.config.sigma_max,
+            num_steps=self.config.num_diffusion_generation_steps,
+        )
+        samples = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(samples_norm, axis=channel_axis)
+        )
+        loss = self.loss(targets_norm, samples_norm)
+        return ModelOutputs(
+            prediction=samples,
+            target=batch.fine,
+            loss=loss,
+        )
 
     def get_state(self) -> Mapping[str, Any]:
         return {

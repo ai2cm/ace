@@ -187,7 +187,7 @@ def test_serialization(tmp_path):
     )
 
 
-def test_diffusion_model_train():
+def test_diffusion_model_train_and_generate():
     fine_shape = (16, 32)
     coarse_shape = (8, 16)
     downscale_factor = 2
@@ -211,6 +211,10 @@ def test_diffusion_model_train():
         use_fine_topography=False,
         p_mean=-1.0,
         p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=3,
     ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
 
     batch_size = 2
@@ -221,3 +225,17 @@ def test_diffusion_model_train():
     optimization = OptimizationConfig().build(model.module.parameters(), 2)
     train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine["x"])
+
+    n_generated_samples = 2
+    generated_outputs = [
+        model.generate_on_batch(batch) for _ in range(n_generated_samples)
+    ]
+
+    for generated_output in generated_outputs:
+        assert (
+            generated_output.prediction["x"].shape == generated_output.target["x"].shape
+        )
+
+    assert torch.all(
+        generated_outputs[0].prediction["x"] != generated_outputs[1].prediction["x"]
+    )

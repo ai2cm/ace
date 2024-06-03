@@ -41,7 +41,10 @@ class UNetDiffusionModule(torch.nn.Module):
         self.fine_topography = fine_topography
 
     def forward(
-        self, latent: torch.Tensor, coarse: torch.Tensor, noise_level: torch.Tensor
+        self,
+        latent: torch.Tensor,
+        coarse: torch.Tensor,
+        noise_level: torch.Tensor,
     ) -> torch.Tensor:
         """
         Forward pass of the UNetDiffusion module.
@@ -74,7 +77,6 @@ class UNetDiffusionModule(torch.nn.Module):
             topography = pad_right(topography, self.target_shape)
             inputs = torch.concat((inputs, topography), dim=1)
 
-        class_labels = None
-        outputs = self.unet(inputs, noise_level, class_labels)
+        outputs = self.unet(inputs, sigma=noise_level, class_labels=None)
         fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
         return outputs[..., : fine_shape[0], : fine_shape[1]]
