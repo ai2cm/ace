@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import warnings
-from typing import List, Optional, Sequence, Tuple
+from typing import Hashable, List, Optional, Sequence, Tuple
 
 import cftime
 import numpy as np
@@ -14,7 +14,7 @@ from fme.core.typing_ import TensorMapping
 SLICE_NONE = slice(None)
 
 
-def infer_horizontal_dimension_names(ds: xr.Dataset) -> Tuple[str, str]:
+def infer_horizontal_dimension_names(ds: xr.Dataset) -> Tuple[Hashable, Hashable]:
     if "grid_xt" in ds.variables:
         hdims = "grid_xt", "grid_yt"
     elif "lon" in ds.variables:
@@ -95,10 +95,12 @@ def load_series_data(
     n_steps: int,
     ds: xr.Dataset,
     names: List[str],
+    time_dim: str,
+    lat_dim: str,
+    lon_dim: str,
 ):
     time_slice = slice(idx, idx + n_steps)
-    lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
-    dims = ("time", lat_dim, lon_dim)
+    dims = (time_dim, lat_dim, lon_dim)
     shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
     loaded = _load_all_variables(ds, names, time_slice)
     arrays = {}
