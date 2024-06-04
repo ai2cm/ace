@@ -261,7 +261,7 @@ def _test_monthly_values(
         target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
         xr.testing.assert_equal(times, target_times)
         lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
-        dims = ("time", lat_dim, lon_dim)
+        dims = ("time", str(lat_dim), str(lon_dim))
         shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
         time_slice = slice(global_idx, global_idx + 2)
         for var_name in var_names.spatial_resolved_names:

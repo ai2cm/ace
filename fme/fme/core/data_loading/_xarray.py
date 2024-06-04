@@ -301,6 +301,7 @@ class XarrayDataset(Dataset):
             engine=self.engine,
         )
         lons, lats = get_lons_and_lats(first_dataset)
+        self.lon_dim, self.lat_dim = infer_horizontal_dimension_names(first_dataset)
         self._static_derived_data = StaticDerivedData(lons, lats)
         (
             self.time_dependent_names,
@@ -482,7 +483,13 @@ class XarrayDataset(Dataset):
             n_steps = stop - start + 1
             total_steps += n_steps
             tensor_dict = load_series_data(
-                start, n_steps, ds, self.time_dependent_names
+                start,
+                n_steps,
+                ds,
+                self.time_dependent_names,
+                time_dim="time",
+                lon_dim=str(self.lon_dim),
+                lat_dim=str(self.lat_dim),
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
@@ -497,9 +504,8 @@ class XarrayDataset(Dataset):
 
         # load time-invariant variables from first dataset
         ds = self._open_file(idxs[0])
-        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
-        dims = ("time", lat_dim, lon_dim)
-        shape = (total_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
+        dims = ("time", str(self.lat_dim), str(self.lon_dim))
+        shape = (total_steps, ds.sizes[self.lat_dim], ds.sizes[self.lon_dim])
         for name in self.time_invariant_names:
             variable = ds[name].variable
             tensors[name] = as_broadcasted_tensor(variable, dims, shape)
