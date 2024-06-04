@@ -42,7 +42,7 @@ def infer_horizontal_dimension_names(ds: xr.Dataset) -> Tuple[Hashable, Hashable
 
 
 def _get_indexers(
-    variable: xr.Variable, dims: Sequence[str]
+    variable: xr.Variable, dims: Sequence[Hashable]
 ) -> Tuple[Optional[slice], ...]:
     """Returns a tuple of indexers for the dimensions provided.
 
@@ -64,7 +64,7 @@ def _get_indexers(
 
 def as_broadcasted_tensor(
     variable: xr.Variable,
-    dims: Sequence[str],
+    dims: Sequence[Hashable],
     shape: Sequence[int],
 ) -> torch.tensor:
     """Load data from variable and broadcast to tensor with the given shape."""
@@ -95,9 +95,9 @@ def load_series_data(
     n_steps: int,
     ds: xr.Dataset,
     names: List[str],
-    time_dim: str,
-    lat_dim: str,
-    lon_dim: str,
+    time_dim: Hashable,
+    lat_dim: Hashable,
+    lon_dim: Hashable,
 ):
     time_slice = slice(idx, idx + n_steps)
     dims = (time_dim, lat_dim, lon_dim)

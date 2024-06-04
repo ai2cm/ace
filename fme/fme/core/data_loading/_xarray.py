@@ -488,8 +488,8 @@ class XarrayDataset(Dataset):
                 ds,
                 self.time_dependent_names,
                 time_dim="time",
-                lon_dim=str(self.lon_dim),
-                lat_dim=str(self.lat_dim),
+                lon_dim=self.lon_dim,
+                lat_dim=self.lat_dim,
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
@@ -504,7 +504,7 @@ class XarrayDataset(Dataset):
 
         # load time-invariant variables from first dataset
         ds = self._open_file(idxs[0])
-        dims = ("time", str(self.lat_dim), str(self.lon_dim))
+        dims = ("time", self.lat_dim, self.lon_dim)
         shape = (total_steps, ds.sizes[self.lat_dim], ds.sizes[self.lon_dim])
         for name in self.time_invariant_names:
             variable = ds[name].variable
