@@ -4,7 +4,7 @@ import dacite
 import dacite.exceptions
 import yaml
 
-from fme.ace.inference.inference import InferenceConfig
+from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.train_config import TrainConfig
 from fme.core.stepper import SingleModuleStepperConfig
 
@@ -28,7 +28,7 @@ if __name__ == "__main__":
 
     if args.inference:
         dacite.from_dict(
-            data_class=InferenceConfig,
+            data_class=InferenceEvaluatorConfig,
             data=config_data,
             config=dacite.Config(strict=True),
         )
