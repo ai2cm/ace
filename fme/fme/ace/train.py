@@ -58,12 +58,12 @@ import torch
 import yaml
 
 import fme
-from fme.ace.inference import run_inference
+from fme.ace.inference import run_inference_evaluator
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.train_config import TrainConfig
 from fme.ace.utils import logging_utils
 from fme.core.aggregator import (
-    InferenceAggregatorConfig,
+    InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
     TrainAggregator,
 )
@@ -376,7 +376,9 @@ class Trainer:
 
     def inference_one_epoch(self):
         record_step_20 = self.config.inference.n_forward_steps >= 20
-        aggregator_config: InferenceAggregatorConfig = self.config.inference.aggregator
+        aggregator_config: InferenceEvaluatorAggregatorConfig = (
+            self.config.inference.aggregator
+        )
         aggregator = aggregator_config.build(
             area_weights=self.train_data.area_weights.to(fme.get_device()),
             sigma_coordinates=self.train_data.sigma_coordinates,
@@ -386,7 +388,7 @@ class Trainer:
             metadata=self.train_data.metadata,
         )
         with torch.no_grad(), self._validation_context():
-            run_inference(
+            run_inference_evaluator(
                 aggregator=aggregator,
                 stepper=self.stepper,
                 data=self._inference_data,
