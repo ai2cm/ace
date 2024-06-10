@@ -108,8 +108,8 @@ def _inference_internal_loop(
 ):
     """Do operations that need to be done on each time step of the inference loop.
 
-    This function exists to de-duplicate code between run_inference and
-    run_data_inference."""
+    This function exists to de-duplicate code between run_inference_evaluator and
+    run_dataset_comparison."""
 
     # The first data window includes the IC, while subsequent windows don't.
     # The aggregators use the full first window including IC.
@@ -152,7 +152,7 @@ def _to_device(
     return {key: value.to(device) for key, value in data.items()}
 
 
-def run_inference(
+def run_inference_evaluator(
     aggregator: InferenceAggregator,
     stepper: SingleModuleStepper,
     data: GriddedData,
@@ -224,7 +224,7 @@ def run_inference(
     return timers
 
 
-def run_dataset_inference(
+def run_dataset_comparison(
     aggregator: InferenceAggregator,
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,

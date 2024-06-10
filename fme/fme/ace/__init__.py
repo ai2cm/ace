@@ -1,10 +1,10 @@
 import sys
 
-from fme.ace.inference.inference import (
+from fme.ace.inference.evaluator import (
     DataWriterConfig,
-    InferenceAggregatorConfig,
-    InferenceConfig,
     InferenceDataLoaderConfig,
+    InferenceEvaluatorAggregatorConfig,
+    InferenceEvaluatorConfig,
     OceanConfig,
 )
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
