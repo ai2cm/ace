@@ -60,9 +60,9 @@ class _TimeDependentAggregator(Protocol):
 
 
 @dataclasses.dataclass
-class InferenceAggregatorConfig:
+class InferenceEvaluatorAggregatorConfig:
     """
-    Configuration for inference aggregator.
+    Configuration for inference evaluator aggregator.
 
     Attributes:
         log_histograms: Whether to log histograms of the targets and predictions.

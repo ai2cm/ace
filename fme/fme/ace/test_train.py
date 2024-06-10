@@ -12,7 +12,7 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace.inference.inference import main as inference_main
+from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.train import _restore_checkpoint, count_parameters
 from fme.ace.train import main as train_main
 from fme.ace.train_config import epoch_checkpoint_enabled
@@ -294,9 +294,7 @@ def test_train_and_inference_inline(tmp_path, nettype):
     # inference should not require stats files
     (tmp_path / "stats" / "stats-mean.nc").unlink()
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
-    inference_logs = inference_main(
-        yaml_config=inference_config,
-    )
+    inference_logs = inference_evaluator_main(yaml_config=inference_config)
     assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
     prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     assert prediction_output_path.exists()

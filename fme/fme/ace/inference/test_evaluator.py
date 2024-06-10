@@ -14,11 +14,11 @@ import yaml
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
-from fme.ace.inference.inference import InferenceConfig, main
+from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
 from fme.ace.registry import ModuleSelector
 from fme.ace.train_config import LoggingConfig
 from fme.core import metrics
-from fme.core.aggregator.inference import InferenceAggregatorConfig, annual
+from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig, annual
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.inference import (
@@ -198,7 +198,7 @@ def inference_helper(
         )
     else:
         monthly_reference_filename = None
-    config = InferenceConfig(
+    config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
@@ -209,7 +209,7 @@ def inference_helper(
         ),
         loader=data.inference_data_loader_config,
         prediction_loader=prediction_data,
-        aggregator=InferenceAggregatorConfig(
+        aggregator=InferenceEvaluatorAggregatorConfig(
             monthly_reference_data=monthly_reference_filename, log_video=True
         ),
         data_writer=DataWriterConfig(
@@ -354,7 +354,7 @@ def test_inference_writer_boundaries(
         names=all_names,
         dim_sizes=dim_sizes,
     )
-    config = InferenceConfig(
+    config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
@@ -477,7 +477,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         names=all_names,
         dim_sizes=dim_sizes,
     )
-    config = InferenceConfig(
+    config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=8,
         forward_steps_in_memory=forward_steps_in_memory,
@@ -603,7 +603,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         time_varying_values=time_varying_values,
     )
-    config = InferenceConfig(
+    config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),
@@ -655,7 +655,7 @@ def test_inference_config_raises_incompatible_timesteps(time_coarsen):
     base_config_dict["data_writer"] = {"time_coarsen": {"coarsen_factor": time_coarsen}}
     with pytest.raises(ValueError):
         dacite.from_dict(
-            data_class=InferenceConfig,
+            data_class=InferenceEvaluatorConfig,
             data=base_config_dict,
             config=dacite.Config(strict=True),
         )
@@ -687,7 +687,7 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         ocean_fraction_name="override_ocean_fraction",
     )
 
-    config = InferenceConfig(
+    config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
         n_forward_steps=n_forward_steps,
         checkpoint_path=str(stepper_path),

@@ -13,11 +13,11 @@ import yaml
 
 import fme
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
-from fme.ace.inference.loop import run_dataset_inference, run_inference
+from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
 from fme.ace.train_config import LoggingConfig
 from fme.ace.utils import logging_utils
 from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference import InferenceAggregatorConfig
+from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
@@ -45,9 +45,9 @@ def _load_stepper(
 
 
 @dataclasses.dataclass
-class InferenceConfig:
+class InferenceEvaluatorConfig:
     """
-    Configuration for running inference.
+    Configuration for running inference including comparison to reference data.
 
     Attributes:
         experiment_dir: Directory to save results to.
@@ -82,8 +82,8 @@ class InferenceConfig:
         default_factory=lambda: DataWriterConfig()
     )
     monthly_reference_data: Optional[str] = None
-    aggregator: InferenceAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceAggregatorConfig()
+    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
+        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     ocean: Optional[OceanConfig] = None
 
@@ -171,13 +171,11 @@ class InferenceConfig:
         )
 
 
-def main(
-    yaml_config: str,
-):
+def main(yaml_config: str):
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
     config = dacite.from_dict(
-        data_class=InferenceConfig,
+        data_class=InferenceEvaluatorConfig,
         data=data,
         config=dacite.Config(strict=True),
     )
@@ -217,7 +215,7 @@ def main(
             f"match that of the forcing data, {data.timestep}."
         )
 
-    aggregator_config: InferenceAggregatorConfig = config.aggregator
+    aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     aggregator = aggregator_config.build(
         area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
@@ -237,7 +235,7 @@ def main(
             data_requirements,
         )
 
-        timers = run_dataset_inference(
+        timers = run_dataset_comparison(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
             prediction_data=prediction_data,
@@ -245,7 +243,7 @@ def main(
             writer=writer,
         )
     else:
-        timers = run_inference(
+        timers = run_inference_evaluator(
             aggregator=aggregator,
             writer=writer,
             stepper=stepper,
