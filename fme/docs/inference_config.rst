@@ -8,9 +8,9 @@ Inference Config
 
 We use the :ref:`Builder pattern <Builder Pattern>` to load this configuration into a multi-level dataclass structure.
 The configuration is divided into several sub-configurations, each with its own dataclass.
-The top-level configuration is the :class:`fme.ace.InferenceConfig` class.
+The top-level configuration is the :class:`fme.ace.InferenceEvaluatorConfig` class.
 
-.. autoclass:: fme.ace.InferenceConfig
+.. autoclass:: fme.ace.InferenceEvaluatorConfig
    :show-inheritance:
    :noindex:
 
@@ -36,7 +36,7 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.InferenceAggregatorConfig
+.. autoclass:: fme.ace.InferenceEvaluatorAggregatorConfig
    :show-inheritance:
    :noindex:
 
