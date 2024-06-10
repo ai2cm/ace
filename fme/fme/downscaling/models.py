@@ -64,16 +64,12 @@ class DownscalingModelConfig:
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine, reduction="mean")
-
-        dist = Distributed.get_instance()
-        module = dist.wrap_module(
-            self.module.build(
-                n_in_channels=len(self.in_names),
-                n_out_channels=len(self.out_names),
-                coarse_shape=coarse_shape,
-                downscale_factor=downscale_factor,
-                fine_topography=fine_topography if self.use_fine_topography else None,
-            )
+        module = self.module.build(
+            n_in_channels=len(self.in_names),
+            n_out_channels=len(self.out_names),
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+            fine_topography=fine_topography if self.use_fine_topography else None,
         )
         return Model(
             module,
@@ -116,7 +112,8 @@ class Model:
     ) -> None:
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
-        self.module = module.to(get_device())
+        dist = Distributed.get_instance()
+        self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer
         self.loss = loss
         self.in_packer = Packer(in_names)
@@ -241,16 +238,13 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
-        dist = Distributed.get_instance()
-        module = dist.wrap_module(
-            self.module.build(
-                n_in_channels=len(self.in_names),
-                n_out_channels=len(self.out_names),
-                coarse_shape=coarse_shape,
-                downscale_factor=downscale_factor,
-                fine_topography=fine_topography if self.use_fine_topography else None,
-                sigma_data=sigma_data,
-            )
+        module = self.module.build(
+            n_in_channels=len(self.in_names),
+            n_out_channels=len(self.out_names),
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+            fine_topography=fine_topography if self.use_fine_topography else None,
+            sigma_data=sigma_data,
         )
         return DiffusionModel(
             config=self,
@@ -292,7 +286,8 @@ class DiffusionModel:
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
         self.sigma_data = sigma_data
-        self.module = module.to(get_device())
+        dist = Distributed.get_instance()
+        self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer
         self.loss = loss
         self.in_packer = Packer(config.in_names)
