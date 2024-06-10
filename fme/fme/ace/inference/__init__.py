@@ -1,1 +1,1 @@
-from .loop import run_inference
+from .loop import run_inference_evaluator

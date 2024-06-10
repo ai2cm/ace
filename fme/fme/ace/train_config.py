@@ -4,7 +4,7 @@ import os
 import warnings
 from typing import Any, Mapping, Optional, Union
 
-from fme.core.aggregator import InferenceAggregatorConfig
+from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.config import DataLoaderConfig, Slice
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -99,8 +99,8 @@ class InlineInferenceConfig:
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
-    aggregator: InferenceAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceAggregatorConfig()
+    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
+        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
 
     def __post_init__(self):
