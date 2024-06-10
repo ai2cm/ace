@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import Optional
+from typing import Optional, Union
 
 import dacite
 import torch
@@ -18,7 +18,12 @@ from fme.core.optimization import NullOptimization, Optimization, OptimizationCo
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
-from fme.downscaling.models import DownscalingModelConfig, Model
+from fme.downscaling.models import (
+    DiffusionModel,
+    DiffusionModelConfig,
+    DownscalingModelConfig,
+    Model,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
@@ -49,7 +54,7 @@ def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
 class Trainer:
     def __init__(
         self,
-        model: Model,
+        model: Union[Model, DiffusionModel],
         optimization: Optimization,
         train_data: GriddedData,
         validation_data: GriddedData,
@@ -174,7 +179,7 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: DownscalingModelConfig
+    model: Union[DownscalingModelConfig, DiffusionModelConfig]
     optimization: OptimizationConfig
     train_data: DataLoaderConfig
     validation_data: DataLoaderConfig
