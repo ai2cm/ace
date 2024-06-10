@@ -327,8 +327,7 @@ class DiffusionModel:
         latents = targets_norm + noise
 
         denoised_norm = self.module(latents, coarse_norm, sigma)
-        batch_size = len(weight)
-        loss = torch.sum(weight * self.loss(targets_norm, denoised_norm)) / batch_size
+        loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
 
         optimizer.step_weights(loss)
         target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
