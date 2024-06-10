@@ -35,7 +35,9 @@ class Optimization:
 
     @contextlib.contextmanager
     def autocast(self):
-        with amp.autocast(enabled=self.gscaler is not None):
+        enabled = self.gscaler is not None
+        dtype = torch.bfloat16 if enabled else None
+        with amp.autocast(enabled=enabled, dtype=dtype):
             yield
 
     @property
@@ -125,7 +127,7 @@ class OptimizationConfig:
     optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
-    enable_automatic_mixed_precision: bool = True
+    enable_automatic_mixed_precision: bool = False
     scheduler: SchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
     )
