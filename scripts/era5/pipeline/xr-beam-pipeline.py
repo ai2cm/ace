@@ -705,6 +705,7 @@ def _make_template(
             join="outer",
         ).squeeze()
 
+        ds_regridded = ds_regridded.chunk({"latitude": -1, "longitude": -1})
         ds_regridded.to_zarr(TEMPLATE_PATH, mode="w")
         inv_fields = xr.merge([ds_invariant_regridded, ds_akbk])
 
