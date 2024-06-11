@@ -388,6 +388,20 @@ class SingleModuleStepper:
         return self._config.get_data_requirements(n_forward_steps)
 
     @property
+    def effective_loss_scaling(self) -> TensorMapping:
+        """
+        Effective loss scalings used to normalize outputs before computing loss.
+        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
+        where loss_scaling_i = loss_normalizer_std_i / weight_i
+        """
+        custom_weights = self._config.loss.weights
+        loss_normalizer_stds = self.loss_normalizer.stds
+        return {
+            k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
+            for k in self._config.out_names
+        }
+
+    @property
     def prognostic_names(self) -> List[str]:
         return sorted(
             list(set(self.out_packer.names).intersection(self.in_packer.names))
