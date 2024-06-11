@@ -345,7 +345,7 @@ class Trainer:
             self.train_data.area_weights.to(fme.get_device()),
             self.train_data.sigma_coordinates,
             self.train_data.metadata,
-            loss_scaling=self.stepper.loss_normalizer.stds,
+            loss_scaling=self.stepper.effective_loss_scaling,
         )
 
         with torch.no_grad(), self._validation_context():
