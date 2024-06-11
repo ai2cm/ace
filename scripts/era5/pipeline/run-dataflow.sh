@@ -6,12 +6,12 @@
 RUNNER=${1:-DataflowRunner}
 
 python3 xr-beam-pipeline.py \
-    gs://vcm-ml-intermediate/2024-05-29-era5-1deg-8layer-1940-2022.zarr \
+    gs://vcm-ml-intermediate/2024-06-11-era5-1deg-8layer-1940-2022.zarr \
     1940-01-01T12:00:00 \
     2022-12-31T18:00:00 \
     --output_grid F90 \
-    --output_time_chunksize 20 \
-    --ncar_process_time_chunksize 4 \
+    --output_time_chunksize 10 \
+    --ncar_process_time_chunksize 2 \
     --project vcm-ml \
     --region us-central1 \
     --temp_location gs://vcm-ml-scratch/oliwm/temp/ \
