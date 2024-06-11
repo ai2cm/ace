@@ -27,3 +27,11 @@ jobs:
       - name: Build docs
         run: |
           cd fme/docs && make doctest html
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        with:
+          publish_branch: gh-pages
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: fme/docs/_build/
+          force_orphan: true
