@@ -71,6 +71,7 @@ class InferenceEvaluatorAggregatorConfig:
             statistical metrics, only done if log_video is True.
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
             time dimension.
+        log_seasonal_means: Whether to log seasonal mean metrics and images.
         monthly_reference_data: Path to monthly reference data to compare against.
     """
 
@@ -78,6 +79,7 @@ class InferenceEvaluatorAggregatorConfig:
     log_video: bool = False
     log_extended_video: bool = False
     log_zonal_mean_images: bool = True
+    log_seasonal_means: bool = False
     monthly_reference_data: Optional[str] = None
 
     def build(self, **kwargs):
@@ -91,6 +93,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
             log_zonal_mean_images=self.log_zonal_mean_images,
+            log_seasonal_means=self.log_seasonal_means,
             monthly_reference_data=monthly_reference_data,
             **kwargs,
         )
@@ -114,6 +117,7 @@ class InferenceAggregator:
         log_video: bool = False,
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
+        log_seasonal_means: bool = False,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
@@ -130,6 +134,7 @@ class InferenceAggregator:
                 metrics of state evolution
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
+            log_seasonal_means: Whether to log seasonal means metrics and images.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
@@ -173,13 +178,12 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
-
-        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {
-            "seasonal": SeasonalAggregator(
+        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
+        if log_seasonal_means:
+            self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
                 area_weights=area_weights,
                 metadata=metadata,
-            ),
-        }
+            )
 
         if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
