@@ -283,6 +283,21 @@ class DiffusionModel:
         downscale_factor: int,
         sigma_data: float,
     ) -> None:
+        """
+        Args:
+            config: The configuration object for the diffusion model.
+            module: The neural network module used for downscaling. Note: this
+                should *not* be DistributedDataParallel since it is wrapped by
+                it in this init method.
+            normalizer: The normalizer object used for data normalization.
+            loss: The loss function used for training the model.
+            coarse_shape: The height (lat) and width (lon) of the
+                coarse-resolution input data.
+            downscale_factor: The factor by which the data is downscaled from
+                coarse to fine.
+            sigma_data: The standard deviation of the data, used for diffusion
+                model preconditioning
+        """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
         self.sigma_data = sigma_data
