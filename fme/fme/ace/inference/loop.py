@@ -13,9 +13,13 @@ from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
+from fme.core.typing_ import TensorMapping
 
-from .data_writer import NullDataWriter, PairedDataWriter
-from .derived_variables import compute_stepped_derived_quantities
+from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
+from .derived_variables import (
+    compute_derived_quantities,
+    compute_stepped_derived_quantities,
+)
 
 
 class WindowStitcher:
@@ -150,6 +154,62 @@ def _to_device(
     data: Mapping[str, torch.Tensor], device: torch.device
 ) -> Dict[str, Any]:
     return {key: value.to(device) for key, value in data.items()}
+
+
+def run_inference(
+    stepper: SingleModuleStepper,
+    initial_condition: TensorMapping,
+    forcing_data: GriddedData,
+    writer: DataWriter,
+) -> Dict[str, float]:
+    """Run extended inference loop given initial condition and forcing data.
+
+    Args:
+        stepper: The model to run inference with.
+        initial_condition: Mapping of prognostic names to initial condition tensors of
+            shape (n_sample, n_lat, n_lon).
+        forcing_data: GriddedData object which includes a DataLoader which will provide
+            windows of forcing data appropriately aligned with the initial condition.
+        writer: Data writer for saving the inference results to disk.
+
+    Returns:
+        Execution time in seconds for each step of the inference loop.
+    """
+    with torch.no_grad():
+        timers: Dict[str, float] = defaultdict(float)
+        current_time = time.time()
+        i_time = 0
+        for window_forcing in forcing_data.loader:
+            timers["data_loading"] += time.time() - current_time
+            current_time = time.time()
+            forward_steps_in_memory = list(window_forcing.data.values())[0].size(1) - 1
+            logging.info(
+                f"Inference: starting window spanning {i_time}"
+                f" to {i_time + forward_steps_in_memory} steps."
+            )
+            window_forcing_data = _to_device(window_forcing.data, get_device())
+            prediction = stepper.predict(
+                initial_condition, window_forcing_data, forward_steps_in_memory
+            )
+            timers["run_on_batch"] += time.time() - current_time
+
+            prediction = compute_derived_quantities(
+                prediction, forcing_data.sigma_coordinates, forcing_data.timestep
+            )
+
+            writer.append_batch(
+                prediction, i_time, window_forcing.times.isel(time=slice(1, None))
+            )
+            timers["writer_and_aggregator"] += time.time() - current_time
+            current_time = time.time()
+            initial_condition = {
+                k: prediction[k][:, -1] for k in stepper.prognostic_names
+            }
+            i_time += forward_steps_in_memory
+
+        for name, duration in timers.items():
+            logging.info(f"{name} duration: {duration:.2f}s")
+    return timers
 
 
 def run_inference_evaluator(

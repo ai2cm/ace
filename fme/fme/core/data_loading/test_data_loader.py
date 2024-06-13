@@ -2,9 +2,11 @@
 data (e.g. netCDF files)."""
 
 import datetime
+import math
 import pathlib
 from typing import List
 
+import cftime
 import numpy as np
 import pytest
 import torch
@@ -12,8 +14,14 @@ import xarray as xr
 
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.getters import get_data_loader, get_inference_data
+from fme.core.data_loading.getters import (
+    get_data_loader,
+    get_forcing_data,
+    get_inference_data,
+)
 from fme.core.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
@@ -26,7 +34,7 @@ def _get_coords(dim_sizes, calendar):
     for dim_name, size in dim_sizes.items():
         if dim_name == "time":
             dtype = np.int64
-            attrs = {"calendar": calendar, "units": "seconds since 1970-01-01"}
+            attrs = {"calendar": calendar, "units": "days since 1970-01-01"}
         else:
             dtype = np.float32
             attrs = {}
@@ -321,3 +329,46 @@ def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_err
             get_data_loader(config, True, requirements)  # type: ignore
     else:
         get_data_loader(config, True, requirements)  # type: ignore
+
+
+@pytest.mark.parametrize("n_initial_conditions", [1, 2])
+def test_get_forcing_data(tmp_path, n_initial_conditions):
+    calendar = "proleptic_gregorian"
+    total_forward_steps = 5
+    forward_steps_in_memory = 2
+    _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
+    config = ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path))
+    requirements = DataRequirements(["foo"], total_forward_steps + 1)
+    time_values = [
+        cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)
+        for n in range(n_initial_conditions)
+    ]
+    initial_times = xr.DataArray(time_values, dims=["sample"])
+    data = get_forcing_data(
+        config, forward_steps_in_memory, requirements, initial_times
+    )
+    assert len(data.loader.dataset) == math.ceil(
+        total_forward_steps / forward_steps_in_memory
+    )
+    batch_data = next(iter(data.loader))
+    assert isinstance(batch_data, BatchData)
+    assert isinstance(batch_data.data["foo"], torch.Tensor)
+    assert set(batch_data.data.keys()) == {"foo"}
+    assert batch_data.data["foo"].shape[0] == len(time_values)
+    assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
+    assert list(batch_data.times.dims) == ["sample", "time"]
+    xr.testing.assert_allclose(batch_data.times.isel(time=0), initial_times)
+    assert batch_data.times.dt.calendar == calendar
+
+
+def test_inference_loader_raises_if_subset():
+    with pytest.raises(ValueError):
+        InferenceDataLoaderConfig(
+            XarrayDataConfig(data_path="foo", subset=Slice(stop=1)),
+            start_indices=ExplicitIndices([0, 1]),
+        )
+
+
+def test_forcing_loader_raises_if_subset():
+    with pytest.raises(ValueError):
+        ForcingDataLoaderConfig(XarrayDataConfig(data_path="foo", subset=Slice(stop=1)))
