@@ -90,6 +90,20 @@ class StandardNameMapping:
 
 
 @dataclasses.dataclass
+class ChunkingConfig:
+    time_dim: int = 160
+    latitude_dim: int = -1
+    longitude_dim: int = -1
+
+    def get_chunks(self, standard_names: StandardNameMapping):
+        return {
+            standard_names.time_dim: self.time_dim,
+            standard_names.longitude_dim: self.longitude_dim,
+            standard_names.latitude_dim: self.latitude_dim,
+        }
+
+
+@dataclasses.dataclass
 class DatasetComputationConfig:
     """Configuration of computation details for an FME reference dataset.
 
@@ -107,6 +121,8 @@ class DatasetComputationConfig:
         renaming: (optional) mapping of names in dataset to renamed output
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
+        chunking: (optional) mapping of standard dimension names to desired
+            output chunk sizes
     """
 
     reference_vertical_coordinate_file: str
@@ -116,6 +132,7 @@ class DatasetComputationConfig:
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
     standard_names: StandardNameMapping = StandardNameMapping()
+    chunking: ChunkingConfig = ChunkingConfig()
 
 
 @dataclasses.dataclass
@@ -141,14 +158,6 @@ class DatasetConfig:
         return dacite.from_dict(
             data_class=cls, data=data, config=dacite.Config(cast=[tuple])
         )
-
-
-def get_chunks(standard_names):
-    return {
-        standard_names.time_dim: 160,
-        standard_names.longitude_dim: -1,
-        standard_names.latitude_dim: -1,
-    }
 
 
 def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray:
@@ -412,7 +421,7 @@ def construct_lazy_dataset(
         config.vertical_coarsening_indices,
     )
     ds = xr.merge([ds, ak_bk_ds])
-    chunks = get_chunks(standard_names)
+    chunks = config.chunking.get_chunks(standard_names)
     ds = ds.chunk(chunks)
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/data_process"
