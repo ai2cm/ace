@@ -3,73 +3,89 @@ import dataclasses
 import logging
 import os
 import time
-import warnings
-from pathlib import Path
-from typing import Optional, Sequence
+from typing import Literal, Optional, Sequence, Tuple
 
 import dacite
 import torch
+import xarray as xr
 import yaml
 
 import fme
-from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
-from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.loop import run_inference
 from fme.ace.train_config import LoggingConfig
 from fme.ace.utils import logging_utils
 from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
-from fme.core.data_loading.getters import get_inference_data
-from fme.core.data_loading.inference import InferenceDataLoaderConfig
+from fme.core.data_loading.getters import get_forcing_data
+from fme.core.data_loading.inference import ForcingDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.wandb import WandB
+from fme.core.typing_ import TensorMapping
 
-
-def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
-    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    return SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
-
-
-def load_stepper(
-    checkpoint_file: str,
-    area: torch.Tensor,
-    sigma_coordinates: SigmaCoordinates,
-    ocean: Optional[OceanConfig] = None,
-) -> SingleModuleStepper:
-    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
-    )
-    if ocean is not None:
-        logging.info(
-            "Overriding training ocean configuration with the inference ocean config."
-        )
-        stepper.ocean = ocean
-    return stepper
+from .evaluator import load_stepper, load_stepper_config
 
 
 @dataclasses.dataclass
-class InferenceEvaluatorConfig:
+class InitialConditionConfig:
+    path: str
+    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+
+    def get_dataset(self) -> xr.Dataset:
+        return xr.open_dataset(self.path, engine=self.engine, use_cftime=True)
+
+
+def get_initial_condition(
+    ds: xr.Dataset, prognostic_names: Sequence[str]
+) -> Tuple[TensorMapping, xr.DataArray]:
+    """Given a dataset, extract a mapping of variables to tensors.
+    and the time coordinate corresponding to the initial conditions.
+
+    Args:
+        ds: Dataset containing initial condition data. Must include prognostic_names
+            as variables, and they must each have shape (n_samples, n_lat, n_lon).
+            Dataset must also include a 'time' variable with length n_samples.
+        prognostic_names: Names of prognostic variables to extract from the dataset.
+
+    Returns:
+        A mapping of variable names to tensors and the time coordinate.
     """
-    Configuration for running inference including comparison to reference data.
+    initial_condition = {}
+    for name in prognostic_names:
+        if len(ds[name].shape) != 3:
+            raise ValueError(
+                f"Initial condition variables {name} must have shape "
+                f"(n_samples, n_lat, n_lon). Got shape {ds[name].shape}."
+            )
+        n_samples = ds[name].shape[0]
+        initial_condition[name] = torch.tensor(ds[name].values).to(fme.get_device())
+    if "time" not in ds:
+        raise ValueError("Initial condition dataset must have a 'time' variable.")
+    initial_times = ds.time
+    if len(initial_times) != n_samples:
+        raise ValueError(
+            "Length of 'time' variable must match first dimension of variables "
+            f"in initial condition dataset. Got {len(initial_times)} and {n_samples}."
+        )
+    return initial_condition, initial_times
+
+
+@dataclasses.dataclass
+class InferenceConfig:
+    """
+    Configuration for running inference.
 
     Attributes:
         experiment_dir: Directory to save results to.
-        n_forward_steps: Number of steps to run the model forward for. Must be divisble
-            by forward_steps_in_memory.
+        n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
-        logging: configuration for logging.
-        loader: Configuration for data to be used as initial conditions, forcing, and
-            target in inference.
-        prediction_loader: Configuration for prediction data to evaluate. If given,
-            model evaluation will not run, and instead predictions will be evaluated.
-            Model checkpoint will still be used to determine inputs and outputs.
+        logging: Configuration for logging.
+        initial_condition: Configuration for initial condition data.
+        forcing_loader: Configuration for forcing data.
         forward_steps_in_memory: Number of forward steps to complete in memory
-            at a time, will load one more step for initial condition.
+            at a time.
         data_writer: Configuration for data writers.
-        aggregator: Configuration for inference aggregator.
         ocean: Ocean configuration for running inference with a
             different one than what is used in training.
     """
@@ -78,39 +94,15 @@ class InferenceEvaluatorConfig:
     n_forward_steps: int
     checkpoint_path: str
     logging: LoggingConfig
-    loader: InferenceDataLoaderConfig
-    prediction_loader: Optional[InferenceDataLoaderConfig] = None
-    log_video: Optional[bool] = None
-    log_extended_video: Optional[bool] = None
-    log_zonal_mean_images: Optional[bool] = None
-    forward_steps_in_memory: int = 1
+    initial_condition: InitialConditionConfig
+    forcing_loader: ForcingDataLoaderConfig
+    forward_steps_in_memory: int = 10
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
-    )
-    monthly_reference_data: Optional[str] = None
-    aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
-        deprecated_aggregator_attrs = {
-            k: getattr(self, k)
-            for k in [
-                "log_video",
-                "log_extended_video",
-                "log_zonal_mean_images",
-                "monthly_reference_data",
-            ]
-            if getattr(self, k) is not None
-        }
-        for k, v in deprecated_aggregator_attrs.items():
-            warnings.warn(
-                f"Inference configuration attribute `{k}` is deprecated. "
-                f"Using its value `{v}`, but please use attribute `aggregator` "
-                "instead."
-            )
-            setattr(self.aggregator, k, v)
         if (self.data_writer.time_coarsen is not None) and (
             self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
             != 0
@@ -162,10 +154,10 @@ class InferenceEvaluatorConfig:
 
     def get_data_writer(
         self, data: GriddedData, prognostic_names: Sequence[str]
-    ) -> PairedDataWriter:
-        return self.data_writer.build_paired(
+    ) -> DataWriter:
+        return self.data_writer.build(
             experiment_dir=self.experiment_dir,
-            n_samples=self.loader.n_samples,
+            n_samples=data.loader.dataset.n_samples,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
@@ -178,7 +170,7 @@ def main(yaml_config: str):
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
     config = dacite.from_dict(
-        data_class=InferenceEvaluatorConfig,
+        data_class=InferenceConfig,
         data=data,
         config=dacite.Config(strict=True),
     )
@@ -198,14 +190,19 @@ def main(yaml_config: str):
 
     start_time = time.time()
     stepper_config = config.load_stepper_config()
-    logging.info("Loading inference data")
-    data_requirements = stepper_config.get_data_requirements(
+    data_requirements = stepper_config.get_forcing_data_requirements(
         n_forward_steps=config.n_forward_steps
     )
-    data = get_inference_data(
-        config.loader,
+    logging.info("Loading initial condition data")
+    initial_condition, initial_times = get_initial_condition(
+        config.initial_condition.get_dataset(), stepper_config.prognostic_names
+    )
+    logging.info("Initializing forcing data loaded")
+    data = get_forcing_data(
+        config.forcing_loader,
         config.forward_steps_in_memory,
         data_requirements,
+        initial_times,
     )
 
     stepper = config.load_stepper(
@@ -218,85 +215,34 @@ def main(yaml_config: str):
             f"match that of the forcing data, {data.timestep}."
         )
 
-    aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
-    aggregator = aggregator_config.build(
-        area_weights=data.area_weights.to(fme.get_device()),
-        sigma_coordinates=data.sigma_coordinates,
-        timestep=data.timestep,
-        record_step_20=config.n_forward_steps >= 20,
-        n_timesteps=config.n_forward_steps + 1,
-        metadata=data.metadata,
-    )
-
     writer = config.get_data_writer(data, stepper.prognostic_names)
 
     logging.info("Starting inference")
-    if config.prediction_loader is not None:
-        prediction_data = get_inference_data(
-            config.prediction_loader,
-            config.forward_steps_in_memory,
-            data_requirements,
-        )
-
-        timers = run_dataset_comparison(
-            aggregator=aggregator,
-            normalizer=stepper.normalizer,
-            prediction_data=prediction_data,
-            target_data=data,
-            writer=writer,
-        )
-    else:
-        timers = run_inference_evaluator(
-            aggregator=aggregator,
-            writer=writer,
-            stepper=stepper,
-            data=data,
-        )
+    timers = run_inference(
+        stepper=stepper,
+        initial_condition=initial_condition,
+        forcing_data=data,
+        writer=writer,
+    )
 
     final_flush_start_time = time.time()
     logging.info("Starting final flush of data writer")
     writer.flush()
-    logging.info("Writing reduced metrics to disk in netcdf format.")
-    for name, ds in aggregator.get_datasets(
-        ("time_mean", "zonal_mean", "histogram")
-    ).items():
-        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
-        ds = ds.assign_coords(coords)
-        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
-
     final_flush_duration = time.time() - final_flush_start_time
     logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
     timers["final_writer_flush"] = final_flush_duration
 
     duration = time.time() - start_time
-    total_steps = config.n_forward_steps * config.loader.n_samples
+    total_steps = config.n_forward_steps * data.loader.dataset.n_samples
     total_steps_per_second = total_steps / duration
     logging.info(f"Inference duration: {duration:.2f} seconds")
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
 
-    step_logs = aggregator.get_inference_logs(label="inference")
-    wandb = WandB.get_instance()
-    if wandb.enabled:
-        logging.info("Starting logging of metrics to wandb")
-        duration_logs = {
-            "duration_seconds": duration,
-            "total_steps_per_second": total_steps_per_second,
-        }
-        wandb.log({**timers, **duration_logs}, step=0)
-        for i, log in enumerate(step_logs):
-            wandb.log(log, step=i, sleep=0.01)
-
     config.clean_wandb()
-
-    return step_logs
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("yaml_config", type=str)
-
     args = parser.parse_args()
-
-    main(
-        yaml_config=args.yaml_config,
-    )
+    main(yaml_config=args.yaml_config)

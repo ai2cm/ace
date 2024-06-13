@@ -1,13 +1,14 @@
 import dataclasses
 import datetime
 from math import ceil
+from typing import Sequence, Union
 
 import numpy as np
 import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
-from fme.core.data_loading.config import XarrayDataConfig
+from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
@@ -39,6 +40,22 @@ class InferenceInitialConditionIndices:
 
 
 @dataclasses.dataclass
+class ExplicitIndices:
+    """
+    Configure indices providing them explicitly.
+    """
+
+    list: Sequence[int]
+
+    def as_indices(self) -> np.ndarray:
+        return np.array(self.list)
+
+    @property
+    def n_initial_conditions(self) -> int:
+        return len(self.list)
+
+
+@dataclasses.dataclass
 class InferenceDataLoaderConfig:
     """
     Configuration for inference data.
@@ -56,12 +73,41 @@ class InferenceDataLoaderConfig:
     """
 
     dataset: XarrayDataConfig
-    start_indices: InferenceInitialConditionIndices
+    start_indices: Union[InferenceInitialConditionIndices, ExplicitIndices]
     num_data_workers: int = 0
+
+    def __post_init__(self):
+        if self.dataset.subset != Slice(None, None, None):
+            raise ValueError("Inference data may not be subset.")
 
     @property
     def n_samples(self) -> int:
         return self.start_indices.n_initial_conditions
+
+
+@dataclasses.dataclass
+class ForcingDataLoaderConfig:
+    """
+    Configuration for the forcing data.
+
+    Attributes:
+        dataset: Configuration to define the dataset.
+        num_data_workers: Number of parallel workers to use for data loading.
+    """
+
+    dataset: XarrayDataConfig
+    num_data_workers: int = 0
+
+    def __post_init__(self):
+        if self.dataset.subset != Slice(None, None, None):
+            raise ValueError("Inference data may not be subset.")
+
+    def build_inference_config(self, start_indices: ExplicitIndices):
+        return InferenceDataLoaderConfig(
+            dataset=self.dataset,
+            num_data_workers=self.num_data_workers,
+            start_indices=start_indices,
+        )
 
 
 class InferenceDataset(torch.utils.data.Dataset):
