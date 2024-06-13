@@ -231,11 +231,7 @@ class TrainerConfig:
     def configure_wandb(self, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
         env_vars = logging_utils.retrieve_env_vars()
-        if "environment" in config:
-            logging.warning("Not recording env vars since 'environment' is in config.")
-        elif env_vars is not None:
-            config["environment"] = env_vars
-        self.logging.configure_wandb(config=config, **kwargs)
+        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
 
 def main(config_path: str):
