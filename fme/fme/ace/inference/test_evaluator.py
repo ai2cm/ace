@@ -311,18 +311,19 @@ def inference_helper(
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
-    histograms = xr.open_dataset(tmp_path / "histograms.nc")
-    actual_var_names = sorted([str(k) for k in histograms.keys()])
-    assert len(actual_var_names) == 2
-    assert "var" in actual_var_names
-    assert histograms.data_vars["var"].attrs["units"] == "count"
-    assert "var_bin_edges" in actual_var_names
-    assert histograms.data_vars["var_bin_edges"].attrs["units"] == "m"
-    var_counts_per_timestep = histograms["var"].sum(dim=["bin", "source"])
-    same_count_each_timestep = np.all(
-        var_counts_per_timestep.values == var_counts_per_timestep.values[0]
-    )
-    assert same_count_each_timestep
+    for source in ["target", "prediction"]:
+        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        actual_var_names = sorted([str(k) for k in histograms.keys()])
+        assert len(actual_var_names) == 2
+        assert "var" in actual_var_names
+        assert histograms.data_vars["var"].attrs["units"] == "count"
+        assert "var_bin_edges" in actual_var_names
+        assert histograms.data_vars["var_bin_edges"].attrs["units"] == "m"
+        var_counts_per_timestep = histograms["var"].sum(dim=["bin"])
+        same_count_each_timestep = np.all(
+            var_counts_per_timestep.values == var_counts_per_timestep.values[0]
+        )
+        assert same_count_each_timestep
     if monthly_reference_filename is not None:
         assert "inference/annual/var" in inference_logs[-1]
         assert "inference/annual/r2_gen_var" in inference_logs[-1]
@@ -511,10 +512,11 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     assert (
         metric_ds.sizes["timestep"] == n_coarsened_timesteps
     ), "reduced predictions time dimension size"
-    histograms = xr.open_dataset(tmp_path / "histograms.nc")
-    assert (
-        histograms.sizes["time"] == n_coarsened_timesteps
-    ), "histograms time dimension size"
+    for source in ["target", "prediction"]:
+        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        assert (
+            histograms.sizes["time"] == n_coarsened_timesteps
+        ), "histograms time dimension size"
 
 
 @pytest.mark.parametrize("has_required_fields", [True, False])
