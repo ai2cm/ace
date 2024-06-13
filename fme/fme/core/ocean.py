@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import torch
 
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from .climate_data import ClimateData
 from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER
@@ -44,7 +44,7 @@ class OceanConfig:
         in_names: List[str],
         out_names: List[str],
         timestep: datetime.timedelta,
-    ):
+    ) -> "Ocean":
         if not (
             self.surface_temperature_name in in_names
             and self.surface_temperature_name in out_names
@@ -93,9 +93,9 @@ class Ocean:
 
     def __call__(
         self,
-        target_data: TensorDict,
-        input_data: TensorDict,
-        gen_data: TensorDict,
+        target_data: TensorMapping,
+        input_data: TensorMapping,
+        gen_data: TensorMapping,
     ) -> TensorDict:
         """
         Args:
