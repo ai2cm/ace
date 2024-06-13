@@ -1,10 +1,11 @@
 import os
-from typing import List, Optional
+from typing import Callable, List, Optional, Union
 
 import torch.distributed
+from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
-from fme.core.device import using_gpu
+from fme.core.device import get_device, using_gpu
 
 singleton: Optional["Distributed"] = None
 
@@ -140,7 +141,10 @@ class Distributed:
         """
         Gather a tensor from all processes to the root process.
 
-        Modifies the input tensor in-place as a side effect.
+        Note: tensor shape is assumed to be equal across all processes; data will
+            reshaped/filled/dropped to coerce non-root tensors to the shape
+            of the root tensor if not. To avoid this behavior, use
+            "gather_irregular" instead.
 
         Args:
             tensor: The tensor to gather.
@@ -158,6 +162,30 @@ class Distributed:
         if self._distributed:
             torch.distributed.gather(tensor, gather_list)
         return gather_list
+
+    def gather_irregular(
+        self,
+        tensor: torch.Tensor,
+    ) -> Optional[List[torch.Tensor]]:
+        """
+        Gather a tensor from all processes to the root process. The rank tensors
+        may have diferent dimension lengths, but must have the same number of
+        dimensions.
+
+        Args:
+            tensor: The tensor to gather.
+
+        Returns:
+            A list of tensors of consistent shape, where the i-th element is the tensor
+                from the i-th process.
+        """
+
+        return gather_irregular(
+            tensor,
+            self.reduce_max,
+            self.gather,
+            is_distributed=self.is_distributed(),
+        )
 
     def is_root(self) -> bool:
         """
@@ -190,3 +218,113 @@ class Distributed:
             )
         else:
             return DummyWrapper(module)
+
+
+def gather_irregular(
+    tensor: torch.Tensor,
+    reduce_max: Callable[[torch.Tensor], torch.tensor],
+    gather: Callable[[torch.Tensor], Optional[List[torch.Tensor]]],
+    is_distributed: bool = False,
+    fill_value: Union[float, int] = 0.0,
+) -> Optional[List[torch.Tensor]]:
+    """
+    Gather a tensor from all processes to the root process. The rank tensors
+    may have diferent dimension lengths, but must have the same number of dimesions.
+    temporarily padded with `fill_value` where its dimension length is smaller than the
+    maxmimum dimension length, but the padding is removed prior to returning the
+    gathered tensors.
+
+    Args:
+        tensor: The tensor to gather.
+        reduce_max: The reduction function to use for each dimension length.
+        gather: The gather function to use.
+        is_distributed: Whether the current process is distributed.
+        fill_value: The value to fill each tensor with.
+
+    Returns:
+        A list of tensors, where the i-th element is the tensor from the i-th process.
+    """
+
+    output_tensor_size = []
+    tensor_size = list(tensor.size())
+    for dim_len in tensor_size:
+        if is_distributed:
+            dimension_length = torch.tensor(
+                dim_len, dtype=torch.int32, device=get_device()
+            )
+            reduce_max(dimension_length)
+            output_tensor_size.append(int(dimension_length.item()))
+        else:
+            output_tensor_size.append(int(dim_len))
+    dimension_difference = [
+        output - input for output, input in zip(output_tensor_size, tensor_size)
+    ]
+    regular_tensor = pad_tensor_at_end(tensor, dimension_difference, fill_value)
+    gathered_regular_tensors = gather(regular_tensor)
+    gathered_dimension_differences = gather(
+        torch.tensor(dimension_difference, device=get_device())
+    )
+    if gathered_regular_tensors is None or gathered_dimension_differences is None:
+        return None
+    else:
+        return [
+            unpad_tensor_at_end(regular_tensor, dimension_difference)
+            for regular_tensor, dimension_difference in zip(
+                gathered_regular_tensors, gathered_dimension_differences
+            )
+        ]
+
+
+def pad_tensor_at_end(
+    tensor: torch.Tensor,
+    dimension_difference: List[int],
+    fill_value: Union[float, int] = 0.0,
+):
+    """Pad tensor by specified amount at end of each dimension.
+    Note that `pad` format is in reverse dimension order
+
+    Args:
+        tensor: The tensor to pad
+        dimension_difference: The amount to pad each dimension
+        fill_value: The value to fill the padding with
+
+    Returns:
+        The padded tensor
+    """
+    assert len(dimension_difference) == len(tensor.size()), "Dimension mismatch"
+    pad_dimensions = tuple(
+        [
+            val
+            for pair in zip(
+                [0 for _ in tensor.size()],
+                [diff for diff in dimension_difference[::-1]],
+            )
+            for val in pair
+        ]
+    )
+    padded_tensor = pad(tensor, pad_dimensions, mode="constant", value=fill_value).to(
+        get_device()
+    )
+    return padded_tensor
+
+
+def unpad_tensor_at_end(
+    tensor: torch.Tensor, dimension_difference: torch.Tensor
+) -> torch.Tensor:
+    """Remove padding from tensor
+
+    Args:
+        tensor: The tensor to remove padding from
+        dimension_difference: The amount of padding to remove from each dimension
+
+    Returns:
+        The tensor with padding removed
+    """
+    assert len(dimension_difference) == len(tensor.size()), "Dimension mismatch"
+    slice_dimensions = tuple(
+        [
+            slice(0, tensor.size()[i] - dimension_difference[i])
+            for i in range(len(tensor.size()))
+        ]
+    )
+    return tensor[slice_dimensions]

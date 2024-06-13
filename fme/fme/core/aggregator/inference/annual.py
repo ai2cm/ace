@@ -249,7 +249,7 @@ def _gather_sample_datasets(
     dist: Distributed, dataset: xr.Dataset
 ) -> Optional[xr.Dataset]:
     """
-    Gather the dataset across all processes, concatenating on the given dimension.
+    Gather the dataset across all processes, concatenating on the sample dimension.
 
     Assumes all dataset variables have the same dimensions and shape, and that the
     first dimension is "sample".
@@ -260,16 +260,23 @@ def _gather_sample_datasets(
         [torch.asarray(np.expand_dims(dataset[name].values, axis=0)) for name in names],
         dim=0,
     ).to(get_device())
-    gather_list = dist.gather(tensor)
-    if gather_list is None:
+    years = torch.asarray(dataset.year.values).to(get_device())
+    gathered_tensors = dist.gather_irregular(tensor)
+    gathered_years = dist.gather_irregular(years)
+    if gathered_tensors is None or gathered_years is None:
         return None
-    tensor = torch.concat(
-        gather_list, dim=1  # gather along sample, first dims are [name, sample]
-    ).cpu()
-    dataset_out = xr.Dataset(
-        {name: (["sample", "year"], tensor[i]) for i, name in enumerate(names)},
-        coords=dataset.coords,
-    )
+    datasets = []
+    for tensor, years in zip(gathered_tensors, gathered_years):
+        single_rank_dataset = xr.Dataset(
+            {
+                name: (["sample", "year"], tensor[i].cpu())
+                for i, name in enumerate(names)
+            },
+            coords={"year": years.cpu()},
+        )
+        datasets.append(single_rank_dataset)
+    # concat ranks along sample dim
+    dataset_out = xr.concat(datasets, dim="sample")
     return dataset_out
 
 
