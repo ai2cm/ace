@@ -27,7 +27,7 @@ from fme.core.data_loading.inference import (
 )
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
-from fme.core.ocean import OceanConfig
+from fme.core.ocean import Ocean, OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 
@@ -683,7 +683,7 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
     )
     ocean_override = OceanConfig(
-        surface_temperature_name="override_sfc_temp",
+        surface_temperature_name="var",
         ocean_fraction_name="override_ocean_fraction",
     )
 
@@ -701,6 +701,7 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         sigma_coordinates=SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)),
         area=torch.ones(10),
     )
+    assert isinstance(stepper.ocean, Ocean)
     assert (
         stepper.ocean.surface_temperature_name
         == ocean_override.surface_temperature_name

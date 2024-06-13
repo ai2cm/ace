@@ -3,7 +3,7 @@ from typing import List
 
 import torch
 
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -72,9 +72,9 @@ class Prescriber:
 
     def __call__(
         self,
-        mask_data: TensorDict,
-        gen: TensorDict,
-        target: TensorDict,
+        mask_data: TensorMapping,
+        gen: TensorMapping,
+        target: TensorMapping,
     ) -> TensorDict:
         """
         Args:
