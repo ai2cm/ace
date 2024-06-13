@@ -142,7 +142,7 @@ class InferenceConfig:
             self.checkpoint_path,
             area=area,
             sigma_coordinates=sigma_coordinates,
-            ocean=self.ocean,
+            ocean_config=self.ocean,
         )
         return stepper
 

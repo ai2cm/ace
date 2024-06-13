@@ -19,7 +19,7 @@ from fme.core.normalizer import (
     NormalizationConfig,
     StandardNormalizer,
 )
-from fme.core.ocean import OceanConfig
+from fme.core.ocean import Ocean, OceanConfig
 from fme.core.packer import Packer
 from fme.core.registry import ModuleSelector
 
@@ -344,7 +344,9 @@ class SingleModuleStepper:
         self.out_packer = Packer(config.out_names)
         self.normalizer = config.normalization.build(config.normalize_names)
         if config.ocean is not None:
-            self.ocean = config.ocean.build(config.in_names, config.out_names, timestep)
+            self.ocean: Optional[Ocean] = config.ocean.build(
+                config.in_names, config.out_names, timestep
+            )
         else:
             self.ocean = None
         self.module = config.builder.build(
