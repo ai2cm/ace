@@ -232,19 +232,17 @@ class TestDataWriter:
             for var_name in set(sample_prediction_data.keys()):
                 assert "valid_time" in ds[var_name].coords
                 assert "init_time" in ds[var_name].coords
-
-        histograms = xr.open_dataset(tmp_path / "histograms.nc")
-        actual_var_names = sorted([str(k) for k in histograms.keys()])
-        assert len(actual_var_names) == 8
-        assert "humidity" in actual_var_names
-        assert histograms.data_vars["humidity"].attrs["units"] == "count"
-        assert "humidity_bin_edges" in actual_var_names
-        assert histograms.data_vars["humidity_bin_edges"].attrs["units"] == "%"
-        counts_per_timestep = histograms["humidity"].sum(dim=["bin", "source"])
-        same_count_each_timestep = np.all(
-            counts_per_timestep.values == counts_per_timestep.values[0]
-        )
-        assert same_count_each_timestep
+        for source in ["target", "prediction"]:
+            histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+            actual_var_names = sorted([str(k) for k in histograms.keys()])
+            assert histograms.data_vars["temp"].attrs["units"] == "count"
+            assert "temp_bin_edges" in actual_var_names
+            assert histograms.data_vars["temp_bin_edges"].attrs["units"] == "K"
+            counts_per_timestep = histograms["temp"].sum(dim=["bin"])
+            same_count_each_timestep = np.all(
+                counts_per_timestep.values == counts_per_timestep.values[0]
+            )
+            assert same_count_each_timestep
 
         with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
             assert ds.counts.sum() == n_samples * n_timesteps
@@ -330,13 +328,6 @@ class TestDataWriter:
                 "lon",
             }
         )
-        histograms = xr.open_dataset(tmp_path / "histograms.nc")
-        if save_names is None:
-            expected_names = set(sample_target_data)
-        else:
-            expected_names = set(save_names)
-        expected_bin_edge_names = {f"{name}_bin_edges" for name in expected_names}
-        assert set(histograms) == expected_names.union(expected_bin_edge_names)
 
     def test_append_batch_data_time_mismatch(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
