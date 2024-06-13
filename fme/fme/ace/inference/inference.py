@@ -118,11 +118,9 @@ class InferenceConfig:
 
     def configure_wandb(self, env_vars: Optional[dict] = None, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
-        if "environment" in config:
-            logging.warning("Not recording env vars since 'environment' is in config.")
-        elif env_vars is not None:
-            config["environment"] = env_vars
-        self.logging.configure_wandb(config=config, resume=False, **kwargs)
+        self.logging.configure_wandb(
+            config=config, env_vars=env_vars, resume=False, **kwargs
+        )
 
     def clean_wandb(self):
         self.logging.clean_wandb(self.experiment_dir)
