@@ -1,7 +1,7 @@
+import logging
 from pathlib import Path
 from typing import Dict, Mapping, Optional, Sequence
 
-import numpy as np
 import torch
 import xarray as xr
 
@@ -11,80 +11,42 @@ from fme.core.histogram import DynamicHistogram
 
 class _HistogramAggregator:
     def __init__(self, n_times: int, names: Optional[Sequence[str]] = None):
-        self._prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
-        self._target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
+        self._histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self._n_times = n_times
         self._names = names
 
     def record_batch(
         self,
-        target_data: Dict[str, torch.Tensor],
-        prediction_data: Dict[str, torch.Tensor],
+        data: Dict[str, torch.Tensor],
         i_time_start: int,
     ):
-        if self._target_histograms is None:
+        if self._histograms is None:
             if self._names is not None:
-                target_names = [k for k in target_data if k in self._names]
+                save_names_not_in_data = set(self._names) - set(data.keys())
+                if len(save_names_not_in_data) > 0:
+                    logging.warning(
+                        f"Variables {save_names_not_in_data} in save_names are not "
+                        "in histogram data."
+                    )
+                _names = [k for k in data if k in self._names]
             else:
-                target_names = list(target_data)
-            self._target_histograms = {
-                var_name: DynamicHistogram(n_times=self._n_times)
-                for var_name in target_names
+                _names = list(data)
+            self._histograms = {
+                var_name: DynamicHistogram(n_times=self._n_times) for var_name in _names
             }
-        if self._prediction_histograms is None:
-            if self._names is not None:
-                prediction_names = [k for k in prediction_data if k in self._names]
-            else:
-                prediction_names = list(prediction_data)
-            self._prediction_histograms = {
-                var_name: DynamicHistogram(n_times=self._n_times)
-                for var_name in prediction_names
-            }
-        for var_name, histogram in self._prediction_histograms.items():
+
+        for var_name, histogram in self._histograms.items():
             # go from [n_samples, n_timesteps, n_lat, n_lon] to
             #     [n_timesteps, n_samples, n_lat, n_lon]
             # and then reshape to [n_timesteps, n_hist_samples]
-            n_times = prediction_data[var_name].shape[1]
-            data = prediction_data[var_name].transpose(1, 0).reshape(n_times, -1)
-            histogram.add(data, i_time_start=i_time_start)
-        for var_name, histogram in self._target_histograms.items():
-            # go from [n_samples, n_timesteps, n_lat, n_lon] to
-            #     [n_timesteps, n_samples, n_height, n_width]
-            # and then reshape to [n_timesteps, n_hist_samples]
-            n_times = target_data[var_name].shape[1]
-            data = target_data[var_name].transpose(1, 0).reshape(n_times, -1)
-            histogram.add(data, i_time_start=i_time_start)
+            n_times = data[var_name].shape[1]
+            reshaped_data = data[var_name].transpose(1, 0).reshape(n_times, -1)
+            histogram.add(reshaped_data, i_time_start=i_time_start)
 
     def get_dataset(self) -> xr.Dataset:
-        if self._target_histograms is None or self._prediction_histograms is None:
+        if self._histograms is None:
             raise RuntimeError("No data has been recorded.")
-        target_dataset = self._get_single_dataset(self._target_histograms)
-        prediction_dataset = self._get_single_dataset(self._prediction_histograms)
-        for missing_target_name in set(prediction_dataset.data_vars) - set(
-            target_dataset.data_vars
-        ):
-            if not missing_target_name.endswith("_bin_edges"):
-                target_dataset[missing_target_name] = xr.DataArray(
-                    np.zeros_like(prediction_dataset[missing_target_name]),
-                    dims=("time", "bin"),
-                )
-                target_dataset[f"{missing_target_name}_bin_edges"] = prediction_dataset[
-                    f"{missing_target_name}_bin_edges"
-                ]
-        for missing_prediction_name in set(target_dataset.data_vars) - set(
-            prediction_dataset.data_vars
-        ):
-            if not missing_prediction_name.endswith("_bin_edges"):
-                prediction_dataset[missing_prediction_name] = xr.DataArray(
-                    np.zeros_like(target_dataset[missing_prediction_name]),
-                    dims=("time", "bin"),
-                )
-                prediction_dataset[
-                    f"{missing_prediction_name}_bin_edges"
-                ] = target_dataset[f"{missing_prediction_name}_bin_edges"]
-        ds = xr.concat([target_dataset, prediction_dataset], dim="source")
-        ds["source"] = ["target", "prediction"]
-        return ds
+        return self._get_single_dataset(self._histograms)
 
     @staticmethod
     def _get_single_dataset(histograms: Mapping[str, DynamicHistogram]) -> xr.Dataset:
@@ -103,6 +65,57 @@ class _HistogramAggregator:
 
 class PairedHistogramDataWriter:
     """
+    Wrapper over HistogramDataWriter to write both target and prediction data.
+    Gives the same interface as HistogramDataWriter.
+    """
+
+    def __init__(
+        self,
+        path: str,
+        n_timesteps: int,
+        metadata: Mapping[str, VariableMetadata],
+        save_names: Optional[Sequence[str]],
+    ):
+        self._target_writer = HistogramDataWriter(
+            path=path,
+            n_timesteps=n_timesteps,
+            filename="histograms_target.nc",
+            metadata=metadata,
+            save_names=save_names,
+        )
+        self._prediction_writer = HistogramDataWriter(
+            path=path,
+            n_timesteps=n_timesteps,
+            filename="histograms_prediction.nc",
+            metadata=metadata,
+            save_names=save_names,
+        )
+
+    def append_batch(
+        self,
+        target: Dict[str, torch.Tensor],
+        prediction: Dict[str, torch.Tensor],
+        start_timestep: int,
+        batch_times: xr.DataArray,
+    ):
+        self._target_writer.append_batch(
+            data=target,
+            start_timestep=start_timestep,
+            batch_times=batch_times,
+        )
+        self._prediction_writer.append_batch(
+            data=prediction,
+            start_timestep=start_timestep,
+            batch_times=batch_times,
+        )
+
+    def flush(self):
+        self._target_writer.flush()
+        self._prediction_writer.flush()
+
+
+class HistogramDataWriter:
+    """
     Write [time, bin] histogram data for each variable to a netCDF file.
     """
 
@@ -110,6 +123,7 @@ class PairedHistogramDataWriter:
         self,
         path: str,
         n_timesteps: int,
+        filename: str,
         metadata: Mapping[str, VariableMetadata],
         save_names: Optional[Sequence[str]],
     ):
@@ -120,14 +134,13 @@ class PairedHistogramDataWriter:
             metadata: Metadata for each variable to be written to the file.
         """
         self.path = path
-        self._metrics_filename = str(Path(path) / "histograms.nc")
+        self._metrics_filename = str(Path(path) / filename)
         self.metadata = metadata
         self._histogram = _HistogramAggregator(n_times=n_timesteps, names=save_names)
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        data: Dict[str, torch.Tensor],
         start_timestep: int,
         batch_times: xr.DataArray,
     ):
@@ -142,8 +155,7 @@ class PairedHistogramDataWriter:
         """
         del batch_times
         self._histogram.record_batch(
-            target_data=target,
-            prediction_data=prediction,
+            data=data,
             i_time_start=start_timestep,
         )
 
@@ -153,9 +165,15 @@ class PairedHistogramDataWriter:
         """
         metric_dataset = self._histogram.get_dataset()
         for name in self.metadata:
-            metric_dataset[f"{name}_bin_edges"].attrs["units"] = self.metadata[
-                name
-            ].units
+            try:
+                metric_dataset[f"{name}_bin_edges"].attrs["units"] = self.metadata[
+                    name
+                ].units
+            except KeyError:
+                logging.info(
+                    f"{name} in metadata but not in data written to "
+                    f"{self._metrics_filename}."
+                )
         for name in metric_dataset.data_vars:
             if not name.endswith("_bin_edges"):
                 metric_dataset[f"{name}_bin_edges"].attrs[
