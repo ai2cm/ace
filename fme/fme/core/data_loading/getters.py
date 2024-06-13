@@ -1,9 +1,11 @@
+import dataclasses
 import logging
 import warnings
 from typing import List, Sequence
 
 import numpy as np
 import torch.utils.data
+import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
@@ -13,7 +15,12 @@ from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset, as_index_slice, subset_dataset
 from .data_typing import GriddedData
-from .inference import InferenceDataLoaderConfig, InferenceDataset
+from .inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    InferenceDataLoaderConfig,
+    InferenceDataset,
+)
 from .requirements import DataRequirements
 from .utils import BatchData
 
@@ -183,3 +190,34 @@ def get_inference_data(
         timestep=dataset.timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
+
+
+def get_forcing_data(
+    config: ForcingDataLoaderConfig,
+    forward_steps_in_memory: int,
+    requirements: DataRequirements,
+    initial_times: xr.DataArray,
+) -> GriddedData:
+    """Return a GriddedData loader for forcing data only. This function determines the
+    start indices for the forcing data based on the initial times provided.
+
+    Args:
+        config: Parameters for the forcing data loader.
+        forward_steps_in_memory: Number of forward steps to provide per window of
+            forcing data that will be returned by loader.
+        requirements: Data requirements for the forcing data.
+        initial_times: Desired initial times for the forcing data. This must be a 1D
+            data array, whose length determines the ensemble size.
+
+    Returns:
+        A data loader for forcing data with coordinates and metadata.
+    """
+    requirements_copy = dataclasses.replace(requirements, n_timesteps=1)
+    available_times = XarrayDataset(config.dataset, requirements_copy).time_index
+    start_time_indices = []
+    for time in initial_times.values:
+        start_time_indices.append(available_times.get_loc(time))
+    inference_config = config.build_inference_config(
+        start_indices=ExplicitIndices(start_time_indices)
+    )
+    return get_inference_data(inference_config, forward_steps_in_memory, requirements)
