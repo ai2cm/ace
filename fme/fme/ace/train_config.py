@@ -2,7 +2,7 @@ import dataclasses
 import logging
 import os
 import warnings
-from typing import Any, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Optional, Union
 
 from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.config import DataLoaderConfig, Slice
@@ -64,12 +64,25 @@ class LoggingConfig:
             fh.setFormatter(logging.Formatter(self.log_format))
             logger.addHandler(fh)
 
-    def configure_wandb(self, config: Mapping[str, Any], **kwargs):
+    def configure_wandb(
+        self,
+        config: Mapping[str, Any],
+        env_vars: Optional[Mapping[str, Any]] = None,
+        **kwargs,
+    ):
+        config_copy = {**config}
+        if "environment" in config_copy:
+            logging.warning(
+                "Not recording environmental variables since 'environment' key is "
+                "already present in config."
+            )
+        elif env_vars is not None:
+            config_copy["environment"] = env_vars
         # must ensure wandb.configure is called before wandb.init
         wandb = WandB.get_instance()
         wandb.configure(log_to_wandb=self.log_to_wandb)
         wandb.init(
-            config=config,
+            config=config_copy,
             project=self.project,
             entity=self.entity,
             dir=config["experiment_dir"],
@@ -248,13 +261,9 @@ class TrainConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self, env_vars: Optional[Mapping[str, str]] = None, **kwargs):
+    def configure_wandb(self, env_vars: Optional[Dict[str, Any]] = None, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
-        if "environment" in config:
-            logging.warning("Not recording env vars since 'environment' is in config.")
-        elif env_vars is not None:
-            config["environment"] = env_vars
-        self.logging.configure_wandb(config=config, **kwargs)
+        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
     def log(self):
         logging.info("------------------ Configuration ------------------")
