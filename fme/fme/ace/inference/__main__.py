@@ -1,6 +1,6 @@
 import argparse
 
-from .evaluator import main
+from .inference import main
 
 parser = argparse.ArgumentParser()
 parser.add_argument("yaml_config", type=str)

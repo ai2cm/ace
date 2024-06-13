@@ -99,6 +99,14 @@ class SingleModuleStepperConfig:
             n_timesteps=n_forward_steps + 1,
         )
 
+    def get_forcing_data_requirements(self, n_forward_steps: int) -> DataRequirements:
+        if self.ocean is None:
+            names = self.forcing_names
+        else:
+            names = list(set(self.forcing_names).union(self.ocean.forcing_names))
+
+        return DataRequirements(names=names, n_timesteps=n_forward_steps + 1)
+
     def get_state(self):
         return dataclasses.asdict(self)
 
