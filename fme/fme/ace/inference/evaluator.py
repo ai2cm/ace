@@ -36,17 +36,20 @@ def load_stepper(
     checkpoint_file: str,
     area: torch.Tensor,
     sigma_coordinates: SigmaCoordinates,
-    ocean: Optional[OceanConfig] = None,
+    ocean_config: Optional[OceanConfig] = None,
 ) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
     stepper = SingleModuleStepper.from_state(
         checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
     )
-    if ocean is not None:
+    if ocean_config is not None:
         logging.info(
             "Overriding training ocean configuration with the inference ocean config."
         )
-        stepper.ocean = ocean
+        new_ocean = ocean_config.build(
+            stepper.in_packer.names, stepper.out_packer.names, stepper.timestep
+        )
+        stepper.ocean = new_ocean
     return stepper
 
 
@@ -150,7 +153,7 @@ class InferenceEvaluatorConfig:
             self.checkpoint_path,
             area=area,
             sigma_coordinates=sigma_coordinates,
-            ocean=self.ocean,
+            ocean_config=self.ocean,
         )
         return stepper
 
