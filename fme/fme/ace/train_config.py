@@ -2,7 +2,7 @@ import dataclasses
 import logging
 import os
 import warnings
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.config import DataLoaderConfig, Slice
@@ -10,88 +10,10 @@ from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
+from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.stepper import ExistingStepperConfig, SingleModuleStepperConfig
-from fme.core.wandb import WandB
 from fme.core.weight_ops import CopyWeightsConfig
-
-
-@dataclasses.dataclass
-class LoggingConfig:
-    """
-    Configuration for logging.
-
-    Attributes:
-        project: name of the project in Weights & Biases
-        entity: name of the entity in Weights & Biases
-        log_to_screen: whether to log to the screen
-        log_to_file: whether to log to a file
-        log_to_wandb: whether to log to Weights & Biases
-        log_format: format of the log messages
-    """
-
-    project: str = "ace"
-    entity: str = "ai2cm"
-    log_to_screen: bool = True
-    log_to_file: bool = True
-    log_to_wandb: bool = True
-    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    level: Union[str, int] = logging.INFO
-
-    def __post_init__(self):
-        self._dist = Distributed.get_instance()
-
-    def configure_logging(self, experiment_dir: str, log_filename: str):
-        """
-        Configure the global `logging` module based on this LoggingConfig.
-        """
-        if self.log_to_screen and self._dist.is_root():
-            logging.basicConfig(format=self.log_format, level=self.level)
-        elif self._dist.is_root():
-            logging.basicConfig(level=logging.WARNING)
-        else:  # we are not root
-            logging.basicConfig(level=logging.ERROR)
-        logger = logging.getLogger()
-        if self.log_to_file and self._dist.is_root():
-            if not os.path.exists(experiment_dir):
-                raise ValueError(
-                    f"experiment directory {experiment_dir} does not exist, "
-                    "cannot log files to it"
-                )
-            log_path = os.path.join(experiment_dir, log_filename)
-            fh = logging.FileHandler(log_path)
-            fh.setLevel(self.level)
-            fh.setFormatter(logging.Formatter(self.log_format))
-            logger.addHandler(fh)
-
-    def configure_wandb(
-        self,
-        config: Mapping[str, Any],
-        env_vars: Optional[Mapping[str, Any]] = None,
-        **kwargs,
-    ):
-        config_copy = {**config}
-        if "environment" in config_copy:
-            logging.warning(
-                "Not recording environmental variables since 'environment' key is "
-                "already present in config."
-            )
-        elif env_vars is not None:
-            config_copy["environment"] = env_vars
-        # must ensure wandb.configure is called before wandb.init
-        wandb = WandB.get_instance()
-        wandb.configure(log_to_wandb=self.log_to_wandb)
-        wandb.init(
-            config=config_copy,
-            project=self.project,
-            entity=self.entity,
-            dir=config["experiment_dir"],
-            **kwargs,
-        )
-
-    def clean_wandb(self, experiment_dir: str):
-        wandb = WandB.get_instance()
-        wandb.clean_wandb_dir(experiment_dir=experiment_dir)
 
 
 @dataclasses.dataclass

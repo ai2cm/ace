@@ -12,16 +12,16 @@ import torch
 import yaml
 
 import fme
+import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
-from fme.ace.train_config import LoggingConfig
-from fme.ace.utils import logging_utils
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB

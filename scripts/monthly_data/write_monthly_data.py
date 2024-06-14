@@ -11,13 +11,12 @@ import torch.utils.data
 import xarray as xr
 import yaml
 
+import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
 from fme.ace.inference.derived_variables import compute_derived_quantities
-from fme.ace.train_config import LoggingConfig
-from fme.ace.utils import logging_utils
 from fme.core.data_loading.config import DataLoaderConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_datasets
@@ -25,6 +24,7 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import DimSizes, save_2d_netcdf
 
 

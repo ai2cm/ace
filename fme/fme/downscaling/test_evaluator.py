@@ -5,8 +5,8 @@ from typing import Any, Mapping
 import pytest
 import yaml
 
-from fme.ace.train_config import LoggingConfig
 from fme.core.data_loading.config import XarrayDataConfig
+from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
