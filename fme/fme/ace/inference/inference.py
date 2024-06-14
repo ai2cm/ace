@@ -11,15 +11,15 @@ import xarray as xr
 import yaml
 
 import fme
+import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.loop import run_inference
-from fme.ace.train_config import LoggingConfig
-from fme.ace.utils import logging_utils
 from fme.core import SingleModuleStepper
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_forcing_data
 from fme.core.data_loading.inference import ForcingDataLoaderConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping

@@ -58,10 +58,10 @@ import torch
 import yaml
 
 import fme
+import fme.core.logging_utils as logging_utils
 from fme.ace.inference import run_inference_evaluator
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.train_config import TrainConfig
-from fme.ace.utils import logging_utils
 from fme.core.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,

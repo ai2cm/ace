@@ -16,7 +16,6 @@ from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
 from fme.ace.registry import ModuleSelector
-from fme.ace.train_config import LoggingConfig
 from fme.core import metrics
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig, annual
 from fme.core.data_loading.config import XarrayDataConfig
@@ -26,6 +25,7 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.core.device import get_device
+from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig, SteppedData

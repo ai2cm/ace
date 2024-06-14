@@ -21,9 +21,9 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.train_config import LoggingConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.inference import ForcingDataLoaderConfig
+from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.testing import DimSizes, FV3GFSData
