@@ -9,11 +9,11 @@ import torch
 import yaml
 
 import fme
+import fme.core.logging_utils as logging_utils
 from fme.ace.train import count_parameters
-from fme.ace.train_config import LoggingConfig
-from fme.ace.utils import logging_utils
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
