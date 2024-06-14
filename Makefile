@@ -29,7 +29,7 @@ launch_beaker_session:
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) pip install uv
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv==0.2.5
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e fme[dev]
 
 test:
