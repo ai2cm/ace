@@ -3,8 +3,8 @@ import pathlib
 import xarray as xr
 from write_monthly_data import Config, run, write_ensemble_dataset
 
-from fme.ace.train_config import LoggingConfig
 from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
+from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import DimSizes
 
 
