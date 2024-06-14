@@ -11,7 +11,7 @@ import xarray as xr
 @click.argument("output_directory")
 @click.option("--start-date", help="For subsetting, e.g. '2016-01-01'")
 @click.option("--end-date", help="For subsetting, e.g. '2016-12-31'")
-@click.option("--nc-format", default="NETCDF3_64BIT", help="netCDF file format")
+@click.option("--nc-format", default="NETCDF4", help="netCDF file format")
 @click.option(
     "--prepend-nans",
     is_flag=True,
