@@ -8,10 +8,10 @@ import dacite
 import torch
 import yaml
 
+import fme.core.logging_utils as logging_utils
 from fme.ace.train import count_parameters
-from fme.ace.train_config import LoggingConfig
-from fme.ace.utils import logging_utils
 from fme.core.dicts import to_flat_dict
+from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
