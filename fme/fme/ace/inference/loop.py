@@ -7,7 +7,7 @@ import torch
 import xarray as xr
 
 from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference.main import InferenceAggregator
+from fme.core.aggregator.inference.main import InferenceEvaluatorAggregator
 from fme.core.data_loading.data_typing import GriddedData
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
@@ -106,7 +106,7 @@ class WindowStitcher:
 def _inference_internal_loop(
     stepped: SteppedData,
     i_time: int,
-    aggregator: InferenceAggregator,
+    aggregator: InferenceEvaluatorAggregator,
     stitcher: WindowStitcher,
     batch_times: xr.DataArray,
 ):
@@ -213,7 +213,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceAggregator,
+    aggregator: InferenceEvaluatorAggregator,
     stepper: SingleModuleStepper,
     data: GriddedData,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -285,7 +285,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceAggregator,
+    aggregator: InferenceEvaluatorAggregator,
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
