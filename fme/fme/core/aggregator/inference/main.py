@@ -22,7 +22,7 @@ wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 
 
-class _Aggregator(Protocol):
+class _EvaluatorAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
@@ -44,7 +44,7 @@ class _Aggregator(Protocol):
         ...
 
 
-class _TimeDependentAggregator(Protocol):
+class _TimeDependentEvaluatorAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
@@ -88,7 +88,7 @@ class InferenceEvaluatorAggregatorConfig:
         else:
             monthly_reference_data = xr.open_dataset(self.monthly_reference_data)
 
-        return InferenceAggregator(
+        return InferenceEvaluatorAggregator(
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
@@ -99,7 +99,7 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
-class InferenceAggregator:
+class InferenceEvaluatorAggregator:
     """
     Aggregates statistics for inference.
 
@@ -140,7 +140,7 @@ class InferenceAggregator:
             monthly_reference_data: Reference monthly data for computing target stats.
             log_histograms: Whether to aggregate histograms.
         """
-        self._aggregators: Dict[str, _Aggregator] = {
+        self._aggregators: Dict[str, _EvaluatorAggregator] = {
             "mean": MeanAggregator(
                 area_weights,
                 target="denorm",
@@ -178,7 +178,9 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
-        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
+        self._time_dependent_aggregators: Dict[
+            str, _TimeDependentEvaluatorAggregator
+        ] = {}
         if log_seasonal_means:
             self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
                 area_weights=area_weights,

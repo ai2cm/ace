@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.core.aggregator.inference import InferenceAggregator
+from fme.core.aggregator.inference import InferenceEvaluatorAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
@@ -27,7 +27,7 @@ def test_logs_labels_exist():
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
 
-    agg = InferenceAggregator(
+    agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
@@ -76,7 +76,7 @@ def test_inference_logs_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = InferenceAggregator(
+    agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
@@ -123,7 +123,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = InferenceAggregator(
+    agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
@@ -171,7 +171,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = InferenceAggregator(
+    agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
