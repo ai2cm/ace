@@ -22,6 +22,23 @@ wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 
 
+class _Aggregator(Protocol):
+    @torch.no_grad()
+    def record_batch(
+        self,
+        gen_data: TensorMapping,
+    ):
+        ...
+
+    @torch.no_grad()
+    def get_logs(self, label: str):
+        ...
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        ...
+
+
 class _EvaluatorAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
@@ -41,6 +58,20 @@ class _EvaluatorAggregator(Protocol):
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
+        ...
+
+
+class _TimeDependentAggregator(Protocol):
+    @torch.no_grad()
+    def record_batch(
+        self,
+        time: xr.DataArray,
+        gen_data: TensorMapping,
+    ):
+        ...
+
+    @torch.no_grad()
+    def get_logs(self, label: str):
         ...
 
 
@@ -82,7 +113,7 @@ class InferenceEvaluatorAggregatorConfig:
     log_seasonal_means: bool = False
     monthly_reference_data: Optional[str] = None
 
-    def build(self, **kwargs):
+    def build(self, **kwargs) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
         else:
@@ -101,7 +132,7 @@ class InferenceEvaluatorAggregatorConfig:
 
 class InferenceEvaluatorAggregator:
     """
-    Aggregates statistics for inference.
+    Aggregates statistics for inference comparing a generated and target series.
 
     To use, call `record_batch` on the results of each batch, then call
     `get_logs` to get a dictionary of statistics when you're done.
@@ -309,3 +340,114 @@ def table_to_logs(table: Table) -> List[Dict[str, Union[float, int]]]:
     for row in table.data:
         logs.append({table.columns[i]: row[i] for i in range(len(row))})
     return logs
+
+
+@dataclasses.dataclass
+class InferenceAggregatorConfig:
+    """
+    Configuration for inference aggregator.
+    """
+
+    def build(
+        self,
+        area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ) -> "InferenceAggregator":
+        return InferenceAggregator(
+            area_weights=area_weights,
+            sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
+            metadata=metadata,
+        )
+
+
+class InferenceAggregator:
+    """
+    Aggregates statistics on a single timeseries of data.
+
+    To use, call `record_batch` on the results of each batch, then call
+    `get_logs` to get a dictionary of statistics when you're done.
+    """
+
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ):
+        """
+        Args:
+            area_weights: Area weights for each grid cell.
+            sigma_coordinates: Data sigma coordinates
+            timestep: Timestep of the model.
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
+        """
+        self._aggregators: Dict[str, _Aggregator] = {}
+        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
+
+    @torch.no_grad()
+    def record_batch(
+        self,
+        time: xr.DataArray,
+        data: TensorMapping,
+    ):
+        if len(data) == 0:
+            raise ValueError("No data in gen_data")
+        for aggregator in self._aggregators.values():
+            aggregator.record_batch(
+                gen_data=data,
+            )
+        for time_dependent_aggregator in self._time_dependent_aggregators.values():
+            time_dependent_aggregator.record_batch(
+                time=time,
+                gen_data=data,
+            )
+
+    @torch.no_grad()
+    def get_logs(self, label: str):
+        """
+        Returns logs as can be reported to WandB.
+
+        Args:
+            label: Label to prepend to all log keys.
+        """
+        logs = {}
+        for name, aggregator in self._aggregators.items():
+            logs.update(aggregator.get_logs(label=name))
+        for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
+            logs.update(time_dependent_aggregator.get_logs(label=name))
+        logs = {f"{label}/{key}": val for key, val in logs.items()}
+        return logs
+
+    @torch.no_grad()
+    def get_inference_logs(self, label: str) -> List[Dict[str, Union[float, int]]]:
+        """
+        Returns a list of logs to report to WandB.
+
+        This is done because in inference, we use the wandb step
+        as the time step, meaning we need to re-organize the logged data
+        from tables into a list of dictionaries.
+        """
+        return to_inference_logs(self.get_logs(label=label))
+
+    @torch.no_grad()
+    def get_datasets(
+        self, aggregator_whitelist: Optional[Iterable[str]] = None
+    ) -> Dict[str, xr.Dataset]:
+        """
+        Args:
+            aggregator_whitelist: aggregator names to include in the output. If
+                None, return all the datasets associated with all aggregators.
+        """
+        datasets = (
+            (name, agg.get_dataset()) for name, agg in self._aggregators.items()
+        )
+        if aggregator_whitelist is not None:
+            filter_ = set(aggregator_whitelist)
+            return {name: ds for name, ds in datasets if name in filter_}
+
+        return {name: ds for name, ds in datasets}

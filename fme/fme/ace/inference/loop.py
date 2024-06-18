@@ -7,8 +7,12 @@ import torch
 import xarray as xr
 
 from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference.main import InferenceEvaluatorAggregator
+from fme.core.aggregator.inference.main import (
+    InferenceAggregator,
+    InferenceEvaluatorAggregator,
+)
 from fme.core.data_loading.data_typing import GriddedData
+from fme.core.data_loading.utils import BatchData
 from fme.core.device import get_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
@@ -161,6 +165,7 @@ def run_inference(
     initial_condition: TensorMapping,
     forcing_data: GriddedData,
     writer: DataWriter,
+    aggregator: InferenceAggregator,
 ) -> Dict[str, float]:
     """Run extended inference loop given initial condition and forcing data.
 
@@ -179,6 +184,7 @@ def run_inference(
         timers: Dict[str, float] = defaultdict(float)
         current_time = time.time()
         i_time = 0
+        window_forcing: BatchData
         for window_forcing in forcing_data.loader:
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
@@ -197,9 +203,9 @@ def run_inference(
                 prediction, forcing_data.sigma_coordinates, forcing_data.timestep
             )
 
-            writer.append_batch(
-                prediction, i_time, window_forcing.times.isel(time=slice(1, None))
-            )
+            forward_times = window_forcing.times.isel(time=slice(1, None))
+            writer.append_batch(prediction, i_time, forward_times)
+            aggregator.record_batch(time=forward_times, data=prediction)
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
             initial_condition = {
