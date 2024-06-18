@@ -571,3 +571,16 @@ def test_repeat_and_increment_times(n_repeats):
     assert full_periods == n_repeats * raw_periods
     assert full_total_periods == n_repeats * raw_total_periods
     np.testing.assert_equal(result_concatenated, expected_concatenated)
+
+
+def test_available_times(mock_monthly_netcdfs):
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    dataset = XarrayDataset(
+        config,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=10
+        ),
+    )
+    assert dataset.available_times.equals(
+        xr.CFTimeIndex(mock_monthly_netcdfs.obs_times)
+    )

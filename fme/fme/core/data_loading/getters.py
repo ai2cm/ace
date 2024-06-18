@@ -1,4 +1,3 @@
-import dataclasses
 import logging
 import warnings
 from typing import List, Sequence
@@ -212,8 +211,7 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
-    requirements_copy = dataclasses.replace(requirements, n_timesteps=1)
-    available_times = XarrayDataset(config.dataset, requirements_copy).time_index
+    available_times = XarrayDataset(config.dataset, requirements).available_times
     start_time_indices = []
     for time in initial_times.values:
         start_time_indices.append(available_times.get_loc(time))

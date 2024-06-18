@@ -24,6 +24,7 @@ from fme.core.data_loading.inference import (
     ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
+    TimestampList,
 )
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData, get_times
@@ -372,3 +373,47 @@ def test_inference_loader_raises_if_subset():
 def test_forcing_loader_raises_if_subset():
     with pytest.raises(ValueError):
         ForcingDataLoaderConfig(XarrayDataConfig(data_path="foo", subset=Slice(stop=1)))
+
+
+@pytest.mark.parametrize(
+    "timestamps, expected_indices",
+    [
+        (
+            [
+                "2020-01-01T00:00:00",
+                "2020-01-02T00:00:00",
+            ],
+            [0, 2],
+        ),
+        (
+            [
+                "2020-01-01T00:00:00",
+                "2021-01-02T00:00:00",
+            ],
+            None,
+        ),
+        (
+            [
+                "2021-01-02T00:00:00",
+            ],
+            None,
+        ),
+    ],
+)
+def test_TimestampList_as_indices(timestamps, expected_indices):
+    time_index = xr.CFTimeIndex(
+        [
+            cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0),
+            cftime.DatetimeJulian(2020, 1, 1, 12, 0, 0),
+            cftime.DatetimeJulian(2020, 1, 2, 0, 0, 0),
+            cftime.DatetimeJulian(2020, 1, 2, 12, 0, 0),
+        ]
+    )
+    timestamp_list = TimestampList(timestamps)
+    if expected_indices is None:
+        with pytest.raises(ValueError):
+            timestamp_list.as_indices(time_index)
+    else:
+        np.testing.assert_equal(
+            timestamp_list.as_indices(time_index), np.array(expected_indices)
+        )
