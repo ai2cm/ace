@@ -3,6 +3,7 @@ import datetime
 from math import ceil
 from typing import Sequence, Union
 
+import cftime
 import numpy as np
 import torch
 import xarray as xr
@@ -13,6 +14,32 @@ from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordi
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
+
+
+@dataclasses.dataclass
+class TimestampList:
+    times: Sequence[str]
+    timestamp_format: str = "%Y-%m-%dT%H:%M:%S"
+
+    def as_indices(self, time_index: xr.CFTimeIndex) -> np.ndarray:
+        datetimes = [
+            cftime.datetime.strptime(
+                t, self.timestamp_format, calendar=time_index.calendar
+            )
+            for t in self.times
+        ]
+        (indices,) = time_index.isin(datetimes).nonzero()
+        if len(indices) != len(self.times):
+            missing_times = set(datetimes) - set(time_index[indices])
+            raise ValueError(
+                f"Inference initial condition timestamps {missing_times} "
+                "were not found in the dataset."
+            )
+        return indices
+
+    @property
+    def n_initial_conditions(self) -> int:
+        return len(self.times)
 
 
 @dataclasses.dataclass
@@ -73,7 +100,9 @@ class InferenceDataLoaderConfig:
     """
 
     dataset: XarrayDataConfig
-    start_indices: Union[InferenceInitialConditionIndices, ExplicitIndices]
+    start_indices: Union[
+        InferenceInitialConditionIndices, ExplicitIndices, TimestampList
+    ]
     num_data_workers: int = 0
 
     def __post_init__(self):
@@ -128,7 +157,12 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._total_steps = requirements.n_timesteps - 1
         self._is_remote = dataset.is_remote
         self.n_samples = config.n_samples  # public attribute
-        self._start_indices = config.start_indices.as_indices()
+        if isinstance(config.start_indices, TimestampList):
+            self._start_indices = config.start_indices.as_indices(
+                dataset.available_times
+            )
+        else:
+            self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()
 
     def __getitem__(self, index) -> BatchData:

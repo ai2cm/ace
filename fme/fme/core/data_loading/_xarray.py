@@ -326,6 +326,11 @@ class XarrayDataset(Dataset):
             return False
         return True
 
+    @property
+    def available_times(self) -> xr.CFTimeIndex:
+        """Time index of all available times in the data"""
+        return self._available_times
+
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
             raise ValueError(
@@ -367,6 +372,8 @@ class XarrayDataset(Dataset):
         self._time_index = xr.CFTimeIndex(
             np.concatenate(time_coords)[: self._n_initial_conditions]
         )
+        self._available_times = xr.CFTimeIndex(np.concatenate(raw_times))
+
         del cum_num_timesteps, time_coords
 
         ds = self._open_file(0)
