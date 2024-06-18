@@ -3,6 +3,7 @@ import dataclasses
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Literal, Optional, Sequence, Tuple
 
 import dacite
@@ -15,6 +16,7 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.loop import run_inference
 from fme.core import SingleModuleStepper
+from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_forcing_data
 from fme.core.data_loading.inference import ForcingDataLoaderConfig
@@ -23,6 +25,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import WandB
 
 from .evaluator import load_stepper, load_stepper_config
 
@@ -99,6 +102,9 @@ class InferenceConfig:
     forward_steps_in_memory: int = 10
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
+    )
+    aggregator: InferenceAggregatorConfig = dataclasses.field(
+        default_factory=lambda: InferenceAggregatorConfig()
     )
     ocean: Optional[OceanConfig] = None
 
@@ -213,6 +219,13 @@ def main(yaml_config: str):
             f"match that of the forcing data, {data.timestep}."
         )
 
+    aggregator = config.aggregator.build(
+        area_weights=data.area_weights.to(fme.get_device()),
+        sigma_coordinates=data.sigma_coordinates,
+        timestep=data.timestep,
+        metadata=data.metadata,
+    )
+
     writer = config.get_data_writer(data, stepper.prognostic_names)
 
     logging.info("Starting inference")
@@ -221,11 +234,16 @@ def main(yaml_config: str):
         initial_condition=initial_condition,
         forcing_data=data,
         writer=writer,
+        aggregator=aggregator,
     )
 
     final_flush_start_time = time.time()
     logging.info("Starting final flush of data writer")
     writer.flush()
+    for name, ds in aggregator.get_datasets(("time_mean",)).items():
+        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
+        ds = ds.assign_coords(coords)
+        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
     final_flush_duration = time.time() - final_flush_start_time
     logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
     timers["final_writer_flush"] = final_flush_duration
@@ -235,6 +253,18 @@ def main(yaml_config: str):
     total_steps_per_second = total_steps / duration
     logging.info(f"Inference duration: {duration:.2f} seconds")
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
+
+    step_logs = aggregator.get_inference_logs(label="inference")
+    wandb = WandB.get_instance()
+    if wandb.enabled:
+        logging.info("Starting logging of metrics to wandb")
+        duration_logs = {
+            "duration_seconds": duration,
+            "total_steps_per_second": total_steps_per_second,
+        }
+        wandb.log({**timers, **duration_logs}, step=0)
+        for i, log in enumerate(step_logs):
+            wandb.log(log, step=i, sleep=0.01)
 
     config.clean_wandb()
 
