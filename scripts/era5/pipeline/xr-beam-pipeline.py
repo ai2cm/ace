@@ -124,6 +124,7 @@ VARIABLE_NAMES = {
         "u_component_of_wind",
         "v_component_of_wind",
         "geopotential",
+        "total_column_water_vapour",
     ],
 }
 
@@ -189,6 +190,7 @@ OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
 assert OUTPUT_LAYER_INDICES[-1] == N_INPUT_LAYERS
 N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
 OUTPUT_PRESSURE_LEVELS = [850, 500, 200]  # additionally save these pressure levels
+OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200]
 
 RENAME_Q = {f"q_{i}": f"specific_total_water_{i}" for i in range(N_OUTPUT_LAYERS)}
 RENAME_T = {f"t_{i}": f"air_temperature_{i}" for i in range(N_OUTPUT_LAYERS)}
@@ -198,7 +200,9 @@ RENAME_Q_PRES = {f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVE
 RENAME_T_PRES = {f"temperature_{p}": f"TMP{p}" for p in OUTPUT_PRESSURE_LEVELS}
 RENAME_U_PRES = {f"u_component_of_wind_{p}": f"UGRD{p}" for p in OUTPUT_PRESSURE_LEVELS}
 RENAME_V_PRES = {f"v_component_of_wind_{p}": f"VGRD{p}" for p in OUTPUT_PRESSURE_LEVELS}
-RENAME_Z_PRES = {f"geopotential_{p}": f"h{p}" for p in OUTPUT_PRESSURE_LEVELS}
+RENAME_Z_PRES = {
+    f"geopotential_{p}": f"h{p}" for p in OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL
+}
 RENAME_ETC = {
     "skt": "surface_temperature",
     "t2m": "TMP2m",
@@ -324,16 +328,23 @@ def _process_pressure_level_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset
     """Select pressure levels from 0.25° pressure level dataset."""
     # convert to 2D fields at desired pressure levels
     select_levels = xr.Dataset()
-    for pressure in OUTPUT_PRESSURE_LEVELS:
-        for name in ds.data_vars:
-            logging.info(f"Selecting {name} at {pressure} hPa")
-            out_name = f"{name}_{pressure}"
-            select_levels[out_name] = ds[name].sel(level=pressure)
+    for name in ds.data_vars:
+        if "level" in ds[name].dims:
             if name == "geopotential":
-                select_levels[out_name] = _to_geopotential_height(
-                    select_levels[out_name]
-                )
-            select_levels[out_name].attrs["long_name"] += f" at {pressure} hPa"
+                pressure_levels = OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL
+            else:
+                pressure_levels = OUTPUT_PRESSURE_LEVELS
+            for pressure in pressure_levels:
+                logging.info(f"Selecting {name} at {pressure} hPa")
+                out_name = f"{name}_{pressure}"
+                select_levels[out_name] = ds[name].sel(level=pressure)
+                if name == "geopotential":
+                    select_levels[out_name] = _to_geopotential_height(
+                        select_levels[out_name]
+                    )
+                select_levels[out_name].attrs["long_name"] += f" at {pressure} hPa"
+        else:
+            select_levels[name] = ds[name]
 
     regridded = _regrid_quarter_degree(select_levels, output_grid)
     regridded = regridded.rename(RENAME_PRESSURE_LEVEL)
