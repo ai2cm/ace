@@ -50,6 +50,82 @@ def get_gen_shape(gen_data: TensorMapping):
         return gen_data[name].shape
 
 
+class SingleTargetTimeMeanAggregator:
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+        target: Literal["norm", "denorm"] = "denorm",
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ):
+        """
+        Args:
+            area_weights: Area weights for each grid cell.
+            target: Whether to compute metrics on the normalized or denormalized data,
+                defaults to "denorm".
+            metadata: Mapping of variable names their metadata that will
+                used in generating logged image captions.
+        """
+        self._area_weights = area_weights
+        self._target = target
+        if metadata is None:
+            self._metadata: Mapping[str, VariableMetadata] = {}
+        else:
+            self._metadata = metadata
+        # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
+        self._data: Optional[TensorDict] = None
+        self._n_timesteps = 0
+        self._n_samples: Optional[int] = None
+
+    @staticmethod
+    def _add_or_initialize_time_mean(
+        maybe_dict: Optional[TensorDict],
+        new_data: TensorMapping,
+        ignore_initial: bool = False,
+    ) -> TensorDict:
+        sample_dim = 0
+        time_dim = 1
+        if ignore_initial:
+            time_slice = slice(1, None)
+        else:
+            time_slice = slice(0, None)
+        if maybe_dict is None:
+            d: TensorDict = {
+                name: tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
+                for name, tensor in new_data.items()
+            }
+        else:
+            d = dict(maybe_dict)
+            for name, tensor in new_data.items():
+                d[name] += tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
+        return d
+
+    @torch.no_grad()
+    def record_batch(
+        self,
+        data: TensorMapping,
+        i_time_start: int = 0,
+    ):
+        ignore_initial = i_time_start == 0
+        self._data = self._add_or_initialize_time_mean(self._data, data, ignore_initial)
+        if self._n_samples is None:
+            self._n_samples = data[list(data)[0]].size(0)
+        if ignore_initial:
+            self._n_timesteps = data[list(data)[0]].size(1) - 1
+        else:
+            self._n_timesteps += data[list(data)[0]].size(1)
+
+    def get_data(self) -> TensorMapping:
+        if self._n_timesteps == 0 or self._data is None:
+            raise ValueError("No data recorded.")
+
+        ret = {}
+        dist = Distributed.get_instance()
+        for name, value in self._data.items():
+            gen = dist.reduce_mean(value / self._n_timesteps / self._n_samples)
+            ret[name] = gen
+        return ret
+
+
 class TimeMeanAggregator:
     """Statistics and images on the time-mean state.
 
@@ -84,35 +160,12 @@ class TimeMeanAggregator:
         else:
             self._metadata = metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._target_data: Optional[TensorDict] = None
-        self._gen_data: Optional[TensorDict] = None
-        self._target_data_norm = None
-        self._gen_data_norm = None
-        self._n_timesteps = 0
-        self._n_samples: Optional[int] = None
-
-    @staticmethod
-    def _add_or_initialize_time_mean(
-        maybe_dict: Optional[TensorDict],
-        new_data: TensorMapping,
-        ignore_initial: bool = False,
-    ) -> TensorDict:
-        sample_dim = 0
-        time_dim = 1
-        if ignore_initial:
-            time_slice = slice(1, None)
-        else:
-            time_slice = slice(0, None)
-        if maybe_dict is None:
-            d: TensorDict = {
-                name: tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
-                for name, tensor in new_data.items()
-            }
-        else:
-            d = dict(maybe_dict)
-            for name, tensor in new_data.items():
-                d[name] += tensor[:, time_slice].sum(dim=time_dim).sum(dim=sample_dim)
-        return d
+        self._target_agg = SingleTargetTimeMeanAggregator(
+            area_weights=area_weights, target=target, metadata=metadata
+        )
+        self._gen_agg = SingleTargetTimeMeanAggregator(
+            area_weights=area_weights, target=target, metadata=metadata
+        )
 
     @torch.no_grad()
     def record_batch(
@@ -127,43 +180,22 @@ class TimeMeanAggregator:
         if self._target == "norm":
             target_data = target_data_norm
             gen_data = gen_data_norm
-        ignore_initial = i_time_start == 0
-        self._target_data = self._add_or_initialize_time_mean(
-            self._target_data, target_data, ignore_initial
-        )
-        self._gen_data = self._add_or_initialize_time_mean(
-            self._gen_data, gen_data, ignore_initial
-        )
-        if self._n_samples is None:
-            self._n_samples = target_data[list(target_data)[0]].size(0)
-        if ignore_initial:
-            self._n_timesteps = target_data[list(target_data)[0]].size(1) - 1
-        else:
-            self._n_timesteps += target_data[list(target_data)[0]].size(1)
+        self._target_agg.record_batch(target_data, i_time_start)
+        self._gen_agg.record_batch(gen_data, i_time_start)
 
     def _get_target_gen_pairs(self) -> List[_TargetGenPair]:
-        if (
-            self._n_timesteps == 0
-            or self._gen_data is None
-            or self._target_data is None
-        ):
-            raise ValueError("No data recorded.")
+        target_data = self._target_agg.get_data()
+        gen_data = self._gen_agg.get_data()
 
         ret = []
-        for name in self._gen_data.keys():
-            gen = self._dist.reduce_mean(
-                self._gen_data[name] / self._n_timesteps / self._n_samples
+        for name in gen_data.keys():
+            ret.append(
+                _TargetGenPair(gen=gen_data[name], target=target_data[name], name=name)
             )
-            target = self._dist.reduce_mean(
-                self._target_data[name] / self._n_timesteps / self._n_samples
-            )
-            ret.append(_TargetGenPair(gen=gen, target=target, name=name))
         return ret
 
     @torch.no_grad()
     def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor, Image]]:
-        if self._n_samples is None:
-            raise ValueError("No batches have been recorded.")
         logs = {}
         preds = self._get_target_gen_pairs()
         bias_map_key, gen_map_key = "bias_map", "gen_map"
