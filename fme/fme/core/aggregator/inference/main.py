@@ -26,7 +26,7 @@ class _Aggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
-        gen_data: TensorMapping,
+        data: TensorMapping,
     ):
         ...
 
@@ -66,7 +66,7 @@ class _TimeDependentAggregator(Protocol):
     def record_batch(
         self,
         time: xr.DataArray,
-        gen_data: TensorMapping,
+        data: TensorMapping,
     ):
         ...
 
@@ -396,15 +396,15 @@ class InferenceAggregator:
         data: TensorMapping,
     ):
         if len(data) == 0:
-            raise ValueError("No data in gen_data")
+            raise ValueError("data is empty")
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
-                gen_data=data,
+                data=data,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
                 time=time,
-                gen_data=data,
+                data=data,
             )
 
     @torch.no_grad()
