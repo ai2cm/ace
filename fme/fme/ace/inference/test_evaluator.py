@@ -116,6 +116,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         dim_sizes,
         n_forward_steps,
         stepper_path,
+        timestep=TIMESTEP,
     )
 
 
@@ -135,7 +136,6 @@ def test_inference_plus_one_model(
         n_lat=16,
         n_lon=32,
         nz_interface=4,
-        timestep=datetime.timedelta(days=20),
     )
     if use_prediction_data:
         # use std of 10 so the stepper would have errors at the plus-one problem
@@ -158,6 +158,7 @@ def test_inference_plus_one_model(
         n_forward_steps,
         stepper_path,
         save_monthly_files=False,  # requires timestep == 6h
+        timestep=datetime.timedelta(days=20),
     )
 
 
@@ -168,6 +169,7 @@ def inference_helper(
     dim_sizes: DimSizes,
     n_forward_steps,
     stepper_path,
+    timestep: datetime.timedelta,
     save_monthly_files: bool = True,
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
@@ -176,6 +178,7 @@ def inference_helper(
         names=all_names,
         dim_sizes=dim_sizes,
         time_varying_values=time_varying_values,
+        timestep_days=timestep.total_seconds() / 86400,
     )
     if use_prediction_data:
         prediction_data = data.inference_data_loader_config
@@ -354,6 +357,7 @@ def test_inference_writer_boundaries(
         path=tmp_path,
         names=all_names,
         dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
@@ -477,6 +481,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         path=tmp_path,
         names=all_names,
         dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
@@ -604,6 +609,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         names=all_names,
         dim_sizes=dim_sizes,
         time_varying_values=time_varying_values,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
@@ -683,6 +689,7 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         path=tmp_path,
         names=all_names,
         dim_sizes=dim_sizes,
+        timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     ocean_override = OceanConfig(
         surface_temperature_name="var",
@@ -719,9 +726,7 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper_test_data"
-    dim_sizes = DimSizes(
-        n_time=8, n_lat=4, n_lon=8, nz_interface=2, timestep=datetime.timedelta(hours=3)
-    )
+    dim_sizes = DimSizes(n_time=8, n_lat=4, n_lon=8, nz_interface=2)
     std = 1.0
     save_plus_one_stepper(
         stepper_path,
@@ -741,4 +746,5 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
             dim_sizes,
             n_forward_steps,
             stepper_path,
+            timestep=datetime.timedelta(days=20),
         )
