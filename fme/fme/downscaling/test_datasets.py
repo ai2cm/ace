@@ -110,13 +110,14 @@ def test_dataloader_build(tmp_path):
             names=all_names,
             dim_sizes=DimSizes(num_timesteps, h, w, num_vertical_levels),
             time_varying_values=[float(i) for i in range(num_timesteps)],
+            timestep_days=0.25,
         )
-        for (path, (h, w)) in zip([fine_path, coarse_path], [fine_shape, coarse_shape])
+        for (path, (h, w)) in [(fine_path, fine_shape), (coarse_path, coarse_shape)]
     ]
     batch_size = 2
     config = DataLoaderConfig(
-        fine=[XarrayDataConfig(str(fine_data.path / "data"))],
-        coarse=[XarrayDataConfig(str(coarse_data.path / "data"))],
+        fine=[XarrayDataConfig(str(fine_data.data_path))],
+        coarse=[XarrayDataConfig(str(coarse_data.data_path))],
         batch_size=batch_size,
         num_data_workers=1,
         strict_ensemble=False,

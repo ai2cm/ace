@@ -91,6 +91,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         path=tmp_path,
         names=["forcing_var"],
         dim_sizes=dim_sizes,
+        timestep_days=0.25,
     )
     initial_condition = xr.Dataset(
         {"prog": xr.DataArray(np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"])}

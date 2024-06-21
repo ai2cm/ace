@@ -5,5 +5,6 @@ from .fv3gfs_data import (
     MonthlyReferenceData,
     StatsData,
     save_2d_netcdf,
+    save_scalar_netcdf,
 )
 from .wandb import mock_wandb

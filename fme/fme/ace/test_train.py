@@ -1,11 +1,8 @@
-import datetime
 import pathlib
 import subprocess
 import tempfile
 import unittest.mock
-from typing import Dict
 
-import cftime
 import numpy as np
 import pytest
 import torch
@@ -17,7 +14,12 @@ from fme.ace.train import _restore_checkpoint, count_parameters
 from fme.ace.train import main as train_main
 from fme.ace.train_config import epoch_checkpoint_enabled
 from fme.core.data_loading.config import Slice
-from fme.core.testing import DimSizes, MonthlyReferenceData
+from fme.core.testing import (
+    DimSizes,
+    MonthlyReferenceData,
+    save_2d_netcdf,
+    save_scalar_netcdf,
+)
 from fme.core.testing.wandb import mock_wandb
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
@@ -152,38 +154,6 @@ loader:
     return f_train.name, f_inference.name
 
 
-def _save_netcdf(
-    filename, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
-):
-    data_vars = {}
-    for name in variable_names:
-        data = np.random.randn(*list(dim_sizes.values()))
-        if len(dim_sizes) > 0:
-            data = data.astype(np.float32)
-        data_vars[name] = xr.DataArray(
-            data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
-        )
-
-    coords = {
-        dim_name: (
-            xr.DataArray(
-                np.arange(size, dtype=np.float64),
-                dims=(dim_name,),
-            )
-            if dim_name not in coords_override
-            else coords_override[dim_name]
-        )
-        for dim_name, size in dim_sizes.items()
-    }
-
-    for i in range(7):
-        data_vars[f"ak_{i}"] = np.float64(i)
-        data_vars[f"bk_{i}"] = np.float64(i + 1)
-
-    ds = xr.Dataset(data_vars=data_vars, coords=coords)
-    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
-
-
 def _setup(
     path,
     nettype,
@@ -202,14 +172,13 @@ def _setup(
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names))
-    data_dim_sizes = {"time": n_time, "grid_yt": 16, "grid_xt": 32}
-    grid_yt = np.linspace(-89.5, 89.5, data_dim_sizes["grid_yt"])
-    time = [
-        cftime.DatetimeProlepticGregorian(2000, 1, 1)
-        + timestep_days * datetime.timedelta(days=i)
-        for i in range(data_dim_sizes["time"])
-    ]
-    stats_dim_sizes = {}
+
+    dim_sizes = DimSizes(
+        n_time=n_time,
+        n_lat=16,
+        n_lon=32,
+        nz_interface=7,
+    )
 
     data_dir = path / "data"
     stats_dir = path / "stats"
@@ -217,23 +186,19 @@ def _setup(
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
-    _save_netcdf(
+    save_2d_netcdf(
         data_dir / "data.nc",
-        data_dim_sizes,
-        all_variable_names + [mask_name],
-        coords_override={"grid_yt": grid_yt, "time": time},
+        dim_sizes,
+        variable_names=all_variable_names + [mask_name],
+        timestep_days=1,
     )
-    _save_netcdf(
+    save_scalar_netcdf(
         stats_dir / "stats-mean.nc",
-        stats_dim_sizes,
-        all_variable_names,
-        coords_override={},
+        variable_names=all_variable_names,
     )
-    _save_netcdf(
+    save_scalar_netcdf(
         stats_dir / "stats-stddev.nc",
-        stats_dim_sizes,
-        all_variable_names,
-        coords_override={},
+        variable_names=all_variable_names,
     )
 
     monthly_reference_data = MonthlyReferenceData(
