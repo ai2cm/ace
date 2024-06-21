@@ -1,13 +1,13 @@
 import torch
 
-from fme.core.aggregator.inference.time_mean import TimeMeanAggregator
+from fme.core.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
 
 
 def test_rmse_of_time_mean_all_channels():
     torch.manual_seed(0)
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanAggregator(area_weights, target="norm")
+    agg = TimeMeanEvaluatorAggregator(area_weights, target="norm")
     target_data_norm = {
         "a": torch.ones([2, 3, 4, 4], device=get_device()),
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
@@ -31,7 +31,7 @@ def test_rmse_of_time_mean_all_channels():
 
 def test_mean_all_channels_not_in_denorm():
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanAggregator(area_weights, target="denorm")
+    agg = TimeMeanEvaluatorAggregator(area_weights, target="denorm")
     target_data = {
         "a": torch.ones([2, 3, 4, 4], device=get_device()),
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,

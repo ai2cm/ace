@@ -50,7 +50,7 @@ def get_gen_shape(gen_data: TensorMapping):
         return gen_data[name].shape
 
 
-class SingleTargetTimeMeanAggregator:
+class TimeMeanAggregator:
     def __init__(
         self,
         area_weights: torch.Tensor,
@@ -114,7 +114,7 @@ class SingleTargetTimeMeanAggregator:
         else:
             self._n_timesteps += data[list(data)[0]].size(1)
 
-    def get_data(self) -> TensorMapping:
+    def get_data(self) -> TensorDict:
         if self._n_timesteps == 0 or self._data is None:
             raise ValueError("No data recorded.")
 
@@ -125,8 +125,63 @@ class SingleTargetTimeMeanAggregator:
             ret[name] = gen
         return ret
 
+    @torch.no_grad()
+    def get_logs(self, label: str) -> Dict[str, Image]:
+        logs = {}
+        data = self.get_data()
+        gen_map_key = "gen_map"
+        wandb = WandB.get_instance()
+        for name, pred in data.items():
+            vmin_pred, vmax_pred = get_cmap_limits(pred.cpu().numpy())
+            prediction_image = wandb.Image(
+                plot_imshow(pred.cpu().numpy()),
+                caption=self._get_caption(gen_map_key, name, vmin_pred, vmax_pred),
+            )
+            plt.close("all")
+            logs.update(
+                {
+                    f"{gen_map_key}/{name}": prediction_image,
+                }
+            )
 
-class TimeMeanAggregator:
+        if len(label) != 0:
+            return {f"{label}/{key}": logs[key] for key in logs}
+        return logs
+
+    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
+        if name in self._metadata:
+            caption_name = self._metadata[name].long_name
+            units = self._metadata[name].units
+        else:
+            caption_name, units = name, "unknown_units"
+        caption = f"{caption_name} time-mean generated [{units}]"
+        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
+        return caption
+
+    def get_dataset(self) -> xr.Dataset:
+        dims = ("lat", "lon")
+        data = {}
+        for name, pred in self.get_data().items():
+            if name in self._metadata:
+                long_name = self._metadata[name].long_name
+                units = self._metadata[name].units
+            else:
+                long_name = name
+                units = "unknown_units"
+            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
+            data.update(
+                {
+                    f"gen_map-{name}": xr.DataArray(
+                        pred.cpu(),
+                        dims=dims,
+                        attrs=gen_metadata,
+                    ),
+                }
+            )
+        return xr.Dataset(data)
+
+
+class TimeMeanEvaluatorAggregator:
     """Statistics and images on the time-mean state.
 
     This aggregator keeps track of the time-mean state, then computes
@@ -160,10 +215,10 @@ class TimeMeanAggregator:
         else:
             self._metadata = metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._target_agg = SingleTargetTimeMeanAggregator(
+        self._target_agg = TimeMeanAggregator(
             area_weights=area_weights, target=target, metadata=metadata
         )
-        self._gen_agg = SingleTargetTimeMeanAggregator(
+        self._gen_agg = TimeMeanAggregator(
             area_weights=area_weights, target=target, metadata=metadata
         )
 
@@ -258,10 +313,17 @@ class TimeMeanAggregator:
         preds = self._get_target_gen_pairs()
         dims = ("lat", "lon")
         for pred in preds:
+            if pred.name in self._metadata:
+                long_name = self._metadata[pred.name].long_name
+                units = self._metadata[pred.name].units
+            else:
+                long_name = pred.name
+                units = "unknown_units"
+            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
             bias_metadata = self._metadata.get(
-                pred.name, VariableMetadata(units="unknown_units", long_name=pred.name)
+                pred.name, VariableMetadata(long_name=long_name, units=units)
             )._asdict()
-            gen_metadata = VariableMetadata(units="", long_name=pred.name)._asdict()
+            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
             data.update(
                 {
                     f"bias_map-{pred.name}": xr.DataArray(
