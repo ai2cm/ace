@@ -296,7 +296,7 @@ def inference_helper(
     assert "bias_map-var" in actual_var_names
     assert time_mean_diagnostics.data_vars["bias_map-var"].attrs["units"] == "m"
     assert "gen_map-var" in actual_var_names
-    assert time_mean_diagnostics.data_vars["gen_map-var"].attrs["units"] == ""
+    assert time_mean_diagnostics.data_vars["gen_map-var"].attrs["units"] == "m"
     assert len(time_mean_diagnostics.coords) == 2
     assert "lat" in time_mean_diagnostics.coords
     assert "lon" in time_mean_diagnostics.coords
