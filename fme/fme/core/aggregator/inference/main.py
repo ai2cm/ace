@@ -12,7 +12,7 @@ from fme.core.wandb import Table, WandB
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
 from .histogram import HistogramAggregator
-from .reduced import MeanAggregator
+from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
@@ -353,12 +353,14 @@ class InferenceAggregatorConfig:
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
+        n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
         return InferenceAggregator(
             area_weights=area_weights,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
+            n_timesteps=n_timesteps,
             metadata=metadata,
         )
 
@@ -376,6 +378,7 @@ class InferenceAggregator:
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
+        n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
@@ -387,6 +390,10 @@ class InferenceAggregator:
                 used in generating logged image captions.
         """
         self._aggregators: Dict[str, _Aggregator] = {
+            "mean": SingleTargetMeanAggregator(
+                area_weights,
+                n_timesteps=n_timesteps,
+            ),
             "time_mean": TimeMeanAggregator(
                 area_weights,
                 metadata=metadata,
@@ -399,12 +406,14 @@ class InferenceAggregator:
         self,
         time: xr.DataArray,
         data: TensorMapping,
+        i_time_start: int,
     ):
         if len(data) == 0:
             raise ValueError("data is empty")
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 data=data,
+                i_time_start=i_time_start,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
@@ -437,10 +446,7 @@ class InferenceAggregator:
         as the time step, meaning we need to re-organize the logged data
         from tables into a list of dictionaries.
         """
-        # return to_inference_logs(self.get_logs(label=label))
-        # for now, we have no tables with timeseries data, so we just convert
-        # to the expected type
-        return [self.get_logs(label=label)]
+        return to_inference_logs(self.get_logs(label=label))
 
     @torch.no_grad()
     def get_datasets(
