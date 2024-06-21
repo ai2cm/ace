@@ -10,8 +10,8 @@ python3 xr-beam-pipeline.py \
     1940-01-01T12:00:00 \
     2022-12-31T18:00:00 \
     --output_grid F90 \
-    --output_time_chunksize 60 \
-    --ncar_process_time_chunksize 6 \
+    --output_time_chunksize 20 \
+    --ncar_process_time_chunksize 4 \
     --project vcm-ml \
     --region us-central1 \
     --temp_location gs://vcm-ml-scratch/oliwm/temp/ \
