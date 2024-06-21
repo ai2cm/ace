@@ -29,11 +29,13 @@ def test_logs_labels_exist():
         area_weights,
         sigma_coordinates,
         TIMESTEP,
+        n_timesteps=n_time,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(time, gen_data)
+    agg.record_batch(time, data=gen_data, i_time_start=0)
     logs = agg.get_logs(label="test")
+    assert "test/mean/series" in logs
     assert "test/time_mean/gen_map/a" in logs
 
 
@@ -49,12 +51,15 @@ def test_inference_logs_labels_exist():
         area_weights,
         sigma_coordinates,
         TIMESTEP,
+        n_timesteps=n_time,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(time, gen_data)
+    agg.record_batch(time, data=gen_data, i_time_start=0)
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
-    assert len(logs) == 1
+    assert len(logs) == n_time
+    assert "test/mean/weighted_mean_gen/a" in logs[0]
+    assert "test/mean/weighted_mean_gen/a" in logs[-1]
     # assert len(logs) == n_time use this assertion when timeseries data is generated
     assert "test/time_mean/gen_map/a" in logs[-1]

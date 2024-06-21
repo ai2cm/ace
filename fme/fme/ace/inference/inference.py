@@ -223,6 +223,7 @@ def main(yaml_config: str):
         area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
         timestep=data.timestep,
+        n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
     )
 
