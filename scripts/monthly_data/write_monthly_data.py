@@ -3,7 +3,6 @@ import dataclasses
 import datetime
 import logging
 import os
-import pathlib
 from typing import List
 
 import dacite
@@ -25,7 +24,6 @@ from fme.core.data_loading.utils import BatchData
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
-from fme.core.testing import DimSizes, save_2d_netcdf
 
 
 def get_data_loaders(
@@ -189,21 +187,6 @@ def main(
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     run(config)
-
-
-def write_ensemble_dataset(
-    path: pathlib.Path, n_members: int, names: List[str], dim_sizes: DimSizes
-):
-    if not path.exists():
-        path.mkdir(parents=True)
-    for i in range(n_members):
-        ensemble_dir = path / f"ic_{i:04d}"
-        ensemble_dir.mkdir(exist_ok=True)
-        save_2d_netcdf(
-            ensemble_dir / "data.nc",
-            dim_sizes,
-            names,
-        )
 
 
 if __name__ == "__main__":
