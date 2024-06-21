@@ -14,7 +14,7 @@ from .annual import GlobalMeanAnnualAggregator
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator
 from .seasonal import SeasonalAggregator
-from .time_mean import TimeMeanAggregator
+from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
 
@@ -184,11 +184,11 @@ class InferenceEvaluatorAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             ),
-            "time_mean": TimeMeanAggregator(
+            "time_mean": TimeMeanEvaluatorAggregator(
                 area_weights,
                 metadata=metadata,
             ),
-            "time_mean_norm": TimeMeanAggregator(
+            "time_mean_norm": TimeMeanEvaluatorAggregator(
                 area_weights,
                 target="norm",
                 metadata=metadata,
@@ -386,7 +386,12 @@ class InferenceAggregator:
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
-        self._aggregators: Dict[str, _Aggregator] = {}
+        self._aggregators: Dict[str, _Aggregator] = {
+            "time_mean": TimeMeanAggregator(
+                area_weights,
+                metadata=metadata,
+            ),
+        }
         self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
 
     @torch.no_grad()
@@ -432,7 +437,10 @@ class InferenceAggregator:
         as the time step, meaning we need to re-organize the logged data
         from tables into a list of dictionaries.
         """
-        return to_inference_logs(self.get_logs(label=label))
+        # return to_inference_logs(self.get_logs(label=label))
+        # for now, we have no tables with timeseries data, so we just convert
+        # to the expected type
+        return [self.get_logs(label=label)]
 
     @torch.no_grad()
     def get_datasets(
