@@ -48,6 +48,8 @@ class SingleModuleStepperConfig:
         conservation_loss: The conservation loss configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         loss_normalization: The normalization configuration for the loss.
+        residual_normalization: Optional alternative to configure loss normalization.
+            If provided, it will be used for all *prognostic* variables in loss scaling.
     """
 
     builder: ModuleSelector
@@ -632,9 +634,11 @@ class SingleModuleStepper:
 
         # for backwards compatibility with previous steppers created w/o
         # loss_normalization or residual_normalization
-        if config.get("residual_normalization") is None:
-            loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
-            config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
+        loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
+        config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
+        # Overwrite the residual_normalization key if it exists, since the combined
+        # loss scalings are saved in initial training as the loss_normalization
+        config["residual_normalization"] = None
 
         area = state.get("area", area)
         if "sigma_coordinates" in state:

@@ -54,6 +54,9 @@ def _get_test_yaml_files(
   normalization:
     global_means_path: '{global_means_path}'
     global_stds_path: '{global_stds_path}'
+  residual_normalization:
+    global_means_path: '{global_means_path}'
+    global_stds_path: '{global_stds_path}'
   loss:
     global_mean_type: "LpLoss"
   builder:
@@ -251,7 +254,6 @@ def test_train_and_inference_inline(tmp_path, nettype):
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
     )
-
     # using pdb requires calling main functions directly
     train_main(
         yaml_config=train_config,
