@@ -1,4 +1,5 @@
 import collections
+import logging
 from collections import namedtuple
 from typing import Dict, List, Literal, Mapping, Optional, Tuple
 
@@ -107,16 +108,20 @@ class DynamicHistogram:
 
         i_time_end = i_time_start + value.shape[0]
         for i_time in range(i_time_start, i_time_end):
-            self.counts[i_time] += (
-                histogram(
-                    value[i_time - i_time_start, :],
-                    self.bin_edges[0],
-                    self.bin_edges[1] - self.bin_edges[0],
-                    self._n_bins,
+            try:
+                self.counts[i_time] += (
+                    histogram(
+                        value[i_time - i_time_start, :],
+                        self.bin_edges[0],
+                        self.bin_edges[1] - self.bin_edges[0],
+                        self._n_bins,
+                    )
+                    .cpu()
+                    .numpy()
                 )
-                .cpu()
-                .numpy()
-            )
+            except RuntimeError as err:
+                # ignore samples with NaNs
+                logging.error(f"caught exception while computing histogram: {err}")
 
     def _double_size_left(self):
         """
