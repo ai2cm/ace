@@ -501,6 +501,7 @@ class XarrayDataset(Dataset):
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
             times_segments.append(get_times(ds, start, n_steps))
+            ds.close()
             del ds
 
         tensors: TensorDict = {}
@@ -510,12 +511,15 @@ class XarrayDataset(Dataset):
         times: xr.DataArray = xr.concat(times_segments, dim="time")
 
         # load time-invariant variables from first dataset
-        ds = self._open_file(idxs[0])
-        dims = ("time", self.lat_dim, self.lon_dim)
-        shape = (total_steps, ds.sizes[self.lat_dim], ds.sizes[self.lon_dim])
-        for name in self.time_invariant_names:
-            variable = ds[name].variable
-            tensors[name] = as_broadcasted_tensor(variable, dims, shape)
+        if len(self.time_invariant_names) > 0:
+            ds = self._open_file(idxs[0])
+            dims = ("time", self.lat_dim, self.lon_dim)
+            shape = (total_steps, ds.sizes[self.lat_dim], ds.sizes[self.lon_dim])
+            for name in self.time_invariant_names:
+                variable = ds[name].variable
+                tensors[name] = as_broadcasted_tensor(variable, dims, shape)
+            ds.close()
+            del ds
 
         # load static derived variables
         for name in self.static_derived_names:
