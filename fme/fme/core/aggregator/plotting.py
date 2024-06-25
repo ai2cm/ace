@@ -38,6 +38,7 @@ def plot_imshow(
         max_ = np.max(data) if vmax is None else vmax
         range_ = np.linspace(min_, max_, height)
         range_ = np.repeat(range_[:, np.newaxis], repeats=colorbar_width, axis=1)
+        range_ = np.flipud(range_)  # wandb images start from top (and left)
         padding = np.zeros((height, colorbar_width)) + np.nan
         data = np.concatenate((data, padding, range_), axis=1)
 
