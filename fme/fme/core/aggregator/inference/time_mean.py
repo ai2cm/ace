@@ -120,7 +120,9 @@ class TimeMeanAggregator:
 
         ret = {}
         dist = Distributed.get_instance()
-        for name, value in self._data.items():
+        names = sorted(list(self._data.keys()))  # sort for rank-consistent order
+        for name in names:
+            value = self._data[name]
             gen = dist.reduce_mean(value / self._n_timesteps / self._n_samples)
             ret[name] = gen
         return ret
