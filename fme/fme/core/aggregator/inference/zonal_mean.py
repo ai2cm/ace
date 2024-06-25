@@ -117,7 +117,8 @@ class ZonalMeanAggregator:
             raise RuntimeError("No data recorded")
         sample_dim = 0
         data: Dict[str, _RawData] = {}
-        for name in self._gen_data.keys():
+        sorted_names = sorted(list(self._gen_data.keys()))
+        for name in sorted_names:
             gen = (
                 self._dist.reduce_mean(self._gen_data[name] / self._n_batches)
                 .mean(sample_dim)
