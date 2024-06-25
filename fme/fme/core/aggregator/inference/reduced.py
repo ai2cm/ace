@@ -285,7 +285,8 @@ class MeanAggregator:
             raise ValueError("No batches have been recorded.")
         data: List[_SeriesData] = []
         for metric in self._variable_metrics:
-            for key in self._variable_metrics[metric]:
+            sorted_keys = sorted(list(self._variable_metrics[metric].keys()))
+            for key in sorted_keys:
                 arr = self._variable_metrics[metric][key].get().detach()
                 datum = _SeriesData(
                     metric_name=metric,
@@ -460,7 +461,8 @@ class SingleTargetMeanAggregator:
             raise ValueError("No batches have been recorded.")
         data: List[_SeriesData] = []
         for metric in self._variable_metrics:
-            for key in self._variable_metrics[metric]:
+            sorted_keys = sorted(list(self._variable_metrics[metric].keys()))
+            for key in sorted_keys:
                 arr = self._variable_metrics[metric][key].get().detach()
                 datum = _SeriesData(
                     metric_name=metric,

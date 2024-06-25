@@ -95,14 +95,15 @@ class _ErrorVideoData:
         rmse_data = {}
         min_err_data = {}
         max_err_data = {}
-        for name, tensor in self._mse_data.items():
+        for name in sorted(self._mse_data):
+            tensor = self._mse_data[name]
             mse = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
             mse = self._dist.reduce_mean(mse)
             rmse_data[name] = torch.sqrt(mse)
-        for name, tensor in self._min_err_data.items():
-            min_err_data[name] = self._dist.reduce_min(tensor)
-        for name, tensor in self._max_err_data.items():
-            max_err_data[name] = self._dist.reduce_max(tensor)
+        for name in sorted(self._min_err_data):
+            min_err_data[name] = self._dist.reduce_min(self._min_err_data[name])
+        for name in sorted(self._max_err_data):
+            max_err_data[name] = self._dist.reduce_max(self._max_err_data[name])
         return _ErrorData(rmse_data, min_err_data, max_err_data)
 
 
@@ -155,10 +156,12 @@ class _MeanVideoData:
             raise RuntimeError("No data recorded")
         target_data = {}
         gen_data = {}
-        for name, tensor in self._target_data.items():
+        for name in sorted(self._target_data):
+            tensor = self._target_data[name]
             target_data[name] = tensor / self._n_batches[:, None, None]
             target_data[name] = self._dist.reduce_mean(target_data[name])
-        for name, tensor in self._gen_data.items():
+        for name in sorted(self._gen_data):
+            tensor = self._gen_data[name]
             gen_data[name] = tensor / self._n_batches[:, None, None]
             gen_data[name] = self._dist.reduce_mean(gen_data[name])
         return gen_data, target_data
@@ -233,13 +236,15 @@ class _VarianceVideoData:
         target_data = {}
         gen_data = {}
         # calculate variance as E[X^2] - E[X]^2
-        for name, tensor in self._target_means.items():
+        for name in sorted(self._target_means):
+            tensor = self._target_means[name]
             mean = tensor / self._n_batches[:, None, None]
             mean = self._dist.reduce_mean(mean)
             square = self._target_squares[name] / self._n_batches[:, None, None]
             square = self._dist.reduce_mean(square)
             target_data[name] = square - mean**2
-        for name, tensor in self._gen_means.items():
+        for name in sorted(self._gen_means):
+            tensor = self._gen_means[name]
             mean = tensor / self._n_batches[:, None, None]
             mean = self._dist.reduce_mean(mean)
             square = self._gen_squares[name] / self._n_batches[:, None, None]

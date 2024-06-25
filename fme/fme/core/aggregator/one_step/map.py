@@ -73,7 +73,8 @@ class MapAggregator:
         time_dim = 0
         target_time = 1
         image_logs = {}
-        for name in self._gen_data.keys():
+        sorted_names = sorted(list(self._gen_data.keys()))
+        for name in sorted_names:
             # use first sample in batch
             gen = (
                 dist.reduce_mean(
