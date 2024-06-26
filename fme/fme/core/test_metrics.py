@@ -1,11 +1,13 @@
 import numpy as np
 import pytest
 import torch
+import torch_harmonics
 
 import fme
 from fme.core.metrics import (
     net_surface_energy_flux,
     quantile,
+    spherical_power_spectrum,
     surface_pressure_due_to_dry_air,
     vertical_integral,
 )
@@ -354,3 +356,11 @@ def test_net_surface_energy_flux():
 def test_quantile(bins, hist, pct, expected):
     result = quantile(bins, hist, pct)
     np.testing.assert_allclose(result, expected)
+
+
+def test_spherical_power_spectrum():
+    nlat, nlon = 4, 8
+    data = torch.rand(2, nlat, nlon)
+    sht = torch_harmonics.RealSHT(nlat, nlon)
+    spectrum = spherical_power_spectrum(data, sht)
+    assert spectrum.shape == (2, nlat - 1)
