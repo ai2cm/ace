@@ -183,11 +183,16 @@ def main(yaml_config: str):
         data=data,
         config=dacite.Config(strict=True),
     )
-
     if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir)
+        os.makedirs(config.experiment_dir, exist_ok=True)
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    return run_evaluator_from_config(config)
+
+
+def run_evaluator_from_config(config: InferenceEvaluatorConfig):
+    if not os.path.isdir(config.experiment_dir):
+        os.makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
     env_vars = logging_utils.retrieve_env_vars()
     beaker_url = logging_utils.log_beaker_url()
