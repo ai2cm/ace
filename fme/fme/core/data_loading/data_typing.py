@@ -2,7 +2,7 @@ import abc
 import dataclasses
 import datetime
 from collections import namedtuple
-from typing import Mapping, Optional, Tuple
+from typing import Literal, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -142,3 +142,15 @@ class GriddedData:
             **self.horizontal_coordinates.coords,
             **self.sigma_coordinates.coords,
         }
+
+    @property
+    def grid(self) -> Literal["equiangular", "legendre-gauss"]:
+        """If the latitudes are equiangular, assume a regular grid and otherwise
+        assume a gaussian, or 'legendre-gauss' grid."""
+        if torch.allclose(
+            self.horizontal_coordinates.lat[1:] - self.horizontal_coordinates.lat[:-1],
+            self.horizontal_coordinates.lat[1] - self.horizontal_coordinates.lat[0],
+        ):
+            return "equiangular"
+        else:
+            return "legendre-gauss"

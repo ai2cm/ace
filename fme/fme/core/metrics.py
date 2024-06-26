@@ -2,6 +2,7 @@ from typing import Iterable, Optional, Union
 
 import numpy as np
 import torch
+import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY
@@ -356,3 +357,26 @@ def quantile(bins: np.ndarray, hist: np.ndarray, probability: float) -> float:
     c0, c1 = bins[bin_idx], bins[bin_idx + 1]
     p0, p1 = cdf[bin_idx], cdf[bin_idx + 1]
     return c0 + (c1 - c0) * (probability - p0) / (p1 - p0)
+
+
+def spherical_power_spectrum(
+    field: torch.Tensor, sht: torch_harmonics.RealSHT
+) -> torch.Tensor:
+    """Compute the spherical power spectrum of a field.
+
+    Args:
+        field: The field to compute the power spectrum for. It is assumed that
+            the last two dimension are latitude and longitude, respectively.
+        sht: An initialized spherical harmonics transformer. Must be passed for
+            performance reasons.
+
+    Returns:
+        The power spectrum of the field. Will have one fewer dimensions than the
+            input field.
+
+    Notes:
+        Computed by summing over all "m" wavenumbers for each total "l" wavenumber.
+    """
+    field_sht = sht.forward(field)
+    power_spectrum = torch.sum(abs(field_sht) ** 2, dim=-1)
+    return power_spectrum
