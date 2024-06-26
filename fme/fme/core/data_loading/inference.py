@@ -158,9 +158,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._is_remote = dataset.is_remote
         self.n_samples = config.n_samples  # public attribute
         if isinstance(config.start_indices, TimestampList):
-            self._start_indices = config.start_indices.as_indices(
-                dataset.available_times
-            )
+            self._start_indices = config.start_indices.as_indices(dataset.all_times)
         else:
             self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()

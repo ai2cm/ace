@@ -211,7 +211,7 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
-    available_times = XarrayDataset(config.dataset, requirements).available_times
+    available_times = XarrayDataset(config.dataset, requirements).all_times
     start_time_indices = []
     for time in initial_times.values:
         start_time_indices.append(available_times.get_loc(time))
