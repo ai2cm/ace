@@ -57,6 +57,7 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
     subsetted_dataset.timestep = dataset.timestep
     subsetted_dataset.is_remote = dataset.is_remote
+    subsetted_dataset.sample_start_times = dataset.sample_start_times[subset]
     return subsetted_dataset
 
 
