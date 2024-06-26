@@ -9,6 +9,7 @@ from fme.core import ClimateData, metrics
 from fme.core.corrector import (
     _force_conserve_dry_air,
     _force_conserve_moisture,
+    _force_positive,
     _force_zero_global_mean_moisture_advection,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -181,3 +182,18 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         np.testing.assert_almost_equal(new_budget_residual, 0.0, decimal=6)
 
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
+
+
+def test__force_positive():
+    data = {
+        "foo": torch.tensor([[-1.0, 0.0], [0.0, 1.0], [1.0, 2.0]]),
+        "bar": torch.tensor([[-1.0, 0.0], [0.0, -3.0], [1.0, 2.0]]),
+    }
+    original_min = torch.min(data["foo"])
+    assert original_min < 0.0
+    fixed_data = _force_positive(data, ["foo"])
+    new_min = torch.min(fixed_data["foo"])
+    # Ensure the minimum value of 'foo' is now 0
+    torch.testing.assert_close(new_min, torch.tensor(0.0))
+    # Ensure other variables are not modified
+    torch.testing.assert_close(fixed_data["bar"], data["bar"])

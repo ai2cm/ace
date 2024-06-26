@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 import torch
 
@@ -80,6 +80,8 @@ class CorrectorConfig:
                     global-mean correction above, recompute the column-integrated
                     advective tendency as the budget residual,
                     ensuring column budget closure.
+        force_positive_names: Names of fields that should be forced to be greater
+            than or equal to zero. This is useful for fields like precipitation.
     """
 
     conserve_dry_air: bool = False
@@ -92,6 +94,7 @@ class CorrectorConfig:
             "advection_and_evaporation",
         ]
     ] = None
+    force_positive_names: List[str] = dataclasses.field(default_factory=list)
 
     def build(
         self,
@@ -125,6 +128,10 @@ class Corrector:
         input_data: TensorMapping,
         gen_data: TensorMapping,
     ):
+        if len(self._config.force_positive_names) > 0:
+            # do this step before imposing other conservation correctors, since
+            # otherwise it could end up creating violations of those constraints.
+            gen_data = _force_positive(gen_data, self._config.force_positive_names)
         if self._config.conserve_dry_air:
             gen_data = _force_conserve_dry_air(
                 input_data=input_data,
@@ -147,6 +154,14 @@ class Corrector:
                 terms_to_modify=self._config.moisture_budget_correction,
             )
         return gen_data
+
+
+def _force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
+    """Clamp all tensors defined by `names` to be greater than or equal to zero."""
+    out = {**data}
+    for name in names:
+        out[name] = torch.clamp(data[name], min=0.0)
+    return out
 
 
 def _force_conserve_dry_air(
