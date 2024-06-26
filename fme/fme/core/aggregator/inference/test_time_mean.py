@@ -1,6 +1,10 @@
+import numpy as np
 import torch
 
-from fme.core.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
+from fme.core.aggregator.inference.time_mean import (
+    TimeMeanAggregator,
+    TimeMeanEvaluatorAggregator,
+)
 from fme.core.device import get_device
 
 
@@ -49,3 +53,58 @@ def test_mean_all_channels_not_in_denorm():
     )
     logs = agg.get_logs(label="time_mean")
     assert "time_mean/rmse/channel_mean" not in list(logs.keys())
+    ds = agg.get_dataset()
+    assert "bias_map-a" in ds
+    assert np.all(ds["bias_map-a"].values == 1.0)
+
+
+def test_bias_values():
+    area_weights = torch.ones(1).to(get_device())
+    agg = TimeMeanEvaluatorAggregator(area_weights, target="denorm")
+    # use constant values so area-weighting doesn't matter
+    target_data = {
+        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+    }
+    gen_data = {
+        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+    }
+    agg.record_batch(
+        loss=1.0,
+        target_data=target_data,
+        gen_data=gen_data,
+        target_data_norm=target_data,
+        gen_data_norm=gen_data,
+    )
+    ds = agg.get_dataset()
+    assert "bias_map-a" in ds
+    np.testing.assert_array_equal(
+        ds["bias_map-a"].values,
+        (
+            gen_data["a"].cpu().numpy().mean(axis=(0, 1))
+            - target_data["a"].cpu().numpy().mean(axis=(0, 1))
+        ),
+    )
+    assert "gen_map-a" in ds
+    np.testing.assert_array_equal(
+        ds["gen_map-a"].values,
+        (gen_data["a"].cpu().numpy().mean(axis=(0, 1))),
+    )
+
+
+def test_aggregator_mean_values():
+    area_weights = torch.ones(1).to(get_device())
+    agg = TimeMeanAggregator(area_weights)
+    # use constant values so area-weighting doesn't matter
+    data = {
+        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+    }
+    agg.record_batch(
+        data=data,
+        i_time_start=0,
+    )
+    ds = agg.get_dataset()
+    assert "gen_map-a" in ds
+    np.testing.assert_array_equal(
+        ds["gen_map-a"].values,
+        (data["a"].cpu().numpy().mean(axis=(0, 1))),
+    )
