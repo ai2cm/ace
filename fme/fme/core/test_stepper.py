@@ -396,24 +396,24 @@ class Multiply(torch.nn.Module):
 
 
 @pytest.mark.parametrize(
-    "global_only, terms_to_modify",
+    "global_only, terms_to_modify, force_positive",
     [
-        (True, "none"),
-        (True, "precipitation"),
-        (True, "evaporation"),
-        (False, "advection_and_precipitation"),
-        (False, "advection_and_evaporation"),
+        (True, "none", False),
+        (True, "precipitation", False),
+        (True, "evaporation", False),
+        (False, "advection_and_precipitation", False),
+        (False, "advection_and_evaporation", False),
+        (False, "advection_and_precipitation", True),
     ],
 )
-def test_stepper_corrector(global_only: bool, terms_to_modify):
+def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: bool):
     torch.random.manual_seed(0)
     n_forward_steps = 5
     device = get_device()
     data = {
         "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
-        "specific_total_water_0": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(
-            device
-        ),
+        "specific_total_water_0": -0.2
+        + torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
         "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(
             device
         ),
@@ -428,10 +428,16 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
     ).to(device)
     area_weights = 1.0 + torch.rand(size=(5, 5)).to(device)
 
+    if force_positive:
+        force_positive_names = ["specific_total_water_0"]
+    else:
+        force_positive_names = []
+
     corrector_config = CorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction=terms_to_modify,
+        force_positive_names=force_positive_names,
     )
 
     mean_advection = metrics.weighted_mean(
@@ -520,6 +526,11 @@ def test_stepper_corrector(global_only: bool, terms_to_modify):
     )
     dry_air_nonconservation = np.abs(dry_air[:, 1:] - dry_air[:, :-1])
     np.testing.assert_almost_equal(dry_air_nonconservation, 0.0, decimal=3)
+
+    # check that positive forcing is enforced
+    if force_positive:
+        for name in force_positive_names:
+            assert stepped.gen_data[name].min() >= 0.0
 
 
 def _get_stepper(
