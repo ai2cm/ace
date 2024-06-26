@@ -386,6 +386,7 @@ class Trainer:
             record_step_20=record_step_20,
             n_timesteps=self.config.inference.n_forward_steps + 1,
             metadata=self.train_data.metadata,
+            data_grid=self.train_data.grid,
         )
         with torch.no_grad(), self._validation_context():
             run_inference_evaluator(
