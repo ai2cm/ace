@@ -479,7 +479,7 @@ def test_time_index(mock_monthly_netcdfs):
     )
     last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
     obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
-    assert dataset.time_index.equals(xr.CFTimeIndex(obs_times))
+    assert dataset.sample_start_times.equals(xr.CFTimeIndex(obs_times))
 
 
 @pytest.mark.parametrize("infer_timestep", [True, False])
@@ -581,6 +581,4 @@ def test_available_times(mock_monthly_netcdfs):
             names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=10
         ),
     )
-    assert dataset.available_times.equals(
-        xr.CFTimeIndex(mock_monthly_netcdfs.obs_times)
-    )
+    assert dataset.all_times.equals(xr.CFTimeIndex(mock_monthly_netcdfs.obs_times))

@@ -327,9 +327,9 @@ class XarrayDataset(Dataset):
         return True
 
     @property
-    def available_times(self) -> xr.CFTimeIndex:
+    def all_times(self) -> xr.CFTimeIndex:
         """Time index of all available times in the data"""
-        return self._available_times
+        return self._all_times
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -369,10 +369,10 @@ class XarrayDataset(Dataset):
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
         self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
-        self._time_index = xr.CFTimeIndex(
+        self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coords)[: self._n_initial_conditions]
         )
-        self._available_times = xr.CFTimeIndex(np.concatenate(raw_times))
+        self._all_times = xr.CFTimeIndex(np.concatenate(raw_times))
 
         del cum_num_timesteps, time_coords
 
@@ -451,9 +451,9 @@ class XarrayDataset(Dataset):
         return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
 
     @property
-    def time_index(self) -> xr.CFTimeIndex:
+    def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
-        return self._time_index
+        return self._sample_start_times
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
@@ -535,7 +535,7 @@ def as_index_slice(subset: Union[Slice, TimeSlice], dataset: XarrayDataset) -> s
     if isinstance(subset, Slice):
         index_slice = subset.slice
     elif isinstance(subset, TimeSlice):
-        index_slice = subset.slice(dataset.time_index)
+        index_slice = subset.slice(dataset.sample_start_times)
     else:
         raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
     return index_slice
