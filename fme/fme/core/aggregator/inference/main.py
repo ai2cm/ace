@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
-from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
+import warnings
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Protocol, Union
 
 import torch
 import xarray as xr
@@ -14,6 +15,7 @@ from .annual import GlobalMeanAnnualAggregator
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
+from .spectrum import PairedSphericalPowerSpectrumAggregator
 from .time_mean import TimeMeanAggregator, TimeMeanEvaluatorAggregator
 from .video import VideoAggregator
 from .zonal_mean import ZonalMeanAggregator
@@ -152,6 +154,7 @@ class InferenceEvaluatorAggregator:
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
+        data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss",
     ):
         """
         Args:
@@ -170,6 +173,7 @@ class InferenceEvaluatorAggregator:
                 used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
             log_histograms: Whether to aggregate histograms.
+            data_grid: The grid type of the data, used for spherical power spectrum.
         """
         self._aggregators: Dict[str, _EvaluatorAggregator] = {
             "mean": MeanAggregator(
@@ -194,6 +198,18 @@ class InferenceEvaluatorAggregator:
                 metadata=metadata,
             ),
         }
+        if len(area_weights.shape) == 2:
+            self._aggregators[
+                "spherical_power_spectrum"
+            ] = PairedSphericalPowerSpectrumAggregator(
+                area_weights.shape[-2],
+                area_weights.shape[-1],
+                data_grid,
+            )
+        else:
+            warnings.warn(
+                "Area weights are not 2D, spherical power spectrum will not be computed"
+            )
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 area_weights, target_time=20

@@ -232,6 +232,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
+        data_grid=data.grid,
     )
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
