@@ -491,9 +491,6 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
 
 
 def main(yaml_config: str):
-    dist = Distributed.get_instance()
-    if fme.using_gpu():
-        torch.backends.cudnn.benchmark = True
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
     train_config: TrainConfig = dacite.from_dict(
@@ -501,17 +498,25 @@ def main(yaml_config: str):
         data=data,
         config=dacite.Config(strict=True),
     )
-
     if not os.path.isdir(train_config.experiment_dir):
-        os.makedirs(train_config.experiment_dir)
+        os.makedirs(train_config.experiment_dir, exist_ok=True)
     with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    train_config.configure_logging(log_filename="out.log")
+    run_train_from_config(train_config)
+
+
+def run_train_from_config(config: TrainConfig):
+    dist = Distributed.get_instance()
+    if fme.using_gpu():
+        torch.backends.cudnn.benchmark = True
+    if not os.path.isdir(config.experiment_dir):
+        os.makedirs(config.experiment_dir, exist_ok=True)
+    config.configure_logging(log_filename="out.log")
     env_vars = logging_utils.retrieve_env_vars()
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    train_config.configure_wandb(env_vars=env_vars, resume=True, notes=beaker_url)
-    trainer = Trainer(train_config)
+    config.configure_wandb(env_vars=env_vars, resume=True, notes=beaker_url)
+    trainer = Trainer(config)
     trainer.train()
     logging.info("DONE ---- rank %d" % dist.rank)
 
