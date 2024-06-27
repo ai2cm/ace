@@ -71,7 +71,7 @@ def save_stepper(
 def test_inference_entrypoint(tmp_path: pathlib.Path):
     forward_steps_in_memory = 2
     in_names = ["prog", "forcing_var"]
-    out_names = ["prog"]
+    out_names = ["prog", "diagnostic_var"]
     stepper_path = tmp_path / "stepper"
     dim_sizes = DimSizes(
         n_time=9,
