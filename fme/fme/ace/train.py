@@ -524,7 +524,7 @@ def run_train_from_config(config: TrainConfig):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--yaml_config", required=True, type=str)
+    parser.add_argument("yaml_config", type=str)
 
     args = parser.parse_args()
 
