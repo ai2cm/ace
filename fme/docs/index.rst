@@ -7,8 +7,9 @@ Welcome to full-model's documentation!
 
    installation
    quickstart
-   inference_config
    training_config
+   inference_config
+   evaluator_config
    builder
    modules
    api
