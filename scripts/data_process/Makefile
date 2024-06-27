@@ -208,7 +208,7 @@ e3smv2_1deg_climSST_dataset:
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:
 	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-05-29-era5-1deg-8layer-1940-2022.zarr \
+	--input-url gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr \
 	--start-date 1990-01-01 \
 	--end-date 2019-12-31 \
 	--name "era5-1deg-8layer-stats-1990-2019" \
