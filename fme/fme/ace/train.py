@@ -47,6 +47,7 @@
 import argparse
 import contextlib
 import dataclasses
+import gc
 import logging
 import os
 import time
@@ -197,6 +198,9 @@ class Trainer:
         # "epoch" describes the loop, self._model_epoch describes model weights
         # needed so we can describe the loop even after weights are updated
         for epoch in range(self.startEpoch, segment_max_epochs):
+            # garbage collect to avoid CUDA error in some contexts
+            # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
+            gc.collect()
             logging.info(f"Epoch: {epoch+1}")
             if isinstance(self.train_data.sampler, torch.utils.data.DistributedSampler):
                 self.train_data.sampler.set_epoch(epoch)
