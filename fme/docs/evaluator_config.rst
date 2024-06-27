@@ -1,26 +1,25 @@
-.. _inference-config:
+.. _evaluator-config:
 
 ================
-Inference Config
+Evaluator Config
 ================
 
-.. literalinclude:: inference-config.yaml
+.. literalinclude:: evaluator-config.yaml
    :language: yaml
    :caption: Example YAML Configuration
-
 
 .. testcode::
    :hide:
 
-   from fme.ace import InferenceConfig
+   from fme.ace import InferenceEvaluatorConfig
    import yaml
    import dacite
 
-   with open('inference-config.yaml', 'r') as f:
+   with open('evaluator-config.yaml', 'r') as f:
       config_dict = yaml.safe_load(f)
 
    config = dacite.from_dict(
-      InferenceConfig,
+      InferenceEvaluatorConfig,
       data=config_dict,
       config=dacite.Config(strict=True)
    )
@@ -45,11 +44,7 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.InitialConditionConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.ForcingDataLoaderConfig
+.. autoclass:: fme.ace.InferenceDataLoaderConfig
    :show-inheritance:
    :noindex:
 
@@ -61,7 +56,7 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.InferenceAggregatorConfig
+.. autoclass:: fme.ace.InferenceEvaluatorAggregatorConfig
    :show-inheritance:
    :noindex:
 

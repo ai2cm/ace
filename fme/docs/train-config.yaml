@@ -1,50 +1,55 @@
-experiment_dir: /output
+experiment_dir: train_output
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 30
+max_epochs: 80
 n_forward_steps: 1
 inference:
-  n_forward_steps: 7300
+  n_forward_steps: 7300  # 5 years
   forward_steps_in_memory: 50
   loader:
     start_indices:
       first: 0
       n_initial_conditions: 4
-      interval: 1460
+      interval: 1460  # 1 year
     dataset:
-      data_path: /validdata
-    num_data_workers: 8
+      data_path: validation
+    num_data_workers: 2
 logging:
   log_to_screen: true
-  log_to_wandb: true
+  log_to_wandb: false
   log_to_file: true
   project: fourcastnet
   entity: ai2cm
 train_loader:
   batch_size: 4
-  data_type: ensemble_xarray
   num_data_workers: 8
   dataset:
-    data_path: /traindata
+    - data_path: /traindata/ic_0001
+    - data_path: /traindata/ic_0002
+    - data_path: /traindata/ic_0003
+    - data_path: /traindata/ic_0004
+    - data_path: /traindata/ic_0005
+    - data_path: /traindata/ic_0006
+    - data_path: /traindata/ic_0007
+    - data_path: /traindata/ic_0008
+    - data_path: /traindata/ic_0009
+    - data_path: /traindata/ic_0010
 validation_loader:
   batch_size: 16
-  data_type: xarray
-  num_data_workers: 8
-  subset:
-    stop: 1456
+  num_data_workers: 2
   dataset:
-    data_path: /validdata
+    - data_path: validation
+      subset:
+        step: 5
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
-  optimizer_type: FusedAdam
-  scheduler:
-    type: CosineAnnealingLR
+  optimizer_type: Adam  # can switch to FusedAdam if using GPU
 stepper:
   builder:
     type: SphericalFourierNeuralOperatorNet
     config:
-      embed_dim: 256
+      embed_dim: 384
       filter_type: linear
       hard_thresholding_fraction: 1.0
       use_mlp: true
@@ -53,13 +58,11 @@ stepper:
       operator_type: dhconv
       scale_factor: 1
       separable: false
-      spectral_layers: 3
-      spectral_transform: sht
   loss:
     type: MSE
   normalization:
-    global_means_path: /statsdata/centering.nc
-    global_stds_path: /statsdata/scaling.nc
+    global_means_path: centering.nc
+    global_stds_path: scaling.nc
   ocean:
     surface_temperature_name: surface_temperature
     ocean_fraction_name: ocean_fraction
