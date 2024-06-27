@@ -1,12 +1,16 @@
 import argparse
+import logging
 
 import dacite
 import dacite.exceptions
 import yaml
 
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
+from fme.ace.inference.inference import InferenceConfig
 from fme.ace.train_config import TrainConfig
 from fme.core.stepper import SingleModuleStepperConfig
+
+CONFIG_CHOICES = ["train", "inference", "evaluator"]
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -17,22 +21,43 @@ if __name__ == "__main__":
         "--inference",
         action="store_true",
         help=(
-            "Indicates the path is an inference config, "
-            "otherwise assume training config."
+            "Deprecated, use --config_type evaluator to validate an evaluator config."
         ),
     )
+    parser.add_argument(
+        "--config_type",
+        type=str,
+        choices=CONFIG_CHOICES,
+        default="train",
+        help=("Indicates the kind of configuration being validated."),
+    )
     args = parser.parse_args()
+
+    if args.inference:
+        logging.warning(
+            "The --inference flag is deprecated. "
+            "Use --config_type evaluator to validate an evaluator config."
+        )
+        config_type = "evaluator"
+    else:
+        config_type = args.config_type
 
     with open(args.path, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
 
-    if args.inference:
+    if config_type == "evaluator":
         dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
             data=config_data,
             config=dacite.Config(strict=True),
         )
-    else:
+    elif config_type == "inference":
+        dacite.from_dict(
+            data_class=InferenceConfig,
+            data=config_data,
+            config=dacite.Config(strict=True),
+        )
+    elif config_type == "train":
         try:
             dacite.from_dict(
                 data_class=TrainConfig,
@@ -48,3 +73,7 @@ if __name__ == "__main__":
                 )
             # if there was no issue for SingleModuleStepperConfig, raise original error
             raise err
+    else:
+        raise ValueError(
+            f"Invalid config type: {config_type}, expected one of {CONFIG_CHOICES}"
+        )
