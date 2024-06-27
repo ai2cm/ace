@@ -5,7 +5,6 @@
 import os
 
 import click
-import numpy as np
 import xarray as xr
 from dask.diagnostics import ProgressBar
 
@@ -28,16 +27,6 @@ DROP_VARIABLES = (
     + [f"bk_{i}" for i in range(9)]
 )
 
-# these variables either have no time dimension, or we expect them to vary
-# only slightly in time (e.g. ocean_fraction and sea_ice_fraction). So we
-# specify them here to indicate that their standard deviations should always be
-# computed using the "full-field" approach.
-TIME_INVARIANT_VARIABLES = {
-    "FV3GFS": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
-    "E3SMV2": ("PHIS", "OCNFRAC", "ICEFRAC", "LANDFRAC"),
-    "ERA5": ("HGTsfc", "land_fraction", "ocean_fraction", "sea_ice_fraction"),
-}
-
 DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
     "E3SMV2": ["time", "lat", "lon"],
@@ -50,35 +39,6 @@ def add_history_attr(ds, input_zarr, start_date, end_date):
         "Created by full-model/fv3gfs_data_process/get_stats.py. INPUT_ZARR:"
         f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}."
     )
-
-
-def compute_geometric_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
-    """For some variables (e.g. surface pressure), normalization based on the
-    'full field' leads to residuals that are very small and therefore don't
-    contribute much to loss function. Here we rescale based on the residual
-    standard deviation. See
-    https://github.com/ai2cm/explore/blob/master/oliwm/2023-04-16-fme-analysis/2023-04-27-compute-new-scaling-dataset.ipynb  # noqa: E501
-    for more details.
-    """
-    residual = ds.diff("time")
-    residual_stddev = residual.std(dim=dims)
-    # We want to multiply the global_stds by the above norm_residual_stddev variable
-    # so that the residuals are more evenly weighted. However, we don't want to
-    # make the standard deviations of the normalized inputs/outputs very different from
-    # 1. Therefore we rescale the norm_residual_stddev variable so that its geometric
-    # mean is 1. Choice of using geometric mean is somewhat arbitrary.
-    # must have float64 for .prod as variables can have very different scales
-    as_variable_array = residual_stddev.to_array().astype(np.float64)
-    n_variables = as_variable_array.sizes["variable"]
-    geometric_mean = np.exp(np.log(as_variable_array).sum(dim="variable") / n_variables)
-    residual_stddev /= geometric_mean
-    # rescale standard deviations so that residuals are evenly weighted in loss
-    return residual_stddev
-
-
-def compute_residual_scaling(ds, dims=["time", "grid_xt", "grid_yt"]):
-    residual = ds.diff("time")
-    return residual.std(dim=dims)
 
 
 @click.command()
@@ -108,30 +68,15 @@ def main(input_zarr, output_directory, start_date, end_date, data_type, debug):
     ds = ds.sel(time=slice(start_date, end_date))
 
     dims = DIMS[data_type]
-    time_invariant_variables = TIME_INVARIANT_VARIABLES[data_type]
 
     centering = ds.mean(dim=dims)
     scaling_full_field = ds.std(dim=dims)
+    scaling_residual = ds.diff("time").std(dim=dims)
     time_means = ds.mean(dim="time")
-
-    ds_time_varying = ds.drop_vars(time_invariant_variables)
-    geometric_residual_scaling = compute_geometric_residual_scaling(
-        ds_time_varying, dims
-    )
-    # residual scaling still uses full-field scales for time invariant data
-    scaling_geometric_residual = scaling_full_field.copy()
-    for name in geometric_residual_scaling:
-        scaling_geometric_residual[name] = geometric_residual_scaling[name]
-
-    scaling_residual = scaling_full_field.copy()
-    residual_scaling = compute_residual_scaling(ds_time_varying, dims)
-    for name in residual_scaling:
-        scaling_residual[name] = residual_scaling[name]
 
     for dataset in [
         centering,
         scaling_full_field,
-        scaling_geometric_residual,
         scaling_residual,
         time_means,
     ]:
@@ -152,10 +97,6 @@ def main(input_zarr, output_directory, start_date, end_date, data_type, debug):
         with ProgressBar():
             scaling_full_field.to_netcdf(
                 os.path.join(output_directory, "scaling-full-field.nc")
-            )
-        with ProgressBar():
-            scaling_geometric_residual.to_netcdf(
-                os.path.join(output_directory, "scaling-geometric-residual.nc")
             )
         with ProgressBar():
             scaling_residual.to_netcdf(
