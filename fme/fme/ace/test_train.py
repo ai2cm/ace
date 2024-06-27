@@ -338,7 +338,6 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.
         "--nproc_per_node",
         "2",
         TRAIN_SCRIPT_PATH,
-        "--yaml_config",
         train_config,
     ]
     resume_process = subprocess.run(resume_subprocess_args, cwd=tmpdir)

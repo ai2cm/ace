@@ -8,7 +8,13 @@ from fme.ace.inference.evaluator import (
     OceanConfig,
     run_evaluator_from_config,
 )
-from fme.ace.inference.inference import InferenceConfig, run_inference_from_config
+from fme.ace.inference.inference import (
+    ForcingDataLoaderConfig,
+    InferenceAggregatorConfig,
+    InferenceConfig,
+    InitialConditionConfig,
+    run_inference_from_config,
+)
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.config import TimeSlice, XarrayDataConfig
