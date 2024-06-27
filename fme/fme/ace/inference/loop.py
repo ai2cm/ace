@@ -186,16 +186,6 @@ def run_inference(
         i_time = 0
         window_forcing: BatchData
         for window_forcing in forcing_data.loader:
-            if i_time == 0:
-                aggregator.record_batch(
-                    time=window_forcing.times.isel(time=slice(0, 1)),
-                    data={
-                        # need to create a time axis for aggregators
-                        name: value.unsqueeze(1)
-                        for name, value in initial_condition.items()
-                    },
-                    i_time_start=0,
-                )
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
             forward_steps_in_memory = list(window_forcing.data.values())[0].size(1) - 1
