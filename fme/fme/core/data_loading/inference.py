@@ -18,6 +18,14 @@ from fme.core.distributed import Distributed
 
 @dataclasses.dataclass
 class TimestampList:
+    """
+    Configuration for a list of timestamps.
+
+    Attributes:
+        times: List of timestamps.
+        timestamp_format: Format of the timestamps.
+    """
+
     times: Sequence[str]
     timestamp_format: str = "%Y-%m-%dT%H:%M:%S"
 
@@ -70,6 +78,9 @@ class InferenceInitialConditionIndices:
 class ExplicitIndices:
     """
     Configure indices providing them explicitly.
+
+    Attributes:
+        list: List of integer indices.
     """
 
     list: Sequence[int]
@@ -92,10 +103,12 @@ class InferenceDataLoaderConfig:
     samples directly determines the size of that batch.
 
     Attributes:
-        dataset: Parameters to define the dataset.
-        start_indices: Slice indicating the set of indices to consider for initial
-            conditions of inference series of data. Values following the initial
-            condition will still come from the full dataset.
+        dataset: Configuration to define the dataset.
+        start_indices: Configuration of the indices for initial conditions
+            during inference. This can be a list of timestamps, a list of
+            integer indices, or a slice configuration of the integer indices.
+            Values following the initial condition will still come from
+            the full dataset.
         num_data_workers: Number of parallel workers to use for data loading.
     """
 

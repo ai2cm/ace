@@ -361,7 +361,7 @@ def table_to_logs(table: Table) -> List[Dict[str, Union[float, int]]]:
 @dataclasses.dataclass
 class InferenceAggregatorConfig:
     """
-    Configuration for inference aggregator.
+    Configuration for inference aggregator (no configurable attributes).
     """
 
     def build(

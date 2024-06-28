@@ -70,35 +70,31 @@ class TrainConfig:
     Configuration for training a model.
 
     Attributes:
-        train_loader: configuration for the training data loader
-        validation_loader: configuration for the validation data loader
-        stepper: configuration for the stepper
-        optimization: configuration for the optimization
-        logging: configuration for logging
-        max_epochs: total number of epochs to train for
-        save_checkpoint: whether to save checkpoints
-        experiment_dir: directory where checkpoints and logs are saved
-        inference: configuration for inline inference
-        n_forward_steps: number of forward steps to take gradient over
+        train_loader: Configuration for the training data loader.
+        validation_loader: Configuration for the validation data loader.
+        stepper: Configuration for the stepper.
+        optimization: Configuration for the optimization.
+        logging: Configuration for logging.
+        max_epochs: Total number of epochs to train for.
+        save_checkpoint: Whether to save checkpoints.
+        experiment_dir: Directory where checkpoints and logs are saved.
+        inference: Configuration for inline inference.
+        n_forward_steps: Number of forward steps to take gradient over.
         copy_weights_after_batch: Configuration for copying weights from the
-            base model to the training model after each batch. This is used
-            to achieve an effect of freezing model parameters that can freeze
-            a subset of each weight that comes from a smaller base weight.
-            This is less efficient than true parameter freezing, but layer
-            freezing is all-or-nothing for each parameter. By default, no
-            weights are copied.
-        ema: configuration for exponential moving average of model weights
-        validate_using_ema: whether to validate using the EMA model
-        checkpoint_save_epochs: how often to save epoch-based checkpoints,
+            base model to the training model after each batch.
+        ema: Configuration for exponential moving average of model weights.
+        validate_using_ema: Whether to validate and perform inference using
+            the EMA model.
+        checkpoint_save_epochs: How often to save epoch-based checkpoints,
             if save_checkpoint is True. If None, checkpoints are only saved
             for the most recent epoch
             (and the best epochs if validate_using_ema == False).
-        ema_checkpoint_save_epochs: how often to save epoch-based EMA checkpoints,
+        ema_checkpoint_save_epochs: How often to save epoch-based EMA checkpoints,
             if save_checkpoint is True. If None, EMA checkpoints are only saved
             for the most recent epoch
             (and the best epochs if validate_using_ema == True).
-        log_train_every_n_batches: how often to log batch_loss during training
-        segment_epochs: (optional) exit after training for at most this many epochs
+        log_train_every_n_batches: How often to log batch_loss during training.
+        segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
     """
