@@ -77,7 +77,7 @@ stepper:
   - HGTsfc
   - PRESsfc
   - surface_temperature
-  - air_temperature_0
+  - air_temperature_0 # _0 denotes the top most layer of the atmosphere
   - air_temperature_1
   - air_temperature_2
   - air_temperature_3

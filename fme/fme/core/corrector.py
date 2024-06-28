@@ -42,7 +42,7 @@ class CorrectorConfig:
     .. math::
 
         tendency\_of\_total\_water\_path = (evaporation\_rate - precipitation\_rate
-        + tendency\_of\_total\_water\_path\_due\_to\_advection)
+        \\\\ + tendency\_of\_total\_water\_path\_due\_to\_advection)
 
     in the generated data, where ``tendency_of_total_water_path`` is the difference
     between the total water path at the current timestep and the previous
