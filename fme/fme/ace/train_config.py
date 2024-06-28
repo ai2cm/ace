@@ -1,7 +1,6 @@
 import dataclasses
 import logging
 import os
-import warnings
 from typing import Any, Dict, Optional, Union
 
 from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
@@ -118,18 +117,6 @@ class TrainConfig:
     ema_checkpoint_save_epochs: Optional[Slice] = None
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
-    monthly_reference_data: Optional[str] = None
-
-    def __post_init__(self):
-        if self.monthly_reference_data is not None:
-            warnings.warn(
-                "monthly_reference_data is deprecated, use "
-                "inference.aggregator.monthly_reference_data instead.",
-                category=DeprecationWarning,
-            )
-            self.inference.aggregator.monthly_reference_data = (
-                self.monthly_reference_data
-            )
 
     @property
     def checkpoint_dir(self) -> str:
