@@ -72,7 +72,11 @@ class FromStateNormalizer:
     initialized from a serializable state.
     """
 
-    def __init__(self, state):
+    def __init__(self, state: Dict[str, Dict[str, float]]):
+        """
+        Args:
+            state: State dict of the normalizer.
+        """
         self.state = state
 
     def build(self, names: List[str]):

@@ -65,7 +65,8 @@ class XarrayDataConfig:
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
-        subset: Slice defining a subset of the XarrayDataset to load.
+        subset: Slice defining a subset of the XarrayDataset to load. This can
+            either be a `Slice` of integer indices or a `TimeSlice` of timestamps.
         infer_timestep: Whether to infer the timestep from the provided data.
             This should be set to True (the default) for ACE training. It may
             be useful to toggle this to False for applications like downscaling,
@@ -93,7 +94,8 @@ class XarrayDataConfig:
 class DataLoaderConfig:
     """
     Attributes:
-        dataset: Parameters to define the dataset.
+        dataset: A sequence of configurations each defining a dataset
+            to be loaded. This sequence of datasets will be concatenated.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
@@ -106,15 +108,9 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int
     prefetch_factor: Optional[int] = None
-    n_samples: Optional[int] = None
     strict_ensemble: bool = True
 
     def __post_init__(self):
-        if self.n_samples is not None:
-            raise ValueError(
-                "n_samples is not a valid parameter for DataLoaderParams, "
-                "use subset.stop instead"
-            )
         dist = Distributed.get_instance()
         if self.batch_size % dist.world_size != 0:
             raise ValueError(

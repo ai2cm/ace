@@ -45,7 +45,6 @@ class SingleModuleStepperConfig:
         ocean: The ocean configuration.
         loss: The loss configuration.
         corrector: The corrector configuration.
-        conservation_loss: The conservation loss configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
@@ -208,6 +207,13 @@ class SingleModuleStepperConfig:
 
 @dataclasses.dataclass
 class ExistingStepperConfig:
+    """
+    Configuration for an existing stepper.
+
+    Attributes:
+        checkpoint_path: The path to the checkpoint.
+    """
+
     checkpoint_path: str
 
     def _load_checkpoint(self) -> Mapping[str, Any]:
