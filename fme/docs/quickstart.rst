@@ -9,7 +9,7 @@ Clone this repository. Then assuming `conda`_ is available, run::
 
     make create_environment
 
-to create a conda environment called `fme` with dependencies and source code installed. Alternatively, a Docker image can be built with `make build_docker_image`. You may verify installation by running `pytest fme/`.
+to create a conda environment called ``fme`` with dependencies and source code installed. Alternatively, a Docker image can be built with ``make build_docker_image``. You may verify installation by running ``pytest fme/``.
 
 .. _conda: https://docs.conda.io/en/latest/
 
@@ -42,7 +42,7 @@ The files may include more variables, as in the example datasets below, but only
 The code will run an ensemble of predictions starting from each time specified in the initial conditions file.
 The forcing dataset must contain data for the times specified in the initial conditions file, as well as all timesteps required for the prediction period.
 
-An initial condition file for this endpoint is available via a public `requester pays`_ Google Cloud Storage bucket.
+An initial condition file is available via a public `requester pays`_ Google Cloud Storage bucket.
 
 .. code-block:: bash
 
@@ -63,7 +63,7 @@ It is possible to download a portion of the dataset only, but it is necessary to
 .. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
 .. _requester pays: https://cloud.google.com/storage/docs/requester-pays
 
-Save a ``inference-config.yaml`` file based on the `example config <inference-config>`_ with updated paths for the downloaded data.
+Save a ``inference-config.yaml`` file based on the :ref:`example config <inference-config>` with updated paths for the downloaded data.
 Then in the ``fme`` conda environment, run inference with:
 
 .. code-block:: bash
@@ -98,7 +98,7 @@ For example, the 10-year validation data (approx. 190GB) can be downloaded with:
 
     gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
 
-Save a ``config-evaluator.yaml`` file based on the `example config <evaluator-config>`_ with updated paths for the downloaded data.
+Save a ``config-evaluator.yaml`` file based on the :ref:`example config <evaluator-config>` with updated paths for the downloaded data.
 Then in the ``fme`` conda environment, run evaluation with:
 
 .. code-block:: bash
@@ -160,7 +160,7 @@ These are generated using the script located at ``scripts/data_process/get_stats
    centering.nc
    scaling.nc
 
-Save a ``config-train.yaml`` file based on the `example config <train-config>`_ with updated paths for the downloaded data.
+Save a ``config-train.yaml`` file based on the :ref:`example config <train-config>` with updated paths for the downloaded data.
 Then in the ``fme`` conda environment, run evaluation with:
 
 .. code-block:: bash
