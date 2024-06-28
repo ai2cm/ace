@@ -50,18 +50,11 @@ class DataWriterConfig:
     log_extended_video_netcdfs: bool = False
     save_prediction_files: bool = True
     save_monthly_files: bool = True
-    save_raw_prediction_names: Optional[Sequence[str]] = None
     names: Optional[Sequence[str]] = None
     save_histogram_files: bool = False
     time_coarsen: Optional[TimeCoarsenConfig] = None
 
     def __post_init__(self):
-        if self.save_raw_prediction_names is not None:
-            warnings.warn(
-                "The DataWriterConfig field `save_raw_prediction_names` "
-                "is deprecated. Use `names` instead."
-            )
-            self.names = self.save_raw_prediction_names
         if (
             not any(
                 [

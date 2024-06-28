@@ -3,7 +3,6 @@ import dataclasses
 import logging
 import os
 import time
-import warnings
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -82,37 +81,16 @@ class InferenceEvaluatorConfig:
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     prediction_loader: Optional[InferenceDataLoaderConfig] = None
-    log_video: Optional[bool] = None
-    log_extended_video: Optional[bool] = None
-    log_zonal_mean_images: Optional[bool] = None
     forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
     )
-    monthly_reference_data: Optional[str] = None
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
-        deprecated_aggregator_attrs = {
-            k: getattr(self, k)
-            for k in [
-                "log_video",
-                "log_extended_video",
-                "log_zonal_mean_images",
-                "monthly_reference_data",
-            ]
-            if getattr(self, k) is not None
-        }
-        for k, v in deprecated_aggregator_attrs.items():
-            warnings.warn(
-                f"Inference configuration attribute `{k}` is deprecated. "
-                f"Using its value `{v}`, but please use attribute `aggregator` "
-                "instead."
-            )
-            setattr(self.aggregator, k, v)
         if (self.data_writer.time_coarsen is not None) and (
             self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
             != 0
