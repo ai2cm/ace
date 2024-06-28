@@ -24,4 +24,14 @@ class SchedulerConfig:
         """
         Build the scheduler.
         """
-        raise NotImplementedError()
+        if self.type is None:
+            return None
+
+        build_kwargs = {**self.kwargs}
+        # work-around so we don't need to specify T_max
+        # in the yaml file for this scheduler
+        if self.type == "CosineAnnealingLR" and "T_max" not in self.kwargs:
+            build_kwargs["T_max"] = max_epochs
+
+        scheduler_class = getattr(torch.optim.lr_scheduler, self.type)
+        return scheduler_class(optimizer=optimizer, **build_kwargs)

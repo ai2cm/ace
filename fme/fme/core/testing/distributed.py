@@ -1,4 +1,5 @@
 import contextlib
+from typing import List, Optional
 
 import torch
 
@@ -6,7 +7,8 @@ from fme.core import distributed
 
 
 class MockDistributed:
-    def __init__(self, fill_value: float):
+    def __init__(self, fill_value: float, world_size: int):
+        self.world_size = world_size
         self.fill_value = fill_value
         self.reduce_called = False
 
@@ -17,6 +19,9 @@ class MockDistributed:
         tensor.fill_(self.fill_value)
         self.reduce_called = True
         return tensor
+
+    def reduce_max(self, tensor: torch.Tensor) -> torch.Tensor:
+        return tensor + 1
 
     def reduce_sum(self, tensor: torch.Tensor) -> torch.Tensor:
         tensor.fill_(self.fill_value)
@@ -29,9 +34,21 @@ class MockDistributed:
     def is_distributed(self) -> bool:
         return True
 
+    def gather(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+        return [tensor for i in range(self.world_size)]
+
+    def gather_irregular(self, tensor: torch.Tensor) -> Optional[List[torch.Tensor]]:
+        """
+        Note this uses the actual implementation but mocks the underlying
+        distributed calls.
+        """
+        return distributed.gather_irregular(
+            tensor, self.reduce_max, self.gather, is_distributed=self.is_distributed()
+        )
+
 
 @contextlib.contextmanager
-def mock_distributed(fill_value: float):
+def mock_distributed(fill_value: float = 0.0, world_size: int = 1):
     """
     Mock the distributed singleton to return a MockDistributed object.
 
@@ -41,7 +58,9 @@ def mock_distributed(fill_value: float):
     the given fill_value, which can be checked for in tests.
     """
     original = distributed.singleton
-    distributed.singleton = MockDistributed(fill_value=fill_value)  # type: ignore
+    distributed.singleton = MockDistributed(
+        fill_value=fill_value, world_size=world_size
+    )  # type: ignore
     try:
         yield distributed.singleton
     finally:

@@ -1,3 +1,6 @@
+fme/docs/available_modules.rst
+fme/docs/_build
+
 .vscode
 
 # Byte-compiled / optimized / DLL files
@@ -72,6 +75,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+.DS_Store
 
 # PyBuilder
 target/
@@ -129,3 +133,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# scratch directory for testing
+scratch/

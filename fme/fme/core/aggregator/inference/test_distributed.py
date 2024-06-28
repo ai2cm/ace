@@ -1,7 +1,7 @@
 import torch
 
 from fme.core.aggregator.inference.reduced import MeanAggregator
-from fme.core.aggregator.inference.time_mean import TimeMeanAggregator
+from fme.core.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
 from fme.core.testing import mock_distributed
 
@@ -33,7 +33,7 @@ def test_time_mean_metrics_call_distributed():
     torch.manual_seed(0)
     with mock_distributed(0.0) as mock:
         area_weights = torch.ones(1).to(get_device())
-        agg = TimeMeanAggregator(area_weights)
+        agg = TimeMeanEvaluatorAggregator(area_weights)
         target_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         gen_data = {"a": torch.randn([2, 3, 4, 4], device=get_device())}
         agg.record_batch(

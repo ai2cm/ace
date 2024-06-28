@@ -1,9 +1,8 @@
-from typing import Dict
-
 import pytest
 import torch
 
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.typing_ import TensorDict
 
 
 def test_normalize_depends_on_mean():
@@ -67,7 +66,7 @@ def test_normalization_config_exclude_names():
     )
     normalizer = normalization.build(["a", "b", "c"])
     tensors = {"a": torch.randn(10), "b": torch.randn(10), "c": torch.randn(10)}
-    normalized: Dict[str, torch.Tensor] = normalizer.normalize(tensors)
+    normalized: TensorDict = normalizer.normalize(tensors)
     denormalized = normalizer.denormalize(normalized)
     assert torch.all(normalized["c"] == tensors["c"])
     assert torch.all(denormalized["c"] == tensors["c"])

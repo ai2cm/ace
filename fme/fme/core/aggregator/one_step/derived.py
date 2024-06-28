@@ -1,8 +1,9 @@
 """Derived metrics take the global state as input and usually output a new
 variable, e.g. dry air mass."""
 
+import abc
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Protocol, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
 
@@ -11,8 +12,9 @@ from fme.core.climate_data import (
     ClimateData,
     compute_dry_air_absolute_differences,
 )
-from fme.core.data_loading.typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.typing_ import TensorMapping
 
 
 @dataclass
@@ -21,13 +23,15 @@ class _TargetGenPair:
     gen: torch.Tensor
 
 
-class DerivedMetric(Protocol):
+class DerivedMetric(abc.ABC):
     """Derived metrics are computed from the global state and usually output a
     new variable, e.g. dry air tendencies."""
 
+    @abc.abstractmethod
     def record(self, target: ClimateData, gen: ClimateData) -> None:
         ...
 
+    @abc.abstractmethod
     def get(self) -> _TargetGenPair:
         """Returns the derived metric applied to the target and data generated
         by the model."""
@@ -88,7 +92,9 @@ class DerivedMetricsAggregator:
         self,
         area_weights: torch.Tensor,
         sigma_coordinates: SigmaCoordinates,
-        climate_field_name_prefixes: Mapping[str, str] = CLIMATE_FIELD_NAME_PREFIXES,
+        climate_field_name_prefixes: Mapping[
+            str, List[str]
+        ] = CLIMATE_FIELD_NAME_PREFIXES,
     ):
         self.area_weights = area_weights
         self.sigma_coordinates = sigma_coordinates
@@ -105,10 +111,10 @@ class DerivedMetricsAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         del loss, target_data_norm, gen_data_norm  # unused
         target = ClimateData(target_data, self.climate_field_name_prefixes)

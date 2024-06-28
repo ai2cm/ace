@@ -1,1 +1,6 @@
-from .main import InferenceAggregator
+from .main import (
+    InferenceAggregator,
+    InferenceAggregatorConfig,
+    InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
+)

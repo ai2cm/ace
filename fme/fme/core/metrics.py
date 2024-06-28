@@ -2,6 +2,7 @@ from typing import Iterable, Optional, Union
 
 import numpy as np
 import torch
+import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY
@@ -289,3 +290,93 @@ def surface_pressure_due_to_dry_air(
     )
     dry_air = surface_pressure - GRAVITY * total_water_path
     return dry_air
+
+
+def net_surface_energy_flux(
+    lw_rad_down,
+    lw_rad_up,
+    sw_rad_down,
+    sw_rad_up,
+    latent_heat_flux,
+    sensible_heat_flux,
+    frozen_precipitation_rate=None,
+) -> torch.Tensor:
+    """
+    Compute the net surface energy flux from individual terms in budget.
+
+    Args:
+        lw_rad_down: Downward longwave surface radiation in W/m^2.
+        lw_rad_up: Upward longwave surface radiation in W/m^2.
+        sw_rad_down: Downward shortwave surface radiation in W/m^2.
+        sw_rad_up: Upward shortwave surface radiation in W/m^2.
+        latent_heat_flux: Latent heat flux in W/m^2.
+        sensible_heat_flux: Sensible heat flux in W/m^2.
+        frozen_precipitation_rate (optional): Frozen precipitation rate in kg/m^2/s.
+
+    Returns:
+        Net surface energy flux in W/m^2. Positive values indicate energy flowing
+        from atmosphere to surface.
+    """
+    if frozen_precipitation_rate is not None:
+        raise NotImplementedError(
+            "Computing net surface energy flux with frozen precipitation is "
+            "not implemented."
+        )
+    net_surface_radiative_flux = sw_rad_down - sw_rad_up + lw_rad_down - lw_rad_up
+    return net_surface_radiative_flux - latent_heat_flux - sensible_heat_flux
+
+
+def quantile(bins: np.ndarray, hist: np.ndarray, probability: float) -> float:
+    """
+    Calculate the quantile value for a given histogram, using linear
+    interpolation within bins. This is the inverse of the cumulative
+    distribution function (CDF).
+
+    Args:
+        bins: The bin edges of the histogram.
+        hist: The histogram values.
+        probability: The probability to query the quantile for.
+
+    Returns:
+        The quantile value.
+
+    Raises:
+        ValueError: If probability is not between 0 and 1.
+    """
+    if not (0.0 <= probability <= 1.0):
+        raise ValueError("Probabilities must be between 0 and 1.")
+
+    # get the normalized CDF based on the histogram
+    cdf = np.cumsum(hist)
+    cdf = cdf / cdf[-1]
+    # append initial zero to cdf as there are no values less than the first bin
+    cdf = np.insert(cdf, 0, 0)
+    # find within which bin the requested pct percentile falls
+    bin_idx = np.argmax(cdf > probability) - 1
+    # linearly interpolate within the bin to get the percentile value
+    c0, c1 = bins[bin_idx], bins[bin_idx + 1]
+    p0, p1 = cdf[bin_idx], cdf[bin_idx + 1]
+    return c0 + (c1 - c0) * (probability - p0) / (p1 - p0)
+
+
+def spherical_power_spectrum(
+    field: torch.Tensor, sht: torch_harmonics.RealSHT
+) -> torch.Tensor:
+    """Compute the spherical power spectrum of a field.
+
+    Args:
+        field: The field to compute the power spectrum for. It is assumed that
+            the last two dimension are latitude and longitude, respectively.
+        sht: An initialized spherical harmonics transformer. Must be passed for
+            performance reasons.
+
+    Returns:
+        The power spectrum of the field. Will have one fewer dimensions than the
+            input field.
+
+    Notes:
+        Computed by summing over all "m" wavenumbers for each total "l" wavenumber.
+    """
+    field_sht = sht.forward(field)
+    power_spectrum = torch.sum(abs(field_sht) ** 2, dim=-1)
+    return power_spectrum

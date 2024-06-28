@@ -1,9 +1,16 @@
 import numpy as np
 import pytest
 import torch
+import torch_harmonics
 
 import fme
-from fme.core.metrics import surface_pressure_due_to_dry_air, vertical_integral
+from fme.core.metrics import (
+    net_surface_energy_flux,
+    quantile,
+    spherical_power_spectrum,
+    surface_pressure_due_to_dry_air,
+    vertical_integral,
+)
 
 
 def _get_lats(num_lat: int):
@@ -307,3 +314,53 @@ def test_single_level_dry_air_some_water():
     np.testing.assert_allclose(
         dry_air.cpu().numpy(), target_dry_air.cpu().numpy(), rtol=1e-5
     )
+
+
+def test_net_surface_energy_flux():
+    sfc_down_lw_radiative_flux = torch.tensor([100.0])
+    sfc_up_lw_radiative_flux = torch.tensor([50.0])
+    sfc_down_sw_radiative_flux = torch.tensor([25.0])
+    sfc_up_sw_radiative_flux = torch.tensor([10.0])
+    latent_heat_flux = torch.tensor([5.0])
+    sensible_heat_flux = torch.tensor([2.5])
+    expected_net_surface_energy_flux = torch.tensor([57.5])
+    result = net_surface_energy_flux(
+        sfc_down_lw_radiative_flux,
+        sfc_up_lw_radiative_flux,
+        sfc_down_sw_radiative_flux,
+        sfc_up_sw_radiative_flux,
+        latent_heat_flux,
+        sensible_heat_flux,
+    )
+    torch.testing.assert_close(result, expected_net_surface_energy_flux)
+
+
+@pytest.mark.parametrize(
+    "bins, hist, pct, expected",
+    [
+        pytest.param(
+            np.array([0, 1]), np.array([10]), 0.8, 0.8, id="single_bin_interpolation"
+        ),
+        pytest.param(
+            np.array([0, 1, 2]),
+            np.array([10, 10]),
+            0.8,
+            1.6,
+            id="two_bin_interpolation",
+        ),
+        pytest.param(
+            np.array([0, 1, 2]), np.array([10, 10]), 1.0, 2.0, id="two_bin_end_value"
+        ),
+    ],
+)
+def test_quantile(bins, hist, pct, expected):
+    result = quantile(bins, hist, pct)
+    np.testing.assert_allclose(result, expected)
+
+
+def test_spherical_power_spectrum():
+    nlat, nlon = 4, 8
+    data = torch.rand(2, nlat, nlon)
+    sht = torch_harmonics.RealSHT(nlat, nlon)
+    spectrum = spherical_power_spectrum(data, sht)
+    assert spectrum.shape == (2, nlat - 1)

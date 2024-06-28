@@ -1,0 +1,7 @@
+name: era5-ingestion
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - metview-batch
+  - pip

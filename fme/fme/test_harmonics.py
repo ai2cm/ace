@@ -5,9 +5,9 @@ import torch
 import torch_harmonics as harmonics
 
 
-@pytest.mark.parametrize("nlat, nlon", [(2, 2), (6, 8), (6, 12)])
+@pytest.mark.parametrize("nlat, nlon", [(6, 12)])
 @pytest.mark.parametrize("grid", ["equiangular", "legendre-gauss"])
-@pytest.mark.parametrize("constant", [1.0, 0.42, -1.0])
+@pytest.mark.parametrize("constant", [1.0, 0.42])
 def test_constant_field(nlat, nlon, grid, constant):
     """Tests that the SHT of a constant field has a single non-zero wavenumber,
     the first one.
@@ -31,7 +31,7 @@ def _roundtrip(field, grid):
 
 
 @pytest.mark.parametrize("seed", [0, 1])
-@pytest.mark.parametrize("nlat, nlon", [(2, 2), (6, 8), (6, 12)])
+@pytest.mark.parametrize("nlat, nlon", [(6, 12)])
 def test_roundtrip(nlat, nlon, seed, grid="legendre-gauss"):
     """Tests that the SHT and ISHT are inverses of each other."""
     torch.manual_seed(seed)

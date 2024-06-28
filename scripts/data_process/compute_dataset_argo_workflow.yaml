@@ -1,0 +1,98 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: compute-fme-dataset-ensemble-
+spec:
+  entrypoint: compute-fme-dataset-ensemble
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+    - name: config
+    - name: names
+    - name: run_directories
+    - name: output_directory
+    - name: ic_max
+  templates:
+    - name: compute-fme-dataset-ensemble
+      steps:
+      - - name: compute-fme-dataset-individual
+          template: compute-fme-dataset-individual
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.python_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+            - name: names
+              value: "{{workflow.parameters.names}}"
+            - name: run_directories
+              value: "{{workflow.parameters.run_directories}}"
+            - name: output_directory
+              value: "{{workflow.parameters.output_directory}}"
+            - name: ic_max
+              value: "{{workflow.parameters.ic_max}}"
+            - name: ic
+              value: "{{item}}"
+          withSequence:
+            start: "1"
+            end: "{{workflow.parameters.ic_max}}"
+    - name: compute-fme-dataset-individual
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+          - name: names
+          - name: run_directories
+          - name: output_directory
+          - name: ic
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            names=({{inputs.parameters.names}})
+            run_directories=({{inputs.parameters.run_directories}})
+            output_directory={{inputs.parameters.output_directory}}
+            ic={{inputs.parameters.ic}}
+
+            i="$((ic - 1))"  # bash arrays are zero indexed
+            name="${names[${i}]}"
+            run_directory="${run_directories[${i}]}"
+
+            output_store=${output_directory}/${name}.zarr
+
+            python script.py --config config.yaml \
+              --run-directory ${run_directory} \
+              --output-store ${output_store}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

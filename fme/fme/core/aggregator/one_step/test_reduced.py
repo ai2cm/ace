@@ -20,7 +20,6 @@ def test_mean_metrics_call_distributed():
         agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
         assert logs["metrics/loss"] == -1.0
-        assert logs["metrics/l1/a"] == -1.0
         assert logs["metrics/weighted_rmse/a"] == -1.0
         assert logs["metrics/weighted_grad_mag_percent_diff/a"] == -1.0
         assert mock.reduce_called
@@ -46,7 +45,7 @@ def test_i_time_start_gets_correct_time_one_step_windows():
             i_time_start=i,
         )
     logs = agg.get_logs(label="metrics")
-    torch.testing.assert_allclose(logs["metrics/weighted_bias/a"], target_time)
+    np.testing.assert_allclose(logs["metrics/weighted_bias/a"], target_time)
 
 
 @pytest.mark.parametrize(

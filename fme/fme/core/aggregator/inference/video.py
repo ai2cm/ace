@@ -1,18 +1,19 @@
 import dataclasses
-from typing import Dict, Mapping, Optional, Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading.typing import VariableMetadata
+from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 wandb = WandB.get_instance()
 
 
-def _get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def _get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
     raise ValueError("No data in gen_data")
@@ -20,9 +21,9 @@ def _get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
 
 @dataclasses.dataclass
 class _ErrorData:
-    rmse: Dict[str, torch.Tensor]
-    min_err: Dict[str, torch.Tensor]
-    max_err: Dict[str, torch.Tensor]
+    rmse: TensorDict
+    min_err: TensorDict
+    max_err: TensorDict
 
 
 class _ErrorVideoData:
@@ -30,21 +31,19 @@ class _ErrorVideoData:
     Record batches of video data and compute statistics on the error.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
-        self._mse_data: Optional[Dict[str, torch.Tensor]] = None
-        self._min_err_data: Optional[Dict[str, torch.Tensor]] = None
-        self._max_err_data: Optional[Dict[str, torch.Tensor]] = None
+    def __init__(self, n_timesteps: int):
+        self._mse_data: Optional[TensorDict] = None
+        self._min_err_data: Optional[TensorDict] = None
+        self._max_err_data: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -96,14 +95,15 @@ class _ErrorVideoData:
         rmse_data = {}
         min_err_data = {}
         max_err_data = {}
-        for name, tensor in self._mse_data.items():
+        for name in sorted(self._mse_data):
+            tensor = self._mse_data[name]
             mse = (tensor / self._n_batches[None, :, None, None]).mean(dim=0)
             mse = self._dist.reduce_mean(mse)
             rmse_data[name] = torch.sqrt(mse)
-        for name, tensor in self._min_err_data.items():
-            min_err_data[name] = self._dist.reduce_min(tensor)
-        for name, tensor in self._max_err_data.items():
-            max_err_data[name] = self._dist.reduce_max(tensor)
+        for name in sorted(self._min_err_data):
+            min_err_data[name] = self._dist.reduce_min(self._min_err_data[name])
+        for name in sorted(self._max_err_data):
+            max_err_data[name] = self._dist.reduce_max(self._max_err_data[name])
         return _ErrorData(rmse_data, min_err_data, max_err_data)
 
 
@@ -112,20 +112,18 @@ class _MeanVideoData:
     Record batches of video data and compute the mean.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
-        self._target_data: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_data: Optional[Dict[str, torch.Tensor]] = None
+    def __init__(self, n_timesteps: int):
+        self._target_data: Optional[TensorDict] = None
+        self._gen_data: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -153,15 +151,17 @@ class _MeanVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def get(self) -> Tuple[TensorDict, TensorDict]:
         if self._gen_data is None or self._target_data is None:
             raise RuntimeError("No data recorded")
         target_data = {}
         gen_data = {}
-        for name, tensor in self._target_data.items():
+        for name in sorted(self._target_data):
+            tensor = self._target_data[name]
             target_data[name] = tensor / self._n_batches[:, None, None]
             target_data[name] = self._dist.reduce_mean(target_data[name])
-        for name, tensor in self._gen_data.items():
+        for name in sorted(self._gen_data):
+            tensor = self._gen_data[name]
             gen_data[name] = tensor / self._n_batches[:, None, None]
             gen_data[name] = self._dist.reduce_mean(gen_data[name])
         return gen_data, target_data
@@ -172,22 +172,20 @@ class _VarianceVideoData:
     Record batches of video data and compute the variance.
     """
 
-    def __init__(self, n_timesteps: int, dist: Optional[Distributed] = None):
-        self._target_means: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_means: Optional[Dict[str, torch.Tensor]] = None
-        self._target_squares: Optional[Dict[str, torch.Tensor]] = None
-        self._gen_squares: Optional[Dict[str, torch.Tensor]] = None
+    def __init__(self, n_timesteps: int):
+        self._target_means: Optional[TensorDict] = None
+        self._gen_means: Optional[TensorDict] = None
+        self._target_squares: Optional[TensorDict] = None
+        self._gen_squares: Optional[TensorDict] = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
-        if dist is None:
-            dist = Distributed.get_instance()
-        self._dist = dist
+        self._dist = Distributed.get_instance()
 
     @torch.no_grad()
     def record_batch(
         self,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
         i_time_start: int,
     ):
         """
@@ -227,7 +225,7 @@ class _VarianceVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[Dict[str, torch.Tensor], Dict[str, torch.Tensor]]:
+    def get(self) -> Tuple[TensorDict, TensorDict]:
         if (
             self._gen_means is None
             or self._target_means is None
@@ -238,13 +236,15 @@ class _VarianceVideoData:
         target_data = {}
         gen_data = {}
         # calculate variance as E[X^2] - E[X]^2
-        for name, tensor in self._target_means.items():
+        for name in sorted(self._target_means):
+            tensor = self._target_means[name]
             mean = tensor / self._n_batches[:, None, None]
             mean = self._dist.reduce_mean(mean)
             square = self._target_squares[name] / self._n_batches[:, None, None]
             square = self._dist.reduce_mean(square)
             target_data[name] = square - mean**2
-        for name, tensor in self._gen_means.items():
+        for name in sorted(self._gen_means):
+            tensor = self._gen_means[name]
             mean = tensor / self._n_batches[:, None, None]
             mean = self._dist.reduce_mean(mean)
             square = self._gen_squares[name] / self._n_batches[:, None, None]
@@ -254,7 +254,7 @@ class _VarianceVideoData:
 
 
 def _initialize_video_from_batch(
-    batch: Mapping[str, torch.Tensor], n_timesteps: int, fill_value: float = 0.0
+    batch: TensorMapping, n_timesteps: int, fill_value: float = 0.0
 ):
     """
     Initialize a video of the same shape as the batch, but with all valeus equal
@@ -292,7 +292,6 @@ class VideoAggregator:
         self,
         n_timesteps: int,
         enable_extended_videos: bool,
-        dist: Optional[Distributed] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
@@ -300,7 +299,6 @@ class VideoAggregator:
             n_timesteps: Number of timesteps of inference that will be run.
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
-            dist: Distributed object to use for metric aggregation.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged video captions.
         """
@@ -308,13 +306,13 @@ class VideoAggregator:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._metadata = metadata
-        self._mean_data = _MeanVideoData(n_timesteps=n_timesteps, dist=dist)
+        self._mean_data = _MeanVideoData(n_timesteps=n_timesteps)
         if enable_extended_videos:
             self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps
             )
             self._variance_data: Optional[_VarianceVideoData] = _VarianceVideoData(
-                n_timesteps=n_timesteps, dist=dist
+                n_timesteps=n_timesteps
             )
             self._enable_extended_videos = True
         else:
@@ -326,10 +324,10 @@ class VideoAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
-        gen_data_norm: Optional[Mapping[str, torch.Tensor]] = None,
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: Optional[TensorMapping] = None,
+        gen_data_norm: Optional[TensorMapping] = None,
         i_time_start: int = 0,
     ):
         del target_data_norm, gen_data_norm  # intentionally unused

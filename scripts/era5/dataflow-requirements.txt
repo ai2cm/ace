@@ -1,0 +1,10 @@
+apache_beam[gcp]==2.54.0
+h5netcdf
+xarray
+zarr
+dask
+scipy
+numpy
+xarray_beam
+cftime
+gcsfs
