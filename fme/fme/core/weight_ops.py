@@ -17,6 +17,11 @@ class CopyWeightsConfig:
     target parameters have longer dimensions than the base model, only
     the initial slice is overwritten.
 
+    This is used to achieve an effect of freezing model parameters that
+    can freeze a subset of each weight that comes from a smaller base weight.
+    This is less efficient than true parameter freezing, but layer
+    freezing is all-or-nothing for each parameter.
+
     All parameters must be covered by either the include or exclude list,
     but not both.
 

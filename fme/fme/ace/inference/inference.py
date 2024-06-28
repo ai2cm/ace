@@ -32,6 +32,14 @@ from .evaluator import load_stepper, load_stepper_config
 
 @dataclasses.dataclass
 class InitialConditionConfig:
+    """
+    Configuration for initial conditions.
+
+    Attributes:
+        path: The path to the initial conditions dataset.
+        engine: The engine used to open the dataset.
+    """
+
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
 
@@ -89,6 +97,7 @@ class InferenceConfig:
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time.
         data_writer: Configuration for data writers.
+        aggregator: Configuration for inference aggregator.
         ocean: Ocean configuration for running inference with a
             different one than what is used in training.
     """

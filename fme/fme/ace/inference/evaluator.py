@@ -60,8 +60,7 @@ class InferenceEvaluatorConfig:
 
     Attributes:
         experiment_dir: Directory to save results to.
-        n_forward_steps: Number of steps to run the model forward for. Must be divisble
-            by forward_steps_in_memory.
+        n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
         logging: configuration for logging.
         loader: Configuration for data to be used as initial conditions, forcing, and
@@ -72,7 +71,7 @@ class InferenceEvaluatorConfig:
         forward_steps_in_memory: Number of forward steps to complete in memory
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
-        aggregator: Configuration for inference aggregator.
+        aggregator: Configuration for inference evaluator aggregator.
         ocean: Ocean configuration for running inference with a
             different one than what is used in training.
     """

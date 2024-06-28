@@ -13,6 +13,14 @@ from .prescriber import Prescriber
 
 @dataclasses.dataclass
 class SlabOceanConfig:
+    """
+    Configuration for a slab ocean model.
+
+    Attributes:
+        mixed_layer_depth_name: Name of the mixed layer depth field.
+        q_flux_name: Name of the heat flux field.
+    """
+
     mixed_layer_depth_name: str
     q_flux_name: str
 
@@ -23,7 +31,8 @@ class SlabOceanConfig:
 
 @dataclasses.dataclass
 class OceanConfig:
-    """Configuration for determining sea surface temperature from an ocean model.
+    """
+    Configuration for determining sea surface temperature from an ocean model.
 
     Attributes:
         surface_temperature_name: Name of the sea surface temperature field.
