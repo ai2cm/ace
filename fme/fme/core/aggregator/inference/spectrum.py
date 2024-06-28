@@ -41,7 +41,8 @@ class SphericalPowerSpectrumAggregator:
     def get_mean(self) -> Dict[str, torch.Tensor]:
         dist = Distributed.get_instance()
         logs = {}
-        for name in self._power_spectrum:
+        sorted_names = sorted(list(self._power_spectrum))
+        for name in sorted_names:
             _mean_spectrum = self._power_spectrum[name]
             if dist.world_size > 1:
                 # assuming same count on all workers
