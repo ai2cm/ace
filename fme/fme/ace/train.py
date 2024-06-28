@@ -1,3 +1,7 @@
+# This module is derived from the train.py module in the following repository:
+# https://github.com/NVlabs/FourCastNet. The corresponding license is
+# provided below.
+
 # BSD 3-Clause License
 #
 # Copyright (c) 2022, FourCastNet authors
