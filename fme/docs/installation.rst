@@ -6,8 +6,8 @@ Installation
 
 All commands here are run from the top-level directory of the repository, unless otherwise stated.
 
-Stable release
---------------
+Experimental release
+--------------------
 
 There is no stable release. This is unsupported, pre-alpha software: use at your own risk!
 

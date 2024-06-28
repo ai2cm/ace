@@ -13,6 +13,17 @@ to create a conda environment called `fme` with dependencies and source code ins
 
 .. _conda: https://docs.conda.io/en/latest/
 
+Wandb Integration
+=================
+
+For the optional Weights and Biases (wandb) integration, you will need to set the API key::
+
+    export WANDB_API_KEY=wandb-api-key
+
+where `wandb-api-key` is created and retrieved from the "API Keys" section of the `Wandb`_ settings page.
+
+.. _Wandb: https://wandb.ai/settings
+
 Commands
 ========
 
