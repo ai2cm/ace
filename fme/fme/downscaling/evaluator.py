@@ -9,7 +9,6 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
-from fme.ace.train import count_parameters
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
@@ -24,6 +23,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
+from fme.downscaling.train import count_parameters
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 
