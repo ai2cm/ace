@@ -205,6 +205,7 @@ def run_inference_from_config(config: InferenceConfig):
     torch.backends.cudnn.benchmark = True
 
     logging_utils.log_versions()
+    logging.info(f"Current device is {fme.get_device()}")
 
     start_time = time.time()
     stepper_config = config.load_stepper_config()
