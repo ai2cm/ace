@@ -10,7 +10,6 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.ace.train import count_parameters
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -25,6 +24,15 @@ from fme.downscaling.models import (
     Model,
 )
 from fme.downscaling.typing_ import FineResCoarseResPair
+
+
+def count_parameters(modules: torch.nn.ModuleList) -> int:
+    parameters = 0
+    for module in modules:
+        for parameter in module.parameters():
+            if parameter.requires_grad:
+                parameters += parameter.numel()
+    return parameters
 
 
 def save_checkpoint(trainer: "Trainer", path: str) -> None:
