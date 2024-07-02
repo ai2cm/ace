@@ -94,6 +94,7 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
 
 class Trainer:
     def __init__(self, config: TrainConfig):
+        logging.info(f"Current device is {fme.get_device()}")
         self.dist = Distributed.get_instance()
         if self.dist.is_root():
             if not os.path.isdir(config.experiment_dir):
