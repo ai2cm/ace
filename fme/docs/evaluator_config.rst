@@ -48,6 +48,18 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
+.. autoclass:: fme.ace.InferenceInitialConditionIndices
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.ExplicitIndices
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.TimestampList
+   :show-inheritance:
+   :noindex:
+
 .. autoclass:: fme.ace.XarrayDataConfig
    :show-inheritance:
    :noindex:
