@@ -18,7 +18,11 @@ from fme.ace.inference.inference import (
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.config import TimeSlice, XarrayDataConfig
-from fme.core.data_loading.inference import InferenceInitialConditionIndices
+from fme.core.data_loading.inference import (
+    ExplicitIndices,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.parameter_init import ParameterInitializationConfig
