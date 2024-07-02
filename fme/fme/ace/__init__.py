@@ -28,8 +28,8 @@ from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.parameter_init import ParameterInitializationConfig
 from fme.core.registry import ModuleSelector, get_available_module_types, register
 
-from ._train import run_train_from_config
-from .train_config import (
+from .train.train import run_train_from_config
+from .train.train_config import (
     CopyWeightsConfig,
     DataLoaderConfig,
     EMAConfig,

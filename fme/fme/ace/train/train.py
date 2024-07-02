@@ -56,14 +56,16 @@ import os
 import time
 from typing import Optional
 
+import dacite
 import dask
 import torch
+import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference import run_inference_evaluator
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
-from fme.ace.train_config import TrainConfig
+from fme.ace.train.train_config import TrainConfig
 from fme.core.aggregator import (
     InferenceEvaluatorAggregatorConfig,
     OneStepAggregator,
@@ -510,3 +512,18 @@ def run_train_from_config(config: TrainConfig):
     trainer = Trainer(config)
     trainer.train()
     logging.info("DONE ---- rank %d" % dist.rank)
+
+
+def main(yaml_config: str):
+    with open(yaml_config, "r") as f:
+        data = yaml.safe_load(f)
+    train_config: TrainConfig = dacite.from_dict(
+        data_class=TrainConfig,
+        data=data,
+        config=dacite.Config(strict=True),
+    )
+    if not os.path.isdir(train_config.experiment_dir):
+        os.makedirs(train_config.experiment_dir, exist_ok=True)
+    with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    run_train_from_config(train_config)
