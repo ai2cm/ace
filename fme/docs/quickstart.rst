@@ -81,7 +81,11 @@ If you run into configuration issues, you can validate your configuration with
 
 .. tip::
 
-    While inference can be performed without a GPU, it may be very slow.
+    While inference can be performed without a GPU, it may be very slow. If running on a Mac, set the environmental variable
+    ``export FME_USE_MPS=1`` to enable using the `Metal Performance Shaders`_ framework for GPU acceleration. Note this backend is
+    not fully featured and it may not work with all inference features or for training.
+
+.. _Metal Performance Shaders: https://developer.apple.com/metal/pytorch/
 
 Evaluating a Checkpoint
 =======================
