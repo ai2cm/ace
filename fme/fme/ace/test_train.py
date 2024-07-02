@@ -9,8 +9,8 @@ import torch
 import xarray as xr
 import yaml
 
+from fme.ace._train import _restore_checkpoint, count_parameters
 from fme.ace.inference.evaluator import main as inference_evaluator_main
-from fme.ace.train import _restore_checkpoint, count_parameters
 from fme.ace.train import main as train_main
 from fme.ace.train_config import epoch_checkpoint_enabled
 from fme.core.data_loading.config import Slice
@@ -285,7 +285,7 @@ def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
-    with unittest.mock.patch("fme.ace.train._restore_checkpoint", new=mock):
+    with unittest.mock.patch("fme.ace._train._restore_checkpoint", new=mock):
         train_config, inference_config = _setup(
             tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )
