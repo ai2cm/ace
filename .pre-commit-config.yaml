@@ -19,7 +19,7 @@ repos:
       name: flake8 __init__.py files
       files: "__init__.py"
       # ignore unused import error in __init__.py files
-      args: ["--ignore=F401,E203", --config, setup.cfg]
+      args: ["--ignore=F401,E203,W503", --config, setup.cfg]
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.2.0
     hooks:

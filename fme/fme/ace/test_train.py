@@ -9,10 +9,10 @@ import torch
 import xarray as xr
 import yaml
 
-from fme.ace._train import _restore_checkpoint, count_parameters
 from fme.ace.inference.evaluator import main as inference_evaluator_main
-from fme.ace.train import main as train_main
-from fme.ace.train_config import epoch_checkpoint_enabled
+from fme.ace.train.train import _restore_checkpoint, count_parameters
+from fme.ace.train.train import main as train_main
+from fme.ace.train.train_config import epoch_checkpoint_enabled
 from fme.core.data_loading.config import Slice
 from fme.core.testing import (
     DimSizes,
@@ -26,7 +26,6 @@ REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
     REPOSITORY_PATH / "fme" / "fme" / "ace" / "run-train-and-inference.sh"
 )
-TRAIN_SCRIPT_PATH = REPOSITORY_PATH / "fme" / "fme" / "ace" / "train.py"
 
 
 def _get_test_yaml_files(
@@ -285,8 +284,8 @@ def test_resume(tmp_path, nettype):
     """Make sure the training is resumed from a checkpoint when restarted."""
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
-    with unittest.mock.patch("fme.ace._train._restore_checkpoint", new=mock):
-        train_config, inference_config = _setup(
+    with unittest.mock.patch("fme.ace.train.train._restore_checkpoint", new=mock):
+        train_config, _ = _setup(
             tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )
         with mock_wandb() as wandb:
@@ -337,7 +336,8 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.
         "torchrun",
         "--nproc_per_node",
         "2",
-        TRAIN_SCRIPT_PATH,
+        "-m",
+        "fme.ace.train",
         train_config,
     ]
     resume_process = subprocess.run(resume_subprocess_args, cwd=tmpdir)
