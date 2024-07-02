@@ -2,6 +2,7 @@ h5py
 imageio<=2.27.0
 moviepy
 netcdf4
+numpy<2
 wandb
 tensorly
 tensorly-torch
