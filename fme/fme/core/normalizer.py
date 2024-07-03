@@ -69,14 +69,15 @@ class NormalizationConfig:
 class FromStateNormalizer:
     """
     An alternative to NormalizationConfig which provides a normalizer
-    initialized from a serializable state.
+    initialized from a serializable state. This is not a public configuration
+    class, but instead allows for loading trained models that have been
+    serialized to disk, using the pre-existing normalization state.
+
+    Args:
+        state: State dict of a normalizer.
     """
 
     def __init__(self, state: Dict[str, Dict[str, float]]):
-        """
-        Args:
-            state: State dict of the normalizer.
-        """
         self.state = state
 
     def build(self, names: List[str]):
