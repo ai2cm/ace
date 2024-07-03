@@ -38,45 +38,13 @@ The top-level configuration is the :class:`fme.ace.TrainConfig` class.
    :show-inheritance:
    :noindex:
 
-The sub-configurations are:
+The top-level sub-configurations are:
 
 .. autoclass:: fme.ace.DataLoaderConfig
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.XarrayDataConfig
-   :show-inheritance:
-   :noindex:
-
 .. autoclass:: fme.ace.SingleModuleStepperConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.ModuleSelector
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.NormalizationConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.FromStateNormalizer
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.ParameterInitializationConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.OceanConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.WeightedMappingLossConfig
-   :show-inheritance:
-   :noindex:
-
-.. autoclass:: fme.ace.CorrectorConfig
    :show-inheritance:
    :noindex:
 
@@ -100,10 +68,10 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.Slice
+.. autoclass:: fme.ace.EMAConfig
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.TimeSlice
+.. autoclass:: fme.ace.Slice
    :show-inheritance:
    :noindex:
