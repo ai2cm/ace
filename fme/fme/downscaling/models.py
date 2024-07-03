@@ -130,7 +130,9 @@ class Model:
         return torch.nn.ModuleList([self.module])
 
     def train_on_batch(
-        self, batch: FineResCoarseResPair[TensorMapping], optimization: Optimization
+        self,
+        batch: FineResCoarseResPair[TensorMapping],
+        optimization: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         return self._run_on_batch(batch, optimization)
 
@@ -316,7 +318,7 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: FineResCoarseResPair[TensorMapping],
-        optimizer: Optimization,
+        optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
 

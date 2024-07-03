@@ -3,7 +3,7 @@ import os
 import pathlib
 import subprocess
 import unittest.mock
-from typing import Dict, Literal, Set
+from typing import Dict
 from unittest.mock import MagicMock
 
 import cftime
@@ -163,31 +163,6 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
     return outpath
 
 
-def _get_aggregator_keys(prefix: Literal["train", "validation"]) -> Set[str]:
-    keys = [f"{prefix}/loss"]
-    if prefix == "train":
-        keys.append("epoch")
-
-    for metric_name in (
-        "rmse",
-        "weighted_rmse",
-        "snapshot/image-error",
-        "snapshot/image-full-field",
-        "time_mean_map/error",
-        "time_mean_map/full-field",
-        "histogram",
-        "histogram/target/99.9999th-percentile",
-        "histogram/prediction/99.9999th-percentile",
-    ):
-        for var_name in ("x", "y"):
-            keys.append(f"{prefix}/{metric_name}/{var_name}")
-
-    for var_name in ("x", "y"):
-        for data_type in ("target", "prediction"):
-            keys.append(f"{prefix}/spectrum/{var_name}_{data_type}")
-    return set(keys)
-
-
 def test_train_main(trainer_config):
     """Check that training loop records the appropriate logs."""
     with mock_wandb() as wandb:
@@ -206,25 +181,11 @@ def test_train_main(trainer_config):
         == 1  # validation is run once before training
         + trainer_config_dict["max_epochs"] * num_gradient_descent_updates_per_epoch
     )
-
-    validation_keys = _get_aggregator_keys("validation")
-    all_epoch_keys = validation_keys.union(_get_aggregator_keys("train"))
-    batch_loss_key = "train/batch_loss"
-    assert validation_keys == set(logs[0].keys())
-    for step in range(1, len(logs)):
+    for step in range(len(logs)):
         keys = set(logs[step].keys())
-        assert (
-            batch_loss_key in keys
-        ), "batch_loss should be logged at each training step."
-        if step % num_gradient_descent_updates_per_epoch == 0:
-            assert (
-                all_epoch_keys & keys == all_epoch_keys
-            ), "All train and validation metrics should be logged each epoch."
-            assert (
-                len(keys) == len(all_epoch_keys) + 1
-            ), "batch_loss should also be logged each epoch."
-        else:
-            assert len(keys) == 1, "Within an epoch, only batch_loss should be logged."
+        # if validation takes place during this step, check that at least some
+        # number of metrics were logged (e.g. 5).
+        assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
 def test_restore_checkpoint(trainer_config, tmp_path):

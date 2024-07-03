@@ -124,23 +124,34 @@ class Trainer:
             validation_aggregator = Aggregator(
                 self.area_weights.fine.cpu(), self.latitudes
             )
+            generation_aggregator = Aggregator(
+                self.area_weights.fine.cpu(), self.latitudes
+            )
             batch: BatchData
             for batch in self.validation_data.loader:
                 inputs = FineResCoarseResPair(
                     batch.fine,
                     batch.coarse,
                 )
-                outputs = self.model.generate_on_batch(inputs)
+                outputs = self.model.train_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs.loss, outputs.target, outputs.prediction
                 )
+                generated_outputs = self.model.generate_on_batch(inputs)
+                generation_aggregator.record_batch(
+                    generated_outputs.loss, outputs.target, outputs.prediction
+                )
+
         wandb = WandB.get_instance()
-        metrics = validation_aggregator.get_wandb(prefix="validation")
+
+        validation_metrics = validation_aggregator.get_wandb(prefix="validation")
+        generation_metrics = generation_aggregator.get_wandb(prefix="generation")
         wandb.log(
-            metrics,
+            {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
-        return metrics["validation/loss"]
+
+        return validation_metrics["validation/loss"]
 
     @property
     def resuming(self) -> bool:
