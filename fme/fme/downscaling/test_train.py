@@ -7,13 +7,21 @@ from typing import Dict, Literal, Set
 from unittest.mock import MagicMock
 
 import cftime
+import dacite
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 import yaml
 
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.train import Trainer, main, restore_checkpoint
+from fme.downscaling.train import (
+    Trainer,
+    TrainerConfig,
+    main,
+    restore_checkpoint,
+    save_checkpoint,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -217,6 +225,33 @@ def test_train_main(trainer_config):
             ), "batch_loss should also be logged each epoch."
         else:
             assert len(keys) == 1, "Within an epoch, only batch_loss should be logged."
+
+
+def test_restore_checkpoint(trainer_config, tmp_path):
+    with open(trainer_config, "r") as f:
+        trainer_config_dict = yaml.safe_load(f)
+
+    config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
+    trainer1 = config.build()
+    trainer2 = config.build()
+
+    # Random initialization should result in two different sets of parameters
+    # for the same configuration.
+    assert any(
+        not torch.equal(p1, p2)
+        for p1, p2 in zip(
+            trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
+        )
+    )
+
+    save_checkpoint(trainer1, tmp_path / "checkpoint.pth")
+    restore_checkpoint(trainer2, tmp_path / "checkpoint.pth")
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
+        )
+    )
 
 
 def test_resume(trainer_config, tmp_path):

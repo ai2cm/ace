@@ -50,7 +50,7 @@ def save_checkpoint(trainer: "Trainer", path: str) -> None:
 
 def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
     checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
-    trainer.model.from_state(
+    trainer.model = trainer.model.from_state(
         checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )
     trainer.optimization.load_state(checkpoint["optimization"])
