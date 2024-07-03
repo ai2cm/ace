@@ -25,7 +25,9 @@ from fme.core.data_loading.inference import (
 )
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
-from fme.core.parameter_init import ParameterInitializationConfig
+from fme.core.ocean import SlabOceanConfig
+from fme.core.optimization import SchedulerConfig
+from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
 from fme.core.registry import ModuleSelector, get_available_module_types, register
 
 from .train.train import run_train_from_config
