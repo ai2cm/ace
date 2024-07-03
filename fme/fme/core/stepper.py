@@ -208,10 +208,12 @@ class SingleModuleStepperConfig:
 @dataclasses.dataclass
 class ExistingStepperConfig:
     """
-    Configuration for an existing stepper.
+    Configuration for an existing stepper. This is only designed to point to
+    a serialized stepper checkpoint for loading, e.g., in the case of training
+    resumption.
 
     Attributes:
-        checkpoint_path: The path to the checkpoint.
+        checkpoint_path: The path to the serialized checkpoint.
     """
 
     checkpoint_path: str
