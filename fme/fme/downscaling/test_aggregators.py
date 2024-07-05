@@ -148,6 +148,7 @@ def test_map_aggregator(n_steps: int):
     ],
 )
 def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
+    downscale_factor = 2
     shape = (2, 16, 32)
     _, n_lat, n_lon = shape
     area_weights = torch.ones(n_lon)
@@ -155,12 +156,19 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
     n_bins = 300
     target = {"x": torch.zeros(*shape)}
     prediction = {"x": torch.ones(*shape)}
+    coarse = {
+        "x": torch.ones(2, shape[1] // downscale_factor, shape[2] // downscale_factor)
+    }
 
     with mock_wandb():
         aggregator = Aggregator(
-            area_weights, latitudes, n_histogram_bins=n_bins, percentiles=percentiles
+            area_weights,
+            latitudes,
+            downscale_factor,
+            n_histogram_bins=n_bins,
+            percentiles=percentiles,
         )
-        aggregator.record_batch(torch.tensor(0.0), target, prediction)
+        aggregator.record_batch(torch.tensor(0.0), target, prediction, coarse)
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
     assert f"{expected_prefix}loss" in wandb_metrics
@@ -173,6 +181,7 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
     for metric_name in [
         "rmse",
         "weighted_rmse",
+        "relative_mse_bicubic",
         "time_mean_map/error",
         "time_mean_map/full-field",
         "histogram/target",

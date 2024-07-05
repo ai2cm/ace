@@ -167,3 +167,12 @@ def compute_zonal_power_spectrum(
     power = power[..., mask, :]
 
     return power.mean(dim=-2)
+
+
+def interpolate(tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
+    return torch.nn.functional.interpolate(
+        tensor,
+        scale_factor=[scale_factor, scale_factor],
+        mode="bicubic",
+        align_corners=True,
+    )

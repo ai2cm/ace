@@ -18,6 +18,7 @@ import dacite
 import torch
 
 from fme.core.device import get_device
+from fme.downscaling.metrics_and_maths import interpolate
 from fme.downscaling.modules.swinir import SwinIR
 from fme.downscaling.modules.unets import DhariwalUNet, SongUNet
 
@@ -133,12 +134,7 @@ class UNetRegressionModule(torch.nn.Module):
         self.fine_topography = fine_topography
 
     def forward(self, x: torch.Tensor):
-        inputs = torch.nn.functional.interpolate(
-            x,
-            scale_factor=(self.downscale_factor, self.downscale_factor),
-            mode="bicubic",
-            align_corners=True,
-        )
+        inputs = interpolate(x, self.downscale_factor)
         inputs = pad_right(inputs, self.target_shape)
 
         if self.fine_topography is not None:
