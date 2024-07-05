@@ -39,6 +39,7 @@ class Evaluator:
         aggregator = Aggregator(
             self.data.area_weights.fine,
             self.data.horizontal_coordinates.fine.lat.cpu(),
+            self.model.downscale_factor,
         )
 
         for batch in self.data.loader:
@@ -46,7 +47,7 @@ class Evaluator:
             with torch.no_grad():
                 outputs = self.model.generate_on_batch(inputs)
                 aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction
+                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
                 )
 
         logs = aggregator.get_wandb()

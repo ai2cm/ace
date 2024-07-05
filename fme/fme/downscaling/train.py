@@ -97,7 +97,9 @@ class Trainer:
             self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
 
     def train_one_epoch(self) -> None:
-        train_aggregator = Aggregator(self.area_weights.fine.cpu(), self.latitudes)
+        train_aggregator = Aggregator(
+            self.area_weights.fine.cpu(), self.latitudes, self.model.downscale_factor
+        )
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
@@ -106,7 +108,7 @@ class Trainer:
             self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction
+                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
@@ -122,10 +124,14 @@ class Trainer:
     def valid_one_epoch(self) -> float:
         with torch.no_grad():
             validation_aggregator = Aggregator(
-                self.area_weights.fine.cpu(), self.latitudes
+                self.area_weights.fine.cpu(),
+                self.latitudes,
+                self.model.downscale_factor,
             )
             generation_aggregator = Aggregator(
-                self.area_weights.fine.cpu(), self.latitudes
+                self.area_weights.fine.cpu(),
+                self.latitudes,
+                self.model.downscale_factor,
             )
             batch: BatchData
             for batch in self.validation_data.loader:
@@ -135,11 +141,14 @@ class Trainer:
                 )
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction
+                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
                 )
                 generated_outputs = self.model.generate_on_batch(inputs)
                 generation_aggregator.record_batch(
-                    generated_outputs.loss, outputs.target, outputs.prediction
+                    generated_outputs.loss,
+                    outputs.target,
+                    outputs.prediction,
+                    inputs.coarse,
                 )
 
         wandb = WandB.get_instance()

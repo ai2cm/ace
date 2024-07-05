@@ -18,6 +18,7 @@ from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
     compute_zonal_power_spectrum,
+    interpolate,
     map_tensor_mapping,
 )
 
@@ -335,6 +336,33 @@ class MeanMapAggregator:
         return xr.Dataset(dataset, coords=coords)
 
 
+class RelativeMSEInterpAggregator:
+    def __init__(self, downscale_factor: int) -> None:
+        self.downscale_factor = downscale_factor
+        self._prediction_mse = MeanComparison(torch.nn.MSELoss())
+        self._interpolated_mse = MeanComparison(torch.nn.MSELoss())
+
+    def _interpolate(self, tensor: torch.Tensor, downscale_factor: int):
+        channel_dim = -3
+        return interpolate(tensor.unsqueeze(channel_dim), downscale_factor).squeeze(
+            channel_dim
+        )
+
+    def record_batch(
+        self, target: TensorMapping, prediction: TensorMapping, coarse: TensorMapping
+    ) -> None:
+        self._prediction_mse.record_batch(target, prediction)
+        interpolated = {
+            k: self._interpolate(v, self.downscale_factor) for k, v in coarse.items()
+        }
+        self._interpolated_mse.record_batch(target, interpolated)
+
+    def get_wandb(self) -> Mapping[str, Any]:
+        prediction_mse = self._prediction_mse.get()
+        interpolated_mse = self._interpolated_mse.get()
+        return {k: prediction_mse[k] / interpolated_mse[k] for k in prediction_mse}
+
+
 class _ComparisonAggregator(Protocol):
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         ...
@@ -357,6 +385,7 @@ class Aggregator:
         self,
         area_weights: torch.Tensor,
         latitudes: torch.Tensor,
+        downscale_factor: int,
         n_histogram_bins: int = 300,
         percentiles: Optional[List[float]] = None,
         ssim_kwargs: Optional[Mapping[str, Any]] = None,
@@ -385,11 +414,18 @@ class Aggregator:
             }
             for input_type in ("target", "prediction")
         }
+        self._coarse_comparisons = {
+            "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
+        }
         self.loss = Mean(torch.mean)
 
     @torch.no_grad()
     def record_batch(
-        self, loss: torch.Tensor, target: TensorMapping, prediction: TensorMapping
+        self,
+        loss: torch.Tensor,
+        target: TensorMapping,
+        prediction: TensorMapping,
+        coarse: TensorMapping,
     ) -> None:
         """
         Records a batch of target and prediction tensors for metric computation.
@@ -400,6 +436,9 @@ class Aggregator:
         """
         for _, comparison_aggregator in self._comparisons.items():
             comparison_aggregator.record_batch(target, prediction)
+
+        for _, coarse_comparison_aggregator in self._coarse_comparisons.items():
+            coarse_comparison_aggregator.record_batch(target, prediction, coarse)
 
         for input, input_type in zip((target, prediction), ("target", "prediction")):
             for _, intrinsic_aggregator in self._intrinsics[input_type].items():
@@ -416,17 +455,28 @@ class Aggregator:
             prefix += "/"
 
         ret: Dict[str, Any] = {f"{prefix}loss": self.loss.get()["loss"]}
-        for metric_name, agg in self._comparisons.items():
+        for metric_name, comparison_agg in self._comparisons.items():
             ret.update(
-                {f"{prefix}{metric_name}/{k}": v for (k, v) in agg.get_wandb().items()}
+                {
+                    f"{prefix}{metric_name}/{k}": v
+                    for (k, v) in comparison_agg.get_wandb().items()
+                }
+            )
+
+        for metric_name, relative_agg in self._coarse_comparisons.items():
+            ret.update(
+                {
+                    f"{prefix}{metric_name}/{k}": v
+                    for (k, v) in relative_agg.get_wandb().items()
+                }
             )
 
         for data_role in ("target", "prediction"):
             _aggregators = self._intrinsics[data_role]
-            for metric_name, agg in _aggregators.items():
+            for metric_name, intrinsic_agg in _aggregators.items():
                 _metric_values = {
                     f"{prefix}{metric_name}/{var_name}_{data_role}": v
-                    for (var_name, v) in agg.get_wandb().items()
+                    for (var_name, v) in intrinsic_agg.get_wandb().items()
                 }
                 ret.update(_metric_values)
 
