@@ -57,7 +57,9 @@ class Mean:
         metric = self._mapped_metric(data)
 
         if self._sum is None:
-            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
+            self._sum = {
+                k: torch.zeros_like(v, dtype=torch.float64) for k, v in metric.items()
+            }
 
         self._sum = self._add(self._sum, metric)
         self._count += 1
@@ -117,7 +119,9 @@ class MeanComparison:
         metric = self._mapped_metric(target, prediction)
 
         if self._sum is None:
-            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
+            self._sum = {
+                k: torch.zeros_like(v, dtype=torch.float64) for k, v in metric.items()
+            }
 
         self._sum = self._add(self._sum, metric)
         self._count += 1

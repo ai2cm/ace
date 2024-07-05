@@ -44,7 +44,9 @@ def test_mean_values(metric, input_, expected_outputs, n_batches):
     for _ in range(n_batches):
         aggregator.record_batch(input_)
     result = aggregator.get()
-    assert_tensor_mapping_all_close(result, expected_outputs)
+    assert_tensor_mapping_all_close(
+        result, {k: v.to(torch.float64) for k, v in expected_outputs.items()}
+    )
 
 
 @pytest.mark.parametrize(
@@ -66,7 +68,9 @@ def test_mean_comparison_values(
     for _ in range(n_batches):
         aggregator.record_batch(target, prediction)
     result = aggregator.get()
-    assert_tensor_mapping_all_close(result, expected_outputs)
+    assert_tensor_mapping_all_close(
+        result, {k: v.to(torch.float64) for (k, v) in expected_outputs.items()}
+    )
 
 
 def _compute_zonal_spectrum_for_testing(x):
