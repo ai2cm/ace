@@ -63,7 +63,7 @@ def test_swinir_output_shapes(
 
 
 @pytest.mark.parametrize(
-    "coarse_shape, upscale_factor, fine_shape",
+    "coarse_shape, downscale_factor, fine_shape",
     [
         pytest.param(
             (4, 4),
@@ -82,7 +82,7 @@ def test_swinir_output_shapes(
 )
 def test_swinir_downscaling_options(
     coarse_shape,
-    upscale_factor,
+    downscale_factor,
     fine_shape,
     n_in_channels,
     n_out_channels,
@@ -101,7 +101,7 @@ def test_swinir_downscaling_options(
         n_in_channels=n_in_channels,
         n_out_channels=n_out_channels,
         coarse_shape=coarse_shape,
-        downscale_factor=upscale_factor,
+        downscale_factor=downscale_factor,
         fine_topography=None,
     )
     batch_size = 2
@@ -111,7 +111,7 @@ def test_swinir_downscaling_options(
 
 
 @pytest.mark.parametrize(
-    "coarse_shape, upscale_factor, fine_shape",
+    "coarse_shape, downscale_factor, fine_shape",
     [
         pytest.param(
             (4, 4),
@@ -126,7 +126,7 @@ def test_swinir_downscaling_options(
 @pytest.mark.parametrize("upsampler", ["pixelshuffle"])
 def test_swinir_values(
     coarse_shape,
-    upscale_factor,
+    downscale_factor,
     fine_shape,
     n_channels,
     window_size,
@@ -148,7 +148,7 @@ def test_swinir_values(
         n_in_channels=n_channels,
         n_out_channels=n_channels,
         coarse_shape=coarse_shape,
-        downscale_factor=upscale_factor,
+        downscale_factor=downscale_factor,
         fine_topography=None,
     )
     batch_size = 2
