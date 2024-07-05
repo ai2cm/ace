@@ -118,9 +118,9 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
         ),
     )
 
-    img_shape, upscale_factor = (4, 8), 4
+    img_shape, downscale_factor = (4, 8), 4
     area_weights = FineResCoarseResPair[torch.Tensor](
-        torch.ones(img_shape[0] * upscale_factor, img_shape[1] * upscale_factor),
+        torch.ones(img_shape[0] * downscale_factor, img_shape[1] * downscale_factor),
         torch.ones(img_shape[0], img_shape[1]),
     )
     loss = LossConfig(type="L1")
@@ -134,9 +134,9 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     )
     model_config.build(
         img_shape,
-        upscale_factor,
+        downscale_factor,
         area_weights,
-        torch.zeros(*[s * upscale_factor for s in img_shape]),
+        torch.zeros(*[s * downscale_factor for s in img_shape]),
     )
 
 
