@@ -97,6 +97,7 @@ class Trainer:
             self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
 
     def train_one_epoch(self) -> None:
+        self.model.module.train()
         train_aggregator = Aggregator(
             self.area_weights.fine.cpu(), self.latitudes, self.model.downscale_factor
         )
@@ -122,6 +123,7 @@ class Trainer:
             )
 
     def valid_one_epoch(self) -> float:
+        self.model.module.eval()
         with torch.no_grad():
             validation_aggregator = Aggregator(
                 self.area_weights.fine.cpu(),
