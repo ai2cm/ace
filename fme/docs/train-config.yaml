@@ -24,16 +24,16 @@ train_loader:
   batch_size: 4
   num_data_workers: 8
   dataset:
-    - data_path: /traindata/ic_0001
-    - data_path: /traindata/ic_0002
-    - data_path: /traindata/ic_0003
-    - data_path: /traindata/ic_0004
-    - data_path: /traindata/ic_0005
-    - data_path: /traindata/ic_0006
-    - data_path: /traindata/ic_0007
-    - data_path: /traindata/ic_0008
-    - data_path: /traindata/ic_0009
-    - data_path: /traindata/ic_0010
+    - data_path: traindata/ic_0001
+    - data_path: traindata/ic_0002
+    - data_path: traindata/ic_0003
+    - data_path: traindata/ic_0004
+    - data_path: traindata/ic_0005
+    - data_path: traindata/ic_0006
+    - data_path: traindata/ic_0007
+    - data_path: traindata/ic_0008
+    - data_path: traindata/ic_0009
+    - data_path: traindata/ic_0010
 validation_loader:
   batch_size: 16
   num_data_workers: 2
