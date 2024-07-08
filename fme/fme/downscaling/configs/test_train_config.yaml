@@ -26,14 +26,11 @@ validation_data:
   strict_ensemble: False
 model:
   loss:
-    type: "L1"
+    type: "MSE"
   module:
-    type: swinir
+    type: unet_regression_song
     config:
-      depths: [1]
-      window_size: 2
-      embed_dim: 1
-      num_heads: [1]
+      model_channels: 4
   normalization:
     fine:
       global_means_path: /will/be/overwritten

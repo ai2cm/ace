@@ -14,6 +14,7 @@ import torch
 import xarray as xr
 import yaml
 
+from fme.core.optimization import NullOptimization
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import (
     Trainer,
@@ -213,6 +214,39 @@ def test_restore_checkpoint(trainer_config, tmp_path):
             trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
         )
     )
+
+
+def test_train_eval_modes(trainer_config):
+    """Checks that at training time the model is stochastic (due to dropout) but
+    that at validation time, it is deterministic."""
+
+    with open(trainer_config, "r") as f:
+        trainer_config_dict = yaml.safe_load(f)
+        trainer_config_dict["model"]["module"] = {
+            "type": "unet_regression_song",
+            "config": {"model_channels": 4},
+        }
+
+    config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
+    trainer = config.build()
+
+    trainer.train_one_epoch()
+    assert trainer.model.module.training
+
+    null_optimization = NullOptimization()
+
+    batch = next(iter(trainer.train_data.loader))
+    batch.fine = {k: v.to(torch.float64) for (k, v) in batch.fine.items()}
+    batch.coarse = {k: v.to(torch.float32) for (k, v) in batch.coarse.items()}
+    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    assert torch.any(outputs1.prediction["x"] != outputs2.prediction["x"])
+
+    trainer.valid_one_epoch()
+    assert not trainer.model.module.training
+    outputs1 = trainer.model.train_on_batch(batch, null_optimization)
+    outputs2 = trainer.model.train_on_batch(batch, null_optimization)
+    assert torch.all(outputs1.prediction["x"] == outputs2.prediction["x"])
 
 
 def test_resume(trainer_config, tmp_path):
