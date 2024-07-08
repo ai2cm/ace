@@ -8,7 +8,7 @@ from fme.core.data_loading.config import DataLoaderConfig, Slice
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
-from fme.core.ema import EMATracker
+from fme.core.ema import EMAConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.stepper import ExistingStepperConfig, SingleModuleStepperConfig
@@ -46,21 +46,6 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
-
-
-@dataclasses.dataclass
-class EMAConfig:
-    """
-    Configuration for exponential moving average of model weights.
-
-    Attributes:
-        decay: decay rate for the moving average
-    """
-
-    decay: float = 0.9999
-
-    def build(self, model):
-        return EMATracker(model, decay=self.decay, faster_decay_at_start=True)
 
 
 @dataclasses.dataclass
