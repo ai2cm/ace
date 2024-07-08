@@ -26,6 +26,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
+
+import dataclasses
 from typing import Iterable, Iterator, List, Protocol, Tuple
 
 import torch
@@ -37,6 +39,21 @@ class HasNamedParameters(Protocol):
         self, recurse: bool = True
     ) -> Iterator[Tuple[str, nn.Parameter]]:
         ...
+
+
+@dataclasses.dataclass
+class EMAConfig:
+    """
+    Configuration for exponential moving average of model weights.
+
+    Attributes:
+        decay: decay rate for the moving average
+    """
+
+    decay: float = 0.9999
+
+    def build(self, model: HasNamedParameters):
+        return EMATracker(model, decay=self.decay, faster_decay_at_start=True)
 
 
 class EMATracker:
