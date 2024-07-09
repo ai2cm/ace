@@ -13,6 +13,7 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
@@ -50,6 +51,24 @@ def load_stepper(
         )
         stepper.ocean = new_ocean
     return stepper
+
+
+def validate_time_coarsen_config(
+    config: TimeCoarsenConfig, forward_steps_in_memory: int, n_forward_steps: int
+):
+    coarsen_factor = config.coarsen_factor
+    if forward_steps_in_memory % coarsen_factor != 0:
+        raise ValueError(
+            "forward_steps_in_memory must be divisible by "
+            f"time_coarsen.coarsen_factor. Got {forward_steps_in_memory} "
+            f"and {coarsen_factor}."
+        )
+    if n_forward_steps % coarsen_factor != 0:
+        raise ValueError(
+            "n_forward_steps must be divisible by "
+            f"time_coarsen.coarsen_factor. Got {n_forward_steps} "
+            f"and {coarsen_factor}."
+        )
 
 
 @dataclasses.dataclass
@@ -91,14 +110,11 @@ class InferenceEvaluatorConfig:
     ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
-        if (self.data_writer.time_coarsen is not None) and (
-            self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
-            != 0
-        ):
-            raise ValueError(
-                "forward_steps_in_memory must be divisible by "
-                f"time_coarsen.coarsen_factor. Got {self.forward_steps_in_memory} "
-                f"and {self.data_writer.time_coarsen.coarsen_factor}."
+        if self.data_writer.time_coarsen is not None:
+            validate_time_coarsen_config(
+                self.data_writer.time_coarsen,
+                self.forward_steps_in_memory,
+                self.n_forward_steps,
             )
 
     def configure_logging(self, log_filename: str):
