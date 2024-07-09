@@ -26,15 +26,17 @@ def test_logs_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    initial_times = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
+        n_time,
+        initial_times,
         record_step_20=True,
         log_video=True,
         log_zonal_mean_images=True,
-        n_timesteps=n_time,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -76,13 +78,15 @@ def test_inference_logs_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    initial_times = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
+        n_time,
+        initial_times,
         record_step_20=True,
         log_video=True,
-        n_timesteps=n_time,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -123,11 +127,13 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
-        n_timesteps=(window_len - overlap) * n_windows + 1,
+        (window_len - overlap) * n_windows + 1,
+        initial_times,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
     time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
@@ -171,11 +177,13 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
         TIMESTEP,
-        n_timesteps=(window_len - overlap) * n_windows + overlap,
+        (window_len - overlap) * n_windows + overlap,
+        initial_times,
     )
     target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
     time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
