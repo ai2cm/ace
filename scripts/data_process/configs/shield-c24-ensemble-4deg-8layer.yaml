@@ -20,7 +20,15 @@ runs:
   ic_0019: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0019
   ic_0020: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0020
   ic_0021: gs://vcm-ml-raw-flexible-retention/2024-03-08-climSST-C24-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/ic_0021
-output_directory: gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset
+data_output_directory: gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset
+stats:
+  output_directory: gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset-stats
+  beaker_dataset: 2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset-stats
+  start_date: "2021-01-01"
+  end_date: "2030-12-31"
+  exclude_runs:
+    - "ic_0021"
+  data_type: FV3GFS
 dataset_computation:
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:

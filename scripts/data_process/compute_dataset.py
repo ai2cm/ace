@@ -147,7 +147,7 @@ class DatasetConfig:
     """
 
     runs: Mapping[str, str]
-    output_directory: str
+    data_output_directory: str
     dataset_computation: DatasetComputationConfig
 
     @classmethod

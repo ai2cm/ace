@@ -1,6 +1,13 @@
 runs:
   ic_0001: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/regridded-zarrs/gaussian_grid_45_by_90/repeating-sst
-output_directory: gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset
+data_output_directory: gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset
+stats:
+  output_directory: gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset-stats
+  beaker_dataset: 2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset-stats
+  # start_date: "2035-01-01"  # start of run
+  start_date: "2036-01-01"  # we exclude just the first year so we can use it as an initial condition
+  end_date: "2060-12-31"  # end of run
+  data_type: FV3GFS
 dataset_computation:
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
