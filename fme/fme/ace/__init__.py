@@ -1,5 +1,6 @@
 import sys
 
+from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     DataWriterConfig,
     InferenceDataLoaderConfig,
