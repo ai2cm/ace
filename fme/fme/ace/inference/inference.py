@@ -27,7 +27,7 @@ from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 
-from .evaluator import load_stepper, load_stepper_config
+from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
 
 
 @dataclasses.dataclass
@@ -118,14 +118,11 @@ class InferenceConfig:
     ocean: Optional[OceanConfig] = None
 
     def __post_init__(self):
-        if (self.data_writer.time_coarsen is not None) and (
-            self.forward_steps_in_memory % self.data_writer.time_coarsen.coarsen_factor
-            != 0
-        ):
-            raise ValueError(
-                "forward_steps_in_memory must be divisible by "
-                f"time_coarsen.coarsen_factor. Got {self.forward_steps_in_memory} "
-                f"and {self.data_writer.time_coarsen.coarsen_factor}."
+        if self.data_writer.time_coarsen is not None:
+            validate_time_coarsen_config(
+                self.data_writer.time_coarsen,
+                self.forward_steps_in_memory,
+                self.n_forward_steps,
             )
 
     def configure_logging(self, log_filename: str):
