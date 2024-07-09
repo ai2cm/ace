@@ -5,7 +5,13 @@ from typing import List, Mapping, Union
 import torch
 
 from fme.core import metrics
-from fme.core.constants import LATENT_HEAT_OF_VAPORIZATION
+from fme.core.constants import (
+    GRAVITY,
+    LATENT_HEAT_OF_VAPORIZATION,
+    RDGAS,
+    RVGAS,
+    SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
+)
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -13,6 +19,7 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
     {
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
+        "surface_height": ["HGTsfc"],
         "tendency_of_total_water_path_due_to_advection": [
             "tendency_of_total_water_path_due_to_advection"
         ],
@@ -146,6 +153,10 @@ class ClimateData:
         return self._extract_levels(prefix)
 
     @property
+    def surface_height(self) -> torch.Tensor:
+        return self._get("surface_height")
+
+    @property
     def surface_pressure(self) -> torch.Tensor:
         return self._get("surface_pressure")
 
@@ -228,6 +239,35 @@ class ClimateData:
     def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
         self._set("tendency_of_total_water_path_due_to_advection", value)
 
+    def height_at_log_midpoint(
+        self, sigma_coordinates: SigmaCoordinates
+    ) -> torch.Tensor:
+        """
+        Compute vertical height at layer log midpoints
+        """
+        pressure_interfaces = _pressure_at_interface(
+            sigma_coordinates.ak, sigma_coordinates.bk, self.surface_pressure
+        )
+        layer_thickness = _layer_thickness(
+            pressure_at_interface=pressure_interfaces,
+            air_temperature=self.air_temperature,
+            specific_total_water=self.specific_total_water,
+        )
+        height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
+        return (height_at_interface[..., :-1] * height_at_interface[..., 1:]) ** 0.5
+
+    def moist_static_energy(self, sigma_coordinates: SigmaCoordinates) -> torch.Tensor:
+        """
+        Compute moist static energy.
+        """
+        # ACE does not currently prognose specific humidity, so here we closely
+        # approximate this using specific total water (<0.01% effect on total MSE).
+        return (
+            self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE
+            + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
+            + self.height_at_log_midpoint(sigma_coordinates) * GRAVITY
+        )
+
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
@@ -263,4 +303,54 @@ def compute_dry_air_absolute_differences(
         .diff(dim=-1)
         .abs()
         .mean(dim=0)
+    )
+
+
+def _layer_thickness(
+    pressure_at_interface: torch.Tensor,
+    air_temperature: torch.Tensor,
+    specific_total_water: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Computes vertical thickness of each layer assuming hydrostatic equilibrium.
+    ACE does not currently prognose specific humidity, so here we closely
+    approximate this using specific total water."""
+    tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
+    dlogp = torch.log(pressure_at_interface).diff(dim=-1)
+    return dlogp * RDGAS * tv / GRAVITY
+
+
+def _pressure_at_interface(
+    ak: torch.tensor, bk: torch.tensor, surface_pressure: torch.tensor
+) -> torch.Tensor:
+    """
+    Computes pressure at layer interfaces from sigma coefficients.
+    Vertical coordinate is the last tensor dimension.
+    """
+    return torch.stack(
+        [ak[i] + bk[i] * surface_pressure for i in range(ak.shape[-1])],
+        dim=-1,
+    )
+
+
+def _height_at_interface(
+    layer_thickness: torch.tensor, surface_height: torch.tensor
+) -> torch.Tensor:
+    """
+    Computes height at layer interfaces from layer thickness and surface height.
+    Vertical coordinate is the last tensor dimension.
+    """
+    cumulative_thickness = torch.cumsum(layer_thickness.flip(dims=(-1,)), dim=-1).flip(
+        dims=(-1,)
+    )
+    # Sometimes surface height data has negative values, which are filled with 0.
+    hsfc = torch.where(surface_height < 0.0, 0, surface_height).reshape(
+        *surface_height.shape, 1
+    )
+    return torch.concat(
+        [
+            (cumulative_thickness + hsfc.broadcast_to(cumulative_thickness.shape)),
+            hsfc,
+        ],
+        dim=-1,
     )

@@ -200,7 +200,10 @@ def run_inference(
             timers["run_on_batch"] += time.time() - current_time
 
             prediction = compute_derived_quantities(
-                prediction, forcing_data.sigma_coordinates, forcing_data.timestep
+                prediction,
+                forcing_data.sigma_coordinates,
+                forcing_data.timestep,
+                forcing_data=window_forcing_data,
             )
 
             forward_times = window_forcing.times.isel(time=slice(1, None))
@@ -278,7 +281,11 @@ def run_inference_evaluator(
             else:
                 batch_times = window_batch_data.times.isel(time=slice(1, None))
             stepped = compute_stepped_derived_quantities(
-                stepped, data.sigma_coordinates, data.timestep
+                stepped,
+                data.sigma_coordinates,
+                data.timestep,
+                # forcing inputs are in target data but not gen_data
+                forcing_data=stepped.target_data,
             )
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
