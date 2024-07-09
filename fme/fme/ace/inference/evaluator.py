@@ -219,6 +219,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         )
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
+    for batch in data.loader:
+        initial_times = batch.times.isel(time=0)
+        break
     aggregator = aggregator_config.build(
         area_weights=data.area_weights.to(fme.get_device()),
         sigma_coordinates=data.sigma_coordinates,
@@ -227,6 +230,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
         data_grid=data.grid,
+        initial_times=initial_times,
     )
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
