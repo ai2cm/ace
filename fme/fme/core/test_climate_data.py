@@ -3,7 +3,55 @@
 import pytest
 import torch
 
-from fme.core.climate_data import ClimateData, natural_sort
+from fme.core.climate_data import (
+    ClimateData,
+    _height_at_interface,
+    _layer_thickness,
+    _pressure_at_interface,
+    natural_sort,
+)
+
+
+def test__pressure_at_interface():
+    ak = torch.tensor([2.0, 0.5, 0.0])
+    bk = torch.tensor([0.0, 0.5, 1.0])
+    psfc = torch.tensor([[1, 1], [2, 2]])
+    pinterface = _pressure_at_interface(ak=ak, bk=bk, surface_pressure=psfc)
+    assert pinterface.shape == (2, 2, 3)
+    assert pinterface[0, 0, 0] == ak[0]
+    assert pinterface[0, 0, -1] == bk[-1] * psfc[0, 0]
+
+
+def test__layer_thickness():
+    pressure_at_interface = torch.tensor(
+        [
+            [[1, 2, 3], [4, 5, 6]],
+            [[1, 2, 3], [4, 5, 6]],
+        ]
+    )
+    air_temperature = torch.tensor(
+        [
+            [[300, 310], [300, 310]],
+            [[300, 310], [300, 310]],
+        ]
+    )
+    specific_total_water = torch.full((2, 2, 2), 0.1)
+    dz = _layer_thickness(pressure_at_interface, air_temperature, specific_total_water)
+    assert dz.shape == (2, 2, 2)
+    assert torch.all(dz >= 0.0)
+
+
+def test__height_at_interface():
+    layer_thickness = torch.tensor([[[3, 2], [1, 0.5]], [[3, 2], [1, 0.5]]])
+    height_at_surface = torch.tensor([[10, 20], [10, 20]])
+    height_at_interface = _height_at_interface(layer_thickness, height_at_surface)
+    assert height_at_interface.shape == (2, 2, 3)
+    assert torch.equal(
+        height_at_interface,
+        torch.tensor(
+            [[[15, 12, 10], [21.5, 20.5, 20]], [[15, 12, 10], [21.5, 20.5, 20]]]
+        ),
+    )
 
 
 @pytest.mark.parametrize(
