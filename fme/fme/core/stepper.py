@@ -13,7 +13,7 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.loss import ConservationLossConfig, WeightedMappingLossConfig
+from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
     FromStateNormalizer,
     NormalizationConfig,
@@ -175,7 +175,7 @@ class SingleModuleStepperConfig:
         _unsupported_key_defaults = {
             "conserve_dry_air": False,
             "optimization": None,
-            "conservation_loss": dataclasses.asdict(ConservationLossConfig()),
+            "conservation_loss": {"dry_air_penalty": None},
         }
         state_copy = state.copy()
         for key, default in _unsupported_key_defaults.items():
