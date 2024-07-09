@@ -387,10 +387,14 @@ class Trainer:
         aggregator_config: InferenceEvaluatorAggregatorConfig = (
             self.config.inference.aggregator
         )
+        for batch in self._inference_data.loader:
+            initial_times = batch.times.isel(time=0)
+            break
         aggregator = aggregator_config.build(
             area_weights=self.train_data.area_weights.to(fme.get_device()),
             sigma_coordinates=self.train_data.sigma_coordinates,
             timestep=self.train_data.timestep,
+            initial_times=initial_times,
             record_step_20=record_step_20,
             n_timesteps=self.config.inference.n_forward_steps + 1,
             metadata=self.train_data.metadata,
