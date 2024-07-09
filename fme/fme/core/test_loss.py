@@ -1,22 +1,16 @@
-from typing import Optional
-
-import numpy as np
 import pytest
 import torch
 
 from fme.core import metrics
-from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.loss import (
     AreaWeightedMSELoss,
-    ConservationLossConfig,
     GlobalMeanLoss,
     LossConfig,
     MappingLoss,
     VariableWeightingLoss,
     WeightedMappingLossConfig,
     _construct_weight_tensor,
-    get_dry_air_nonconservation,
 )
 from fme.core.packer import Packer
 
@@ -76,117 +70,6 @@ def test_global_mean_loss():
     mse = torch.nn.MSELoss()
     expected = mse(global_weighted_mean(x, area), global_weighted_mean(y, area))
     torch.testing.assert_close(result, expected)
-
-
-def setup_single_level_conservation_loss(
-    n_lat: int,
-    n_lon: int,
-    dry_air_penalty: float,
-    area_weights: Optional[torch.Tensor] = None,
-):
-    if area_weights is None:
-        area_weights = torch.ones(n_lat, n_lon).to(get_device())
-    sigma_coordinates = SigmaCoordinates(
-        ak=torch.zeros(size=[2]).to(get_device()),
-        bk=torch.asarray([0.0, 1.0]).to(get_device()),
-    )
-    config = ConservationLossConfig(dry_air_penalty)
-    conservation_loss = config.build(
-        sigma_coordinates=sigma_coordinates, area_weights=area_weights
-    )
-    return conservation_loss
-
-
-def test_dry_air_conservation_loss_single_level_no_change():
-    n_lat = 5
-    n_lon = 10
-    conservation_loss = setup_single_level_conservation_loss(
-        n_lat=n_lat, n_lon=n_lon, dry_air_penalty=1.0
-    )
-    data = {
-        "PRESsfc": torch.ones(size=[1, 2, n_lat, n_lon]).to(get_device()),
-        "specific_total_water_0": torch.zeros(size=[1, 2, n_lat, n_lon]).to(
-            get_device()
-        ),
-    }
-    metrics, loss = conservation_loss(data)
-    assert len(metrics) == 1
-    assert "dry_air_loss" in metrics
-    assert metrics["dry_air_loss"] == 0.0
-    assert loss == 0.0
-
-
-@pytest.mark.parametrize("dry_air_penalty", [0.0, 1.0, 0.01])
-def test_dry_air_conservation_loss_single_level_remove_all_air(dry_air_penalty: float):
-    n_lat = 5
-    n_lon = 10
-    conservation_loss = setup_single_level_conservation_loss(
-        n_lat=n_lat, n_lon=n_lon, dry_air_penalty=dry_air_penalty
-    )
-    data = {
-        "PRESsfc": torch.ones(size=[1, 2, n_lat, n_lon]).to(get_device()),
-        "specific_total_water_0": torch.zeros(size=[1, 2, n_lat, n_lon]).to(
-            get_device()
-        ),
-    }
-    data["PRESsfc"][:, 1, :, :] = 0.0
-    metrics, loss = conservation_loss(data)
-    assert len(metrics) == 1
-    assert "dry_air_loss" in metrics
-    assert metrics["dry_air_loss"] == dry_air_penalty
-    assert loss == dry_air_penalty
-
-
-@pytest.mark.parametrize("dry_air_penalty", [0.0, 1.0, 0.01])
-def test_dry_air_conservation_loss_single_level(dry_air_penalty: float):
-    torch.manual_seed(0)
-    n_lat = 5
-    n_lon = 10
-    area_weights = torch.ones(n_lat, n_lon).to(get_device())
-    conservation_loss = setup_single_level_conservation_loss(
-        n_lat=n_lat,
-        n_lon=n_lon,
-        dry_air_penalty=dry_air_penalty,
-        area_weights=area_weights,
-    )
-    data = {
-        "PRESsfc": torch.ones(1, 2, n_lat, n_lon).to(get_device()),
-        "specific_total_water_0": torch.rand(1, 2, n_lat, n_lon).to(get_device()),
-    }
-    dry_air = data["PRESsfc"] * (1.0 - data["specific_total_water_0"])
-    dry_air_final = (dry_air[:, 1, :, :] * area_weights).sum() / area_weights.sum()
-    dry_air_initial = (dry_air[:, 0, :, :] * area_weights).sum() / area_weights.sum()
-    target_loss = torch.abs(dry_air_final - dry_air_initial) * dry_air_penalty
-    metrics, loss = conservation_loss(data)
-    assert len(metrics) == 1
-    assert "dry_air_loss" in metrics
-    np.testing.assert_almost_equal(
-        metrics["dry_air_loss"].cpu().numpy(), target_loss.cpu().numpy()
-    )
-    np.testing.assert_almost_equal(loss.cpu().numpy(), target_loss.cpu().numpy())
-
-
-def test_get_dry_air_conservation_loss_single_level():
-    torch.manual_seed(0)
-    n_lat = 5
-    n_lon = 10
-    area_weights = torch.ones(n_lat, n_lon).to(get_device())
-    sigma_coordinates = SigmaCoordinates(
-        ak=torch.zeros(size=[2]).to(get_device()),
-        bk=torch.asarray([0.0, 1.0]).to(get_device()),
-    )
-    data = {
-        "PRESsfc": torch.ones(1, 2, n_lat, n_lon).to(get_device()),
-        "specific_total_water_0": torch.rand(1, 2, n_lat, n_lon).to(get_device()),
-    }
-    loss = get_dry_air_nonconservation(
-        data, area_weights=area_weights, sigma_coordinates=sigma_coordinates
-    )
-    dry_air = data["PRESsfc"] * (1.0 - data["specific_total_water_0"])
-    dry_air_final = (dry_air[:, 1, :, :] * area_weights).sum() / area_weights.sum()
-    dry_air_initial = (dry_air[:, 0, :, :] * area_weights).sum() / area_weights.sum()
-    target_loss = torch.abs(dry_air_final - dry_air_initial)
-    np.testing.assert_almost_equal(loss.cpu().numpy(), target_loss.cpu().numpy())
 
 
 def test_area_weighted_mse():
