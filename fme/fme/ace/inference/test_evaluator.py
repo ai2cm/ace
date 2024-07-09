@@ -636,15 +636,16 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
 
 
 @pytest.mark.parametrize(
-    ["time_coarsen"],
+    "time_coarsen,n_forward_steps,forward_steps_in_memory",
     [
-        pytest.param(3, id="non_factor_time_coarsen"),
-        pytest.param(-1, id="invalid_time_coarsen"),
+        pytest.param(3, 12, 4, id="not_multiple_of_forward_steps_in_memory"),
+        pytest.param(-1, 12, 4, id="invalid_time_coarsen"),
+        pytest.param(2, 5, 4, id="not_multiple_of_n_forward_steps"),
     ],
 )
-def test_inference_config_raises_incompatible_timesteps(time_coarsen):
-    forward_steps_in_memory = 4
-    n_forward_steps = 12
+def test_inference_config_raises_incompatible_timesteps(
+    time_coarsen, n_forward_steps, forward_steps_in_memory
+):
     base_config_dict = dict(
         experiment_dir="./some_dir",
         n_forward_steps=n_forward_steps,
