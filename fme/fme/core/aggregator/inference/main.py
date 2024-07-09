@@ -12,6 +12,7 @@ from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
+from .enso import EnsoCoefficientEvaluatorAggregator
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
@@ -22,6 +23,7 @@ from .zonal_mean import ZonalMeanAggregator
 
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
+SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
 
 
 class _Aggregator(Protocol):
@@ -146,6 +148,7 @@ class InferenceEvaluatorAggregator:
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
+        initial_times: xr.DataArray,
         record_step_20: bool = False,
         log_video: bool = False,
         enable_extended_videos: bool = False,
@@ -162,6 +165,7 @@ class InferenceEvaluatorAggregator:
             sigma_coordinates: Data sigma coordinates
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
+            initial_times: Initial times for each sample.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
             enable_extended_videos: Whether to log videos of statistical
@@ -225,6 +229,8 @@ class InferenceEvaluatorAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             )
+        if log_histograms:
+            self._aggregators["histogram"] = HistogramAggregator()
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
@@ -233,7 +239,6 @@ class InferenceEvaluatorAggregator:
                 area_weights=area_weights,
                 metadata=metadata,
             )
-
         if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
                 area_weights=area_weights,
@@ -241,8 +246,16 @@ class InferenceEvaluatorAggregator:
                 metadata=metadata,
                 monthly_reference_data=monthly_reference_data,
             )
-        if log_histograms:
-            self._aggregators["histogram"] = HistogramAggregator()
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            self._time_dependent_aggregators[
+                "enso_coefficient"
+            ] = EnsoCoefficientEvaluatorAggregator(
+                initial_times,
+                n_timesteps - 1,
+                timestep,
+                area_weights,
+                metadata=metadata,
+            )
 
     @torch.no_grad()
     def record_batch(
