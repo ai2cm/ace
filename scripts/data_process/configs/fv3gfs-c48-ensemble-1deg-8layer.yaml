@@ -1,6 +1,12 @@
 runs:
   ic_0011: gs://vcm-ml-raw-flexible-retention/2023-08-03-C48-FME-reference-ensemble/regridded-zarrs/gaussian_grid_180_by_360/ic_0011_2021010100
-output_directory: gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset
+data_output_directory: gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset
+stats:
+  output_directory: gs://vcm-ml-intermediate/2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset-stats
+  beaker_dataset: 2023-09-01-vertically-resolved-1deg-fme-c48-baseline-dataset-stats
+  start_date: "2021-01-01"
+  end_date: "2030-12-31"
+  data_type: FV3GFS
 dataset_computation:
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2023-04-13-11-year-C96-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:

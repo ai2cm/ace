@@ -48,8 +48,7 @@ NC_OUTPUT ?=
 
 .PHONY: shield_c24_4deg_climSST_dataset
 shield_c24_4deg_climSST_dataset:
-	./compute_dataset.sh \
-	--config configs/shield-c24-ensemble-4deg-8layer.yaml
+	./compute_dataset.sh --config configs/shield-c24-ensemble-4deg-8layer.yaml
 
 .PHONY: shield_c24_4deg_climSST_monthly_netcdfs
 shield_c24_4deg_climSST_monthly_netcdfs:
@@ -61,17 +60,11 @@ shield_c24_4deg_climSST_monthly_netcdfs:
 	--end-date 2030-12-31
 
 shield_c24_4deg_climSST_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-04-05-vertically-resolved-4deg-c24-shield-fme-ensemble-dataset/ic_0001.zarr \
-	--start-date 2021-01-01 \
-	--end-date 2030-12-31 \
-	--name "2024-04-08-shield-c24-4deg-8layer-ic0001-stats-scaling-all-years-v3" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
+	./compute_stats.sh --config configs/shield-c24-ensemble-4deg-8layer.yaml
 
 .PHONY: shield_c96_4deg_climSST_dataset
 shield_c96_4deg_climSST_dataset:
-	./compute_dataset.sh \
-	--config configs/shield-c96-4deg-8layer.yaml
+	./compute_dataset.sh --config configs/shield-c96-4deg-8layer.yaml
 
 .PHONY: shield_c96_4deg_climSST_monthly_netcdfs
 shield_c96_4deg_climSST_monthly_netcdfs:
@@ -83,12 +76,7 @@ shield_c96_4deg_climSST_monthly_netcdfs:
 	--end-date 2060-12-31
 
 shield_c96_4deg_climSST_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset/ic_0001.zarr \
-	--start-date 2035-01-01 \
-	--end-date 2060-12-31 \
-	--name "shield-c96-4deg-8layer-ic0001-stats-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
+	./compute_stats.sh --config configs/shield-c96-4deg-8layer.yaml
 
 .PHONY: fv3gfs_1deg_climSST_dataset
 fv3gfs_1deg_climSST_dataset:
@@ -96,8 +84,7 @@ fv3gfs_1deg_climSST_dataset:
 
 .PHONY: fv3gfs_climSST_dataset
 fv3gfs_climSST_dataset:
-	./compute_dataset.sh \
-	--config configs/fv3gfs-ensemble-$(RESOLUTION)-$(LAYERS).yaml
+	./compute_dataset.sh --config configs/fv3gfs-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: fv3gfs_1deg_climSST_monthly_netcdfs
 fv3gfs_1deg_climSST_monthly_netcdfs:
@@ -118,35 +105,14 @@ fv3gfs_1deg_climSST_stats_beaker_dataset:
 
 .PHONY: fv3gfs_climSST_stats_beaker_dataset
 fv3gfs_climSST_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url $(ROOT_INTERMEDIATE)/ic_0001.zarr \
-	--start-date 2021-01-01 \
-	--end-date 2030-12-31 \
-	--name "${NAME}-ic0001-stats-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs. Includes surface height."
-
-
-.PHONY: fv3gfs_1deg_climSST_full_field_stats_beaker_dataset
-fv3gfs_1deg_climSST_full_field_stats_beaker_dataset:
-	$(MAKE) fv3gfs_climSST_full_field_stats_beaker_dataset RESOLUTION=1deg
-
-.PHONY: fv3gfs_climSST_full_field_stats_beaker_dataset
-fv3gfs_climSST_full_field_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url $(ROOT_INTERMEDIATE)/ic_0001.zarr \
-	--start-date 2021-01-01 \
-	--end-date 2030-12-31 \
-	--name "${NAME}-ic0001-stats-full-field-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with annually-repeating SSTs, using full field scaling. Includes surface height." \
-	--script-flags "--full-field"
+	./compute_stats.sh --config configs/fv3gfs-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 # This took around ~10 hours to complete.  The roundtrip_filter adds significant computational time.
 # If we plan to do this regularly, paralellizing the script across time using xpartition to
 # launch jobs for different time chunks would probably be a good idea.
 .PHONY: fv3gfs_climSST_c48_baseline_dataset
 fv3gfs_climSST_c48_baseline_dataset:
-	./compute_dataset.sh \
-	--config configs/fv3gfs-c48-ensemble-1deg-8layer.yaml
+	./compute_dataset.sh --config configs/fv3gfs-c48-ensemble-1deg-8layer.yaml
 
 .PHONY: fv3gfs_climSST_c48_baseline_monthly_netcdfs
 fv3gfs_climSST_c48_baseline_monthly_netcdfs:
@@ -163,8 +129,7 @@ fv3gfs_1deg_AMIP_dataset:
 
 .PHONY: fv3gfs_AMIP_dataset
 fv3gfs_AMIP_dataset:
-	./compute_dataset.sh \
-	--config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
+	./compute_dataset.sh --config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: fv3gfs_1deg_AMIP_monthly_netcdfs
 fv3gfs_1deg_AMIP_monthly_netcdfs:
@@ -185,12 +150,7 @@ fv3gfs_1deg_AMIP_stats_beaker_dataset:
 
 .PHONY: fv3gfs_AMIP_stats_beaker_dataset
 fv3gfs_AMIP_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url $(ROOT_INTERMEDIATE_AMIP)/ic_0001.zarr \
-	--start-date 1990-01-01 \
-	--end-date 2019-12-31 \
-	--name "${NAME_AMIP}-ic0001-stats-scaling-all-years-v2" \
-	--desc "Coefficients for normalization for 8-level vertically resolved dataset with AMIP SSTs."
+	./compute_stats.sh --config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 # TODO: Add AMIP baseline C48 dataset processing when available
 
@@ -207,10 +167,12 @@ e3smv2_1deg_climSST_dataset:
 
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:
-	./generate_beaker_stats_dataset_fv3gfs.sh \
-	--input-url gs://vcm-ml-intermediate/2024-06-20-era5-1deg-8layer-1940-2022.zarr \
-	--start-date 1990-01-01 \
-	--end-date 2019-12-31 \
-	--name "era5-1deg-8layer-stats-1990-2019" \
-	--desc "Coefficients for normalization for 8-level vertically resolved 1degree ERA5 dataset, computed from years 1990-2019." \
-	--script-flags '--data-type ERA5'
+	./compute_stats.sh --config configs/era5-1deg-8layer-1940-2022.yaml
+
+.PHONY: build_docker_image
+build_docker_image:
+	docker build -f beakerpy.Dockerfile -t us.gcr.io/vcm-ml/beaker-py .
+
+.PHONY: push_docker_image
+push_docker_image: build_docker_image
+	docker push us.gcr.io/vcm-ml/beaker-py
