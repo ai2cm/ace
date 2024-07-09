@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Literal, Mapping, Optional
 
 import torch
 import torch.linalg
@@ -90,80 +90,6 @@ def _construct_weight_tensor(
         len(weights_tensor) if i == _channel_dim else 1 for i in range(n_dim)
     )
     return weights_tensor.reshape(*reshape_dim).to(get_device(), dtype=torch.float)
-
-
-class ConservationLoss:
-    def __init__(
-        self,
-        config: "ConservationLossConfig",
-        area_weights: torch.Tensor,
-        sigma_coordinates: SigmaCoordinates,
-    ):
-        """
-        Args:
-            config: configuration options.
-            area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
-            sigma_coordinates: The sigma coordinates of the model.
-        """
-        self._config = config
-        self._area_weights = area_weights.to(get_device())
-        self._sigma_coordinates = sigma_coordinates.to(get_device())
-
-    def __call__(self, gen_data: TensorMapping) -> Tuple[TensorDict, torch.Tensor]:
-        """
-        Compute loss and metrics related to conservation.
-
-        Args:
-            gen_data: A mapping from variable name to tensor of shape
-                [sample, time, lat, lon], in physical units.
-        """
-        conservation_metrics = {}
-        loss = torch.tensor(0.0, device=get_device())
-        if self._config.dry_air_penalty is not None:
-            dry_air_loss = self._config.dry_air_penalty * get_dry_air_nonconservation(
-                gen_data,
-                area_weights=self._area_weights,
-                sigma_coordinates=self._sigma_coordinates,
-            )
-            conservation_metrics["dry_air_loss"] = dry_air_loss.detach()
-            loss += dry_air_loss
-        return conservation_metrics, loss
-
-    def get_state(self):
-        return {
-            "config": dataclasses.asdict(self._config),
-            "sigma_coordinates": self._sigma_coordinates,
-            "area_weights": self._area_weights,
-        }
-
-    @classmethod
-    def from_state(cls, state) -> "ConservationLoss":
-        return cls(
-            config=ConservationLossConfig(**state["config"]),
-            sigma_coordinates=state["sigma_coordinates"],
-            area_weights=state["area_weights"],
-        )
-
-
-@dataclasses.dataclass
-class ConservationLossConfig:
-    """
-    Attributes:
-        dry_air_penalty: A constant by which to multiply one-step non-conservation
-            of surface pressure due to dry air in Pa as an L1 loss penalty. By
-            default, no such loss will be included.
-    """
-
-    dry_air_penalty: Optional[float] = None
-
-    def build(
-        self, area_weights: torch.Tensor, sigma_coordinates: SigmaCoordinates
-    ) -> ConservationLoss:
-        return ConservationLoss(
-            config=self,
-            area_weights=area_weights,
-            sigma_coordinates=sigma_coordinates,
-        )
 
 
 class LpLoss(torch.nn.Module):
