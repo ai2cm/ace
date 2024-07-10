@@ -17,7 +17,7 @@ from fme.downscaling.models import DownscalingModelConfig, PairedNormalizationCo
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.test_models import LinearDownscaling
 from fme.downscaling.test_train import data_paths_helper
-from fme.downscaling.train import TrainerConfig, save_checkpoint
+from fme.downscaling.train import TrainerConfig
 
 
 def create_evaluator_config(tmp_path, model: Mapping[str, Any]):
@@ -66,6 +66,9 @@ def test_evaluator_runs(tmp_path, model_config):
     paths = data_paths_helper(tmp_path)
 
     if "checkpoint" in model_config:
+        with open(evaluator_config_path, "r") as file:
+            config = yaml.safe_load(file)
+
         data_loader_config = DataLoaderConfig(
             fine=[XarrayDataConfig(paths.fine)],
             coarse=[XarrayDataConfig(paths.coarse)],
@@ -74,7 +77,7 @@ def test_evaluator_runs(tmp_path, model_config):
             strict_ensemble=False,
         )
         trainer = TrainerConfig(
-            DownscalingModelConfig(
+            model=DownscalingModelConfig(
                 ModuleRegistrySelector(
                     "prebuilt", {"module": LinearDownscaling(2, (32, 32), n_channels=2)}
                 ),
@@ -91,23 +94,19 @@ def test_evaluator_runs(tmp_path, model_config):
                 ),
                 use_fine_topography=False,
             ),
-            OptimizationConfig(),
-            data_loader_config,
-            data_loader_config,
-            1,
-            "/experiment_dir",
-            False,
-            LoggingConfig(),
-            None,
+            optimization=OptimizationConfig(),
+            train_data=data_loader_config,
+            validation_data=data_loader_config,
+            max_epochs=1,
+            experiment_dir=config["experiment_dir"],
+            save_checkpoints=False,
+            logging=LoggingConfig(),
         ).build()
 
-        checkpoint_path = tmp_path / model_config["checkpoint"]
-        save_checkpoint(trainer, checkpoint_path)
+        trainer.save_all_checkpoints(float("-inf"))
 
-        with open(evaluator_config_path, "r") as file:
-            config = yaml.safe_load(file)
         with open(evaluator_config_path, "w") as file:
-            config["model"] = {"checkpoint": str(checkpoint_path)}
+            config["model"] = {"checkpoint": trainer.epoch_checkpoint_path}
             yaml.dump(config, file)
 
     with unittest.mock.patch(

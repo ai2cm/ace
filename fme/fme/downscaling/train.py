@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import dataclasses
 import logging
 import os
@@ -8,10 +9,11 @@ import dacite
 import torch
 import yaml
 
-import fme
 import fme.core.logging_utils as logging_utils
+from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
+from fme.core.ema import EMAConfig, EMATracker
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
@@ -35,21 +37,26 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
     return parameters
 
 
-def save_checkpoint(trainer: "Trainer", path: str) -> None:
+def _save_checkpoint(trainer: "Trainer", path: str) -> None:
     torch.save(
         {
             "model": trainer.model.get_state(),
+            "ema": trainer.ema.get_state(),
             "optimization": trainer.optimization.get_state(),
             "num_batches_seen": trainer.num_batches_seen,
             "startEpoch": trainer.startEpoch,
             "best_valid_loss": trainer.best_valid_loss,
+            "validate_using_ema": trainer.validate_using_ema,
         },
         path,
     )
 
 
-def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
-    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+def restore_checkpoint(trainer: "Trainer") -> None:
+    if trainer.epoch_checkpoint_path is None:
+        raise ValueError("Cannot restore checkpoint without a checkpoint path")
+
+    checkpoint = torch.load(trainer.epoch_checkpoint_path, map_location=get_device())
     trainer.model = trainer.model.from_state(
         checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )
@@ -57,6 +64,13 @@ def restore_checkpoint(trainer: "Trainer", checkpoint_path) -> None:
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
+
+    trainer.validate_using_ema = checkpoint["validate_using_ema"]
+    ema_checkpoint = torch.load(trainer.ema_checkpoint_path, map_location=get_device())
+    ema_model = trainer.model.from_state(
+        ema_checkpoint["model"], trainer.area_weights, trainer.fine_topography
+    )
+    trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
 
 
 class Trainer:
@@ -66,35 +80,48 @@ class Trainer:
         optimization: Optimization,
         train_data: GriddedData,
         validation_data: GriddedData,
-        max_epochs: int,
-        segment_epochs: Optional[int],
-        checkpoint_dir: Optional[str],
+        config: "TrainerConfig",
     ) -> None:
         self.model = model
         self.optimization = optimization
         self.null_optimization = NullOptimization()
         self.train_data = train_data
         self.validation_data = validation_data
-        self.max_epochs = max_epochs
-        self.checkpoint_dir = checkpoint_dir
+        self.ema = config.ema.build(self.model.modules)
+        self.validate_using_ema = config.validate_using_ema
         self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.lat.cpu()
         self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
+        self.config = config
 
         self.startEpoch = 0
-        self.segment_epochs = segment_epochs
+        self.segment_epochs = self.config.segment_epochs
+
+        dist = Distributed.get_instance()
+        if dist.is_root():
+            if not os.path.isdir(self.config.experiment_dir):
+                os.makedirs(self.config.experiment_dir)
+            if self.config.checkpoint_dir is not None and not os.path.isdir(
+                self.config.checkpoint_dir
+            ):
+                os.makedirs(self.config.checkpoint_dir)
 
         self.best_valid_loss = float("inf")
         self.epoch_checkpoint_path: Optional[str] = None
         self.best_checkpoint_path: Optional[str] = None
-        if self.checkpoint_dir is not None:
+        if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
-                self.checkpoint_dir, "latest.ckpt"
+                self.config.checkpoint_dir, "latest.ckpt"
             )
-            self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.ckpt")
+            self.best_checkpoint_path = os.path.join(
+                self.config.checkpoint_dir, "best.ckpt"
+            )
+            self.ema_checkpoint_path = os.path.join(
+                self.config.checkpoint_dir, "ema_ckpt.tar"
+            )
 
     def train_one_epoch(self) -> None:
         self.model.module.train()
@@ -122,9 +149,35 @@ class Trainer:
                 step=self.num_batches_seen,
             )
 
+    @contextlib.contextmanager
+    def _ema_context(self):
+        """
+        A context where the model uses the EMA model.
+        """
+        self.ema.store(parameters=self.model.modules.parameters())
+        self.ema.copy_to(model=self.model.modules)  # type: ignore
+        try:
+            yield
+        finally:
+            self.ema.restore(parameters=self.model.modules.parameters())
+
+    @contextlib.contextmanager
+    def _validation_context(self):
+        """
+        The context for running validation.
+
+        In this context, the model uses the EMA model if
+        `self.config.validate_using_ema` is True.
+        """
+        if self.validate_using_ema:
+            with self._ema_context():
+                yield
+        else:
+            yield
+
     def valid_one_epoch(self) -> float:
         self.model.module.eval()
-        with torch.no_grad():
+        with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.area_weights.fine.cpu(),
                 self.latitudes,
@@ -170,17 +223,27 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_checkpoints(self, valid_loss: float) -> None:
+    def save_all_checkpoints(self, valid_loss: float) -> None:
         if (
             self.epoch_checkpoint_path is not None
             and self.best_checkpoint_path is not None
         ):
             logging.info(f"Saving latest checkpoint")
-            save_checkpoint(self, self.epoch_checkpoint_path)
+            if self.validate_using_ema:
+                best_checkpoint_context = self._ema_context
+            else:
+                best_checkpoint_context = contextlib.nullcontext  # type: ignore
+
             if valid_loss < self.best_valid_loss:
                 logging.info(f"Saving best checkpoint")
                 self.best_valid_loss = valid_loss
-                save_checkpoint(self, self.best_checkpoint_path)
+                with best_checkpoint_context():
+                    _save_checkpoint(self, self.best_checkpoint_path)
+
+            _save_checkpoint(self, self.epoch_checkpoint_path)
+
+            with self._ema_context():
+                _save_checkpoint(self, self.ema_checkpoint_path)
 
     def train(self) -> None:
         logging.info("Running metrics on validation data.")
@@ -188,10 +251,10 @@ class Trainer:
         wandb = WandB.get_instance()
 
         if self.segment_epochs is None:
-            segment_max_epochs = self.max_epochs
+            segment_max_epochs = self.config.max_epochs
         else:
             segment_max_epochs = min(
-                self.startEpoch + self.segment_epochs, self.max_epochs
+                self.startEpoch + self.segment_epochs, self.config.max_epochs
             )
 
         for epoch in range(self.startEpoch, segment_max_epochs):
@@ -204,7 +267,7 @@ class Trainer:
 
             dist = Distributed.get_instance()
             if dist.is_root():
-                self.save_checkpoints(valid_loss)
+                self.save_all_checkpoints(valid_loss)
 
 
 @dataclasses.dataclass
@@ -217,14 +280,13 @@ class TrainerConfig:
     experiment_dir: str
     save_checkpoints: bool
     logging: LoggingConfig
+    ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
+    validate_using_ema: bool = False
     segment_epochs: Optional[int] = None
 
     @property
-    def checkpoint_dir(self) -> Optional[str]:
-        if self.save_checkpoints:
-            return os.path.join(self.experiment_dir, "checkpoints")
-        else:
-            return None
+    def checkpoint_dir(self) -> str:
+        return os.path.join(self.experiment_dir, "checkpoints")
 
     def build(self) -> Trainer:
         train_data: GriddedData = self.train_data.build(
@@ -250,9 +312,7 @@ class TrainerConfig:
             optimization,
             train_data,
             validation_data,
-            self.max_epochs,
-            self.segment_epochs,
-            self.checkpoint_dir,
+            self,
         )
 
     def configure_logging(self, log_filename: str):
@@ -274,15 +334,6 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
-    dist = Distributed.get_instance()
-    if dist.is_root():
-        if not os.path.isdir(train_config.experiment_dir):
-            os.makedirs(train_config.experiment_dir)
-        if train_config.checkpoint_dir is not None and not os.path.isdir(
-            train_config.checkpoint_dir
-        ):
-            os.makedirs(train_config.checkpoint_dir)
-
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
@@ -293,7 +344,7 @@ def main(config_path: str):
 
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
-        restore_checkpoint(trainer, trainer.epoch_checkpoint_path)
+        restore_checkpoint(trainer)
 
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
