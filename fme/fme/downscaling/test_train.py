@@ -16,13 +16,7 @@ import yaml
 
 from fme.core.optimization import NullOptimization
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.train import (
-    Trainer,
-    TrainerConfig,
-    main,
-    restore_checkpoint,
-    save_checkpoint,
-)
+from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -35,9 +29,7 @@ def test_trainer():
         optimization=MagicMock(),
         train_data=MagicMock(),
         validation_data=MagicMock(),
-        max_epochs=2,
-        segment_epochs=None,
-        checkpoint_dir=None,
+        config=MagicMock(),
     )
 
     with unittest.mock.patch(
@@ -206,8 +198,9 @@ def test_restore_checkpoint(trainer_config, tmp_path):
         )
     )
 
-    save_checkpoint(trainer1, tmp_path / "checkpoint.pth")
-    restore_checkpoint(trainer2, tmp_path / "checkpoint.pth")
+    tmp_path.mkdir(exist_ok=True)
+    trainer1.save_all_checkpoints(float("-inf"))
+    restore_checkpoint(trainer2)
     assert all(
         torch.equal(p1, p2)
         for p1, p2 in zip(

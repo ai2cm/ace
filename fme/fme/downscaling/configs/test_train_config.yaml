@@ -1,5 +1,6 @@
 experiment_dir: /will/be/overwritten
 max_epochs: 2
+validate_using_ema: true
 logging:
   log_to_screen: true
   log_to_wandb: true
