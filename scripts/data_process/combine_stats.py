@@ -101,14 +101,15 @@ def main(config_yaml: str):
         full_field_datasets = open_datasets(stats_roots, full_field_filename)
         if len(full_field_datasets) > 1:
             samples = xr.DataArray(
-                [float(ds.attrs["input_samples"]) for ds in datasets], dims=["run"]
+                [float(ds.attrs["input_samples"]) for ds in full_field_datasets],
+                dims=["run"],
             )
             centering_datasets = open_datasets(stats_roots, centering_filename)
             average = get_combined_stats(
                 full_field_datasets, centering_datasets, samples
             )
         else:
-            average = datasets[0]
+            average = full_field_datasets[0]
 
         add_history_attrs(average, config_yaml, config.stats.output_directory)
         average.to_netcdf(tmpdir + "/" + full_field_filename)
