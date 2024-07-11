@@ -321,6 +321,12 @@ def get_sample_index_series(
         List of zero-mean index series for each sample, or None if the sample does
         not overlap sufficiently with the reference index.
     """
+    data_calendar = initial_times.dt.calendar
+    index_calendar = index_data.time.dt.calendar
+    if data_calendar != index_calendar:
+        index_data = index_data.convert_calendar(
+            calendar=data_calendar, dim="time", use_cftime=True
+        )
     sample_index_series: List[Optional[xr.DataArray]] = []
     for initial_time in initial_times:
         duration = n_forward_timesteps * timestep
