@@ -186,16 +186,11 @@ DESIRED_ATTRS = {
 # grid defined in Table 2 of https://arxiv.org/pdf/2310.02074.pdf except
 # that the uppermost layer uses the higher model top of ECMWF model.
 N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
-OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
-assert OUTPUT_LAYER_INDICES[-1] == N_INPUT_LAYERS
-N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
+DEFAULT_OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
+
 OUTPUT_PRESSURE_LEVELS = [850, 500, 200]  # additionally save these pressure levels
 OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200]
 
-RENAME_Q = {f"q_{i}": f"specific_total_water_{i}" for i in range(N_OUTPUT_LAYERS)}
-RENAME_T = {f"t_{i}": f"air_temperature_{i}" for i in range(N_OUTPUT_LAYERS)}
-RENAME_U = {f"u_{i}": f"eastward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
-RENAME_V = {f"v_{i}": f"northward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
 RENAME_Q_PRES = {f"specific_humidity_{p}": f"Q{p}" for p in OUTPUT_PRESSURE_LEVELS}
 RENAME_T_PRES = {f"temperature_{p}": f"TMP{p}" for p in OUTPUT_PRESSURE_LEVELS}
 RENAME_U_PRES = {f"u_component_of_wind_{p}": f"UGRD{p}" for p in OUTPUT_PRESSURE_LEVELS}
@@ -210,13 +205,6 @@ RENAME_ETC = {
     "v10": "VGRD10m",
     "d2m": "DPT2m",
 }
-RENAME_NATIVE = {
-    **RENAME_Q,
-    **RENAME_T,
-    **RENAME_U,
-    **RENAME_V,
-    **RENAME_ETC,
-}
 RENAME_PRESSURE_LEVEL = {
     **RENAME_Q_PRES,
     **RENAME_T_PRES,
@@ -224,6 +212,30 @@ RENAME_PRESSURE_LEVEL = {
     **RENAME_V_PRES,
     **RENAME_Z_PRES,
 }
+
+
+def set_nlayer_globals(output_layer_indices):
+    # set global vars that depend on the output layer indices
+    global OUTPUT_LAYER_INDICES
+    OUTPUT_LAYER_INDICES = output_layer_indices
+    assert OUTPUT_LAYER_INDICES[-1] == N_INPUT_LAYERS
+
+    global N_OUTPUT_LAYERS
+    N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
+
+    RENAME_Q = {f"q_{i}": f"specific_total_water_{i}" for i in range(N_OUTPUT_LAYERS)}
+    RENAME_T = {f"t_{i}": f"air_temperature_{i}" for i in range(N_OUTPUT_LAYERS)}
+    RENAME_U = {f"u_{i}": f"eastward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
+    RENAME_V = {f"v_{i}": f"northward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
+
+    global RENAME_NATIVE
+    RENAME_NATIVE = {
+        **RENAME_Q,
+        **RENAME_T,
+        **RENAME_U,
+        **RENAME_V,
+        **RENAME_ETC,
+    }
 
 
 def _open_zarr(key, sel_indices):
@@ -393,15 +405,15 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     thicknesses = _to_dataarray(thicknesses_fs, "pres")
     for short_name in ["q", "t", "u", "v"]:
         variable = _to_dataarray(fieldset_gg.select(shortName=short_name), short_name)
-        for output_index in range(N_OUTPUT_LAYERS):
+        for output_index in range(N_OUTPUT_LAYERS):  # type: ignore[name-defined]
             logging.info(
                 f"Computing vertical integral of {short_name} "
                 f"for output layer {output_index}."
             )
 
             fine_levels = slice(
-                OUTPUT_LAYER_INDICES[output_index],
-                OUTPUT_LAYER_INDICES[output_index + 1],
+                OUTPUT_LAYER_INDICES[output_index],  # type: ignore[name-defined]
+                OUTPUT_LAYER_INDICES[output_index + 1],  # type: ignore[name-defined]
             )
             coarse_level_thicknesses = thicknesses.isel(hybrid=fine_levels)
             total_thickness = coarse_level_thicknesses.sum("hybrid")
@@ -443,7 +455,7 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
 
     output = _adjust_latlon(output)
 
-    output = output.rename(RENAME_NATIVE)
+    output = output.rename(RENAME_NATIVE)  # type: ignore[name-defined]
     for name, attrs in DESIRED_ATTRS.items():
         if name in output:
             output[name] = output[name].assign_attrs(**attrs)
@@ -655,8 +667,8 @@ def _get_vertical_coordinate(ds: xr.Dataset, name: str) -> xr.Dataset:
     hybrid_sigma_values = ds[name].attrs["GRIB_pv"]
     ak = hybrid_sigma_values[: N_INPUT_LAYERS + 1]
     bk = hybrid_sigma_values[N_INPUT_LAYERS + 1 :]
-    ak_coarse = [ak[i] for i in OUTPUT_LAYER_INDICES]
-    bk_coarse = [bk[i] for i in OUTPUT_LAYER_INDICES]
+    ak_coarse = [ak[i] for i in OUTPUT_LAYER_INDICES]  # type: ignore[name-defined]
+    bk_coarse = [bk[i] for i in OUTPUT_LAYER_INDICES]  # type: ignore[name-defined]
     ak_coarse_ds = xr.Dataset({f"ak_{i}": value for i, value in enumerate(ak_coarse)})
     bk_coarse_ds = xr.Dataset({f"bk_{i}": value for i, value in enumerate(bk_coarse)})
     for name in ak_coarse_ds:
@@ -775,12 +787,25 @@ def _get_parser():
             "speed up debugging but should not be used for production runs."
         ),
     )
+    parser.add_argument(
+        "--output-layer-indices",
+        type=int,
+        nargs="+",
+        default=DEFAULT_OUTPUT_LAYER_INDICES,
+        help=(
+            "Specify the ERA5 layer indices to use when defining the vertically "
+            "coarsened output levels."
+        ),
+    )
     return parser
 
 
 def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
+
+    # set globals that depend on output layer indices
+    set_nlayer_globals(args.output_layer_indices)
 
     # desired start/end of output dataset, inclusive
     start_time = datetime.datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%S")
