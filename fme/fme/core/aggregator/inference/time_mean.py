@@ -51,11 +51,17 @@ def get_gen_shape(gen_data: TensorMapping):
 
 
 class TimeMeanAggregator:
+    _image_captions = {
+        "bias_map": "{name} time-mean bias (generated - reference) [{units}]",
+        "gen_map": "{name} time-mean generated [{units}]",
+    }
+
     def __init__(
         self,
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        reference_means: Optional[xr.Dataset] = None,
     ):
         """
         Args:
@@ -64,6 +70,8 @@ class TimeMeanAggregator:
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            reference_means: Dataset containing reference time-mean values
+                for bias computation.
         """
         self._area_weights = area_weights
         self._target = target
@@ -75,6 +83,8 @@ class TimeMeanAggregator:
         self._data: Optional[TensorDict] = None
         self._n_timesteps = 0
         self._n_samples: Optional[int] = None
+        self._reference_means = reference_means
+        self._reference_validated = False
 
     @staticmethod
     def _add_or_initialize_time_mean(
@@ -113,6 +123,10 @@ class TimeMeanAggregator:
             self._n_timesteps = data[list(data)[0]].size(1) - 1
         else:
             self._n_timesteps += data[list(data)[0]].size(1)
+        if not self._reference_validated:
+            if self._reference_means is not None:
+                self.get_logs(label="")
+            self._reference_validated = True
 
     def get_data(self) -> TensorDict:
         if self._n_timesteps == 0 or self._data is None:
@@ -128,8 +142,8 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Image]:
-        logs = {}
+    def get_logs(self, label: str) -> Dict[str, Union[float, Image]]:
+        logs: Dict[str, Union[float, Image]] = {}
         data = self.get_data()
         gen_map_key = "gen_map"
         wandb = WandB.get_instance()
@@ -145,6 +159,28 @@ class TimeMeanAggregator:
                     f"{gen_map_key}/{name}": prediction_image,
                 }
             )
+            if self._reference_means is not None and name in self._reference_means:
+                pair = _TargetGenPair(
+                    name=name,
+                    target=torch.as_tensor(
+                        self._reference_means[name].values, device=pred.device
+                    ),
+                    gen=pred,
+                )
+                bias_map = pair.bias().cpu().numpy()
+                vmin_bias, vmax_bias = get_cmap_limits(bias_map, diverging=True)
+                bias_fig = plot_imshow(
+                    bias_map, vmin=vmin_bias, vmax=vmax_bias, cmap="RdBu_r"
+                )
+                bias_image = wandb.Image(
+                    bias_fig,
+                    caption=self._get_caption("bias_map", name, vmin_bias, vmax_bias),
+                )
+                logs.update(
+                    {f"ref_bias/{name}": pair.weighted_mean_bias(self._area_weights)}
+                )
+                logs.update({f"ref_rmse/{name}": pair.rmse(self._area_weights)})
+                logs.update({f"ref_bias_map/{name}": bias_image})
 
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
@@ -156,7 +192,7 @@ class TimeMeanAggregator:
             units = self._metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
-        caption = f"{caption_name} time-mean generated [{units}]"
+        caption = self._image_captions[key].format(name=caption_name, units=units)
         caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption
 
@@ -200,6 +236,7 @@ class TimeMeanEvaluatorAggregator:
         area_weights: torch.Tensor,
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        reference_means: Optional[xr.Dataset] = None,
     ):
         """
         Args:
@@ -208,6 +245,8 @@ class TimeMeanEvaluatorAggregator:
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            reference_means: Dataset containing reference time-mean values
+                for bias computation.
         """
         self._area_weights = area_weights
         self._target = target
@@ -221,7 +260,10 @@ class TimeMeanEvaluatorAggregator:
             area_weights=area_weights, target=target, metadata=metadata
         )
         self._gen_agg = TimeMeanAggregator(
-            area_weights=area_weights, target=target, metadata=metadata
+            area_weights=area_weights,
+            target=target,
+            metadata=metadata,
+            reference_means=reference_means,
         )
 
     @torch.no_grad()
@@ -253,15 +295,14 @@ class TimeMeanEvaluatorAggregator:
 
     @torch.no_grad()
     def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor, Image]]:
-        logs = {}
+        logs = self._gen_agg.get_logs("")
         preds = self._get_target_gen_pairs()
-        bias_map_key, gen_map_key = "bias_map", "gen_map"
+        bias_map_key = "bias_map"
         rmse_all_channels = {}
         wandb = WandB.get_instance()
         for pred in preds:
             bias_data = pred.bias().cpu().numpy()
             vmin_bias, vmax_bias = get_cmap_limits(bias_data, diverging=True)
-            vmin_pred, vmax_pred = get_cmap_limits(pred.gen.cpu().numpy())
             bias_fig = plot_imshow(
                 bias_data, vmin=vmin_bias, vmax=vmax_bias, cmap="RdBu_r"
             )
@@ -271,10 +312,6 @@ class TimeMeanEvaluatorAggregator:
                     bias_map_key, pred.name, vmin_bias, vmax_bias
                 ),
             )
-            prediction_image = wandb.Image(
-                plot_imshow(pred.gen.cpu().numpy()),
-                caption=self._get_caption(gen_map_key, pred.name, vmin_pred, vmax_pred),
-            )
             plt.close("all")
             rmse_all_channels[pred.name] = pred.rmse(weights=self._area_weights)
             logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
@@ -282,7 +319,6 @@ class TimeMeanEvaluatorAggregator:
                 logs.update(
                     {
                         f"{bias_map_key}/{pred.name}": bias_image,
-                        f"{gen_map_key}/{pred.name}": prediction_image,
                         f"bias/{pred.name}": pred.weighted_mean_bias(
                             weights=self._area_weights
                         ),

@@ -108,6 +108,7 @@ class InferenceEvaluatorAggregatorConfig:
             time dimension.
         log_seasonal_means: Whether to log seasonal mean metrics and images.
         monthly_reference_data: Path to monthly reference data to compare against.
+        time_mean_reference_data: Path to reference time means to compare against.
     """
 
     log_histograms: bool = False
@@ -116,21 +117,44 @@ class InferenceEvaluatorAggregatorConfig:
     log_zonal_mean_images: bool = True
     log_seasonal_means: bool = False
     monthly_reference_data: Optional[str] = None
+    time_mean_reference_data: Optional[str] = None
 
-    def build(self, **kwargs) -> "InferenceEvaluatorAggregator":
+    def build(
+        self,
+        area_weights: torch.Tensor,
+        sigma_coordinates: SigmaCoordinates,
+        timestep: datetime.timedelta,
+        n_timesteps: int,
+        initial_times: xr.DataArray,
+        record_step_20: bool = False,
+        data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss",
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
         else:
             monthly_reference_data = xr.open_dataset(self.monthly_reference_data)
+        if self.time_mean_reference_data is None:
+            time_mean = None
+        else:
+            time_mean = xr.open_dataset(self.time_mean_reference_data)
 
         return InferenceEvaluatorAggregator(
+            area_weights=area_weights,
+            sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
+            n_timesteps=n_timesteps,
+            initial_times=initial_times,
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
             log_zonal_mean_images=self.log_zonal_mean_images,
             log_seasonal_means=self.log_seasonal_means,
             monthly_reference_data=monthly_reference_data,
-            **kwargs,
+            time_mean_reference_data=time_mean,
+            record_step_20=record_step_20,
+            metadata=metadata,
+            data_grid=data_grid,
         )
 
 
@@ -158,6 +182,7 @@ class InferenceEvaluatorAggregator:
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
         data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss",
+        time_mean_reference_data: Optional[xr.Dataset] = None,
     ):
         """
         Args:
@@ -178,6 +203,7 @@ class InferenceEvaluatorAggregator:
             monthly_reference_data: Reference monthly data for computing target stats.
             log_histograms: Whether to aggregate histograms.
             data_grid: The grid type of the data, used for spherical power spectrum.
+            time_mean_reference_data: Reference time means for computing bias stats.
         """
         self._aggregators: Dict[str, _EvaluatorAggregator] = {
             "mean": MeanAggregator(
@@ -195,6 +221,7 @@ class InferenceEvaluatorAggregator:
             "time_mean": TimeMeanEvaluatorAggregator(
                 area_weights,
                 metadata=metadata,
+                reference_means=time_mean_reference_data,
             ),
             "time_mean_norm": TimeMeanEvaluatorAggregator(
                 area_weights,
@@ -374,8 +401,13 @@ def table_to_logs(table: Table) -> List[Dict[str, Union[float, int]]]:
 @dataclasses.dataclass
 class InferenceAggregatorConfig:
     """
-    Configuration for inference aggregator (no configurable attributes).
+    Configuration for inference aggregator.
+
+    Attributes:
+        time_mean_reference_data: Path to reference time means to compare against.
     """
+
+    time_mean_reference_data: Optional[str] = None
 
     def build(
         self,
@@ -385,12 +417,17 @@ class InferenceAggregatorConfig:
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
+        if self.time_mean_reference_data is not None:
+            time_means = xr.open_dataset(self.time_mean_reference_data)
+        else:
+            time_means = None
         return InferenceAggregator(
             area_weights=area_weights,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
             metadata=metadata,
+            time_mean_reference_data=time_means,
         )
 
 
@@ -409,6 +446,7 @@ class InferenceAggregator:
         timestep: datetime.timedelta,
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        time_mean_reference_data: Optional[xr.Dataset] = None,
     ):
         """
         Args:
@@ -417,6 +455,7 @@ class InferenceAggregator:
             timestep: Timestep of the model.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
+            time_mean_reference_data: Reference time means for computing bias stats.
         """
         self._aggregators: Dict[str, _Aggregator] = {
             "mean": SingleTargetMeanAggregator(
@@ -426,6 +465,7 @@ class InferenceAggregator:
             "time_mean": TimeMeanAggregator(
                 area_weights,
                 metadata=metadata,
+                reference_means=time_mean_reference_data,
             ),
         }
         self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
