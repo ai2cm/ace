@@ -22,14 +22,18 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 NUM_TIMESTEPS = 4
 
 
-def test_trainer():
+def test_trainer(tmp_path):
     """Tests the trainer class using mock objects."""
+    mock_config = MagicMock()
+    mock_config.experiment_dir = str(tmp_path / "experiment_dir")
+    mock_config.checkpoint_dir = str(tmp_path / "checkpoint_dir")
+
     trainer = Trainer(
         model=MagicMock(),
         optimization=MagicMock(),
         train_data=MagicMock(),
         validation_data=MagicMock(),
-        config=MagicMock(),
+        config=mock_config,
     )
 
     with unittest.mock.patch(
