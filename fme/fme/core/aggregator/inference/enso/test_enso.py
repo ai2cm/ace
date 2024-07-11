@@ -2,7 +2,6 @@ import datetime
 from contextlib import contextmanager
 from typing import Type
 
-import cftime
 import numpy as np
 import pytest
 import torch
@@ -32,11 +31,19 @@ def _data_generator(scale: int, steps: int):
     return torch.linspace(-scale, scale, steps)
 
 
-def _get_data(scale: int, n_samples: int, n_times: int, n_lat: int, n_lon: int):
+def _get_data(
+    scale: int,
+    n_samples: int,
+    n_times: int,
+    n_lat: int,
+    n_lon: int,
+    calendar: str = "julian",
+):
     times = xr.cftime_range(
-        start=cftime.DatetimeJulian(2000, 1, 1),
+        start="2000-01-01",
         periods=n_times,
-        freq="6H",
+        freq="6h",
+        calendar=calendar,
     )
     enso_index = xr.DataArray(
         _data_generator(scale, n_times), dims=["time"], coords={"time": times}
@@ -154,3 +161,36 @@ def test_enso_index_inference_overlap(shift):
     else:
         assert isinstance(target_coefficients["a"], torch.Tensor)
         assert isinstance(gen_coefficients["a"], torch.Tensor)
+
+
+@pytest.mark.parametrize(
+    "calendar",
+    [
+        pytest.param("julian", id="both_julian"),
+        pytest.param("proleptic_gregorian", id="data_proleptic_gregorian_index_julian"),
+    ],
+)
+def test_enso_agg_calendar(calendar):
+    """
+    Test the EnsoCoefficientEvaluatorAggregator class with different data calendars.
+
+    The reference ENSO index is always in Julian calendar, but the data may be
+    proleptic gregorian. The aggregator should be able to handle this.
+    """
+    n_samples, n_times, n_lat, n_lon = 2, 28, 3, 3
+    data_scale = 3
+    area_weights = torch.ones([n_lat, n_lon])
+    enso_index, sample_times, target_data, gen_data = _get_data(
+        data_scale, n_samples, n_times, n_lat, n_lon, calendar=calendar
+    )
+    enso_index = enso_index.convert_calendar("julian", dim="time", use_cftime=True)
+    with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
+        enso_agg = EnsoCoefficientEvaluatorAggregator(
+            initial_times=sample_times.isel(time=0),
+            n_forward_timesteps=(n_times - 1),
+            timestep=datetime.timedelta(hours=6),
+            area_weights=area_weights,
+        )
+    enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
+    target_coefficients, gen_coefficients = enso_agg._get_coefficients()
+    assert (target_coefficients is not None) and (gen_coefficients is not None)
