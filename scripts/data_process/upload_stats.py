@@ -1,7 +1,7 @@
 import dataclasses
 import shutil
 import tempfile
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import click
 import dacite
@@ -25,6 +25,7 @@ def copy(source: str, destination: str):
 class StatsConfig:
     output_directory: str
     beaker_dataset: str
+    exclude_runs: List[str] = dataclasses.field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
 
@@ -62,7 +63,8 @@ def main(config_yaml: str):
             "time-mean.nc",
         ):
             copy(stats_combined_dir + filename, tmpdir + "/" + filename)
-        run_names = ", ".join(config.runs.keys())
+        runs = [run for run in config.runs if run not in config.stats.exclude_runs]
+        run_names = ", ".join(runs)
         if config.stats.start_date is None:
             start = "start of run"
         else:
