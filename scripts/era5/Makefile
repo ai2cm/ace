@@ -1,4 +1,4 @@
-VERSION ?= 2024-03-11-era5-xarray-beam-pipelines
+VERSION ?= 2024-07-10-era5-xarray-beam-pipelines
 IMAGE_NAME ?= us.gcr.io/vcm-ml/era5-ingest-dataflow:$(VERSION)
 LOCAL_ENVIRONMENT ?= era5-ingestion
 
