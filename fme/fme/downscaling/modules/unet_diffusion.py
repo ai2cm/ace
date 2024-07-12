@@ -54,29 +54,28 @@ class UNetDiffusionModule(torch.nn.Module):
             latent: The latent diffusion variable on the fine grid.
             noise_level: The noise level of each example in the batch.
         """
-        inputs = torch.nn.functional.interpolate(
+        interpolated = torch.nn.functional.interpolate(
             coarse,
             scale_factor=(self.downscale_factor, self.downscale_factor),
             mode="bicubic",
             align_corners=True,
         )
 
-        inputs = pad_right(inputs, self.target_shape)
+        interpolated = pad_right(interpolated, self.target_shape)
         latent = pad_right(latent, self.target_shape)
 
-        # condition the latent variable on the coarse inputs
-        inputs = torch.concat((latent, inputs), dim=1)
-
         if self.fine_topography is not None:
-            batch_size = inputs.shape[0]
+            batch_size = interpolated.shape[0]
             topography = (
                 self.fine_topography.unsqueeze(0)
                 .expand(batch_size, -1, -1, -1)
                 .to(get_device())
             )
             topography = pad_right(topography, self.target_shape)
-            inputs = torch.concat((inputs, topography), dim=1)
+            inputs = torch.concat((interpolated, topography), dim=1)
+        else:
+            inputs = interpolated
 
-        outputs = self.unet(inputs, sigma=noise_level, class_labels=None)
+        outputs = self.unet(latent, inputs, sigma=noise_level, class_labels=None)
         fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
         return outputs[..., : fine_shape[0], : fine_shape[1]]
