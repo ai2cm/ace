@@ -1,12 +1,21 @@
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 import xarray as xr
 
 from fme.core.data_loading.config import XarrayDataConfig
+from fme.core.data_loading.data_typing import Dataset, HorizontalCoordinates
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 from fme.downscaling.requirements import DataRequirements
 
-from .datasets import BatchData, DataLoaderConfig, PairedDataset
+from .datasets import (
+    BatchData,
+    ClosedInterval,
+    DataLoaderConfig,
+    HorizontalSubsetDataset,
+    PairedDataset,
+)
 
 
 def random_named_tensor(var_names, shape):
@@ -91,6 +100,45 @@ def test_downscaling_dataset_validate(
     fine_data, coarse_data = all_data
     with pytest.raises(AssertionError):
         PairedDataset(fine_data, coarse_data)
+
+
+@pytest.mark.parametrize(
+    "lat_interval,lon_interval,n_lat,n_lon,expected_n_lat,expected_n_lon",
+    [
+        pytest.param(("-inf", "inf"), (0, "inf"), 4, 8, 4, 8, id="no-bounds"),
+        pytest.param((0.0, 0.5), (0.0, "inf"), 4, 8, 2, 8, id="lat-bounds"),
+        pytest.param(("-inf", "inf"), (0.0, 0.5), 4, 8, 4, 4, id="lon-bounds"),
+        pytest.param((0.0, 0.5), (0.0, 0.5), 4, 8, 2, 4, id="lat-lon-bounds"),
+    ],
+)
+def test_horizontal_subset(
+    lat_interval, lon_interval, n_lat, n_lon, expected_n_lat, expected_n_lon
+):
+    batch_size, n_timesteps = 2, 1
+    coords = HorizontalCoordinates(
+        lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
+    )
+
+    datum = (
+        {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
+        xr.DataArray([0.0]),
+    )
+    base_dataset = MagicMock(spec=Dataset)
+    base_dataset.horizontal_coordinates = coords
+    base_dataset.__getitem__.return_value = datum
+    dataset = HorizontalSubsetDataset(
+        dataset=base_dataset,
+        lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
+        lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
+    )
+
+    subset, _ = dataset[0]
+    assert subset["x"].shape == (
+        batch_size,
+        n_timesteps,
+        expected_n_lat,
+        expected_n_lon,
+    )
 
 
 def test_dataloader_build(tmp_path):
