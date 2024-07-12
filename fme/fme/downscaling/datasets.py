@@ -1,7 +1,7 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils.data
@@ -9,14 +9,19 @@ import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from fme.core import metrics
 from fme.core.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import HorizontalCoordinates, VariableMetadata
+from fme.core.data_loading.data_typing import (
+    Dataset,
+    HorizontalCoordinates,
+    VariableMetadata,
+)
 from fme.core.data_loading.getters import get_dataset
 from fme.core.data_loading.requirements import DataRequirements as CoreDataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -99,7 +104,139 @@ class PairedDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         batch1, times1 = self.dataset1[idx]
         batch2, _ = self.dataset2[idx]
+
         return squeeze_time_dim(batch1), squeeze_time_dim(batch2), times1.squeeze()
+
+
+@dataclasses.dataclass
+class ClosedInterval:
+    start: float
+    stop: float
+
+    def __post_init__(self):
+        assert self.start < self.stop  # Do not allow empty, start = stop
+
+    def __contains__(self, value: float):
+        return self.start <= value <= self.stop
+
+
+class HorizontalSubsetDataset(Dataset):
+    """Subsets the horizontal latitude-longitude dimensions of a dataset."""
+
+    def __init__(
+        self,
+        dataset: Union[Dataset, torch.utils.data.ConcatDataset[Dataset]],
+        lat_interval: ClosedInterval,
+        lon_interval: ClosedInterval,
+    ):
+        self.dataset = dataset
+        self.lat_interval = lat_interval
+        self.lon_interval = lon_interval
+
+        coords: HorizontalCoordinates = dataset.horizontal_coordinates  # type: ignore
+        lats = torch.tensor(
+            [
+                i
+                for i in range(len(coords.lat))
+                if float(coords.lat[i]) in self.lat_interval
+            ]
+        )
+        lons = torch.tensor(
+            [
+                i
+                for i in range(len(coords.lon))
+                if float(coords.lon[i]) in self.lon_interval
+            ]
+        )
+
+        if (self.lon_interval.stop != float("inf")) and (
+            torch.any(coords.lon < self.lon_interval.stop - 360.0)
+        ):
+            lon_max = coords.lon.max()
+            raise NotImplementedError(
+                (
+                    "lon wraparound not implemented, received lon_max {} but "
+                    "expected lon_max > {}".format(
+                        lon_max, self.lon_interval.stop - 360.0
+                    )
+                )
+            )
+        if (self.lon_interval.start != -float("inf")) and (
+            torch.any(coords.lon > self.lon_interval.start + 360.0)
+        ):
+            lon_min = coords.lon.min()
+            raise NotImplementedError(
+                (
+                    "lon wraparound not implemented, received lon_min {} but "
+                    "expected lon_min < {}".format(
+                        lon_min, self.lon_interval.start + 360.0
+                    )
+                )
+            )
+
+        assert lats.numel() > 0, "No latitudes found in the specified range."
+        assert lons.numel() > 0, "No longitudes found in the specified range."
+
+        self.mask_indices = HorizontalCoordinates(
+            lat=lats,
+            lon=lons,
+        )
+        self._horizontal_coordinates = HorizontalCoordinates(
+            lat=coords.lat[self.mask_indices.lat],
+            lon=coords.lon[self.mask_indices.lon],
+        )
+        self._area_weights = metrics.spherical_area_weights(
+            self._horizontal_coordinates.lat, len(self._horizontal_coordinates.lon)
+        )
+
+    @property
+    def metadata(self) -> Mapping[str, VariableMetadata]:
+        return self.dataset.metadata  # type: ignore
+
+    @property
+    def area_weights(self) -> torch.Tensor:
+        return self._area_weights
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._horizontal_coordinates
+
+    @property
+    def sigma_coordinates(self):
+        return self.dataset.sigma_coordinates  # type: ignore
+
+    @property
+    def is_remote(self) -> bool:
+        return self.dataset.is_remote  # type: ignore
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        batch, times = self.dataset[idx]
+        batch = {
+            k: v[
+                ...,
+                self.mask_indices.lat.unsqueeze(1),
+                self.mask_indices.lon.unsqueeze(0),
+            ]
+            for k, v in batch.items()
+        }
+        return batch, times
+
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> Tuple[TensorDict, xr.DataArray]:
+        sample, time = self.dataset.get_sample_by_time_slice(time_slice)  # type: ignore
+        masked = {
+            k: v[
+                ...,
+                self.mask_indices.lat.unsqueeze(1),
+                self.mask_indices.lon.unsqueeze(0),
+            ]
+            for k, v in sample.items()
+        }
+        return masked, time
 
 
 @dataclasses.dataclass
@@ -129,6 +266,12 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
+    lat_interval: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+    )
+    lon_interval: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
+    )
 
     def build(
         self,
@@ -148,7 +291,17 @@ class DataLoaderConfig:
             for dataset_configs in [self.fine, self.coarse]
         ]
 
-        dataset = PairedDataset(dataset_fine, dataset_coarse)  # type: ignore
+        dataset_fine_subset = HorizontalSubsetDataset(
+            dataset_fine, self.lat_interval, self.lon_interval
+        )  # type: ignore
+
+        dataset_coarse_subset = HorizontalSubsetDataset(
+            dataset_coarse, self.lat_interval, self.lon_interval
+        )  # type: ignore
+
+        dataset = PairedDataset(
+            dataset_fine_subset, dataset_coarse_subset  # type: ignore
+        )
 
         sampler: Optional[DistributedSampler] = (
             DistributedSampler(dataset, shuffle=train)
@@ -168,15 +321,15 @@ class DataLoaderConfig:
         )
 
         area_weights = FineResCoarseResPair(
-            dataset_fine.area_weights, dataset_coarse.area_weights
+            dataset_fine_subset.area_weights, dataset_coarse_subset.area_weights
         )
         horizontal_coordinates = FineResCoarseResPair(
-            fine=dataset_fine.horizontal_coordinates,
-            coarse=dataset_coarse.horizontal_coordinates,
+            fine=dataset_fine_subset.horizontal_coordinates,
+            coarse=dataset_coarse_subset.horizontal_coordinates,
         )
 
-        example_fine, _ = dataset_fine[0]
-        example_coarse, _ = dataset_coarse[0]
+        example_fine, _ = dataset_fine_subset[0]
+        example_coarse, _ = dataset_coarse_subset[0]
         fine_shape = next(iter(example_fine.values())).shape[-2:]
         coarse_shape = next(iter(example_coarse.values())).shape[-2:]
         img_shape = FineResCoarseResPair(fine_shape, coarse_shape)
@@ -191,8 +344,10 @@ class DataLoaderConfig:
             fine_width % coarse_width == 0
         ), "Fine resolution width must be divisible by coarse resolution width"
 
-        assert dataset_fine.metadata == dataset_coarse.metadata, "Metadata must match."
-        metadata = dataset_fine.metadata
+        assert (
+            dataset_fine_subset.metadata == dataset_coarse_subset.metadata
+        ), "Metadata must match."
+        metadata = dataset_fine_subset.metadata
 
         fine_topography = get_topography(
             CoreDataLoaderConfig(
