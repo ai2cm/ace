@@ -225,13 +225,15 @@ def get_2d_dataset(
         )
 
     grid_yt = np.linspace(-89.5, 89.5, dim_sizes.n_lat)
+    grid_xt_start = 360.0 / dim_sizes.n_lon / 2
+    grid_xt = np.linspace(grid_xt_start, 360.0 - grid_xt_start, dim_sizes.n_lon)
     time = [
         cftime.DatetimeProlepticGregorian(2000, 1, 1)
         + i * timestep_days * datetime.timedelta(days=1)
         for i in range(dim_sizes.n_time)
     ]
 
-    coords_override = {"grid_yt": grid_yt, "time": time}
+    coords_override = {"grid_yt": grid_yt, "grid_xt": grid_xt, "time": time}
 
     coords = {
         dim_name: (
