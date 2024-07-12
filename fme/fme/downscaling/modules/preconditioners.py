@@ -37,22 +37,25 @@ class EDMPrecond(torch.nn.Module):
         self.sigma_data = sigma_data
         self.model = model
 
-    def forward(self, x, sigma, class_labels=None, force_fp32=False):
-        x = x.to(torch.float32)
+    def forward(self, latent, conditioning, sigma, class_labels=None, force_fp32=False):
+        latent = latent.to(torch.float32)
         sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
-        class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=x.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
-        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and x.device.type == 'cuda') else torch.float32
+        class_labels = None if self.label_dim == 0 else torch.zeros([1, self.label_dim], device=latent.device) if class_labels is None else class_labels.to(torch.float32).reshape(-1, self.label_dim)
+        dtype = torch.float16 if (self.use_fp16 and not force_fp32 and latent.device.type == 'cuda') else torch.float32
 
         c_skip = self.sigma_data ** 2 / (sigma ** 2 + self.sigma_data ** 2)
         c_out = sigma * self.sigma_data / (sigma ** 2 + self.sigma_data ** 2).sqrt()
         c_in = 1 / (self.sigma_data ** 2 + sigma ** 2).sqrt()
         c_noise = sigma.log() / 4
 
-        F_x = self.model((c_in * x).to(dtype), c_noise.flatten(), class_labels=class_labels)
+        channel_dim = 1
+        input_ = torch.concat(((c_in * latent), conditioning), dim=channel_dim)
+
+        F_x = self.model(input_.to(dtype), c_noise.flatten(), class_labels=class_labels)
         assert F_x.dtype == dtype
         # matches how UNetDiffusionModule concatenates (latent, inputs)
         n_latent_channels = F_x.shape[1]
-        D_x = c_skip * x[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)
+        D_x = c_skip * latent[:, :n_latent_channels, ...] + c_out * F_x.to(torch.float32)
         return D_x
 
     def round_sigma(self, sigma):
