@@ -11,7 +11,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
-from fme.downscaling.metrics_and_maths import filter_tensor_mapping
+from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
@@ -225,6 +225,7 @@ class DiffusionModelConfig:
     sigma_max: float
     churn: float
     num_diffusion_generation_steps: int
+    predict_residual: bool
 
     def build(
         self,
@@ -343,10 +344,23 @@ class DiffusionModel:
         noise = torch.randn_like(targets_norm) * sigma
         latents = targets_norm + noise
 
+        if self.config.predict_residual:
+            base_prediction = interpolate(
+                self.in_packer.pack(
+                    self.normalizer.coarse.normalize(
+                        {k: coarse[k] for k in fine.keys()}
+                    ),
+                    axis=channel_axis,
+                ),
+                self.downscale_factor,
+            )
+            targets_norm = targets_norm - base_prediction
+            latents = latents - base_prediction
+
         denoised_norm = self.module(latents, coarse_norm, sigma)
         loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
-
         optimizer.step_weights(loss)
+
         target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=channel_axis)
@@ -367,7 +381,8 @@ class DiffusionModel:
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
         )
-        latents = torch.rand_like(targets_norm)
+        latents = torch.randn_like(targets_norm)
+
         samples_norm = edm_sampler(
             self.module,
             latents,
@@ -377,9 +392,23 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
+
+        if self.config.predict_residual:
+            base_prediction = interpolate(
+                self.in_packer.pack(
+                    self.normalizer.coarse.normalize(
+                        {k: coarse[k] for k in fine.keys()}
+                    ),
+                    axis=channel_axis,
+                ),
+                self.downscale_factor,
+            )
+            samples_norm += base_prediction
+
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm, axis=channel_axis)
         )
+
         loss = self.loss(targets_norm, samples_norm)
         return ModelOutputs(
             prediction=samples,
