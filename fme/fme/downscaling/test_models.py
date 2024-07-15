@@ -187,7 +187,8 @@ def test_serialization(tmp_path):
     )
 
 
-def test_diffusion_model_train_and_generate():
+@pytest.mark.parametrize("predict_residual", [True, False])
+def test_diffusion_model_train_and_generate(predict_residual):
     fine_shape = (16, 32)
     coarse_shape = (8, 16)
     downscale_factor = 2
@@ -215,6 +216,7 @@ def test_diffusion_model_train_and_generate():
         sigma_max=1.0,
         churn=0.5,
         num_diffusion_generation_steps=3,
+        predict_residual=predict_residual,
     ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
 
     batch_size = 2

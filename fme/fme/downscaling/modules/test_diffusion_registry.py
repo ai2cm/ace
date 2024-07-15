@@ -36,6 +36,6 @@ def test_diffusion_unet_shapes(use_topography):
     coarse = torch.randn(batch_size, n_channels, *coarse_shape)
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise_level = torch.randn(batch_size, 1, 1, 1)
-    outputs = unet(coarse, latent, noise_level)
+    outputs = unet(latent, coarse, noise_level)
 
     assert (batch_size, n_channels, *fine_shape) == outputs.shape
