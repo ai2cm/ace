@@ -53,6 +53,7 @@ import dataclasses
 import gc
 import logging
 import os
+import tempfile
 import time
 from typing import Optional
 
@@ -418,18 +419,25 @@ class Trainer:
         return logs
 
     def save_checkpoint(self, checkpoint_path):
-        torch.save(
-            {
-                "num_batches_seen": self.num_batches_seen,
-                "epoch": self._model_epoch,
-                "best_validation_loss": self._best_validation_loss,
-                "best_inference_error": self._best_inference_error,
-                "stepper": self.stepper.get_state(),
-                "optimization": self.optimization.get_state(),
-                "ema": self._ema.get_state(),
-            },
-            checkpoint_path,
-        )
+        # save to a temporary file in case we get pre-empted during save
+        tmp = tempfile.NamedTemporaryFile()
+        try:
+            torch.save(
+                {
+                    "num_batches_seen": self.num_batches_seen,
+                    "epoch": self._model_epoch,
+                    "best_validation_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
+                    "stepper": self.stepper.get_state(),
+                    "optimization": self.optimization.get_state(),
+                    "ema": self._ema.get_state(),
+                },
+                tmp,
+            )
+            os.replace(tmp.name, checkpoint_path)
+        finally:
+            if os.path.exists(tmp.name):
+                tmp.close()
 
     def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
         _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
