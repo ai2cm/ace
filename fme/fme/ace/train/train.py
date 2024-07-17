@@ -53,8 +53,8 @@ import dataclasses
 import gc
 import logging
 import os
-import tempfile
 import time
+import uuid
 from typing import Optional
 
 import dacite
@@ -420,7 +420,9 @@ class Trainer:
 
     def save_checkpoint(self, checkpoint_path):
         # save to a temporary file in case we get pre-empted during save
-        tmp = tempfile.NamedTemporaryFile()
+        temporary_location = os.path.join(
+            os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
+        )
         try:
             torch.save(
                 {
@@ -432,12 +434,12 @@ class Trainer:
                     "optimization": self.optimization.get_state(),
                     "ema": self._ema.get_state(),
                 },
-                tmp,
+                temporary_location,
             )
-            os.replace(tmp.name, checkpoint_path)
+            os.replace(temporary_location, checkpoint_path)
         finally:
-            if os.path.exists(tmp.name):
-                tmp.close()
+            if os.path.exists(temporary_location):
+                os.remove(temporary_location)
 
     def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
         _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
