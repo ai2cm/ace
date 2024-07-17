@@ -373,6 +373,7 @@ class Trainer:
                     stepped,
                     self.valid_data.sigma_coordinates,
                     self.valid_data.timestep,
+                    forcing_data=stepped.target_data,
                 )
                 aggregator.record_batch(
                     loss=stepped.metrics["loss"],

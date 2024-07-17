@@ -156,9 +156,7 @@ def column_moist_static_energy_tendency(
     # drop the first step as it's the initial condition.
     first_step_shape = (diff.shape[0], 1, *diff.shape[2:])
     tendency = (
-        torch.concat(
-            [torch.full(first_step_shape, torch.nan).to(get_device()), diff], dim=1
-        )
+        torch.concat([torch.zeros(first_step_shape).to(get_device()), diff], dim=1)
         / timestep.total_seconds()
     )
     return tendency
@@ -209,7 +207,7 @@ def _compute_derived_variable(
                 climate_data.data.update({v: forcing_data[v]})
         output = derived_variable.func(climate_data, sigma_coordinates, timestep)
     except KeyError as key_error:
-        logging.info(f"Could not compute {label} because {key_error} is missing")
+        logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
         new_data[label] = output
     return new_data
