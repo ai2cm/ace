@@ -199,11 +199,17 @@ def run_inference(
             )
             timers["run_on_batch"] += time.time() - current_time
 
+            # Replicates the timestep range of the stepped.target_data
+            # used in the evaluator computation of derived quantities, which drops
+            # the initial condition.
+            forcing_data_at_prediction_steps = {
+                k: window_forcing_data[k][:, 1:] for k in window_forcing_data
+            }
             prediction = compute_derived_quantities(
                 prediction,
                 forcing_data.sigma_coordinates,
                 forcing_data.timestep,
-                forcing_data=window_forcing_data,
+                forcing_data=forcing_data_at_prediction_steps,
             )
 
             forward_times = window_forcing.times.isel(time=slice(1, None))
