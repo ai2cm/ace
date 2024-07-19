@@ -5,7 +5,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import Dataset, HorizontalCoordinates
+from fme.core.data_loading.data_typing import Dataset, LatLonCoordinates
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 from fme.downscaling.requirements import DataRequirements
 
@@ -115,7 +115,7 @@ def test_horizontal_subset(
     lat_interval, lon_interval, n_lat, n_lon, expected_n_lat, expected_n_lon
 ):
     batch_size, n_timesteps = 2, 1
-    coords = HorizontalCoordinates(
+    coords = LatLonCoordinates(
         lat=torch.linspace(0.0, 1.0, n_lat), lon=torch.linspace(0.0, 1.0, n_lon)
     )
 

@@ -1,3 +1,4 @@
+import copy
 import datetime
 
 import numpy as np
@@ -5,6 +6,11 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.data_typing import (
+    HEALPixCoordinates,
+    HorizontalCoordinates,
+    LatLonCoordinates,
+)
 from fme.core.data_loading.utils import (
     _get_indexers,
     as_broadcasted_tensor,
@@ -21,13 +27,29 @@ CONSTANT_NAME = "constant"
 SLICE_NONE = slice(None)
 
 
-def get_sizes(lon_dim=LON_DIM, lat_dim=LAT_DIM):
-    return {lon_dim: 12, lat_dim: 6, TIME_DIM: 3}
+def get_sizes(
+    spatial_dims: HorizontalCoordinates = LatLonCoordinates(
+        lon=torch.Tensor(np.arange(6)),
+        lat=torch.Tensor(np.arange(12)),
+        lat_name=LAT_DIM,
+        lon_name=LON_DIM,
+    )
+):
+    spatial_sizes: dict = copy.deepcopy(spatial_dims.default_sizes)
+    spatial_sizes[TIME_DIM] = 3
+    return spatial_sizes
 
 
-def create_reference_dataset(lon_dim=LON_DIM, lat_dim=LAT_DIM):
-    dims = (TIME_DIM, lat_dim, lon_dim)
-    sizes = get_sizes(lon_dim=lon_dim, lat_dim=lat_dim)
+def create_reference_dataset(
+    spatial_dims: HorizontalCoordinates = LatLonCoordinates(
+        lon=torch.Tensor(np.arange(6)),
+        lat=torch.Tensor(np.arange(12)),
+        lat_name=LAT_DIM,
+        lon_name=LON_DIM,
+    )
+):
+    dims = [TIME_DIM] + spatial_dims.dims
+    sizes = get_sizes(spatial_dims=spatial_dims)
     shape = tuple(sizes[dim] for dim in dims)
     data = np.arange(np.prod(shape)).reshape(shape)
     coords = [np.arange(size) for size in shape]
@@ -46,8 +68,14 @@ def create_reference_dataset(lon_dim=LON_DIM, lat_dim=LAT_DIM):
     ],
 )
 def test_infer_horizontal_dimension_names(lon_dim, lat_dim, warns):
-    ds = create_reference_dataset(lon_dim=lon_dim, lat_dim=lat_dim)
-    expected = (lon_dim, lat_dim)
+    spatial_dims = LatLonCoordinates(
+        lon=torch.Tensor(np.arange(6)),
+        lat=torch.Tensor(np.arange(12)),
+        lat_name=lat_dim,
+        lon_name=lon_dim,
+    )
+    ds = create_reference_dataset(spatial_dims=spatial_dims)
+    expected = [lon_dim, lat_dim]
     if warns:
         with pytest.warns(UserWarning, match="Familiar"):
             infer_horizontal_dimension_names(ds)
@@ -56,8 +84,27 @@ def test_infer_horizontal_dimension_names(lon_dim, lat_dim, warns):
         assert result == expected
 
 
+def test_infer_horizontal_dimension_names_healpix():
+    # create a dummy HEALPixCoordinates to test other data format
+    hpx_coords = HEALPixCoordinates(
+        face=torch.Tensor(np.arange(12)),
+        width=torch.Tensor(np.arange(64)),
+        height=torch.Tensor(np.arange(64)),
+    )
+    ds = create_reference_dataset(hpx_coords)
+    expected = hpx_coords.dims
+    result = infer_horizontal_dimension_names(ds)
+    assert result == expected
+
+
 def test_infer_horizontal_dimension_names_error():
-    ds = create_reference_dataset(lon_dim="foo", lat_dim="bar")
+    spatial_dims = LatLonCoordinates(
+        lon=torch.Tensor(np.arange(6)),
+        lat=torch.Tensor(np.arange(12)),
+        lat_name="foo",
+        lon_name="bar",
+    )
+    ds = create_reference_dataset(spatial_dims=spatial_dims)
     ds = ds.isel(time=0)
     print(ds)
     with pytest.raises(ValueError, match="Could not identify"):

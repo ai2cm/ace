@@ -252,6 +252,7 @@ def inference_helper(
             prediction_ds["var"].isel(time=i + 1).values,
         )
         assert not np.any(np.isnan(prediction_ds["var"].isel(time=i + 1).values))
+
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
 

@@ -7,6 +7,7 @@ import torch_harmonics as harmonics
 class Grid(Enum):
     EQUIANGULAR = "equiangular"
     LEGENDRE_GAUSS = "legendre-gauss"
+    HEALPIX = "healpix"
 
 
 def validate_file_path(file_path: str, extension: str) -> None:
