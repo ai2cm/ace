@@ -90,7 +90,7 @@ class Trainer:
         self.ema = config.ema.build(self.model.modules)
         self.validate_using_ema = config.validate_using_ema
         self.area_weights = self.train_data.area_weights
-        self.latitudes = self.train_data.horizontal_coordinates.fine.lat.cpu()
+        self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
         self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)

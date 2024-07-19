@@ -98,6 +98,8 @@ class RealSHT(nn.Module):
             cost, w = clenshaw_curtiss_weights(nlat, -1, 1)
             # cost, w = fejer2_weights(nlat, -1, 1)
             self.lmax = lmax or self.nlat
+        elif self.grid == "healpix":
+            raise(NotImplementedError("'healpix' grid not supported by InverseRealVectorSHT"))
         else:
             raise(ValueError("Unknown quadrature mode"))
 
@@ -181,6 +183,8 @@ class InverseRealSHT(nn.Module):
         elif self.grid == "equiangular":
             cost, _ = clenshaw_curtiss_weights(nlat, -1, 1)
             self.lmax = lmax or self.nlat
+        elif self.grid == "healpix":
+            raise(NotImplementedError("'healpix' grid not supported by RealVectorSHT"))
         else:
             raise(ValueError("Unknown quadrature mode"))
 
@@ -264,6 +268,8 @@ class RealVectorSHT(nn.Module):
             cost, w = clenshaw_curtiss_weights(nlat, -1, 1)
             # cost, w = fejer2_weights(nlat, -1, 1)
             self.lmax = lmax or self.nlat
+        elif self.grid == "healpix":
+            raise(ValueError("Unexpected grid: 'healpix' passed to RealVectorSHT"))
         else:
             raise(ValueError("Unknown quadrature mode"))
 
@@ -360,6 +366,8 @@ class InverseRealVectorSHT(nn.Module):
         elif self.grid == "equiangular":
             cost, _ = clenshaw_curtiss_weights(nlat, -1, 1)
             self.lmax = lmax or self.nlat
+        elif self.grid == "healpix":
+            raise(ValueError("Unexpected grid: 'healpix' passed to InverseRealVectorSHT"))
         else:
             raise(ValueError("Unknown quadrature mode"))
 
