@@ -22,7 +22,12 @@ from fme.ace.inference.inference import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.inference import ForcingDataLoaderConfig
+from fme.core.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
@@ -181,3 +186,62 @@ def test_get_initial_condition_raises_mismatched_time_length():
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     with pytest.raises(ValueError):
         get_initial_condition(data, ["prog"])
+
+
+@pytest.mark.parametrize(
+    "start_indices, expected_time_values",
+    [
+        (
+            None,
+            [
+                cftime.datetime(2000, 1, 1, 6),
+                cftime.datetime(2000, 1, 1, 12),
+                cftime.datetime(2000, 1, 1, 18),
+            ],
+        ),
+        (
+            InferenceInitialConditionIndices(
+                n_initial_conditions=2, first=0, interval=2
+            ),
+            [cftime.datetime(2000, 1, 1, 6), cftime.datetime(2000, 1, 1, 18)],
+        ),
+        (
+            ExplicitIndices([0, 2]),
+            [cftime.datetime(2000, 1, 1, 6), cftime.datetime(2000, 1, 1, 18)],
+        ),
+        (
+            TimestampList(times=["2000-01-01T06:00:00", "2000-01-01T18:00:00"]),
+            [cftime.datetime(2000, 1, 1, 6), cftime.datetime(2000, 1, 1, 18)],
+        ),
+        (
+            ExplicitIndices([1]),
+            [
+                cftime.datetime(2000, 1, 1, 12),
+            ],
+        ),
+    ],
+)
+def test__subselect_initial_conditions(tmp_path, start_indices, expected_time_values):
+    initial_condition = xr.Dataset(
+        {"prog": xr.DataArray(np.random.rand(3, 16, 32), dims=["sample", "lat", "lon"])}
+    )
+    initial_condition_path = tmp_path / "init_data" / "ic.nc"
+    initial_condition_path.parent.mkdir()
+    initial_condition["time"] = xr.DataArray(
+        [
+            cftime.datetime(2000, 1, 1, 6),
+            cftime.datetime(2000, 1, 1, 12),
+            cftime.datetime(2000, 1, 1, 18),
+        ],
+        dims=["sample"],
+    )
+    initial_condition.to_netcdf(initial_condition_path, mode="w")
+
+    ic_config = InitialConditionConfig(
+        path=str(initial_condition_path),
+        start_indices=start_indices,
+    )
+    ic_data = ic_config.get_dataset()
+
+    np.testing.assert_array_equal(ic_data.time.values, np.array(expected_time_values))
+    assert ic_data["prog"].shape == (len(expected_time_values), 16, 32)
