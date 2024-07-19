@@ -11,33 +11,49 @@ from torch.utils.data import default_collate
 
 from fme.core.typing_ import TensorMapping
 
+from .data_typing import HorizontalCoordinates
+
 SLICE_NONE = slice(None)
 
 
-def infer_horizontal_dimension_names(ds: xr.Dataset) -> Tuple[Hashable, Hashable]:
+def infer_horizontal_dimension_names(ds: xr.Dataset) -> List[Hashable]:
+    hdims: List[Hashable]
     if "grid_xt" in ds.variables:
-        hdims = "grid_xt", "grid_yt"
+        hdims = ["grid_xt", "grid_yt"]
     elif "lon" in ds.variables:
-        hdims = "lon", "lat"
+        hdims = ["lon", "lat"]
     elif "longitude" in ds.variables:
-        hdims = "longitude", "latitude"
+        hdims = ["longitude", "latitude"]
+    elif "face" in ds.variables:
+        hdims = ["face", "height", "width"]
     else:
         reference_da = None
         for da in ds.data_vars.values():
             if len(da.dims) == 3:
                 reference_da = da
+                _, lat_dim, lon_dim = reference_da.dims
+                warnings.warn(
+                    f"Familiar latitude and longitude coordinate names could not be "
+                    f"found in the dataset. Assuming that the trailing two dimensions, "
+                    f"{lat_dim!r} and {lon_dim!r}, represent latitude and longitude "
+                    f"of a lat/lon dataset respectively."
+                )
+                hdims = [lon_dim, lat_dim]
+                break
+            elif len(da.dims) == 4:
+                reference_da = da
+                _, face_dim, height_dim, width_dim = reference_da.dims
+                warnings.warn(
+                    f"Familiar latitude and longitude coordinate names could not be "
+                    f"found in the dataset. Assuming that the trailing three "
+                    f"dimensions, {face_dim!r}, {height_dim!r}, and {width_dim!r}, "
+                    f"represent face, height, and width of a healpix dataset "
+                    f" respectively."
+                )
+                hdims = [face_dim, height_dim, width_dim]
                 break
         if reference_da is None:
             raise ValueError("Could not identify dataset's horizontal dimensions.")
-        else:
-            _, lat_dim, lon_dim = reference_da.dims
-            warnings.warn(
-                f"Familiar latitude and longitude coordinate names could not be "
-                f"found in the dataset. Assuming that the trailing two dimensions, "
-                f"{lat_dim!r} and {lon_dim!r}, represent latitude and longitude "
-                f"respectively."
-            )
-            hdims = lon_dim, lat_dim
     return hdims
 
 
@@ -96,12 +112,11 @@ def load_series_data(
     ds: xr.Dataset,
     names: List[str],
     time_dim: Hashable,
-    lat_dim: Hashable,
-    lon_dim: Hashable,
+    spatial_dims: HorizontalCoordinates,
 ):
     time_slice = slice(idx, idx + n_steps)
-    dims = (time_dim, lat_dim, lon_dim)
-    shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
+    dims = [time_dim] + spatial_dims.dims
+    shape = [n_steps] + [ds.sizes[spatial_dim] for spatial_dim in dims[1:]]
     loaded = _load_all_variables(ds, names, time_slice)
     arrays = {}
     for n in names:
@@ -110,10 +125,17 @@ def load_series_data(
     return arrays
 
 
-def get_lons_and_lats(ds: xr.Dataset) -> Tuple[np.ndarray, np.ndarray]:
+def get_horizontal_dimensions(ds: xr.Dataset) -> List[np.ndarray]:
     hdims = infer_horizontal_dimension_names(ds)
-    lons, lats = ds[hdims[0]].values, ds[hdims[1]].values
-    return np.array(lons, dtype=np.float32), np.array(lats, dtype=np.float32)
+
+    horizontal_values = []
+    for dim in hdims:
+        if dim in ds:
+            horizontal_values.append(np.array(ds[dim].values, dtype=np.float32))
+        else:
+            raise ValueError(f"Expected {dim} in dataset: {ds}.")
+
+    return horizontal_values
 
 
 def get_times(ds: xr.Dataset, start: int, n_steps: int) -> xr.DataArray:

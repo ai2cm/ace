@@ -127,7 +127,9 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps: int,
         initial_times: xr.DataArray,
         record_step_20: bool = False,
-        data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss",
+        data_grid: Literal[
+            "legendre-gauss", "equiangular", "healpix"
+        ] = "legendre-gauss",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
@@ -181,7 +183,9 @@ class InferenceEvaluatorAggregator:
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
-        data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss",
+        data_grid: Literal[
+            "legendre-gauss", "equiangular", "healpix"
+        ] = "legendre-gauss",
         time_mean_reference_data: Optional[xr.Dataset] = None,
     ):
         """

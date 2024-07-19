@@ -16,3 +16,4 @@ s3fs
 plotly
 matplotlib
 dask
+astropy-healpix

@@ -37,7 +37,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     complex_activation: str = "real"
     spectral_layers: int = 1
     checkpointing: int = 0
-    data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
+    data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
 
     def build(
         self,
@@ -82,7 +82,7 @@ class SFNO_V0_1_0(ModuleConfig):
     complex_activation: str = "real"
     spectral_layers: int = 1
     checkpointing: int = 0
-    data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
+    data_grid: Literal["legendre-gauss", "equiangular", "healpix"] = "legendre-gauss"
 
     def build(
         self,
