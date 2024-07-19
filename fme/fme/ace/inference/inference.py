@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Literal, Optional, Sequence, Tuple
+from typing import Literal, Optional, Sequence, Tuple, Union
 
 import dacite
 import torch
@@ -19,7 +19,12 @@ from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
 from fme.core.data_loading.getters import get_forcing_data
-from fme.core.data_loading.inference import ForcingDataLoaderConfig
+from fme.core.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
@@ -28,6 +33,8 @@ from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 
 from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
+
+StartIndices = Union[InferenceInitialConditionIndices, ExplicitIndices, TimestampList]
 
 
 @dataclasses.dataclass
@@ -38,13 +45,29 @@ class InitialConditionConfig:
     Attributes:
         path: The path to the initial conditions dataset.
         engine: The engine used to open the dataset.
+        start_indices: optional specification of the subset of
+            initial conditions to use.
     """
 
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
+    start_indices: Optional[StartIndices] = None
 
     def get_dataset(self) -> xr.Dataset:
-        return xr.open_dataset(self.path, engine=self.engine, use_cftime=True)
+        ds = xr.open_dataset(self.path, engine=self.engine, use_cftime=True)
+        return self._subselect_initial_conditions(ds)
+
+    def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:
+        if self.start_indices is None:
+            ic_indices = slice(None, None)
+        elif isinstance(self.start_indices, TimestampList):
+            time_index = xr.CFTimeIndex(ds.time.values)
+            ic_indices = self.start_indices.as_indices(time_index)
+        else:
+            ic_indices = self.start_indices.as_indices()
+        # time is a required variable but not necessarily a dimension
+        sample_dim_name = ds.time.dims[0]
+        return ds.isel({sample_dim_name: ic_indices})
 
 
 def get_initial_condition(
