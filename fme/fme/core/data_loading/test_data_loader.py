@@ -64,15 +64,19 @@ def _save_netcdf(filename, dim_sizes, variable_names, calendar):
 
 
 def _create_dataset_on_disk(
-    data_dir: pathlib.Path, calendar: str = "proleptic_gregorian", n_times: int = 3
+    data_dir: pathlib.Path,
+    calendar: str = "proleptic_gregorian",
+    data_dim_sizes=None,
+    n_times: int = 3,
 ) -> pathlib.Path:
+    if data_dim_sizes is None:
+        data_dim_sizes = {"time": n_times, "grid_yt": 16, "grid_xt": 32}
     seed = 0
     np.random.seed(seed)
     in_variable_names = ["foo", "bar", "baz"]
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
-    data_dim_sizes = {"time": n_times, "grid_yt": 16, "grid_xt": 32}
 
     data_path = data_dir / "data.nc"
     _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar)
@@ -150,6 +154,31 @@ def test_xarray_loader(tmp_path):
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(config, True, requirements)  # type: ignore
+    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+
+
+def test_xarray_loader_hpx(tmp_path):
+    """Checks that sigma coordinates are present."""
+    n_times = 3
+    data_dim_sizes = {"time": n_times, "face": 12, "width": 64, "height": 64}
+    _create_dataset_on_disk(tmp_path, data_dim_sizes=data_dim_sizes, n_times=n_times)
+    config = DataLoaderConfig(
+        [
+            XarrayDataConfig(
+                data_path=tmp_path, n_repeats=1, spatial_dimensions="healpix"
+            )
+        ],
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_data_loader(config, True, requirements)  # type: ignore
+    for batch in data.loader:
+        assert batch is not None
+        # expect healpix shape
+        assert batch.data["foo"].shape == (1, window_timesteps, 12, 64, 64)
+        break
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 

@@ -46,9 +46,13 @@ def _coord_value(name, size):
 
 
 def _save_netcdf(
-    filename, metadata: Mapping[str, Optional[VariableMetadata]], num_members=1
+    filename,
+    metadata: Mapping[str, Optional[VariableMetadata]],
+    num_members=1,
+    dim_sizes=None,
 ):
-    dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+    if dim_sizes is None:
+        dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
     data_vars = {}
     for name in metadata:
         data = np.random.randn(*list(dim_sizes.values()))

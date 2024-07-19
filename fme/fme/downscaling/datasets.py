@@ -15,6 +15,7 @@ from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import (
     Dataset,
     HorizontalCoordinates,
+    LatLonCoordinates,
     VariableMetadata,
 )
 from fme.core.data_loading.getters import get_dataset
@@ -133,7 +134,7 @@ class HorizontalSubsetDataset(Dataset):
         self.lat_interval = lat_interval
         self.lon_interval = lon_interval
 
-        coords: HorizontalCoordinates = dataset.horizontal_coordinates  # type: ignore
+        coords: LatLonCoordinates = dataset.horizontal_coordinates  # type: ignore
         lats = torch.tensor(
             [
                 i
@@ -177,11 +178,11 @@ class HorizontalSubsetDataset(Dataset):
         assert lats.numel() > 0, "No latitudes found in the specified range."
         assert lons.numel() > 0, "No longitudes found in the specified range."
 
-        self.mask_indices = HorizontalCoordinates(
+        self.mask_indices = LatLonCoordinates(
             lat=lats,
             lon=lons,
         )
-        self._horizontal_coordinates = HorizontalCoordinates(
+        self._horizontal_coordinates = LatLonCoordinates(
             lat=coords.lat[self.mask_indices.lat],
             lon=coords.lon[self.mask_indices.lon],
         )

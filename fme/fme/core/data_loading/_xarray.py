@@ -15,19 +15,20 @@ import xarray as xr
 import fme
 from fme.core import metrics
 from fme.core.typing_ import TensorDict
-from fme.core.winds import lon_lat_to_xyz
 
 from .config import Slice, TimeSlice, XarrayDataConfig
 from .data_typing import (
     Dataset,
+    HEALPixCoordinates,
     HorizontalCoordinates,
+    LatLonCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
 from .requirements import DataRequirements
 from .utils import (
     as_broadcasted_tensor,
-    get_lons_and_lats,
+    get_horizontal_dimensions,
     get_times,
     infer_horizontal_dimension_names,
     load_series_data,
@@ -153,25 +154,21 @@ class StaticDerivedData:
         "z": VariableMetadata(units="", long_name="Euclidean z-coordinate"),
     }
 
-    def __init__(self, lons, lats):
-        """
-        Args:
-            lons: 1D array of longitudes.
-            lats: 1D array of latitudes.
-        """
-        self._lats = lats
-        self._lons = lons
+    def __init__(self, coordinates: HorizontalCoordinates):
+        self._coords = coordinates
         self._x: Optional[torch.Tensor] = None
         self._y: Optional[torch.Tensor] = None
         self._z: Optional[torch.Tensor] = None
 
     def _get_xyz(self) -> TensorDict:
         if self._x is None or self._y is None or self._z is None:
-            lats, lons = np.broadcast_arrays(self._lats[:, None], self._lons[None, :])
-            x, y, z = lon_lat_to_xyz(lons, lats)
+            coords = self._coords
+            x, y, z = coords.xyz
+
             self._x = torch.as_tensor(x)
             self._y = torch.as_tensor(y)
             self._z = torch.as_tensor(z)
+
         return {"x": self._x, "y": self._y, "z": self._z}
 
     def __getitem__(self, name: str) -> torch.Tensor:
@@ -281,6 +278,7 @@ class XarrayDataset(Dataset):
         config: XarrayDataConfig,
         requirements: DataRequirements,
     ):
+        self._horizontal_coordinates: HorizontalCoordinates
         self.names = requirements.names
         self.path = config.data_path
         self.file_pattern = config.file_pattern
@@ -301,20 +299,17 @@ class XarrayDataset(Dataset):
             decode_times=False,
             engine=self.engine,
         )
-        lons, lats = get_lons_and_lats(first_dataset)
-        self.lon_dim, self.lat_dim = infer_horizontal_dimension_names(first_dataset)
-        self._static_derived_data = StaticDerivedData(lons, lats)
+        (
+            self._horizontal_coordinates,
+            self._area_weights,
+            self._static_derived_data,
+        ) = self.configure_horizontal_coordinates(config, first_dataset)
         (
             self.time_dependent_names,
             self.time_invariant_names,
             self.static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._area_weights = metrics.spherical_area_weights(lats, len(lons))
         self._sigma_coordinates = get_sigma_coordinates(first_dataset)
-        self._horizontal_coordinates = HorizontalCoordinates(
-            lat=torch.as_tensor(lats, device=fme.get_device()),
-            lon=torch.as_tensor(lons, device=fme.get_device()),
-        )
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -421,6 +416,46 @@ class XarrayDataset(Dataset):
             static_derived_names,
         )
 
+    def configure_horizontal_coordinates(self, config, first_dataset):
+        horizontal_coordinates: HorizontalCoordinates
+        area_weights: torch.Tensor
+        static_derived_data: StaticDerivedData
+        dims = get_horizontal_dimensions(first_dataset)
+
+        if config.spatial_dimensions == "latlon":
+            lons = dims[0]
+            lats = dims[1]
+            names = infer_horizontal_dimension_names(first_dataset)
+            lon_name = names[0]
+            lat_name = names[1]
+            horizontal_coordinates = LatLonCoordinates(
+                lon=torch.as_tensor(lons, device=fme.get_device()),
+                lat=torch.as_tensor(lats, device=fme.get_device()),
+                lat_name=lat_name,
+                lon_name=lon_name,
+            )
+            area_weights = metrics.spherical_area_weights(lats, len(lons))
+            static_derived_data = StaticDerivedData(horizontal_coordinates)
+        elif config.spatial_dimensions == "healpix":
+            face = dims[0]
+            height = dims[1]
+            width = dims[2]
+            horizontal_coordinates = HEALPixCoordinates(
+                face=torch.as_tensor(face, device=fme.get_device()),
+                height=torch.as_tensor(height, device=fme.get_device()),
+                width=torch.as_tensor(width, device=fme.get_device()),
+            )
+            # Area weights should be all 1's of shape (face, height, width),
+            # since area is uniform.
+            area_weights = torch.ones((len(face), len(height), len(width)))
+            static_derived_data = StaticDerivedData(horizontal_coordinates)
+        else:
+            raise ValueError(
+                f"unexpected config.spatial_dimensions {config.spatial_dimensions},"
+                " should be one of 'latlon' or 'healpix'"
+            )
+        return horizontal_coordinates, area_weights, static_derived_data
+
     @property
     def area_weights(self) -> torch.Tensor:
         return self._area_weights
@@ -495,9 +530,8 @@ class XarrayDataset(Dataset):
                 n_steps,
                 ds,
                 self.time_dependent_names,
-                time_dim="time",
-                lon_dim=self.lon_dim,
-                lat_dim=self.lat_dim,
+                "time",
+                self._horizontal_coordinates,
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
@@ -514,8 +548,8 @@ class XarrayDataset(Dataset):
         # load time-invariant variables from first dataset
         if len(self.time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
-            dims = ("time", self.lat_dim, self.lon_dim)
-            shape = (total_steps, ds.sizes[self.lat_dim], ds.sizes[self.lon_dim])
+            dims = ["time"] + self._horizontal_coordinates.dims
+            shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
             for name in self.time_invariant_names:
                 variable = ds[name].variable
                 tensors[name] = as_broadcasted_tensor(variable, dims, shape)

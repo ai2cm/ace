@@ -65,6 +65,8 @@ class XarrayDataConfig:
         engine: Backend for xarray.open_dataset. Currently supported options
             are "netcdf4" (the default) and "h5netcdf". Only valid when using
             XarrayDataset.
+        spatial_dimensions: Specifies the spatial dimensions for the grid, default
+            is lat/lon.
         subset: Slice defining a subset of the XarrayDataset to load. This can
             either be a `Slice` of integer indices or a `TimeSlice` of timestamps.
         infer_timestep: Whether to infer the timestep from the provided data.
@@ -80,6 +82,7 @@ class XarrayDataConfig:
     file_pattern: str = "*.nc"
     n_repeats: int = 1
     engine: Optional[Literal["netcdf4", "h5netcdf", "zarr"]] = None
+    spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
 
