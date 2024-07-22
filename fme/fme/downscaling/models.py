@@ -24,6 +24,7 @@ class ModelOutputs:
     prediction: TensorMapping
     target: TensorMapping
     loss: torch.Tensor
+    latent_steps: List[torch.Tensor]
 
 
 def _tensor_mapping_to_device(
@@ -163,7 +164,9 @@ class Model:
         prediction = self.normalizer.fine.denormalize(
             self.out_packer.unpack(predicted_norm, axis=channel_axis)
         )
-        return ModelOutputs(prediction=prediction, target=target, loss=loss)
+        return ModelOutputs(
+            prediction=prediction, target=target, loss=loss, latent_steps=[]
+        )
 
     def get_state(self) -> Mapping[str, Any]:
         return {
@@ -365,7 +368,9 @@ class DiffusionModel:
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=channel_axis)
         )
-        return ModelOutputs(prediction=denoised, target=target, loss=loss)
+        return ModelOutputs(
+            prediction=denoised, target=target, loss=loss, latent_steps=[]
+        )
 
     @torch.no_grad()
     def generate_on_batch(
@@ -383,7 +388,7 @@ class DiffusionModel:
         )
         latents = torch.randn_like(targets_norm)
 
-        samples_norm = edm_sampler(
+        samples_norm, latent_steps = edm_sampler(
             self.module,
             latents,
             coarse_norm,
@@ -404,6 +409,7 @@ class DiffusionModel:
                 self.downscale_factor,
             )
             samples_norm += base_prediction
+            latent_steps = [step + base_prediction for step in latent_steps]
 
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm, axis=channel_axis)
@@ -411,9 +417,7 @@ class DiffusionModel:
 
         loss = self.loss(targets_norm, samples_norm)
         return ModelOutputs(
-            prediction=samples,
-            target=batch.fine,
-            loss=loss,
+            prediction=samples, target=batch.fine, loss=loss, latent_steps=latent_steps
         )
 
     def get_state(self) -> Mapping[str, Any]:

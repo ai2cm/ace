@@ -136,7 +136,8 @@ class Trainer:
             self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
+                    outputs=outputs,
+                    coarse=inputs.coarse,
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
@@ -196,14 +197,13 @@ class Trainer:
                 )
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
+                    outputs=outputs,
+                    coarse=inputs.coarse,
                 )
                 generated_outputs = self.model.generate_on_batch(inputs)
                 generation_aggregator.record_batch(
-                    generated_outputs.loss,
-                    outputs.target,
-                    outputs.prediction,
-                    inputs.coarse,
+                    outputs=generated_outputs,
+                    coarse=inputs.coarse,
                 )
 
         wandb = WandB.get_instance()

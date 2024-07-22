@@ -21,6 +21,7 @@ from fme.downscaling.metrics_and_maths import (
     interpolate,
     map_tensor_mapping,
 )
+from fme.downscaling.models import ModelOutputs
 
 
 def _detach_and_to_cpu(x: TensorMapping) -> TensorMapping:
@@ -367,6 +368,35 @@ class RelativeMSEInterpAggregator:
         return {k: prediction_mse[k] / interpolated_mse[k] for k in prediction_mse}
 
 
+class LatentStepAggregator:
+    def __init__(self) -> None:
+        self._latent_steps: List[torch.Tensor] = []
+
+    def _tile_time_dim(self, x: torch.Tensor) -> torch.Tensor:
+        time_dim = -3
+        return x.unsqueeze(time_dim).repeat_interleave(2, dim=time_dim)
+
+    @torch.no_grad()
+    def record_batch(self, latent_steps: List[torch.Tensor]) -> None:
+        self._latent_steps = latent_steps
+
+    def get(self) -> List[Any]:
+        if len(self._latent_steps) == 0:
+            return []
+
+        wandb = WandB.get_instance()
+        images = []
+        for i, im in enumerate(self._latent_steps):
+            image = im[0].squeeze(0).cpu().numpy()  # select 1st example
+            fig = plot_imshow(image, use_colorbar=False)
+            images.append(wandb.Image(fig, caption=str(i)))
+            plt.close(fig)
+        return images
+
+    def get_wandb(self) -> List[Any]:
+        return self.get()
+
+
 class _ComparisonAggregator(Protocol):
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
         ...
@@ -395,6 +425,8 @@ class Aggregator:
         ssim_kwargs: Optional[Mapping[str, Any]] = None,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> None:
+        self.downscale_factor = downscale_factor
+
         def _area_weighted_rmse(truth, pred):
             return metrics.root_mean_squared_error(truth, pred, area_weights)
 
@@ -421,14 +453,13 @@ class Aggregator:
         self._coarse_comparisons = {
             "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
         }
+        self._latent_step_aggregator = LatentStepAggregator()
         self.loss = Mean(torch.mean)
 
     @torch.no_grad()
     def record_batch(
         self,
-        loss: torch.Tensor,
-        target: TensorMapping,
-        prediction: TensorMapping,
+        outputs: ModelOutputs,
         coarse: TensorMapping,
     ) -> None:
         """
@@ -439,16 +470,22 @@ class Aggregator:
             pred: Model outputs
         """
         for _, comparison_aggregator in self._comparisons.items():
-            comparison_aggregator.record_batch(target, prediction)
+            comparison_aggregator.record_batch(outputs.target, outputs.prediction)
 
         for _, coarse_comparison_aggregator in self._coarse_comparisons.items():
-            coarse_comparison_aggregator.record_batch(target, prediction, coarse)
+            coarse_comparison_aggregator.record_batch(
+                outputs.target, outputs.prediction, coarse
+            )
 
-        for input, input_type in zip((target, prediction), ("target", "prediction")):
+        for input, input_type in zip(
+            (outputs.target, outputs.prediction), ("target", "prediction")
+        ):
             for _, intrinsic_aggregator in self._intrinsics[input_type].items():
                 intrinsic_aggregator.record_batch(input)
 
-        self.loss.record_batch({"loss": loss})
+        self._latent_step_aggregator.record_batch(outputs.latent_steps)
+
+        self.loss.record_batch({"loss": outputs.loss})
 
     @torch.no_grad()
     def get_wandb(
@@ -483,6 +520,11 @@ class Aggregator:
                     for (var_name, v) in intrinsic_agg.get_wandb().items()
                 }
                 ret.update(_metric_values)
+
+        latent_steps = self._latent_step_aggregator.get_wandb()
+
+        if len(latent_steps) > 0:
+            ret[f"{prefix}snapshot/latent_steps"] = latent_steps
 
         return ret
 
