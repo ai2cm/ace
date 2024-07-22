@@ -47,7 +47,8 @@ class Evaluator:
             with torch.no_grad():
                 outputs = self.model.generate_on_batch(inputs)
                 aggregator.record_batch(
-                    outputs.loss, outputs.target, outputs.prediction, inputs.coarse
+                    outputs=outputs,
+                    coarse=inputs.coarse,
                 )
 
         logs = aggregator.get_wandb()

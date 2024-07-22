@@ -13,6 +13,7 @@ from fme.downscaling.aggregators import (
     MeanMapAggregator,
     SnapshotAggregator,
 )
+from fme.downscaling.models import ModelOutputs
 
 
 def assert_tensor_mapping_all_close(x: TensorMapping, y: TensorMapping):
@@ -151,7 +152,10 @@ def test_map_aggregator(n_steps: int):
         pytest.param("foo", "foo/", id="prefix=foo"),
     ],
 )
-def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
+@pytest.mark.parametrize("n_latent_steps", [0, 2])
+def test_performance_metrics(
+    prefix, expected_prefix, n_latent_steps, percentiles=[99.999]
+):
     downscale_factor = 2
     shape = (2, 16, 32)
     _, n_lat, n_lon = shape
@@ -164,6 +168,8 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
         "x": torch.ones(2, shape[1] // downscale_factor, shape[2] // downscale_factor)
     }
 
+    latent_steps = [torch.zeros(*shape) for _ in range(n_latent_steps)]
+
     with mock_wandb():
         aggregator = Aggregator(
             area_weights,
@@ -172,7 +178,15 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
             n_histogram_bins=n_bins,
             percentiles=percentiles,
         )
-        aggregator.record_batch(torch.tensor(0.0), target, prediction, coarse)
+        aggregator.record_batch(
+            outputs=ModelOutputs(
+                prediction=prediction,
+                target=target,
+                latent_steps=latent_steps,
+                loss=torch.tensor(0.0),
+            ),
+            coarse=coarse,
+        )
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
     assert f"{expected_prefix}loss" in wandb_metrics
@@ -205,6 +219,9 @@ def test_performance_metrics(prefix, expected_prefix, percentiles=[99.999]):
         "snapshot/image-error",
         "snapshot/image-full-field",
     ]:
+        num_metrics += 1
+
+    if n_latent_steps > 0:
         num_metrics += 1
 
     for data_type in ["target", "prediction"]:

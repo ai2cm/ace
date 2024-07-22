@@ -34,6 +34,7 @@ def edm_sampler(
 
     # Main sampling loop.
     x_next = latents.to(torch.float64) * t_steps[0]
+    latent_steps = [x_next]
     for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])): # 0, ..., N-1
         x_cur = x_next
 
@@ -53,7 +54,9 @@ def edm_sampler(
             d_prime = (x_next - denoised) / t_next
             x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
 
-    return x_next
+        latent_steps.append(x_next)
+
+    return x_next, latent_steps
 
 
 #----------------------------------------------------------------------------
