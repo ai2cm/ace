@@ -42,9 +42,25 @@ else ifeq ($(RESOLUTION),4deg)
 	NAME_AMIP ?= $(NAME_AMIP_4DEG)
 endif
 
-# separate netCDF output name to avoid retrieving a default from above, must be given by user
+# the netCDF generation step is done locally usually, so user sets input and output directories
+NC_INPUT ?=
 NC_OUTPUT ?=
 
+SHIELD_RES ?= c96
+
+.PHONY: shield_AMIP_dataset
+shield_AMIP_dataset:
+	./compute_dataset.sh \
+	--config configs/shield-amip-ensemble-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
+
+.PHONY: shield_AMIP_monthly_netcdfs
+shield_AMIP_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url $(NC_INPUT) \
+	--n-ic 2 \
+	--output-dir $(NC_OUTPUT) \
+	--start-date 1940-01-01 \
+	--end-date 2021-12-31
 
 .PHONY: shield_c24_4deg_climSST_dataset
 shield_c24_4deg_climSST_dataset:

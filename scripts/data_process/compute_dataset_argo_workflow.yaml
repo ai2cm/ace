@@ -92,10 +92,10 @@ spec:
         resources:
           limits:
             cpu: "8000m"
-            memory: "27Gi"
+            memory: "48Gi"
           requests:
             cpu: "7500m"
-            memory: "27Gi"
+            memory: "48Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |
