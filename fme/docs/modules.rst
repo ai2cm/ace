@@ -17,7 +17,7 @@ The following module types are available:
 
 .. autofunction:: fme.ace.get_available_module_types
 
-We primarily use Spherical Fourier Neural Operator (SFNO) networks in our work.
+The following module builders are available:
 
 .. autoclass:: fme.ace.SphericalFourierNeuralOperatorBuilder
    :members:
@@ -31,3 +31,8 @@ We primarily use Spherical Fourier Neural Operator (SFNO) networks in our work.
    :show-inheritance:
    :noindex:
 
+.. autoclass:: fme.ace.HEALPixRecUNetBuilder
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
