@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import os
 import warnings
@@ -200,14 +201,22 @@ def _get_fs_protocol_kwargs(path):
     protocol = _get_protocol(path)
     kwargs = {}
     if protocol == "gs":
-        # If necessary switch this to look for environment var credentials
         # https://gcsfs.readthedocs.io/en/latest/api.html#gcsfs.core.GCSFileSystem
-        logger.warning(
-            "GCS currently expects user credentials authenticated using"
-            " `gcloud auth application-default login`. This is not recommended for "
-            "production use."
-        )
-        kwargs["token"] = "google_default"
+        key_json = os.environ.get("FSSPEC_GS_KEY_JSON", None)
+        key_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", None)
+
+        if key_json is not None:
+            token = json.loads(key_json)
+        elif key_file is not None:
+            token = key_file
+        else:
+            logger.warning(
+                "GCS currently expects user credentials authenticated using"
+                " `gcloud auth application-default login`. This is not recommended for "
+                "production use."
+            )
+            token = "google_default"
+        kwargs["token"] = token
     elif protocol == "s3":
         # https://s3fs.readthedocs.io/en/latest/#s3-compatible-storage
         env_vars = [
