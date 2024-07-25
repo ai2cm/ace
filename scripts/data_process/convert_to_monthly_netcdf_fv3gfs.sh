@@ -1,7 +1,6 @@
 #!/bin/bash
 
 # This script launches N_IC jobs to convert all GCS zarr data to local monthly netCDFs
-# and imposes a train (N_IC - 1) / validation (1) data split.
 
 while [[ "$#" -gt 0 ]]
 do case $1 in
@@ -45,25 +44,13 @@ fi
 
 
 
-# training
-for IC in $(seq 1 $(( N_IC - 1 ))); do
+for IC in $(seq 1 $(( N_IC ))); do
     IC_STR=$(printf "%04d" ${IC})
     INPUT_URL=${BASE_INPUT_URL}/ic_${IC_STR}.zarr
-    OUTPUT_DIR=${BASE_OUTPUT_DIR}/train/ic_${IC_STR}
+    OUTPUT_DIR=${BASE_OUTPUT_DIR}/ic_${IC_STR}
     python convert_to_monthly_netcdf.py \
         $INPUT_URL \
         $OUTPUT_DIR \
         --start-date $START_DATE \
         --end-date $END_DATE &
 done
-
-# validation
-IC_STR=$(printf "%04d" ${N_IC})
-INPUT_URL=${BASE_INPUT_URL}/ic_${IC_STR}.zarr
-OUTPUT_DIR=${BASE_OUTPUT_DIR}/validation/ic_${IC_STR}
-python convert_to_monthly_netcdf.py \
-    $INPUT_URL \
-    $OUTPUT_DIR \
-    --start-date $START_DATE \
-    --end-date $END_DATE &
-
