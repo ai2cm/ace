@@ -1,3 +1,4 @@
+import dataclasses
 import datetime
 
 import numpy as np
@@ -32,11 +33,13 @@ def test_sfno_init(shape):
         "builder": sfno_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
+        "normalization": dataclasses.asdict(
+            FromStateNormalizer(
+                state={
+                    "means": {"x": float(np.random.randn(1))},
+                    "stds": {"x": float(np.random.randn(1))},
+                }
+            )
         ),
     }
     area = torch.ones((1, 16, 32)).to(get_device())

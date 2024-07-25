@@ -181,11 +181,13 @@ def test_hpx_init(shape):
         "builder": hpx_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
+        "normalization": dataclasses.asdict(
+            FromStateNormalizer(
+                state={
+                    "means": {"x": float(np.random.randn(1))},
+                    "stds": {"x": float(np.random.randn(1))},
+                }
+            )
         ),
     }
     area = th.ones((1, 16, 32)).to(device)
