@@ -1,45 +1,67 @@
-# full-model
+# ACE: AI2 Climate Emulator
+This repo contains the inference code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)).
 
-Create an ML-only climate model.
+## DISCLAIMER
+This is rapidly changing research software. We make no guarantees of maintaining backwards compatibility.
 
-Development documentation can be found on [github-pages](https://ai2cm.github.io/full-model/html/index.html).
+## Quickstart
 
-## Development
+### 1. Install
 
-This code is easiest to develop with access to an NVIDIA GPU. Therefore it is
-recommended to develop within an [interactive Beaker session](https://beaker-docs.apps.allenai.org/start/interactive.html).
-Once you have logged into a Beaker node and cloned this repo, call
-```
-make build_beaker_image
-```
-and then
-```
-make launch_beaker_session
-```
-Building the beaker image will be slow the first time, since the base
-image must be pulled from NIVDIA's container registry. It will be faster in
-subsequent calls on the same day. The code in this repository will be bind-mounted
-in the interactive session so that code changes outside the session will be
-reflected inside the session.
-
-Alternatively, if you'd like to skip the image building step since you already
-have a particular beaker image to use, you can do something like:
-
-```
-make VERSION=5df2501e58d5a585b3551979cc8ca1bb9f1585fc launch_beaker_session
-```
-
-## Environment
-
-The most reliable way to ensure that your development environment is the same
-as the environment used for our training jobs is to run tests within our
-docker/beaker image. This is described in the previous "Development" section.
-
-There is also tooling to install a conda environment in which our unit
-tests can run. Assuming you already have conda/miniconda installed, the
-following rule:
+Clone this repository. Then assuming [conda](https://docs.conda.io/en/latest/)
+is available, run
 ```
 make create_environment
 ```
-will create conda environment called `fme`, which you can then
-activate (`conda activate fme`) and use.
+to create a conda environment called `fme` with dependencies and source
+code installed. Alternatively, a Docker image can be built with `make build_docker_image`.
+You may verify installation by running `pytest fme/`.
+
+### 2. Download data and checkpoint
+
+The checkpoint and a 1-year subsample of the validation data are available at
+[this Zenodo repository](https://zenodo.org/doi/10.5281/zenodo.10791086).
+Download these to your local filesystem.
+
+Alternatively, if interested in the complete dataset, this is available via a public
+[requester pays](https://cloud.google.com/storage/docs/requester-pays)
+Google Cloud Storage bucket. For example, the 10-year validation data (approx. 190GB)
+can be downloaded with:
+```
+gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
+```
+It is possible to download a portion of the dataset only, but it is necessary to have
+enough data to span the desired prediction period. The checkpoint is also available on GCS at
+`gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar`.
+
+### 3. Update configuration and run
+Update the paths in the [example config](examples/config-inference.yaml). Then in the
+`fme` conda environment, run inference with:
+```
+python -m fme.fcn_training.inference.inference examples/config-inference.yaml
+```
+
+## Configuration options
+See the `InferenceConfig` class in [this file](fme/fme/fcn_training/inference/inference.py) for
+description of configuration options. The [example config](examples/config-inference.yaml)
+shows some useful defaults for performing a 400-step simulation (100 days, with the 6-hour time step).
+
+## Performance
+While inference can be performed without a GPU, it may be very slow in that case. In addition,
+I/O performance is critical for fast inference due to loading of forcing data and target data
+during inference.
+
+## Analyzing output
+Various climate performance metrics are computed online by the inference code. These can be viewed via
+[wandb](https://wandb.ai) by setting `logging.log_to_wandb` to true and updating `logging.entity`
+to your wandb entity. Additionally, raw output data is saved to netCDF by the inference code.
+
+## Available datasets
+Two versions of the dataset described in [arxiv:2310.02074](https://arxiv.org/abs/2310.02074)
+are available:
+```
+gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-zarrs
+gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs
+```
+The `zarr` format is convenient for ad-hoc analysis. The netCDF version contains our
+train/validation split which was used for training and inference.
