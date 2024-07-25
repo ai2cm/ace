@@ -1,0 +1,19 @@
+experiment_dir: inference_output
+n_forward_steps: 400  # 100 days
+forward_steps_in_memory: 50
+checkpoint_path: ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+  entity: your_wandb_entity
+initial_condition:
+  path: initial_condition/data.nc
+forcing_loader:
+  dataset:
+    data_path: forcing
+  num_data_workers: 8
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
