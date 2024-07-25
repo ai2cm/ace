@@ -44,15 +44,6 @@ import sys
 import torch as th
 import torch.nn as nn
 
-# TODO: residual I suppose - this was also in modulus
-# sys.path.append("/home/disk/quicksilver/nacc/dlesm/HealPixPad")
-have_healpixpad = True
-try:
-    from healpixpad import HEALPixPad
-except ImportError:
-    logging.warn("Warning, cannot find healpixpad module")
-    have_healpixpad = False
-
 
 class HEALPixFoldFaces(nn.Module):
     """Class that folds the faces of a HealPIX tensor"""
@@ -115,56 +106,6 @@ class HEALPixUnfoldFaces(nn.Module):
         tensor = th.reshape(tensor, shape=(-1, self.num_faces, C, H, W))
 
         return tensor
-
-
-class HEALPixPaddingv2(nn.Module):
-    """
-    Padding layer for data on a HEALPix sphere. This version uses a faster method to calculate the padding.
-    The requirements for using this layer are as follows:
-    - The last three dimensions are (face=12, height, width)
-    - The first four indices in the faces dimension [0, 1, 2, 3] are the faces on the northern hemisphere
-    - The second four indices in the faces dimension [4, 5, 6, 7] are the faces on the equator
-    - The last four indices in the faces dimension [8, 9, 10, 11] are the faces on the southern hemisphere
-
-    Orientation and arrangement of the HEALPix faces are outlined above.
-
-    TODO: Missing library to use this class. Need to see if we can get it, if not needs to be removed
-    """
-
-    def __init__(self, padding: int):  # pragma: no cover
-        """
-        Args:
-            padding: The padding size
-        """
-        super().__init__()
-        self.unfold = HEALPixUnfoldFaces(num_faces=12)
-        self.fold = HEALPixFoldFaces()
-        self.padding = HEALPixPad(padding=padding)
-
-    def forward(self, x):  # pragma: no cover
-        """
-        Pad each face consistently with its according neighbors in the HEALPix (see ordering and neighborhoods above).
-        Assumes the Tensor is folded
-
-        Parmaters
-        ---------
-        data: th.Tensor
-            The input tensor of shape [..., F, H, W] where each face is to be padded in its HPX context
-
-        Returns
-        -------
-        th.Tensor
-            The padded tensor where each face's height and width are increased by 2*p
-        """
-        th.cuda.nvtx.range_push("HEALPixPaddingv2:forward")
-
-        x = self.unfold(x)
-        xp = self.padding(x)
-        xp = self.fold(xp)
-
-        th.cuda.nvtx.range_pop()
-
-        return xp
 
 
 class HEALPixPadding(nn.Module):
@@ -514,11 +455,13 @@ class HEALPixLayer(nn.Module):
         else:
             enable_nhwc = False
 
+        if "enable_healpixpad" in kwargs and kwargs["enable_healpixpad"]:
+            raise NotImplementedError(
+                "HEALPixPaddingv2 is not available in this environment"
+            )
+
         if "enable_healpixpad" in kwargs:
-            enable_healpixpad = kwargs["enable_healpixpad"]
             del kwargs["enable_healpixpad"]
-        else:
-            enable_healpixpad = False
 
         if not isinstance(layer, type) or not issubclass(layer, th.nn.Module):
             raise TypeError(
@@ -530,17 +473,7 @@ class HEALPixLayer(nn.Module):
             kernel_size = 3 if "kernel_size" not in kwargs else kwargs["kernel_size"]
             dilation = 1 if "dilation" not in kwargs else kwargs["dilation"]
             padding = ((kernel_size - 1) // 2) * dilation
-            if (
-                enable_healpixpad
-                and have_healpixpad
-                and th.cuda.is_available()
-                and not enable_nhwc
-            ):  # pragma: no cover
-                # TODO: missing library, need to decide if we can get library
-                # or if this needs to be removed
-                layers.append(HEALPixPaddingv2(padding=padding))
-            else:
-                layers.append(HEALPixPadding(padding=padding, enable_nhwc=enable_nhwc))
+            layers.append(HEALPixPadding(padding=padding, enable_nhwc=enable_nhwc))
 
         layers.append(layer(**kwargs))
         self.layers = nn.Sequential(*layers)
