@@ -1,0 +1,275 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: compute-fme-dataset-ensemble-
+spec:
+  entrypoint: compute-fme-dataset-ensemble
+  volumes:
+    - name: gcp-key-secret
+      secret:
+        defaultMode: 420
+        secretName: gcp-key
+  arguments:
+    parameters:
+    - name: python_script
+    - name: get_stats_script
+    - name: combine_stats_script
+    - name: upload_stats_script
+    - name: config
+    - name: names
+    - name: run_directories
+    - name: output_directory
+    - name: runs_count_minus_one
+    - name: compute_dataset
+      value: "true"  # default value, can be overridden
+  templates:
+    - name: compute-fme-dataset-ensemble
+      steps:
+      - - name: compute-fme-dataset-individual
+          when: "{{workflow.parameters.compute_dataset}} == true"
+          template: compute-fme-dataset-individual
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.python_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+            - name: names
+              value: "{{workflow.parameters.names}}"
+            - name: run_directories
+              value: "{{workflow.parameters.run_directories}}"
+            - name: output_directory
+              value: "{{workflow.parameters.output_directory}}"
+            - name: run
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.runs_count_minus_one}}"
+      - - name: get-stats
+          template: get-stats
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.get_stats_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+            - name: run
+              value: "{{item}}"
+          withSequence:
+            start: "0"
+            end: "{{workflow.parameters.runs_count_minus_one}}"
+      - - name: combine-stats
+          template: combine-stats
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.combine_stats_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+      - - name: upload-beaker-stats
+          template: upload-beaker-stats
+          arguments:
+            parameters:
+            - name: python_script
+              value: "{{workflow.parameters.upload_stats_script}}"
+            - name: config
+              value: "{{workflow.parameters.config}}"
+    - name: compute-fme-dataset-individual
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+          - name: names
+          - name: run_directories
+          - name: output_directory
+          - name: run
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "48Gi"
+          requests:
+            cpu: "7500m"
+            memory: "48Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            run={{inputs.parameters.run}}
+            names=({{inputs.parameters.names}})
+            run_directories=({{inputs.parameters.run_directories}})
+            output_directory={{inputs.parameters.output_directory}}
+
+            name="${names[${run}]}"
+            run_directory="${run_directories[${run}]}"
+
+            output_store=${output_directory}/${name}.zarr
+
+            python script.py --config config.yaml \
+              --run-directory ${run_directory} \
+              --output-store ${output_store}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+    - name: compute-fme-dataset-ensemble-stats
+      steps:
+        - - name: get-stats
+            template: get-stats
+            arguments:
+              parameters:
+              - name: python_script
+                value: "{{workflow.parameters.get_stats_script}}"
+              - name: config
+                value: "{{workflow.parameters.config}}"
+              - name: run
+                value: "{{item}}"
+            withSequence:
+              start: "0"
+              end: "{{workflow.parameters.runs_count_minus_one}}"
+        - - name: combine-stats
+            template: combine-stats
+            arguments:
+              parameters:
+              - name: python_script
+                value: "{{workflow.parameters.combine_stats_script}}"
+              - name: config
+                value: "{{workflow.parameters.config}}"
+    - name: get-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+          - name: run
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            run={{inputs.parameters.run}}
+
+            python script.py config.yaml ${run}
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+    - name: combine-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+      container:
+        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            python script.py config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret
+    - name: upload-beaker-stats
+      tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          value: med-sim-pool
+      inputs:
+        parameters:
+          - name: python_script
+          - name: config
+      container:
+        image: us.gcr.io/vcm-ml/beaker-py
+        resources:
+          limits:
+            cpu: "8000m"
+            memory: "27Gi"
+          requests:
+            cpu: "7500m"
+            memory: "27Gi"
+        command: ["bash", "-c", "-e"]
+        args:
+          - |
+            cat << EOF > script.py
+            {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > config.yaml
+            {{inputs.parameters.config}}
+            EOF
+
+            python script.py config.yaml
+        env:
+          - name: GOOGLE_APPLICATION_CREDENTIALS
+            value: /secret/gcp-credentials/key.json
+          - name: CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+            value: /secret/gcp-credentials/key.json
+          - name: BEAKER_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: beaker-key-andrep
+                key: BEAKER_USER_KEY
+        volumeMounts:
+          - mountPath: /secret/gcp-credentials
+            name: gcp-key-secret

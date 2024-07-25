@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Mapping, Optional
+from typing import Dict, Iterable, List, Mapping, Optional, Union
 
 import netCDF4
 import numpy as np
@@ -7,10 +7,25 @@ import torch
 import torch.jit
 
 from fme.core.device import get_device
+from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
 class NormalizationConfig:
+    """
+    Configuration for normalizing data.
+
+    Either global_means_path and global_stds_path or explicit means and stds
+    must be provided.
+
+    Attributes:
+        global_means_path: Path to a netCDF file containing global means.
+        global_stds_path: Path to a netCDF file containing global stds.
+        exclude_names: Names to exclude from normalization.
+        means: Mapping from variable names to means.
+        stds: Mapping from variable names to stds.
+    """
+
     global_means_path: Optional[str] = None
     global_stds_path: Optional[str] = None
     exclude_names: Optional[List[str]] = None
@@ -51,14 +66,19 @@ class NormalizationConfig:
             return StandardNormalizer(means=means, stds=stds)
 
 
+@dataclasses.dataclass
 class FromStateNormalizer:
     """
     An alternative to NormalizationConfig which provides a normalizer
-    initialized from a serializable state.
+    initialized from a serializable state. This is not a public configuration
+    class, but instead allows for loading trained models that have been
+    serialized to disk, using the pre-existing normalization state.
+
+    Attributes:
+        state: State dict of a normalizer.
     """
 
-    def __init__(self, state):
-        self.state = state
+    state: Dict[str, Dict[str, float]]
 
     def build(self, names: List[str]):
         return StandardNormalizer.from_state(self.state)
@@ -71,16 +91,16 @@ class StandardNormalizer:
 
     def __init__(
         self,
-        means: Dict[str, torch.Tensor],
-        stds: Dict[str, torch.Tensor],
+        means: TensorDict,
+        stds: TensorDict,
     ):
         self.means = means
         self.stds = stds
 
-    def normalize(self, tensors: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def normalize(self, tensors: TensorDict) -> TensorDict:
         return _normalize(tensors, means=self.means, stds=self.stds)
 
-    def denormalize(self, tensors: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def denormalize(self, tensors: TensorDict) -> TensorDict:
         return _denormalize(tensors, means=self.means, stds=self.stds)
 
     def get_state(self):
@@ -88,8 +108,8 @@ class StandardNormalizer:
         Returns state as a serializable data structure.
         """
         return {
-            "means": {k: float(v.cpu().numpy()) for k, v in self.means.items()},
-            "stds": {k: float(v.cpu().numpy()) for k, v in self.stds.items()},
+            "means": {k: float(v.cpu().numpy().item()) for k, v in self.means.items()},
+            "stds": {k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
         }
 
     @classmethod
@@ -110,10 +130,10 @@ class StandardNormalizer:
 
 @torch.jit.script
 def _normalize(
-    tensors: Dict[str, torch.Tensor],
-    means: Dict[str, torch.Tensor],
-    stds: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+    tensors: TensorDict,
+    means: TensorDict,
+    stds: TensorDict,
+) -> TensorDict:
     return {
         k: (t - means[k]) / stds[k] if k in means.keys() else t
         for k, t in tensors.items()
@@ -122,10 +142,10 @@ def _normalize(
 
 @torch.jit.script
 def _denormalize(
-    tensors: Dict[str, torch.Tensor],
-    means: Dict[str, torch.Tensor],
-    stds: Dict[str, torch.Tensor],
-) -> Dict[str, torch.Tensor]:
+    tensors: TensorDict,
+    means: TensorDict,
+    stds: TensorDict,
+) -> TensorDict:
     return {
         k: t * stds[k] + means[k] if k in means.keys() else t
         for k, t in tensors.items()
@@ -135,16 +155,38 @@ def _denormalize(
 def get_normalizer(
     global_means_path, global_stds_path, names: List[str]
 ) -> StandardNormalizer:
-    means = load_Dict_from_netcdf(global_means_path, names)
+    means = load_dict_from_netcdf(
+        global_means_path, names, defaults={"x": 0.0, "y": 0.0, "z": 0.0}
+    )
     means = {k: torch.as_tensor(v, dtype=torch.float) for k, v in means.items()}
-    stds = load_Dict_from_netcdf(global_stds_path, names)
+    stds = load_dict_from_netcdf(
+        global_stds_path, names, defaults={"x": 1.0, "y": 1.0, "z": 1.0}
+    )
     stds = {k: torch.as_tensor(v, dtype=torch.float) for k, v in stds.items()}
     return StandardNormalizer(means=means, stds=stds)
 
 
-def load_Dict_from_netcdf(path, names) -> Dict[str, np.ndarray]:
+def load_dict_from_netcdf(
+    path: str, names: Iterable[str], defaults: Mapping[str, Union[float, np.ndarray]]
+) -> Dict[str, Union[float, np.ndarray]]:
+    """
+    Load a dictionary of variables from a netCDF file.
+
+    Args:
+        path: Path to the netCDF file.
+        names: List of variable names to load.
+        defaults: Dictionary of default values for each variable, if not found
+            in the netCDF file.
+    """
     ds = netCDF4.Dataset(path)
     ds.set_auto_mask(False)
-    Dict = {c: ds.variables[c][:] for c in names}
+    result = {}
+    for c in names:
+        if c in ds.variables:
+            result[c] = ds.variables[c][:]
+        elif c in defaults:
+            result[c] = defaults[c]
+        else:
+            raise ValueError(f"Variable {c} not found in {path}")
     ds.close()
-    return Dict
+    return result

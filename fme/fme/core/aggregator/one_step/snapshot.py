@@ -1,13 +1,13 @@
-from typing import Mapping, Optional
+from typing import Dict, Mapping, Optional
 
-import numpy as np
+import matplotlib.pyplot as plt
 import torch
 
-from fme.core.data_loading.typing import VariableMetadata
-from fme.core.device import get_device
-from fme.core.wandb import WandB
+from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image, WandB
 
-wandb = WandB.get_instance()
+from ..plotting import get_cmap_limits, plot_imshow
 
 
 class SnapshotAggregator:
@@ -45,10 +45,10 @@ class SnapshotAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
     ):
         self._loss = loss
         self._target_data = target_data
@@ -57,7 +57,7 @@ class SnapshotAggregator:
         self._gen_data_norm = gen_data_norm
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str) -> Dict[str, Image]:
         """
         Returns logs as can be reported to WandB.
 
@@ -68,17 +68,22 @@ class SnapshotAggregator:
         input_time = 0
         target_time = 1
         image_logs = {}
+        wandb = WandB.get_instance()
         for name in self._gen_data.keys():
             # use first sample in batch
-            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0]
-            target = self._target_data[name].select(dim=time_dim, index=target_time)[0]
-            input = self._target_data[name].select(dim=time_dim, index=input_time)[0]
+            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0].cpu()
+            target = (
+                self._target_data[name].select(dim=time_dim, index=target_time)[0].cpu()
+            )
+            input = (
+                self._target_data[name].select(dim=time_dim, index=input_time)[0].cpu()
+            )
             gap_shape = (input.shape[-2], 4)
-            gap = torch.full(gap_shape, target.min()).to(get_device())
-            gap_res = torch.full(gap_shape, (target - input).min()).to(get_device())
+            gap = torch.full(gap_shape, target.min())
+            gap_res = torch.full(gap_shape, (target - input).min())
             images = {}
-            images["error"] = gen - target
-            images["full-field"] = torch.cat((gen, gap, target), axis=1)
+            images["error"] = (gen - target).numpy()
+            images["full-field"] = torch.cat((gen, gap, target), axis=1).numpy()
             images["residual"] = torch.cat(
                 (
                     gen - input,
@@ -86,21 +91,29 @@ class SnapshotAggregator:
                     target - input,
                 ),
                 axis=1,
-            )
+            ).numpy()
             for key, data in images.items():
-                caption = self._get_caption(key, name, data)
-                data = np.flip(data.cpu().numpy(), axis=-2)
-                wandb_image = wandb.Image(data, caption=caption)
+                if key == "error" or key == "residual":
+                    diverging = True
+                    cmap = "RdBu_r"
+                else:
+                    diverging = False
+                    cmap = None
+                vmin, vmax = get_cmap_limits(data, diverging=diverging)
+                caption = self._get_caption(key, name, vmin, vmax)
+                fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
+                wandb_image = wandb.Image(fig, caption=caption)
+                plt.close(fig)
                 image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
         return image_logs
 
-    def _get_caption(self, caption_key: str, name: str, data: torch.Tensor) -> str:
+    def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
         if name in self._metadata:
             caption_name = self._metadata[name].long_name
             units = self._metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
-        caption = self._captions[caption_key].format(name=caption_name, units=units)
-        caption += f" vmin={data.min():.4g}, vmax={data.max():.4g}."
+        caption = self._captions[key].format(name=caption_name, units=units)
+        caption += f" vmin={vmin:.4g}, vmax={vmax:.4g}."
         return caption

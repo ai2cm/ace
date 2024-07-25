@@ -1,33 +1,19 @@
-from typing import Dict, Mapping, Optional, Union
+from typing import Dict, Optional, Union
 
 import torch
 import xarray as xr
-from torch import nn
 
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorMapping
 
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
 
 
-def get_gen_shape(gen_data: Mapping[str, torch.Tensor]):
+def get_gen_shape(gen_data: TensorMapping):
     for name in gen_data:
         return gen_data[name].shape
-
-
-class L1Loss:
-    def __init__(self, device: torch.device):
-        self._total = torch.tensor(0.0, device=device)
-
-    def record(self, target: torch.Tensor, gen: torch.Tensor):
-        self._total += nn.functional.l1_loss(
-            gen,
-            target,
-        )
-
-    def get(self) -> torch.Tensor:
-        return self._total
 
 
 class MeanAggregator:
@@ -44,7 +30,6 @@ class MeanAggregator:
         self,
         area_weights: torch.Tensor,
         target_time: int = 1,
-        dist: Optional[Distributed] = None,
     ):
         self._area_weights = area_weights
         self._shape_x = None
@@ -53,22 +38,17 @@ class MeanAggregator:
         self._loss = torch.tensor(0.0, device=get_device())
         self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
         self._target_time = target_time
-        if dist is None:
-            self._dist = Distributed.get_instance()
-        else:
-            self._dist = dist
+        self._dist = Distributed.get_instance()
 
-    def _get_variable_metrics(self, gen_data: Mapping[str, torch.Tensor]):
+    def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
             self._variable_metrics = {
-                "l1": {},
                 "weighted_rmse": {},
                 "weighted_bias": {},
                 "weighted_grad_mag_percent_diff": {},
             }
             device = get_device()
             for key in gen_data:
-                self._variable_metrics["l1"][key] = L1Loss(device=device)
                 self._variable_metrics["weighted_rmse"][
                     key
                 ] = AreaWeightedReducedMetric(
@@ -96,10 +76,10 @@ class MeanAggregator:
     def record_batch(
         self,
         loss: float,
-        target_data: Mapping[str, torch.Tensor],
-        gen_data: Mapping[str, torch.Tensor],
-        target_data_norm: Mapping[str, torch.Tensor],
-        gen_data_norm: Mapping[str, torch.Tensor],
+        target_data: TensorMapping,
+        gen_data: TensorMapping,
+        target_data_norm: TensorMapping,
+        gen_data_norm: TensorMapping,
         i_time_start: int = 0,
     ):
         self._loss += loss

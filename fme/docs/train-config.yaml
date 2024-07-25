@@ -1,0 +1,156 @@
+experiment_dir: train_output
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 80
+n_forward_steps: 1
+inference:
+  n_forward_steps: 7300  # 5 years
+  forward_steps_in_memory: 50
+  loader:
+    start_indices:
+      first: 0
+      n_initial_conditions: 4
+      interval: 1460  # 1 year
+    dataset:
+      data_path: validation
+    num_data_workers: 2
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: fourcastnet
+  entity: ai2cm
+train_loader:
+  batch_size: 4
+  num_data_workers: 8
+  dataset:
+    - data_path: traindata/ic_0001
+    - data_path: traindata/ic_0002
+    - data_path: traindata/ic_0003
+    - data_path: traindata/ic_0004
+    - data_path: traindata/ic_0005
+    - data_path: traindata/ic_0006
+    - data_path: traindata/ic_0007
+    - data_path: traindata/ic_0008
+    - data_path: traindata/ic_0009
+    - data_path: traindata/ic_0010
+validation_loader:
+  batch_size: 16
+  num_data_workers: 2
+  dataset:
+    - data_path: validation
+      subset:
+        step: 5
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: Adam  # can switch to FusedAdam if using GPU
+stepper:
+  builder:
+    type: SphericalFourierNeuralOperatorNet
+    config:
+      embed_dim: 384
+      filter_type: linear
+      hard_thresholding_fraction: 1.0
+      use_mlp: true
+      normalization_layer: instance_norm
+      num_layers: 8
+      operator_type: dhconv
+      scale_factor: 1
+      separable: false
+  loss:
+    type: MSE
+  normalization:
+    global_means_path: centering.nc
+    global_stds_path: scaling.nc
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+  corrector:
+    conserve_dry_air: true
+    moisture_budget_correction: advection_and_precipitation
+  in_names:
+  - land_fraction
+  - ocean_fraction
+  - sea_ice_fraction
+  - DSWRFtoa
+  - HGTsfc
+  - PRESsfc
+  - surface_temperature
+  - air_temperature_0 # _0 denotes the top most layer of the atmosphere
+  - air_temperature_1
+  - air_temperature_2
+  - air_temperature_3
+  - air_temperature_4
+  - air_temperature_5
+  - air_temperature_6
+  - air_temperature_7
+  - specific_total_water_0
+  - specific_total_water_1
+  - specific_total_water_2
+  - specific_total_water_3
+  - specific_total_water_4
+  - specific_total_water_5
+  - specific_total_water_6
+  - specific_total_water_7
+  - eastward_wind_0
+  - eastward_wind_1
+  - eastward_wind_2
+  - eastward_wind_3
+  - eastward_wind_4
+  - eastward_wind_5
+  - eastward_wind_6
+  - eastward_wind_7
+  - northward_wind_0
+  - northward_wind_1
+  - northward_wind_2
+  - northward_wind_3
+  - northward_wind_4
+  - northward_wind_5
+  - northward_wind_6
+  - northward_wind_7
+  out_names:
+  - PRESsfc
+  - surface_temperature
+  - air_temperature_0
+  - air_temperature_1
+  - air_temperature_2
+  - air_temperature_3
+  - air_temperature_4
+  - air_temperature_5
+  - air_temperature_6
+  - air_temperature_7
+  - specific_total_water_0
+  - specific_total_water_1
+  - specific_total_water_2
+  - specific_total_water_3
+  - specific_total_water_4
+  - specific_total_water_5
+  - specific_total_water_6
+  - specific_total_water_7
+  - eastward_wind_0
+  - eastward_wind_1
+  - eastward_wind_2
+  - eastward_wind_3
+  - eastward_wind_4
+  - eastward_wind_5
+  - eastward_wind_6
+  - eastward_wind_7
+  - northward_wind_0
+  - northward_wind_1
+  - northward_wind_2
+  - northward_wind_3
+  - northward_wind_4
+  - northward_wind_5
+  - northward_wind_6
+  - northward_wind_7
+  - LHTFLsfc
+  - SHTFLsfc
+  - PRATEsfc
+  - ULWRFsfc
+  - ULWRFtoa
+  - DLWRFsfc
+  - DSWRFsfc
+  - USWRFsfc
+  - USWRFtoa
+  - tendency_of_total_water_path_due_to_advection

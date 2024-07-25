@@ -1,5 +1,0 @@
-# requirements if generating an environment for FME package outside of
-# the NVIDIA pytorch docker image
-torchvision==0.14.1
-torch==1.13.1
-apex@git+https://github.com/NVIDIA/apex.git@21e415479b134309a2ba1af95b2319b7bf068f7a
