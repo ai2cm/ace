@@ -15,7 +15,7 @@ To install directly from github, you can run:
 
 .. code-block:: shell
 
-    pip install 'git://github.com/ai2cm/full-model.git#egg=fme&subdirectory=fme'
+    pip install 'git://github.com/ai2cm/ace.git#egg=fme&subdirectory=fme'
 
 Conda
 -----
@@ -24,7 +24,7 @@ To install with Conda, you must retrieve the sources from github:
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/full-model.git
+    git clone git@github.com:ai2cm/ace.git
 
 A make target is available to build a conda environment:
 
@@ -45,7 +45,7 @@ The package is not yet available on PyPI. Before installing, you must retrieve t
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/full-model.git
+    git clone git@github.com:ai2cm/ace.git
 
 Once downloaded, you can install the sources in development mode (``-e`` flag) with the extra dependencies for development (``[dev]``) and versions pinned to the ones we use in development (``-c constraints.txt``) with the following command:
 

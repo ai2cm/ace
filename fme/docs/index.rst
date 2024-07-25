@@ -1,4 +1,4 @@
-Welcome to full-model's documentation!
+Welcome to ACE's documentation!
 ======================================
 
 .. toctree::
