@@ -369,7 +369,7 @@ def test_HEALPixRecUNet_reset():
         decoder_input_channels=decoder_input_channels,
         input_time_dim=input_time_dim,
         output_time_dim=output_time_dim,
-        enable_healpixpad=True,
+        enable_healpixpad=False,
         delta_time="6h",
     ).to(device)
 
@@ -427,7 +427,7 @@ def test_HEALPixRecUNet_forward(
         decoder_input_channels=decoder_input_channels,
         input_time_dim=input_time_dim,
         output_time_dim=output_time_dim,
-        enable_healpixpad=True,
+        enable_healpixpad=False,
         delta_time="6h",
     ).to(device)
     model(inputs)
