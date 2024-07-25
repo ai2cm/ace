@@ -42,6 +42,13 @@ class InitialConditionConfig:
     """
     Configuration for initial conditions.
 
+    .. note::
+        The data specified under path should contain a time dimension of at least
+        length 1. If multiple times are present in the dataset specified by `path`,
+        the inference will start an ensemble simulation using each IC along a
+        leading sample dimension. Specific times can be selected from the dataset
+        by using `start_indices`.
+
     Attributes:
         path: The path to the initial conditions dataset.
         engine: The engine used to open the dataset.
