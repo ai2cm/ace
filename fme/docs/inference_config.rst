@@ -21,6 +21,14 @@ The example assumes you are running in a directory structure like:
 
 The ``.nc`` files correspond to data files like ``2021010100.nc`` in the `Zenodo repository`_, while ``ckpt.tar`` corresponds to a file like ``ace_ckpt.tar`` in that repository.
 
+The specified initial condition file should contain a time dimension of at least length 1, but can also
+contain multiple times.  If multiple times are present and `start_indices` is not specified in the
+configuration, the inference will run an ensemble using all times in the initial condition file.
+Selections from initial conditions can be made using the `start_indices` parameter in the configuration.
+
+While netCDF files are specified in the example, Zarr datasets are also compatible. E.g.,
+specifying `data.zarr` as the `path`  setting `engine` to `zarr` in the dataset configuration.
+
 .. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
 
 .. literalinclude:: inference-config.yaml
