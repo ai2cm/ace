@@ -141,6 +141,18 @@ class InferenceEvaluatorAggregatorConfig:
         else:
             time_mean = xr.open_dataset(self.time_mean_reference_data)
 
+        if n_timesteps > 2**15 and self.log_zonal_mean_images:
+            # matplotlib raises an error if image size is too large, and we plot
+            # one pixel per timestep in the zonal mean images.
+            warnings.warn(
+                "Disabling zonal mean images logging due to large number of timesteps"
+                f" (n_timesteps={n_timesteps}). Set log_zonal_mean_images=False or "
+                "decrease n_timesteps to below 2**15 to avoid this warning."
+            )
+            log_zonal_mean_images = False
+        else:
+            log_zonal_mean_images = self.log_zonal_mean_images
+
         return InferenceEvaluatorAggregator(
             area_weights=area_weights,
             sigma_coordinates=sigma_coordinates,
@@ -150,7 +162,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
-            log_zonal_mean_images=self.log_zonal_mean_images,
+            log_zonal_mean_images=log_zonal_mean_images,
             log_seasonal_means=self.log_seasonal_means,
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
