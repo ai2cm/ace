@@ -66,6 +66,7 @@ class NormalizationConfig:
             return StandardNormalizer(means=means, stds=stds)
 
 
+@dataclasses.dataclass
 class FromStateNormalizer:
     """
     An alternative to NormalizationConfig which provides a normalizer
@@ -73,12 +74,11 @@ class FromStateNormalizer:
     class, but instead allows for loading trained models that have been
     serialized to disk, using the pre-existing normalization state.
 
-    Args:
+    Attributes:
         state: State dict of a normalizer.
     """
 
-    def __init__(self, state: Dict[str, Dict[str, float]]):
-        self.state = state
+    state: Dict[str, Dict[str, float]]
 
     def build(self, names: List[str]):
         return StandardNormalizer.from_state(self.state)
