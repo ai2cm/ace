@@ -424,7 +424,7 @@ def construct_lazy_dataset(
     chunks = config.chunking.get_chunks(standard_names)
     ds = ds.chunk(chunks)
     ds.attrs["history"] = (
-        "Dataset computed by full-model/scripts/data_process"
+        "Dataset computed by ace/scripts/data_process"
         "/compute_dataset_fv3gfs.py"
         f" script, using following input zarrs: {urls.values()}."
     )

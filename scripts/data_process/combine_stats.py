@@ -36,7 +36,7 @@ class Config:
 
 def add_history_attrs(ds, config_filename: str, stats_output_dir: str):
     ds.attrs["history"] = (
-        "Created by full-model/fv3gfs_data_process/combine_stats.py from "
+        "Created by ace/fv3gfs_data_process/combine_stats.py from "
         f"configuration file {config_filename} using inputs at {stats_output_dir}."
     )
 

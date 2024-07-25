@@ -43,7 +43,7 @@ DIMS = {
 
 def add_history_attrs(ds, input_zarr, start_date, end_date, n_samples):
     ds.attrs["history"] = (
-        "Created by full-model/fv3gfs_data_process/get_stats.py. INPUT_ZARR:"
+        "Created by ace/fv3gfs_data_process/get_stats.py. INPUT_ZARR:"
         f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}."
     )
     ds.attrs["input_samples"] = n_samples

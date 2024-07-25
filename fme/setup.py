@@ -26,7 +26,7 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     keywords="",
-    url="https://github.com/ai2cm/full-model",
+    url="https://github.com/ai2cm/ace",
     author="Allen Institute for Artificial Intelligence",
     author_email="oliverwm@allenai.org",
     license="Apache",

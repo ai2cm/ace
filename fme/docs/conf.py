@@ -65,7 +65,7 @@ source_suffix = ".rst"
 master_doc = "index"
 
 # General information about the project.
-project = "full-model"
+project = "ACE"
 copyright = "2024, Allen Institute for Artificial Intelligence"
 author = "Allen Institute for Artificial Intelligence"
 
@@ -146,7 +146,7 @@ latex_documents = [
     (
         master_doc,
         "fme.tex",
-        "full-model Documentation",
+        "ACE Documentation",
         "Allen Institute for Artificial Intelligence",
         "manual",
     ),
@@ -157,7 +157,7 @@ latex_documents = [
 
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
-man_pages = [(master_doc, "fme", "full-model Documentation", [author], 1)]
+man_pages = [(master_doc, "fme", "ACE Documentation", [author], 1)]
 
 
 # -- Options for Texinfo output ----------------------------------------
@@ -169,7 +169,7 @@ texinfo_documents = [
     (
         master_doc,
         "fme",
-        "full-model Documentation",
+        "ACE Documentation",
         author,
         "fme",
         "One line description of project.",
