@@ -1,9 +1,6 @@
 # ACE: AI2 Climate Emulator
 This repo contains the inference code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)).
 
-## Documentation
-Documentation will be available [here](add-read-the-docs-link-here).
-
 ## Quickstart
 
 ### 1. Install
