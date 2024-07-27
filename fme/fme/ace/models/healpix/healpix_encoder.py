@@ -15,13 +15,58 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from typing import Optional, Sequence
 
-import torch as th
 import torch.nn as nn
 
-from fme.ace.registry.hpx_activations import DownsamplingBlockConfig
-from fme.ace.registry.hpx_components import ConvBlockConfig, RecurrentBlockConfig
+from fme.ace.models.healpix.healpix_activations import DownsamplingBlockConfig
+
+from .healpix_blocks import ConvBlockConfig
+
+
+@dataclasses.dataclass
+class UNetEncoderConfig:
+    """
+    Configuration for the UNet Encoder.
+
+    Attributes:
+        conv_block: Configuration for the convolutional block.
+        down_sampling_block: Configuration for the down-sampling block.
+        input_channels: Number of input channels, by default 3.
+        n_channels: Number of channels for each layer, by default (136, 68, 34).
+        n_layers: Number of layers in each block, by default (2, 2, 1).
+        dilations: List of dilation rates for the layers, by default None.
+        enable_nhwc: Flag to enable NHWC data format, by default False.
+        enable_healpixpad: Flag to enable HEALPix padding, by default False.
+    """
+
+    conv_block: ConvBlockConfig
+    down_sampling_block: DownsamplingBlockConfig
+    input_channels: int = 3
+    n_channels: Sequence[int] = (136, 68, 34)
+    n_layers: Sequence[int] = (2, 2, 1)
+    dilations: Optional[list] = None
+    enable_nhwc: bool = False
+    enable_healpixpad: bool = False
+
+    def build(self) -> nn.Module:
+        """
+        Builds the UNet Encoder model.
+
+        Returns:
+            UNet Encoder model.
+        """
+        return UNetEncoder(
+            conv_block=self.conv_block,
+            down_sampling_block=self.down_sampling_block,
+            input_channels=self.input_channels,
+            n_channels=self.n_channels,
+            n_layers=self.n_layers,
+            dilations=self.dilations,
+            enable_nhwc=self.enable_nhwc,
+            enable_healpixpad=self.enable_healpixpad,
+        )
 
 
 class UNetEncoder(nn.Module):
