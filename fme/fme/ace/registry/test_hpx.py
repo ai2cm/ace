@@ -7,12 +7,15 @@ import numpy as np
 import pytest
 import torch as th
 
+from fme.ace.models.healpix.healpix_activations import (
+    CappedGELUConfig,
+    DownsamplingBlockConfig,
+)
+from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
-from fme.ace.registry.hpx_activations import CappedGELUConfig, DownsamplingBlockConfig
-from fme.ace.registry.hpx_components import ConvBlockConfig, RecurrentBlockConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.normalizer import FromStateNormalizer
