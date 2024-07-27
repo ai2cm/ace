@@ -16,13 +16,16 @@ from fme.ace.inference.inference import (
     InitialConditionConfig,
     run_inference_from_config,
 )
+from fme.ace.models.healpix.healpix_activations import (
+    CappedGELUConfig,
+    DownsamplingBlockConfig,
+)
+from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.hpx import (
     HEALPixRecUNetBuilder,
     UNetDecoderConfig,
     UNetEncoderConfig,
 )
-from fme.ace.registry.hpx_activations import CappedGELUConfig, DownsamplingBlockConfig
-from fme.ace.registry.hpx_components import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.config import TimeSlice, XarrayDataConfig

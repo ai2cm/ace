@@ -15,39 +15,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import abc
-from dataclasses import dataclass
 from typing import Sequence
 
-import numpy as np
 import pandas as pd
 import torch as th
 import torch.nn as nn
 
-from fme.ace.models.healpix.healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
-from fme.ace.registry.registry import ModuleConfig
-
-
-class HEALPixBlockConfig(abc.ABC):
-    """
-    Base class for all healpix component configurations, defined in fme.ace.registry.hpx
-    and fme.ace.registry.hpx_components.
-
-    This is a "Config" - in practice it is a dataclass loaded directly from yaml,
-    allowing us to specify details of the network architecture in a config file.
-    """
-
-    enable_nhwc: bool
-    enable_healpixpad: bool
-
-    @abc.abstractmethod
-    def build(self) -> nn.Module:
-        """
-        Build a nn.Module for the current config
-        Returns:
-            a nn.Module
-        """
-        ...
+from .healpix_decoder import UNetDecoderConfig
+from .healpix_encoder import UNetEncoderConfig
+from .healpix_layers import HEALPixFoldFaces, HEALPixUnfoldFaces
 
 
 class HEALPixRecUNet(nn.Module):
@@ -55,8 +31,8 @@ class HEALPixRecUNet(nn.Module):
 
     def __init__(
         self,
-        encoder: "UNetEncoderConfig",  # type: ignore[name-defined]
-        decoder: "UNetDecoderConfig",  # type: ignore[name-defined]
+        encoder: UNetEncoderConfig,
+        decoder: UNetDecoderConfig,
         input_channels: int,
         output_channels: int,
         n_constants: int,

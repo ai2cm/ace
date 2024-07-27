@@ -15,13 +15,63 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from typing import Optional, Sequence
 
 import torch as th
 import torch.nn as nn
 
-from fme.ace.registry.hpx_components import ConvBlockConfig, RecurrentBlockConfig
-from fme.ace.registry.registry import ModuleConfig
+from .healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
+
+
+@dataclasses.dataclass
+class UNetDecoderConfig:
+    """
+    Configuration for the UNet Decoder.
+
+    Attributes:
+        conv_block: Configuration for the convolutional block.
+        up_sampling_block: Configuration for the up-sampling block.
+        output_layer: Configuration for the output layer block.
+        recurrent_block: Configuration for the recurrent block, by default None.
+        n_channels: Number of channels for each layer, by default (34, 68, 136).
+        n_layers: Number of layers in each block, by default (1, 2, 2).
+        output_channels: Number of output channels, by default 1.
+        dilations: List of dilation rates for the layers, by default None.
+        enable_nhwc: Flag to enable NHWC data format, by default False.
+        enable_healpixpad: Flag to enable HEALPix padding, by default False.
+    """
+
+    conv_block: ConvBlockConfig
+    up_sampling_block: ConvBlockConfig
+    output_layer: ConvBlockConfig
+    recurrent_block: Optional[RecurrentBlockConfig] = None
+    n_channels: Sequence[int] = (34, 68, 136)
+    n_layers: Sequence[int] = (1, 2, 2)
+    output_channels: int = 1
+    dilations: Optional[list] = None
+    enable_nhwc: bool = False
+    enable_healpixpad: bool = False
+
+    def build(self) -> nn.Module:
+        """
+        Builds the UNet Decoder model.
+
+        Returns:
+            UNet Decoder model.
+        """
+        return UNetDecoder(
+            conv_block=self.conv_block,
+            up_sampling_block=self.up_sampling_block,
+            output_layer=self.output_layer,
+            recurrent_block=self.recurrent_block,
+            n_channels=self.n_channels,
+            n_layers=self.n_layers,
+            output_channels=self.output_channels,
+            dilations=self.dilations,
+            enable_nhwc=self.enable_nhwc,
+            enable_healpixpad=self.enable_healpixpad,
+        )
 
 
 class UNetDecoder(nn.Module):
