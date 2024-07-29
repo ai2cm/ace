@@ -2,8 +2,6 @@ import collections
 import contextlib
 from typing import Any, Dict, Mapping
 
-import wandb as upstream_wandb
-
 from fme.core import wandb
 from fme.core.distributed import Distributed
 
@@ -19,26 +17,12 @@ class MockWandB:
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
 
-    def init(
-        self,
-        config: Mapping[str, Any],
-        project: str,
-        entity: str,
-        resume: bool,
-        dir: str,
-    ):
+    def init(self, **kwargs):
         if not self._configured:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
-            # wandb.init(
-            #     config=config,
-            #     project=project,
-            #     entity=entity,
-            #     resume=resume,
-            #     dir=dir,
-            # )
             pass
 
     def watch(self, modules):
@@ -46,24 +30,32 @@ class MockWandB:
             # wandb.watch(modules)
             pass
 
-    def log(self, data: Mapping[str, Any], step: int):
+    def log(self, data: Mapping[str, Any], step: int, sleep=None):
+        # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
 
     def get_logs(self) -> Dict[int, Dict[str, Any]]:
         return self._logs
 
-    @property
-    def Image(self):
-        return upstream_wandb.Image
+    def clean_wandb_dir(self, experiment_dir: str):
+        pass
+
+    def Image(self, *args, **kwargs) -> wandb.Image:
+        return wandb.Image(*args, direct_access=False, **kwargs)
+
+    def Video(self, *args, **kwargs) -> wandb.Video:
+        return wandb.Video(*args, direct_access=False, **kwargs)
+
+    def Table(self, *args, **kwargs) -> wandb.Table:
+        return wandb.Table(*args, direct_access=False, **kwargs)
+
+    def Histogram(self, *args, **kwargs) -> wandb.Histogram:
+        return wandb.Histogram(*args, direct_access=False, **kwargs)
 
     @property
-    def Video(self):
-        return upstream_wandb.Video
-
-    @property
-    def Table(self):
-        return upstream_wandb.Table
+    def enabled(self) -> bool:
+        return self._enabled
 
 
 @contextlib.contextmanager

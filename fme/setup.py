@@ -14,7 +14,7 @@ def read_requirements(filename: str):
 
 setup(
     name="fme",
-    version="0.1.0",
+    version="0.2.0",
     description="",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
@@ -26,7 +26,7 @@ setup(
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     keywords="",
-    url="https://github.com/ai2cm/full-model",
+    url="https://github.com/ai2cm/ace",
     author="Allen Institute for Artificial Intelligence",
     author_email="oliverwm@allenai.org",
     license="Apache",
@@ -34,6 +34,9 @@ setup(
         exclude=["*.tests", "*.tests.*", "tests.*", "tests"],
     ),
     install_requires=read_requirements("requirements.txt"),
-    extras_require={"dev": read_requirements("dev-requirements.txt")},
+    extras_require={
+        "dev": read_requirements("dev-requirements.txt"),
+        "docs": read_requirements("docs/requirements.txt"),
+    },
     python_requires=">=3.8",
 )

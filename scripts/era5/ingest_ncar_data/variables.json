@@ -1,0 +1,122 @@
+[
+  {
+    "category": "e5.oper.invariant",
+    "variable_name": "128_172_lsm",
+    "start_time": "1979010100",
+    "n_files": "1"
+  },
+  {
+    "category": "e5.oper.invariant",
+    "variable_name": "128_129_z",
+    "start_time": "1979010100",
+    "n_files": "1"
+  },
+  {
+    "category": "e5.oper.an.sfc",
+    "variable_name": "128_031_ci",
+    "start_time": "1940010100",
+    "n_files": "1008"
+  },
+  {
+    "category": "e5.oper.an.sfc",
+    "variable_name": "128_039_swvl1",
+    "start_time": "1940010100",
+    "n_files": "1008"
+  },
+  {
+    "category": "e5.oper.an.sfc",
+    "variable_name": "128_040_swvl2",
+    "start_time": "1940010100",
+    "n_files": "1008"
+  },
+  {
+    "category": "e5.oper.an.sfc",
+    "variable_name": "128_041_swvl3",
+    "start_time": "1940010100",
+    "n_files": "1008"
+  },
+  {
+    "category": "e5.oper.an.sfc",
+    "variable_name": "128_042_swvl4",
+    "start_time": "1940010100",
+    "n_files": "1008"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_053_mtdwswrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_039_mtnswrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_040_mtnlwrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_035_msdwswrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_037_msnswrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_036_msdwlwrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_038_msnlwrf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_033_msshf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_034_mslhf",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_043_mer",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_055_mtpr",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_031_msr",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  },
+  {
+    "category": "e5.oper.fc.sfc.meanflux",
+    "variable_name": "235_054_mvimd",
+    "start_time": "1940010106",
+    "n_files": "2016"
+  }
+]
