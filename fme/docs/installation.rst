@@ -15,7 +15,7 @@ To install directly from github, you can run:
 
 .. code-block:: shell
 
-    pip install 'git://github.com/ai2cm/ace.git#egg=fme&subdirectory=fme'
+    pip install git+https://github.com/ai2cm/ace#subdirectory=fme
 
 Conda
 -----
