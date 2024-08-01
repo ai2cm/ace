@@ -104,10 +104,13 @@ def test__get_gathered_means(use_mock_distributed):
         world_size = 2
         with mock_distributed(world_size=world_size):
             target, gen = agg._get_gathered_means()
+            combined = agg.get_dataset()
     else:
         world_size = 1
         target, gen = agg._get_gathered_means()
-    for dataset in (target, gen):
-        assert set(dataset.dims) == {"sample", "year"}
+        combined = agg.get_dataset()
+    for dataset in (target, gen, combined):
+        assert set(dataset.dims).issuperset({"sample", "year"})
         assert list(dataset.year.values) == [2000, 2001, 2002]
         assert dataset.sizes["sample"] == n_sample * world_size
+    assert set(combined.coords["source"].values) == set(["target", "prediction"])

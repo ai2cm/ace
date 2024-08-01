@@ -1,8 +1,10 @@
 import logging
 import time
 from collections import defaultdict
-from typing import Any, Dict, Mapping, Optional, Union
+from pathlib import Path
+from typing import Any, Dict, Iterable, Mapping, Optional, Union
 
+import numpy as np
 import torch
 import xarray as xr
 
@@ -374,3 +376,26 @@ def run_dataset_comparison(
     for name, duration in timers.items():
         logging.info(f"{name} duration: {duration:.2f}s")
     return timers
+
+
+def write_reduced_metrics(
+    aggregator: Union[InferenceEvaluatorAggregator, InferenceAggregator],
+    data_coords: Mapping[str, np.ndarray],
+    path: str,
+    excluded: Optional[Iterable[str]] = None,
+):
+    """
+    Write the reduced metrics to disk. Each sub-aggregator will write a netCDF file
+    if its `get_dataset` method returns a non-empty dataset.
+
+    Args:
+        aggregator: The aggregator to write metrics from.
+        data_coords: Coordinates to assign to the datasets.
+        path: Path to write the metrics to.
+        excluded: Names of metrics to exclude from writing.
+    """
+    for name, ds in aggregator.get_datasets(excluded_aggregators=excluded).items():
+        if len(ds) > 0:
+            coords = {k: v for k, v in data_coords.items() if k in ds.dims}
+            ds = ds.assign_coords(coords)
+            ds.to_netcdf(Path(path) / f"{name}_diagnostics.nc")

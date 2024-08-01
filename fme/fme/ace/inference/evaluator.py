@@ -3,7 +3,6 @@ import dataclasses
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Optional, Sequence
 
 import dacite
@@ -14,7 +13,11 @@ import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
+from fme.ace.inference.loop import (
+    run_dataset_comparison,
+    run_inference_evaluator,
+    write_reduced_metrics,
+)
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
@@ -262,13 +265,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    for name, ds in aggregator.get_datasets(
-        ("time_mean", "zonal_mean", "histogram")
-    ).items():
-        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
-        ds = ds.assign_coords(coords)
-        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
-
+    write_reduced_metrics(
+        aggregator,
+        data.coords,
+        config.experiment_dir,
+        excluded=[
+            "video",
+        ],
+    )
     final_flush_duration = time.time() - final_flush_start_time
     logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
     timers["final_writer_flush"] = final_flush_duration

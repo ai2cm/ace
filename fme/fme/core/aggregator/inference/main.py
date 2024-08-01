@@ -78,6 +78,10 @@ class _TimeDependentAggregator(Protocol):
     def get_logs(self, label: str):
         ...
 
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
+        ...
+
 
 class _TimeDependentEvaluatorAggregator(Protocol):
     @torch.no_grad()
@@ -91,6 +95,10 @@ class _TimeDependentEvaluatorAggregator(Protocol):
 
     @torch.no_grad()
     def get_logs(self, label: str):
+        ...
+
+    @torch.no_grad()
+    def get_dataset(self) -> xr.Dataset:
         ...
 
 
@@ -362,21 +370,30 @@ class InferenceEvaluatorAggregator:
 
     @torch.no_grad()
     def get_datasets(
-        self, aggregator_whitelist: Optional[Iterable[str]] = None
+        self, excluded_aggregators: Optional[Iterable[str]] = None
     ) -> Dict[str, xr.Dataset]:
         """
-        Args:
-            aggregator_whitelist: aggregator names to include in the output. If
-                None, return all the datasets associated with all aggregators.
-        """
-        datasets = (
-            (name, agg.get_dataset()) for name, agg in self._aggregators.items()
-        )
-        if aggregator_whitelist is not None:
-            filter_ = set(aggregator_whitelist)
-            return {name: ds for name, ds in datasets if name in filter_}
+        Returns datasets from combined aggregators.
 
-        return {name: ds for name, ds in datasets}
+        Args:
+            excluded_aggregators: aggregator names for which `get_dataset`
+                should not be called and no output should be returned.
+
+        Returns:
+            Dictionary of datasets from aggregators.
+        """
+        if excluded_aggregators is None:
+            excluded_aggregators = []
+
+        combined_aggregators = {
+            **self._aggregators,
+            **self._time_dependent_aggregators,
+        }
+        return {
+            name: agg.get_dataset()
+            for name, agg in combined_aggregators.items()
+            if name not in excluded_aggregators
+        }
 
 
 def to_inference_logs(
@@ -535,18 +552,27 @@ class InferenceAggregator:
 
     @torch.no_grad()
     def get_datasets(
-        self, aggregator_whitelist: Optional[Iterable[str]] = None
+        self, excluded_aggregators: Optional[Iterable[str]] = None
     ) -> Dict[str, xr.Dataset]:
         """
-        Args:
-            aggregator_whitelist: aggregator names to include in the output. If
-                None, return all the datasets associated with all aggregators.
-        """
-        datasets = (
-            (name, agg.get_dataset()) for name, agg in self._aggregators.items()
-        )
-        if aggregator_whitelist is not None:
-            filter_ = set(aggregator_whitelist)
-            return {name: ds for name, ds in datasets if name in filter_}
+        Returns datasets from combined aggregators.
 
-        return {name: ds for name, ds in datasets}
+        Args:
+            excluded_aggregators: aggregator names for which `get_dataset`
+                should not be called and no output should be returned.
+
+        Returns:
+            Dictionary of datasets from aggregators.
+        """
+        if excluded_aggregators is None:
+            excluded_aggregators = []
+
+        combined_aggregators = {
+            **self._aggregators,
+            **self._time_dependent_aggregators,
+        }
+        return {
+            name: agg.get_dataset()
+            for name, agg in combined_aggregators.items()
+            if name not in excluded_aggregators
+        }
