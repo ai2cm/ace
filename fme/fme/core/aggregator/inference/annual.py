@@ -190,6 +190,19 @@ class GlobalMeanAnnualAggregator:
         logs.update({f"{label}{name}": metrics[name] for name in metrics.keys()})
         return logs
 
+    def get_dataset(self) -> xr.Dataset:
+        gathered = self._get_gathered_means()
+        if gathered is None:
+            return xr.Dataset()
+        target, gen = gathered
+        return xr.concat(
+            [
+                target.expand_dims({"source": ["target"]}),
+                gen.expand_dims({"source": ["prediction"]}),
+            ],
+            dim="source",
+        )
+
 
 @dataclasses.dataclass
 class VariableReferenceData:

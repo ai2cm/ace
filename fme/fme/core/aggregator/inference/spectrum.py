@@ -1,3 +1,4 @@
+import logging
 import warnings
 from collections import defaultdict
 from typing import Dict, Optional
@@ -91,7 +92,7 @@ class PairedSphericalPowerSpectrumAggregator:
 
     @torch.no_grad()
     def get_dataset(self) -> xr.Dataset:
-        warnings.warn(
+        logging.debug(
             "get_dataset not implemented for PairedSphericalPowerSpectrumAggregator. "
             "Returning an empty dataset."
         )
