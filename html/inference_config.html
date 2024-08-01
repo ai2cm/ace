@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inference Config &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/sphinx_highlight.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Evaluator Config" href="evaluator_config.html" />
+    <link rel="prev" title="Training Config" href="training_config.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="training_config.html">Training Config</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Inference Config</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/inference_config.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="inference-config">
+<span id="id1"></span><h1>Inference Config<a class="headerlink" href="#inference-config" title="Permalink to this heading"></a></h1>
+<p>The following is an example configuration for running inference.
+While you can use absolute paths in the config yamls (we encourage it!), the example uses paths relative to the directory you run the command.
+The example assumes you are running in a directory structure like:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>.
+├── ckpt.tar
+├── initial_condition
+│   └── data.nc  # name must reflect the path in the config
+└── forcing
+    ├── data1.nc  # files can have any name, but must sort into time-sequential order
+    ├── data2.nc  # can have any number of netCDF files
+    └── ...
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">.nc</span></code> files correspond to data files like <code class="docutils literal notranslate"><span class="pre">2021010100.nc</span></code> in the <a class="reference external" href="https://zenodo.org/doi/10.5281/zenodo.10791086">Zenodo repository</a>, while <code class="docutils literal notranslate"><span class="pre">ckpt.tar</span></code> corresponds to a file like <code class="docutils literal notranslate"><span class="pre">ace_ckpt.tar</span></code> in that repository.</p>
+<p>The specified initial condition file should contain a time dimension of at least length 1, but can also
+contain multiple times.  If multiple times are present and <cite>start_indices</cite> is not specified in the
+configuration, the inference will run an ensemble using all times in the initial condition file.
+Selections from initial conditions can be made using the <cite>start_indices</cite> parameter in the configuration.</p>
+<p>While netCDF files are specified in the example, Zarr datasets are also compatible. E.g.,
+specifying <cite>data.zarr</cite> as the <cite>path</cite>  setting <cite>engine</cite> to <cite>zarr</cite> in the dataset configuration.</p>
+<div class="literal-block-wrapper docutils container" id="id2">
+<div class="code-block-caption"><span class="caption-text">Example YAML Configuration</span><a class="headerlink" href="#id2" title="Permalink to this code"></a></div>
+<div class="highlight-yaml notranslate"><div class="highlight"><pre><span></span><span class="nt">experiment_dir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">inference_output</span>
+<span class="nt">n_forward_steps</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">400</span><span class="w">  </span><span class="c1"># 100 days</span>
+<span class="nt">forward_steps_in_memory</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">50</span>
+<span class="nt">checkpoint_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ckpt.tar</span>
+<span class="nt">logging</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">log_to_screen</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">log_to_wandb</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">log_to_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<span class="w">  </span><span class="nt">project</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ace</span>
+<span class="w">  </span><span class="nt">entity</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">your_wandb_entity</span>
+<span class="nt">initial_condition</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">initial_condition/data.nc</span>
+<span class="nt">forcing_loader</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">dataset</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">data_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">forcing</span>
+<span class="w">  </span><span class="nt">num_data_workers</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">8</span>
+<span class="nt">data_writer</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">save_prediction_files</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+<span class="w">  </span><span class="nt">save_monthly_files</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span>
+</pre></div>
+</div>
+</div>
+<p>We use the <a class="reference internal" href="builder.html#builder-pattern"><span class="std std-ref">Builder pattern</span></a> to load this configuration into a multi-level dataclass structure.
+The configuration is divided into several sub-configurations, each with its own dataclass.
+The top-level configuration is the <a class="reference internal" href="api.html#fme.ace.InferenceConfig" title="fme.ace.InferenceConfig"><code class="xref py py-class docutils literal notranslate"><span class="pre">fme.ace.InferenceConfig</span></code></a> class.</p>
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">InferenceConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">experiment_dir:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_forward_steps:</span> <span class="pre">int</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">checkpoint_path:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">logging:</span> <span class="pre">~fme.core.logging_utils.LoggingConfig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">initial_condition:</span> <span class="pre">~fme.ace.inference.inference.InitialConditionConfig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">forcing_loader:</span> <span class="pre">~fme.core.data_loading.inference.ForcingDataLoaderConfig</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">forward_steps_in_memory:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">10</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">data_writer:</span> <span class="pre">~fme.ace.inference.data_writer.main.DataWriterConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">aggregator:</span> <span class="pre">~fme.core.aggregator.inference.main.InferenceAggregatorConfig</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocean:</span> <span class="pre">~fme.core.ocean.OceanConfig</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/ace/inference/inference.html#InferenceConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for running inference.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">experiment_dir</span></span></dt>
+<dd><p>Directory to save results to.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">n_forward_steps</span></span></dt>
+<dd><p>Number of steps to run the model forward for.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">checkpoint_path</span></span></dt>
+<dd><p>Path to stepper checkpoint to load.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">logging</span></span></dt>
+<dd><p>Configuration for logging.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.LoggingConfig" title="fme.core.logging_utils.LoggingConfig">fme.core.logging_utils.LoggingConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">initial_condition</span></span></dt>
+<dd><p>Configuration for initial condition data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.InitialConditionConfig" title="fme.ace.inference.inference.InitialConditionConfig">fme.ace.inference.inference.InitialConditionConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">forcing_loader</span></span></dt>
+<dd><p>Configuration for forcing data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.ForcingDataLoaderConfig" title="fme.core.data_loading.inference.ForcingDataLoaderConfig">fme.core.data_loading.inference.ForcingDataLoaderConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">forward_steps_in_memory</span></span></dt>
+<dd><p>Number of forward steps to complete in memory
+at a time.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">data_writer</span></span></dt>
+<dd><p>Configuration for data writers.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.DataWriterConfig" title="fme.ace.inference.data_writer.main.DataWriterConfig">fme.ace.inference.data_writer.main.DataWriterConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">aggregator</span></span></dt>
+<dd><p>Configuration for inference aggregator.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.InferenceAggregatorConfig" title="fme.core.aggregator.inference.main.InferenceAggregatorConfig">fme.core.aggregator.inference.main.InferenceAggregatorConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">ocean</span></span></dt>
+<dd><p>Ocean configuration for running inference with a
+different one than what is used in training.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.OceanConfig" title="fme.core.ocean.OceanConfig">fme.core.ocean.OceanConfig</a> | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<p>The sub-configurations are:</p>
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">LoggingConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">project</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'ace'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">entity</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'ai2cm'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_to_screen</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_to_file</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_to_wandb</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">log_format</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'%(asctime)s</span> <span class="pre">-</span> <span class="pre">%(name)s</span> <span class="pre">-</span> <span class="pre">%(levelname)s</span> <span class="pre">-</span> <span class="pre">%(message)s'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">level</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">20</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/core/logging_utils.html#LoggingConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for logging.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">project</span></span></dt>
+<dd><p>name of the project in Weights &amp; Biases</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">entity</span></span></dt>
+<dd><p>name of the entity in Weights &amp; Biases</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">log_to_screen</span></span></dt>
+<dd><p>whether to log to the screen</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">log_to_file</span></span></dt>
+<dd><p>whether to log to a file</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">log_to_wandb</span></span></dt>
+<dd><p>whether to log to Weights &amp; Biases</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">log_format</span></span></dt>
+<dd><p>format of the log messages</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">InitialConditionConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">engine</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Literal</span><span class="p"><span class="pre">[</span></span><span class="s"><span class="pre">'netcdf4'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'h5netcdf'</span></span><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="s"><span class="pre">'zarr'</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'netcdf4'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">start_indices</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="api.html#fme.ace.InferenceInitialConditionIndices" title="fme.core.data_loading.inference.InferenceInitialConditionIndices"><span class="pre">InferenceInitialConditionIndices</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="api.html#fme.ace.ExplicitIndices" title="fme.core.data_loading.inference.ExplicitIndices"><span class="pre">ExplicitIndices</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference internal" href="api.html#fme.ace.TimestampList" title="fme.core.data_loading.inference.TimestampList"><span class="pre">TimestampList</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/ace/inference/inference.html#InitialConditionConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for initial conditions.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The data specified under path should contain a time dimension of at least
+length 1. If multiple times are present in the dataset specified by <cite>path</cite>,
+the inference will start an ensemble simulation using each IC along a
+leading sample dimension. Specific times can be selected from the dataset
+by using <cite>start_indices</cite>.</p>
+</div>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">path</span></span></dt>
+<dd><p>The path to the initial conditions dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">engine</span></span></dt>
+<dd><p>The engine used to open the dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Literal[‘netcdf4’, ‘h5netcdf’, ‘zarr’]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">start_indices</span></span></dt>
+<dd><p>optional specification of the subset of
+initial conditions to use.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.InferenceInitialConditionIndices" title="fme.core.data_loading.inference.InferenceInitialConditionIndices">fme.core.data_loading.inference.InferenceInitialConditionIndices</a> | <a class="reference internal" href="api.html#fme.ace.ExplicitIndices" title="fme.core.data_loading.inference.ExplicitIndices">fme.core.data_loading.inference.ExplicitIndices</a> | <a class="reference internal" href="api.html#fme.ace.TimestampList" title="fme.core.data_loading.inference.TimestampList">fme.core.data_loading.inference.TimestampList</a> | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">ForcingDataLoaderConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">dataset</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="api.html#fme.ace.XarrayDataConfig" title="fme.core.data_loading.config.XarrayDataConfig"><span class="pre">XarrayDataConfig</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">num_data_workers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">int</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/core/data_loading/inference.html#ForcingDataLoaderConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for the forcing data.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">dataset</span></span></dt>
+<dd><p>Configuration to define the dataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.XarrayDataConfig" title="fme.core.data_loading.config.XarrayDataConfig">fme.core.data_loading.config.XarrayDataConfig</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">num_data_workers</span></span></dt>
+<dd><p>Number of parallel workers to use for data loading.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">XarrayDataConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">data_path:</span> <span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file_pattern:</span> <span class="pre">str</span> <span class="pre">=</span> <span class="pre">'*.nc'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">n_repeats:</span> <span class="pre">int</span> <span class="pre">=</span> <span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">engine:</span> <span class="pre">~typing.Literal['netcdf4'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">'h5netcdf'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">'zarr']</span> <span class="pre">|</span> <span class="pre">None</span> <span class="pre">=</span> <span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">spatial_dimensions:</span> <span class="pre">~typing.Literal['healpix'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">'latlon']</span> <span class="pre">=</span> <span class="pre">'latlon'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">subset:</span> <span class="pre">~fme.core.data_loading.config.Slice</span> <span class="pre">|</span> <span class="pre">~fme.core.data_loading.config.TimeSlice</span> <span class="pre">=</span> <span class="pre">&lt;factory&gt;</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">infer_timestep:</span> <span class="pre">bool</span> <span class="pre">=</span> <span class="pre">True</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/core/data_loading/config.html#XarrayDataConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">data_path</span></span></dt>
+<dd><p>Path to the data.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">file_pattern</span></span></dt>
+<dd><p>Glob pattern to match files in the data_path.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">n_repeats</span></span></dt>
+<dd><p>Number of times to repeat the dataset (in time). It is up
+to the user to ensure that the input dataset to repeat results in
+data that is reasonably continuous across repetitions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>int</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">engine</span></span></dt>
+<dd><p>Backend for xarray.open_dataset. Currently supported options
+are “netcdf4” (the default) and “h5netcdf”. Only valid when using
+XarrayDataset.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Literal[‘netcdf4’, ‘h5netcdf’, ‘zarr’] | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">spatial_dimensions</span></span></dt>
+<dd><p>Specifies the spatial dimensions for the grid, default
+is lat/lon.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Literal[‘healpix’, ‘latlon’]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">subset</span></span></dt>
+<dd><p>Slice defining a subset of the XarrayDataset to load. This can
+either be a <cite>Slice</cite> of integer indices or a <cite>TimeSlice</cite> of timestamps.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.Slice" title="fme.core.data_loading.config.Slice">fme.core.data_loading.config.Slice</a> | <a class="reference internal" href="api.html#fme.ace.TimeSlice" title="fme.core.data_loading.config.TimeSlice">fme.core.data_loading.config.TimeSlice</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">infer_timestep</span></span></dt>
+<dd><p>Whether to infer the timestep from the provided data.
+This should be set to True (the default) for ACE training. It may
+be useful to toggle this to False for applications like downscaling,
+which do not depend on the timestep of the data and therefore lack
+the additional requirement that the data be ordered and evenly
+spaced in time. It must be set to True if n_repeats &gt; 1 in order
+to be able to infer the full time coordinate.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">DataWriterConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">log_extended_video_netcdfs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_prediction_files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_monthly_files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">names</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Sequence</span><span class="p"><span class="pre">[</span></span><span class="pre">str</span><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">save_histogram_files</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">time_coarsen</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="api.html#fme.ace.TimeCoarsenConfig" title="fme.ace.inference.data_writer.time_coarsen.TimeCoarsenConfig"><span class="pre">TimeCoarsenConfig</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/ace/inference/data_writer/main.html#DataWriterConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for inference data writers.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">log_extended_video_netcdfs</span></span></dt>
+<dd><p>Whether to enable writing of netCDF files
+containing video metrics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">save_prediction_files</span></span></dt>
+<dd><p>Whether to enable writing of netCDF files
+containing the predictions and target values.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">save_monthly_files</span></span></dt>
+<dd><p>Whether to enable writing of netCDF files
+containing the monthly predictions and target values.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">names</span></span></dt>
+<dd><p>Names of variables to save in the prediction, histogram, and monthly
+netCDF files.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Sequence[str] | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">save_histogram_files</span></span></dt>
+<dd><p>Enable writing of netCDF files containing histograms.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">time_coarsen</span></span></dt>
+<dd><p>Configuration for time coarsening of written outputs.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.TimeCoarsenConfig" title="fme.ace.inference.data_writer.time_coarsen.TimeCoarsenConfig">fme.ace.inference.data_writer.time_coarsen.TimeCoarsenConfig</a> | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">InferenceAggregatorConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">time_mean_reference_data</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/core/aggregator/inference/main.html#InferenceAggregatorConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for inference aggregator.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">time_mean_reference_data</span></span></dt>
+<dd><p>Path to reference time means to compare against.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py class">
+<dt class="sig sig-object py">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">fme.ace.</span></span><span class="sig-name descname"><span class="pre">OceanConfig</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">surface_temperature_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ocean_fraction_name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">str</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">interpolate</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">bool</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">slab</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference internal" href="api.html#fme.ace.SlabOceanConfig" title="fme.core.ocean.SlabOceanConfig"><span class="pre">SlabOceanConfig</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><span class="pre">None</span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/fme/core/ocean.html#OceanConfig"><span class="viewcode-link"><span class="pre">[source]</span></span></a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></p>
+<p>Configuration for determining sea surface temperature from an ocean model.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">surface_temperature_name</span></span></dt>
+<dd><p>Name of the sea surface temperature field.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">ocean_fraction_name</span></span></dt>
+<dd><p>Name of the ocean fraction field.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>str</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">interpolate</span></span></dt>
+<dd><p>If True, interpolate between ML-predicted surface temperature and
+ocean-predicted surface temperature according to ocean_fraction. If False,
+only use ocean-predicted surface temperature where ocean_fraction&gt;=0.5.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>bool</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py">
+<span class="sig-name descname"><span class="pre">slab</span></span></dt>
+<dd><p>If provided, use a slab ocean model to predict surface temperature.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference internal" href="api.html#fme.ace.SlabOceanConfig" title="fme.core.ocean.SlabOceanConfig">fme.core.ocean.SlabOceanConfig</a> | None</p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="training_config.html" class="btn btn-neutral float-left" title="Training Config" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="evaluator_config.html" class="btn btn-neutral float-right" title="Evaluator Config" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

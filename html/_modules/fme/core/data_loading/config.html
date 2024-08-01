@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.core.data_loading.config &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../../_static/jquery.js"></script>
+        <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+        <script src="../../../../_static/doctools.js"></script>
+        <script src="../../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.core.data_loading.config</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.core.data_loading.config</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span> <span class="nn">xarray</span> <span class="k">as</span> <span class="nn">xr</span>
+
+<span class="kn">from</span> <span class="nn">fme.core.distributed</span> <span class="kn">import</span> <span class="n">Distributed</span>
+
+
+<div class="viewcode-block" id="Slice"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.Slice">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">Slice</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration of a python `slice` built-in.</span>
+
+<span class="sd">    Required because `slice` cannot be initialized directly by dacite.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        start: Start index of the slice.</span>
+<span class="sd">        stop: Stop index of the slice.</span>
+<span class="sd">        step: Step of the slice.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">start</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">stop</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">step</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">slice</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">slice</span><span class="p">:</span>
+        <span class="k">return</span> <span class="nb">slice</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">stop</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">step</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="TimeSlice"><a class="viewcode-back" href="../../../../api.html#fme.ace.TimeSlice">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">TimeSlice</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration of a slice of times. Step is an integer-valued index step.</span>
+
+<span class="sd">    Note: start_time and stop_time may be provided as partial time strings and the</span>
+<span class="sd">        stop_time will be included in the slice. See more details in `Xarray docs`_.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        start_time: Start time of the slice.</span>
+<span class="sd">        stop_time: Stop time of the slice.</span>
+<span class="sd">        step: Step of the slice.</span>
+
+<span class="sd">    .. _Xarray docs:</span>
+<span class="sd">       https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range  # noqa</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">start_time</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">stop_time</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">step</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">slice</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">times</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">CFTimeIndex</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">slice</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">times</span><span class="o">.</span><span class="n">slice_indexer</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">stop_time</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">step</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="XarrayDataConfig"><a class="viewcode-back" href="../../../../inference_config.html#fme.ace.XarrayDataConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">XarrayDataConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Attributes:</span>
+<span class="sd">        data_path: Path to the data.</span>
+<span class="sd">        file_pattern: Glob pattern to match files in the data_path.</span>
+<span class="sd">        n_repeats: Number of times to repeat the dataset (in time). It is up</span>
+<span class="sd">            to the user to ensure that the input dataset to repeat results in</span>
+<span class="sd">            data that is reasonably continuous across repetitions.</span>
+<span class="sd">        engine: Backend for xarray.open_dataset. Currently supported options</span>
+<span class="sd">            are &quot;netcdf4&quot; (the default) and &quot;h5netcdf&quot;. Only valid when using</span>
+<span class="sd">            XarrayDataset.</span>
+<span class="sd">        spatial_dimensions: Specifies the spatial dimensions for the grid, default</span>
+<span class="sd">            is lat/lon.</span>
+<span class="sd">        subset: Slice defining a subset of the XarrayDataset to load. This can</span>
+<span class="sd">            either be a `Slice` of integer indices or a `TimeSlice` of timestamps.</span>
+<span class="sd">        infer_timestep: Whether to infer the timestep from the provided data.</span>
+<span class="sd">            This should be set to True (the default) for ACE training. It may</span>
+<span class="sd">            be useful to toggle this to False for applications like downscaling,</span>
+<span class="sd">            which do not depend on the timestep of the data and therefore lack</span>
+<span class="sd">            the additional requirement that the data be ordered and evenly</span>
+<span class="sd">            spaced in time. It must be set to True if n_repeats &gt; 1 in order</span>
+<span class="sd">            to be able to infer the full time coordinate.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">data_path</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">file_pattern</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;*.nc&quot;</span>
+    <span class="n">n_repeats</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">engine</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;netcdf4&quot;</span><span class="p">,</span> <span class="s2">&quot;h5netcdf&quot;</span><span class="p">,</span> <span class="s2">&quot;zarr&quot;</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">spatial_dimensions</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;healpix&quot;</span><span class="p">,</span> <span class="s2">&quot;latlon&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;latlon&quot;</span>
+    <span class="n">subset</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Slice</span><span class="p">,</span> <span class="n">TimeSlice</span><span class="p">]</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="n">Slice</span><span class="p">)</span>
+    <span class="n">infer_timestep</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">n_repeats</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="ow">and</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">infer_timestep</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;infer_timestep must be True if n_repeats is greater than 1&quot;</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="DataLoaderConfig"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.DataLoaderConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">DataLoaderConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Attributes:</span>
+<span class="sd">        dataset: A sequence of configurations each defining a dataset</span>
+<span class="sd">            to be loaded. This sequence of datasets will be concatenated.</span>
+<span class="sd">        batch_size: Number of samples per batch.</span>
+<span class="sd">        num_data_workers: Number of parallel workers to use for data loading.</span>
+<span class="sd">        prefetch_factor: how many batches a single data worker will attempt to</span>
+<span class="sd">            hold in host memory at a given time.</span>
+<span class="sd">        strict_ensemble: Whether to enforce that the ensemble members have the same</span>
+<span class="sd">            dimensions and coordinates.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">dataset</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="n">XarrayDataConfig</span><span class="p">]</span>
+    <span class="n">batch_size</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">num_data_workers</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">prefetch_factor</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">strict_ensemble</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Distributed</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span> <span class="o">%</span> <span class="n">dist</span><span class="o">.</span><span class="n">world_size</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;batch_size must be divisible by the number of parallel &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;workers, got </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">batch_size</span><span class="si">}</span><span class="s2"> and </span><span class="si">{</span><span class="n">dist</span><span class="o">.</span><span class="n">world_size</span><span class="si">}</span><span class="s2">&quot;</span>
+            <span class="p">)</span></div>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

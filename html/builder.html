@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Builder Pattern: Modern Namelists &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/sphinx_highlight.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Modules" href="modules.html" />
+    <link rel="prev" title="Evaluator Config" href="evaluator_config.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">The Builder Pattern: Modern Namelists</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#introduction">Introduction</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#example">Example</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">The Builder Pattern: Modern Namelists</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/builder.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="the-builder-pattern-modern-namelists">
+<span id="builder-pattern"></span><h1>The Builder Pattern: Modern Namelists<a class="headerlink" href="#the-builder-pattern-modern-namelists" title="Permalink to this heading"></a></h1>
+<section id="introduction">
+<h2>Introduction<a class="headerlink" href="#introduction" title="Permalink to this heading"></a></h2>
+<p>The Builder Pattern is a design pattern that lets user configuration change the way a code runs by changing the way objects are constructed.
+Those objects are then used by the code, without that code ever knowing about or handling user configuration.</p>
+<p>At its core, the builder pattern contains two components:
+- A class that represents the configuration, called the Config, which has a build method returning a built instance.
+- A class built by the configuration, called the Product or the “instance”.</p>
+<p>While technically speaking these are defined as two separate classes, the Config is really just the set of variables used by the Product which a user can configure from a configuration file.
+For this reason, it is acceptable to tightly couple the configuration and the product, for example by having a method on the configuration that builds the product and having the product take the configuration as an argument. These two classes should be defined in the same file.</p>
+<p>This pattern makes it much easier to understand and to change both what the code does and how it is configured, because these two very different types of logic are completely separated and isolated from each other. It also makes it much easier to compartmentalize the configuration. When a class only has access to five attributes and classes always use all their attributes, it’s much easier to understand how that class works than if it has access to 100 attributes that are all used in different parts of the code.</p>
+</section>
+<section id="example">
+<h2>Example<a class="headerlink" href="#example" title="Permalink to this heading"></a></h2>
+<p>The pattern itself can be used with any type of configuration file and any code which loads that configuration into a class. In our code, we use YAML files for configuration, and use the <code class="docutils literal notranslate"><span class="pre">dacite</span></code> package to load those files into classes in a type-safe way. Take this example of a yaml configuration file defining an optimizer:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+    <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">    optimizer:</span>
+<span class="s2">      optimizer_type: Adam</span>
+<span class="s2">      lr: 0.01</span>
+<span class="s2">      kwargs:</span>
+<span class="s2">        betas: [0.9, 0.999]</span>
+<span class="s2">    &quot;&quot;&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Let’s define a training configuration <code class="docutils literal notranslate"><span class="pre">TrainConfig</span></code> containing an <code class="docutils literal notranslate"><span class="pre">OptimizerConfig</span></code> to reflect the structure of the configuration file:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Iterable</span>
+
+<span class="kn">from</span> <span class="nn">torch.optim</span> <span class="kn">import</span> <span class="n">Optimizer</span><span class="p">,</span> <span class="n">Adam</span><span class="p">,</span> <span class="n">SGD</span>
+<span class="kn">from</span> <span class="nn">torch.nn</span> <span class="kn">import</span> <span class="n">Parameter</span><span class="p">,</span> <span class="n">Linear</span>
+
+<span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">OptimizerConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for an optimizer.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        optimizer_type: The type of optimizer to use.</span>
+<span class="sd">        lr: The learning rate.</span>
+<span class="sd">        kwargs: Additional keyword arguments to pass to the optimizer.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">optimizer_type</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;Adam&quot;</span><span class="p">,</span> <span class="s2">&quot;SGD&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;Adam&quot;</span>
+    <span class="n">lr</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.001</span>
+    <span class="n">kwargs</span><span class="p">:</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">dict</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">parameters</span><span class="p">:</span> <span class="n">Iterable</span><span class="p">[</span><span class="n">Parameter</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Optimizer</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizer_type</span> <span class="o">==</span> <span class="s2">&quot;Adam&quot;</span><span class="p">:</span>
+            <span class="n">optimizer</span> <span class="o">=</span> <span class="n">Adam</span><span class="p">(</span><span class="n">parameters</span><span class="p">,</span> <span class="n">lr</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">lr</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">optimizer_type</span> <span class="o">==</span> <span class="s2">&quot;SGD&quot;</span><span class="p">:</span>
+            <span class="n">optimizer</span> <span class="o">=</span> <span class="n">SGD</span><span class="p">(</span><span class="n">parameters</span><span class="p">,</span> <span class="n">lr</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">lr</span><span class="p">,</span> <span class="o">**</span><span class="bp">self</span><span class="o">.</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown optimizer type: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">optimizer_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">optimizer</span>
+
+<span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">TrainingConfig</span><span class="p">:</span>
+    <span class="n">optimizer</span><span class="p">:</span> <span class="n">OptimizerConfig</span>
+</pre></div>
+</div>
+<p>We can use <code class="docutils literal notranslate"><span class="pre">dacite</span></code> to automatically load the configuration file into this dataclass structure:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">dacite</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+
+<span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">&quot;config.yaml&quot;</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+    <span class="n">config_dict</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+
+<span class="n">config</span> <span class="o">=</span> <span class="n">dacite</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span><span class="n">TrainingConfig</span><span class="p">,</span> <span class="n">config_dict</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">dacite</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span><span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+<span class="n">module</span> <span class="o">=</span> <span class="n">Linear</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">10</span><span class="p">)</span>
+
+<span class="n">optimizer</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">optimizer</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">parameters</span><span class="o">=</span><span class="n">module</span><span class="o">.</span><span class="n">parameters</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">optimizer</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>The result is a user-configurable instance we can use to optimize model weights.</p>
+<div class="highlight-none notranslate"><div class="highlight"><pre><span></span>TrainingConfig(optimizer=OptimizerConfig(optimizer_type=&#39;Adam&#39;, lr=0.01, kwargs={&#39;betas&#39;: [0.9, 0.999]}))
+Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: [0.9, 0.999]
+    capturable: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.01
+    maximize: False
+    weight_decay: 0
+)
+</pre></div>
+</div>
+<p>The OptimizerConfig is a Config class with a build method.
+The product of that build method is an Optimizer instance from pytorch.
+Once we have an Optimizer, the code no longer needs to worry about how that object was configured.</p>
+<p>Let’s break down what’s happening.
+The user defines a yaml file representing a TrainConfig.
+That yaml contains an “optimizer” section, corresponding to our OptimizerConfig.
+Dacite will automatically load nested dataclasses, meaning it automatically loads the yaml data into the nested “optimizer” attribute.
+It also means we can add as many other configuration classes under TrainConfig as we want (for example, to define the neural network or how many epochs to train), or even nested configuration classes under those classes (such as a SchedulerConfig class under the optimizer).</p>
+<p>Dacite is a very powerful tool for making sure that the configuration is correct and that the code is type-safe.
+It reads the configuration file, validates it against the class, and then constructs the class for us.
+Normally, adding validation to a configuration file would be extra work as well as code you need to keep up to date if the configuration ever changes, but dacite does it all for us.</p>
+<p>As shown in this example, the build method can take in arguments that are only available at runtime, meaning you can build objects that require more than just the provided user configuration.
+In this case, the optimizer also takes in the model weights being optimized.
+You can also pass in data implied by other configuration classes.
+For example, you might have a data configuration specifying data to load, automatically detect the size of the training data (e.g. an image resolution) from that loaded data, and pass that size to another configuration class that builds the neural network.</p>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="evaluator_config.html" class="btn btn-neutral float-left" title="Evaluator Config" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="modules.html" class="btn btn-neutral float-right" title="Modules" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.core.corrector &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.core.corrector</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.core.corrector</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span> <span class="nn">torch</span>
+
+<span class="kn">from</span> <span class="nn">fme.core</span> <span class="kn">import</span> <span class="n">metrics</span>
+<span class="kn">from</span> <span class="nn">fme.core.climate_data</span> <span class="kn">import</span> <span class="n">ClimateData</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.data_typing</span> <span class="kn">import</span> <span class="n">SigmaCoordinates</span>
+<span class="kn">from</span> <span class="nn">fme.core.typing_</span> <span class="kn">import</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">TensorMapping</span>
+
+
+<div class="viewcode-block" id="CorrectorConfig"><a class="viewcode-back" href="../../../api.html#fme.ace.CorrectorConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">CorrectorConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sa">r</span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for the post-step state corrector.</span>
+
+<span class="sd">    ``conserve_dry_air`` enforces the constraint that:</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        global\_dry\_air = global\_mean(ps -</span>
+<span class="sd">        sum_k((ak\_diff + bk\_diff \* ps) \* wat_k))</span>
+
+<span class="sd">    in the generated data is equal to its value in the input data. This is done</span>
+<span class="sd">    by adding a globally-constant correction to the surface pressure in each</span>
+<span class="sd">    column. As per-mass values such as mixing ratios of water are unchanged,</span>
+<span class="sd">    this can cause changes in total water or energy. Note all global means here</span>
+<span class="sd">    are area-weighted.</span>
+
+<span class="sd">    ``zero_global_mean_moisture_advection`` enforces the constraint that:</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        global\_mean(tendency\_of\_total\_water\_path\_due\_to\_advection) = 0</span>
+
+<span class="sd">    in the generated data. This is done by adding a globally-constant correction</span>
+<span class="sd">    to the moisture advection tendency in each column.</span>
+
+<span class="sd">    ``moisture_budget_correction`` enforces closure of the moisture budget equation:</span>
+
+<span class="sd">    .. math::</span>
+
+<span class="sd">        tendency\_of\_total\_water\_path = (evaporation\_rate - precipitation\_rate</span>
+<span class="sd">        \\\\ + tendency\_of\_total\_water\_path\_due\_to\_advection)</span>
+
+<span class="sd">    in the generated data, where ``tendency_of_total_water_path`` is the difference</span>
+<span class="sd">    between the total water path at the current timestep and the previous</span>
+<span class="sd">    timestep divided by the time difference. This is done by modifying the</span>
+<span class="sd">    precipitation, evaporation, and/or moisture advection tendency fields as</span>
+<span class="sd">    described in the ``moisture_budget_correction`` attribute. When</span>
+<span class="sd">    advection tendency is modified, this budget equation is enforced in each</span>
+<span class="sd">    column, while when only precipitation or evaporation are modified, only</span>
+<span class="sd">    the global mean of the budget equation is enforced.</span>
+
+<span class="sd">    When enforcing moisture budget closure, we assume the global mean moisture</span>
+<span class="sd">    advection is zero. Therefore ``zero_global_mean_moisture_advection`` must be</span>
+<span class="sd">    True if using a ``moisture_budget_correction`` option other than ``None``.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        conserve_dry_air: If True, force the generated data to conserve dry air</span>
+<span class="sd">            by subtracting a constant offset from the surface pressure of each</span>
+<span class="sd">            column. This can cause changes in per-mass values such as total water</span>
+<span class="sd">            or energy.</span>
+<span class="sd">        zero_global_mean_moisture_advection: If True, force the generated data to</span>
+<span class="sd">            have zero global mean moisture advection by subtracting a constant</span>
+<span class="sd">            offset from the moisture advection tendency of each column.</span>
+<span class="sd">        moisture_budget_correction: If not &quot;None&quot;, force the generated data to</span>
+<span class="sd">            conserve global or column-local moisture by modifying budget fields.</span>
+<span class="sd">            Options include:</span>
+<span class="sd">                - &quot;precipitation&quot;: multiply precipitation by a scale factor</span>
+<span class="sd">                    to close the global moisture budget.</span>
+<span class="sd">                - &quot;evaporation&quot;: multiply evaporation by a scale factor</span>
+<span class="sd">                    to close the global moisture budget.</span>
+<span class="sd">                - &quot;advection_and_precipitation&quot;: after applying the &quot;precipitation&quot;</span>
+<span class="sd">                    global-mean correction above, recompute the column-integrated</span>
+<span class="sd">                    advective tendency as the budget residual,</span>
+<span class="sd">                    ensuring column budget closure.</span>
+<span class="sd">                - &quot;advection_and_evaporation&quot;: after applying the &quot;evaporation&quot;</span>
+<span class="sd">                    global-mean correction above, recompute the column-integrated</span>
+<span class="sd">                    advective tendency as the budget residual,</span>
+<span class="sd">                    ensuring column budget closure.</span>
+<span class="sd">        force_positive_names: Names of fields that should be forced to be greater</span>
+<span class="sd">            than or equal to zero. This is useful for fields like precipitation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">conserve_dry_air</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">zero_global_mean_moisture_advection</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">moisture_budget_correction</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span>
+        <span class="n">Literal</span><span class="p">[</span>
+            <span class="s2">&quot;precipitation&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;evaporation&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;advection_and_precipitation&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;advection_and_evaporation&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+    <span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">force_positive_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+        <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="s2">&quot;Corrector&quot;</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">Corrector</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span>
+            <span class="n">area</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+            <span class="n">timestep</span><span class="o">=</span><span class="n">timestep</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<span class="k">class</span> <span class="nc">Corrector</span><span class="p">:</span>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">config</span><span class="p">:</span> <span class="n">CorrectorConfig</span><span class="p">,</span>
+        <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+        <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_config</span> <span class="o">=</span> <span class="n">config</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_area</span> <span class="o">=</span> <span class="n">area</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_sigma_coordinates</span> <span class="o">=</span> <span class="n">sigma_coordinates</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_timestep</span> <span class="o">=</span> <span class="n">timestep</span>
+
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">input_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">force_positive_names</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="c1"># do this step before imposing other conservation correctors, since</span>
+            <span class="c1"># otherwise it could end up creating violations of those constraints.</span>
+            <span class="n">gen_data</span> <span class="o">=</span> <span class="n">_force_positive</span><span class="p">(</span><span class="n">gen_data</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">force_positive_names</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">conserve_dry_air</span><span class="p">:</span>
+            <span class="n">gen_data</span> <span class="o">=</span> <span class="n">_force_conserve_dry_air</span><span class="p">(</span>
+                <span class="n">input_data</span><span class="o">=</span><span class="n">input_data</span><span class="p">,</span>
+                <span class="n">gen_data</span><span class="o">=</span><span class="n">gen_data</span><span class="p">,</span>
+                <span class="n">area</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_area</span><span class="p">,</span>
+                <span class="n">sigma_coordinates</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_sigma_coordinates</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">zero_global_mean_moisture_advection</span><span class="p">:</span>
+            <span class="n">gen_data</span> <span class="o">=</span> <span class="n">_force_zero_global_mean_moisture_advection</span><span class="p">(</span>
+                <span class="n">gen_data</span><span class="o">=</span><span class="n">gen_data</span><span class="p">,</span>
+                <span class="n">area</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_area</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">moisture_budget_correction</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">gen_data</span> <span class="o">=</span> <span class="n">_force_conserve_moisture</span><span class="p">(</span>
+                <span class="n">input_data</span><span class="o">=</span><span class="n">input_data</span><span class="p">,</span>
+                <span class="n">gen_data</span><span class="o">=</span><span class="n">gen_data</span><span class="p">,</span>
+                <span class="n">area</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_area</span><span class="p">,</span>
+                <span class="n">sigma_coordinates</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_sigma_coordinates</span><span class="p">,</span>
+                <span class="n">timestep</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_timestep</span><span class="p">,</span>
+                <span class="n">terms_to_modify</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">moisture_budget_correction</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">gen_data</span>
+
+
+<span class="k">def</span> <span class="nf">_force_positive</span><span class="p">(</span><span class="n">data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span> <span class="n">names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Clamp all tensors defined by `names` to be greater than or equal to zero.&quot;&quot;&quot;</span>
+    <span class="n">out</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">data</span><span class="p">}</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">names</span><span class="p">:</span>
+        <span class="n">out</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">clamp</span><span class="p">(</span><span class="n">data</span><span class="p">[</span><span class="n">name</span><span class="p">],</span> <span class="nb">min</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">out</span>
+
+
+<span class="k">def</span> <span class="nf">_force_conserve_dry_air</span><span class="p">(</span>
+    <span class="n">input_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Update the generated data to conserve dry air.</span>
+
+<span class="sd">    This is done by adding a constant correction to the dry air pressure of</span>
+<span class="sd">    each column, and may result in changes in per-mass values such as</span>
+<span class="sd">    total water or energy.</span>
+
+<span class="sd">    We first compute the target dry air pressure by computing the globally</span>
+<span class="sd">    averaged difference in dry air pressure between the input_data and gen_data,</span>
+<span class="sd">    and then add this offset to the fully-resolved gen_data dry air pressure.</span>
+<span class="sd">    We can then solve for the surface pressure corresponding to this new dry air</span>
+<span class="sd">    pressure.</span>
+
+<span class="sd">    We start from the expression for dry air pressure:</span>
+
+<span class="sd">        dry_air = ps - sum_k((ak_diff + bk_diff * ps) * wat_k)</span>
+
+<span class="sd">    To update the dry air, we compute and update the surface pressure:</span>
+
+<span class="sd">        ps = (</span>
+<span class="sd">            dry_air + sum_k(ak_diff * wat_k)</span>
+<span class="sd">        ) / (</span>
+<span class="sd">            1 - sum_k(bk_diff * wat_k)</span>
+<span class="sd">        )</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">input</span> <span class="o">=</span> <span class="n">ClimateData</span><span class="p">(</span><span class="n">input_data</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">input</span><span class="o">.</span><span class="n">surface_pressure</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;surface_pressure is required to force dry air conservation&quot;</span><span class="p">)</span>
+    <span class="n">gen</span> <span class="o">=</span> <span class="n">ClimateData</span><span class="p">(</span><span class="n">gen_data</span><span class="p">)</span>
+    <span class="n">gen_dry_air</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">surface_pressure_due_to_dry_air</span><span class="p">(</span><span class="n">sigma_coordinates</span><span class="p">)</span>
+    <span class="n">global_gen_dry_air</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span><span class="n">gen_dry_air</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+    <span class="n">global_target_gen_dry_air</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span>
+        <span class="nb">input</span><span class="o">.</span><span class="n">surface_pressure_due_to_dry_air</span><span class="p">(</span><span class="n">sigma_coordinates</span><span class="p">),</span>
+        <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+        <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="n">global_gen_dry_air</span> <span class="o">-</span> <span class="n">global_target_gen_dry_air</span>
+    <span class="n">new_gen_dry_air</span> <span class="o">=</span> <span class="n">gen_dry_air</span> <span class="o">-</span> <span class="n">error</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">wat</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">specific_total_water</span>
+    <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;specific_total_water is required for conservation&quot;</span><span class="p">)</span>
+    <span class="n">ak_diff</span> <span class="o">=</span> <span class="n">sigma_coordinates</span><span class="o">.</span><span class="n">ak</span><span class="o">.</span><span class="n">diff</span><span class="p">()</span>
+    <span class="n">bk_diff</span> <span class="o">=</span> <span class="n">sigma_coordinates</span><span class="o">.</span><span class="n">bk</span><span class="o">.</span><span class="n">diff</span><span class="p">()</span>
+    <span class="n">new_pressure</span> <span class="o">=</span> <span class="p">(</span><span class="n">new_gen_dry_air</span> <span class="o">+</span> <span class="p">(</span><span class="n">ak_diff</span> <span class="o">*</span> <span class="n">wat</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="o">/</span> <span class="p">(</span>
+        <span class="mi">1</span> <span class="o">-</span> <span class="p">(</span><span class="n">bk_diff</span> <span class="o">*</span> <span class="n">wat</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">gen</span><span class="o">.</span><span class="n">surface_pressure</span> <span class="o">=</span> <span class="n">new_pressure</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">dtype</span><span class="o">=</span><span class="nb">input</span><span class="o">.</span><span class="n">surface_pressure</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">gen</span><span class="o">.</span><span class="n">data</span>
+
+
+<span class="k">def</span> <span class="nf">_force_zero_global_mean_moisture_advection</span><span class="p">(</span>
+    <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Update the generated data so advection conserves moisture.</span>
+
+<span class="sd">    Does so by adding a constant offset to the moisture advective tendency.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        gen_data: The generated data.</span>
+<span class="sd">        area: (n_lat, n_lon) array containing relative gridcell area, in any</span>
+<span class="sd">            units including unitless.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">gen</span> <span class="o">=</span> <span class="n">ClimateData</span><span class="p">(</span><span class="n">gen_data</span><span class="p">)</span>
+
+    <span class="n">mean_moisture_advection</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">tendency_of_total_water_path_due_to_advection</span><span class="p">,</span>
+        <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+        <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="n">gen</span><span class="o">.</span><span class="n">tendency_of_total_water_path_due_to_advection</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">tendency_of_total_water_path_due_to_advection</span>
+        <span class="o">-</span> <span class="n">mean_moisture_advection</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">gen</span><span class="o">.</span><span class="n">data</span>
+
+
+<span class="k">def</span> <span class="nf">_force_conserve_moisture</span><span class="p">(</span>
+    <span class="n">input_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+    <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+    <span class="n">terms_to_modify</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span>
+        <span class="s2">&quot;precipitation&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;evaporation&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;advection_and_precipitation&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;advection_and_evaporation&quot;</span><span class="p">,</span>
+    <span class="p">],</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Update the generated data to conserve moisture.</span>
+
+<span class="sd">    Does so while conserving total dry air in each column.</span>
+
+<span class="sd">    Assumes the global mean advective tendency of moisture is zero. This assumption</span>
+<span class="sd">    means any existing global mean advective tendency will be set to zero</span>
+<span class="sd">    if the advective tendency is re-computed.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        input_data: The input data.</span>
+<span class="sd">        gen_data: The generated data one timestep after the input data.</span>
+<span class="sd">        area: (n_lat, n_lon) array containing relative gridcell area, in any</span>
+<span class="sd">            units including unitless.</span>
+<span class="sd">        sigma_coordinates: The sigma coordinates.</span>
+<span class="sd">        timestep: Timestep of the model.</span>
+<span class="sd">        terms_to_modify: Which terms to modify, in addition to modifying surface</span>
+<span class="sd">            pressure to conserve dry air mass. One of:</span>
+<span class="sd">            - &quot;precipitation&quot;: modify precipitation only</span>
+<span class="sd">            - &quot;evaporation&quot;: modify evaporation only</span>
+<span class="sd">            - &quot;advection_and_precipitation&quot;: modify advection and precipitation</span>
+<span class="sd">            - &quot;advection_and_evaporation&quot;: modify advection and evaporation</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="nb">input</span> <span class="o">=</span> <span class="n">ClimateData</span><span class="p">(</span><span class="n">input_data</span><span class="p">)</span>
+    <span class="n">gen</span> <span class="o">=</span> <span class="n">ClimateData</span><span class="p">(</span><span class="n">gen_data</span><span class="p">)</span>
+
+    <span class="n">gen_total_water_path</span> <span class="o">=</span> <span class="n">gen</span><span class="o">.</span><span class="n">total_water_path</span><span class="p">(</span><span class="n">sigma_coordinates</span><span class="p">)</span>
+    <span class="n">timestep_seconds</span> <span class="o">=</span> <span class="n">timestep</span> <span class="o">/</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">seconds</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">twp_total_tendency</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">gen_total_water_path</span> <span class="o">-</span> <span class="nb">input</span><span class="o">.</span><span class="n">total_water_path</span><span class="p">(</span><span class="n">sigma_coordinates</span><span class="p">)</span>
+    <span class="p">)</span> <span class="o">/</span> <span class="n">timestep_seconds</span>
+    <span class="n">twp_tendency_global_mean</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span>
+        <span class="n">twp_total_tendency</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">evaporation_global_mean</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">evaporation_rate</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="n">precipitation_global_mean</span> <span class="o">=</span> <span class="n">metrics</span><span class="o">.</span><span class="n">weighted_mean</span><span class="p">(</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">precipitation_rate</span><span class="p">,</span> <span class="n">weights</span><span class="o">=</span><span class="n">area</span><span class="p">,</span> <span class="n">dim</span><span class="o">=</span><span class="p">(</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">terms_to_modify</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;precipitation&quot;</span><span class="p">):</span>
+        <span class="c1"># We want to achieve</span>
+        <span class="c1">#     global_mean(twp_total_tendency) = (</span>
+        <span class="c1">#         global_mean(evaporation_rate)</span>
+        <span class="c1">#         - global_mean(precipitation_rate)</span>
+        <span class="c1">#     )</span>
+        <span class="c1"># so we modify precipitation_rate to achieve this. Note we have</span>
+        <span class="c1"># assumed the global mean advection tendency is zero.</span>
+        <span class="c1"># First, we find the required global-mean precipitation rate</span>
+        <span class="c1">#     new_global_precip_rate = (</span>
+        <span class="c1">#         global_mean(evaporation_rate)</span>
+        <span class="c1">#         - global_mean(twp_total_tendency)</span>
+        <span class="c1">#     )</span>
+        <span class="n">new_precipitation_global_mean</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">evaporation_global_mean</span> <span class="o">-</span> <span class="n">twp_tendency_global_mean</span>
+        <span class="p">)</span>
+        <span class="c1"># Because scalar multiplication commutes with summation, we can</span>
+        <span class="c1"># achieve this by multiplying each gridcell&#39;s precipitation rate</span>
+        <span class="c1"># by the ratio of the new global mean to the current global mean.</span>
+        <span class="c1">#    new_precip_rate = (</span>
+        <span class="c1">#        new_global_precip_rate / current_global_precip_rate</span>
+        <span class="c1">#    ) * current_precip_rate</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">precipitation_rate</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">gen</span><span class="o">.</span><span class="n">precipitation_rate</span>
+            <span class="o">*</span> <span class="p">(</span><span class="n">new_precipitation_global_mean</span> <span class="o">/</span> <span class="n">precipitation_global_mean</span><span class="p">)[</span>
+                <span class="o">...</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+    <span class="k">elif</span> <span class="n">terms_to_modify</span><span class="o">.</span><span class="n">endswith</span><span class="p">(</span><span class="s2">&quot;evaporation&quot;</span><span class="p">):</span>
+        <span class="c1"># Derived similarly as for &quot;precipitation&quot; case.</span>
+        <span class="n">new_evaporation_global_mean</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">twp_tendency_global_mean</span> <span class="o">+</span> <span class="n">precipitation_global_mean</span>
+        <span class="p">)</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">evaporation_rate</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="n">gen</span><span class="o">.</span><span class="n">evaporation_rate</span>
+            <span class="o">*</span> <span class="p">(</span><span class="n">new_evaporation_global_mean</span> <span class="o">/</span> <span class="n">evaporation_global_mean</span><span class="p">)[</span><span class="o">...</span><span class="p">,</span> <span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">]</span>
+        <span class="p">)</span>
+    <span class="k">if</span> <span class="n">terms_to_modify</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;advection&quot;</span><span class="p">):</span>
+        <span class="c1"># Having already corrected the global-mean budget, we recompute</span>
+        <span class="c1"># advection based on assumption that the columnwise</span>
+        <span class="c1"># moisture budget closes. Correcting the global mean budget first</span>
+        <span class="c1"># is important to ensure the resulting advection has zero global mean.</span>
+        <span class="n">new_advection</span> <span class="o">=</span> <span class="n">twp_total_tendency</span> <span class="o">-</span> <span class="p">(</span>
+            <span class="n">gen</span><span class="o">.</span><span class="n">evaporation_rate</span> <span class="o">-</span> <span class="n">gen</span><span class="o">.</span><span class="n">precipitation_rate</span>
+        <span class="p">)</span>
+        <span class="n">gen</span><span class="o">.</span><span class="n">tendency_of_total_water_path_due_to_advection</span> <span class="o">=</span> <span class="n">new_advection</span>
+    <span class="k">return</span> <span class="n">gen</span><span class="o">.</span><span class="n">data</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

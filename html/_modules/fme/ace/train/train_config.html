@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.ace.train.train_config &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../../_static/jquery.js"></script>
+        <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+        <script src="../../../../_static/doctools.js"></script>
+        <script src="../../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.ace.train.train_config</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.ace.train.train_config</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">from</span> <span class="nn">fme.core.aggregator</span> <span class="kn">import</span> <span class="n">InferenceEvaluatorAggregatorConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.config</span> <span class="kn">import</span> <span class="n">DataLoaderConfig</span><span class="p">,</span> <span class="n">Slice</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.inference</span> <span class="kn">import</span> <span class="n">InferenceDataLoaderConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.dicts</span> <span class="kn">import</span> <span class="n">to_flat_dict</span>
+<span class="kn">from</span> <span class="nn">fme.core.distributed</span> <span class="kn">import</span> <span class="n">Distributed</span>
+<span class="kn">from</span> <span class="nn">fme.core.ema</span> <span class="kn">import</span> <span class="n">EMAConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.logging_utils</span> <span class="kn">import</span> <span class="n">LoggingConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.optimization</span> <span class="kn">import</span> <span class="n">OptimizationConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.stepper</span> <span class="kn">import</span> <span class="n">ExistingStepperConfig</span><span class="p">,</span> <span class="n">SingleModuleStepperConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.weight_ops</span> <span class="kn">import</span> <span class="n">CopyWeightsConfig</span>
+
+
+<div class="viewcode-block" id="InlineInferenceConfig"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.InlineInferenceConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">InlineInferenceConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Attributes:</span>
+<span class="sd">        loader: configuration for the data loader used during inference</span>
+<span class="sd">        n_forward_steps: number of forward steps to take</span>
+<span class="sd">        forward_steps_in_memory: number of forward steps to take before</span>
+<span class="sd">            re-reading data from disk</span>
+<span class="sd">        epochs: epochs on which to run inference, where the first epoch is</span>
+<span class="sd">            defined as epoch 0 (unlike in logs which show epochs as starting</span>
+<span class="sd">            from 1). By default runs inference every epoch.</span>
+<span class="sd">        aggregator: configuration of inline inference aggregator.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">loader</span><span class="p">:</span> <span class="n">InferenceDataLoaderConfig</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">forward_steps_in_memory</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">2</span>
+    <span class="n">epochs</span><span class="p">:</span> <span class="n">Slice</span> <span class="o">=</span> <span class="n">Slice</span><span class="p">(</span><span class="n">start</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span> <span class="n">stop</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">aggregator</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">InferenceEvaluatorAggregatorConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Distributed</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span> <span class="o">%</span> <span class="n">dist</span><span class="o">.</span><span class="n">world_size</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Number of inference initial conditions must be divisible by the &quot;</span>
+                <span class="s2">&quot;number of parallel workers, got &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">n_initial_conditions</span><span class="si">}</span><span class="s2"> and &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">dist</span><span class="o">.</span><span class="n">world_size</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="TrainConfig"><a class="viewcode-back" href="../../../../training_config.html#fme.ace.TrainConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">TrainConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for training a model.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        train_loader: Configuration for the training data loader.</span>
+<span class="sd">        validation_loader: Configuration for the validation data loader.</span>
+<span class="sd">        stepper: Configuration for the stepper.</span>
+<span class="sd">        optimization: Configuration for the optimization.</span>
+<span class="sd">        logging: Configuration for logging.</span>
+<span class="sd">        max_epochs: Total number of epochs to train for.</span>
+<span class="sd">        save_checkpoint: Whether to save checkpoints.</span>
+<span class="sd">        experiment_dir: Directory where checkpoints and logs are saved.</span>
+<span class="sd">        inference: Configuration for inline inference.</span>
+<span class="sd">        n_forward_steps: Number of forward steps to take gradient over.</span>
+<span class="sd">        copy_weights_after_batch: Configuration for copying weights from the</span>
+<span class="sd">            base model to the training model after each batch.</span>
+<span class="sd">        ema: Configuration for exponential moving average of model weights.</span>
+<span class="sd">        validate_using_ema: Whether to validate and perform inference using</span>
+<span class="sd">            the EMA model.</span>
+<span class="sd">        checkpoint_save_epochs: How often to save epoch-based checkpoints,</span>
+<span class="sd">            if save_checkpoint is True. If None, checkpoints are only saved</span>
+<span class="sd">            for the most recent epoch</span>
+<span class="sd">            (and the best epochs if validate_using_ema == False).</span>
+<span class="sd">        ema_checkpoint_save_epochs: How often to save epoch-based EMA checkpoints,</span>
+<span class="sd">            if save_checkpoint is True. If None, EMA checkpoints are only saved</span>
+<span class="sd">            for the most recent epoch</span>
+<span class="sd">            (and the best epochs if validate_using_ema == True).</span>
+<span class="sd">        log_train_every_n_batches: How often to log batch_loss during training.</span>
+<span class="sd">        segment_epochs: Exit after training for at most this many epochs</span>
+<span class="sd">            in current job, without exceeding `max_epochs`. Use this if training</span>
+<span class="sd">            must be run in segments, e.g. due to wall clock limit.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">train_loader</span><span class="p">:</span> <span class="n">DataLoaderConfig</span>
+    <span class="n">validation_loader</span><span class="p">:</span> <span class="n">DataLoaderConfig</span>
+    <span class="n">stepper</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">SingleModuleStepperConfig</span><span class="p">,</span> <span class="n">ExistingStepperConfig</span><span class="p">]</span>
+    <span class="n">optimization</span><span class="p">:</span> <span class="n">OptimizationConfig</span>
+    <span class="n">logging</span><span class="p">:</span> <span class="n">LoggingConfig</span>
+    <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">save_checkpoint</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">experiment_dir</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">inference</span><span class="p">:</span> <span class="n">InlineInferenceConfig</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">copy_weights_after_batch</span><span class="p">:</span> <span class="n">CopyWeightsConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">CopyWeightsConfig</span><span class="p">(</span><span class="n">exclude</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;*&quot;</span><span class="p">])</span>
+    <span class="p">)</span>
+    <span class="n">ema</span><span class="p">:</span> <span class="n">EMAConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">EMAConfig</span><span class="p">())</span>
+    <span class="n">validate_using_ema</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">checkpoint_save_epochs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Slice</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">ema_checkpoint_save_epochs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Slice</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">log_train_every_n_batches</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">100</span>
+    <span class="n">segment_epochs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">checkpoint_dir</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        The directory where checkpoints are saved.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="s2">&quot;training_checkpoints&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">latest_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="s2">&quot;ckpt.tar&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">best_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="s2">&quot;best_ckpt.tar&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">best_inference_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="s2">&quot;best_inference_ckpt.tar&quot;</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">ema_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="s2">&quot;ema_ckpt.tar&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">epoch_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;ckpt_</span><span class="si">{</span><span class="n">epoch</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.tar&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">ema_epoch_checkpoint_path</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_dir</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;ema_ckpt_</span><span class="si">{</span><span class="n">epoch</span><span class="si">:</span><span class="s2">04d</span><span class="si">}</span><span class="s2">.tar&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">epoch_checkpoint_enabled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">epoch_checkpoint_enabled</span><span class="p">(</span>
+            <span class="n">epoch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_epochs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_save_epochs</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">ema_epoch_checkpoint_enabled</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">epoch_checkpoint_enabled</span><span class="p">(</span>
+            <span class="n">epoch</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_epochs</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">ema_checkpoint_save_epochs</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">resuming</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="n">checkpoint_file_exists</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isfile</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">latest_checkpoint_path</span><span class="p">)</span>
+        <span class="n">resuming</span> <span class="o">=</span> <span class="kc">True</span> <span class="k">if</span> <span class="n">checkpoint_file_exists</span> <span class="k">else</span> <span class="kc">False</span>
+        <span class="k">return</span> <span class="n">resuming</span>
+
+    <span class="k">def</span> <span class="nf">configure_logging</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">log_filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">configure_logging</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="n">log_filename</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">configure_wandb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env_vars</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">to_flat_dict</span><span class="p">(</span><span class="n">dataclasses</span><span class="o">.</span><span class="n">asdict</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">configure_wandb</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">env_vars</span><span class="o">=</span><span class="n">env_vars</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">log</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;------------------ Configuration ------------------&quot;</span><span class="p">)</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;---------------------------------------------------&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">clean_wandb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">clean_wandb</span><span class="p">(</span><span class="n">experiment_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">epoch_checkpoint_enabled</span><span class="p">(</span>
+    <span class="n">epoch</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">max_epochs</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">save_epochs</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Slice</span><span class="p">]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">save_epochs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span>
+    <span class="k">return</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">max_epochs</span><span class="p">)[</span><span class="n">save_epochs</span><span class="o">.</span><span class="n">slice</span><span class="p">]</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

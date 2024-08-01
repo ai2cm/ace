@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.ace.inference.inference &mdash; ACE 0.2.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../../_static/jquery.js"></script>
+        <script src="../../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../../" id="documentation_options" src="../../../../_static/documentation_options.js"></script>
+        <script src="../../../../_static/doctools.js"></script>
+        <script src="../../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                0.2.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.ace.inference.inference</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.ace.inference.inference</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">argparse</span>
+<span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">from</span> <span class="nn">pathlib</span> <span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Literal</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Sequence</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span> <span class="nn">dacite</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">import</span> <span class="nn">xarray</span> <span class="k">as</span> <span class="nn">xr</span>
+<span class="kn">import</span> <span class="nn">yaml</span>
+
+<span class="kn">import</span> <span class="nn">fme</span>
+<span class="kn">import</span> <span class="nn">fme.core.logging_utils</span> <span class="k">as</span> <span class="nn">logging_utils</span>
+<span class="kn">from</span> <span class="nn">fme.ace.inference.data_writer</span> <span class="kn">import</span> <span class="n">DataWriter</span><span class="p">,</span> <span class="n">DataWriterConfig</span>
+<span class="kn">from</span> <span class="nn">fme.ace.inference.loop</span> <span class="kn">import</span> <span class="n">run_inference</span>
+<span class="kn">from</span> <span class="nn">fme.core</span> <span class="kn">import</span> <span class="n">SingleModuleStepper</span>
+<span class="kn">from</span> <span class="nn">fme.core.aggregator.inference</span> <span class="kn">import</span> <span class="n">InferenceAggregatorConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.data_typing</span> <span class="kn">import</span> <span class="n">GriddedData</span><span class="p">,</span> <span class="n">SigmaCoordinates</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.getters</span> <span class="kn">import</span> <span class="n">get_forcing_data</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.inference</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ExplicitIndices</span><span class="p">,</span>
+    <span class="n">ForcingDataLoaderConfig</span><span class="p">,</span>
+    <span class="n">InferenceInitialConditionIndices</span><span class="p">,</span>
+    <span class="n">TimestampList</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span> <span class="nn">fme.core.dicts</span> <span class="kn">import</span> <span class="n">to_flat_dict</span>
+<span class="kn">from</span> <span class="nn">fme.core.logging_utils</span> <span class="kn">import</span> <span class="n">LoggingConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.ocean</span> <span class="kn">import</span> <span class="n">OceanConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.stepper</span> <span class="kn">import</span> <span class="n">SingleModuleStepperConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.typing_</span> <span class="kn">import</span> <span class="n">TensorMapping</span>
+<span class="kn">from</span> <span class="nn">fme.core.wandb</span> <span class="kn">import</span> <span class="n">WandB</span>
+
+<span class="kn">from</span> <span class="nn">.evaluator</span> <span class="kn">import</span> <span class="n">load_stepper</span><span class="p">,</span> <span class="n">load_stepper_config</span><span class="p">,</span> <span class="n">validate_time_coarsen_config</span>
+
+<span class="n">StartIndices</span> <span class="o">=</span> <span class="n">Union</span><span class="p">[</span><span class="n">InferenceInitialConditionIndices</span><span class="p">,</span> <span class="n">ExplicitIndices</span><span class="p">,</span> <span class="n">TimestampList</span><span class="p">]</span>
+
+
+<div class="viewcode-block" id="InitialConditionConfig"><a class="viewcode-back" href="../../../../inference_config.html#fme.ace.InitialConditionConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">InitialConditionConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for initial conditions.</span>
+
+<span class="sd">    .. note::</span>
+<span class="sd">        The data specified under path should contain a time dimension of at least</span>
+<span class="sd">        length 1. If multiple times are present in the dataset specified by `path`,</span>
+<span class="sd">        the inference will start an ensemble simulation using each IC along a</span>
+<span class="sd">        leading sample dimension. Specific times can be selected from the dataset</span>
+<span class="sd">        by using `start_indices`.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        path: The path to the initial conditions dataset.</span>
+<span class="sd">        engine: The engine used to open the dataset.</span>
+<span class="sd">        start_indices: optional specification of the subset of</span>
+<span class="sd">            initial conditions to use.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">path</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">engine</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;netcdf4&quot;</span><span class="p">,</span> <span class="s2">&quot;h5netcdf&quot;</span><span class="p">,</span> <span class="s2">&quot;zarr&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;netcdf4&quot;</span>
+    <span class="n">start_indices</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">StartIndices</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">get_dataset</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">:</span>
+        <span class="n">ds</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">open_dataset</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">path</span><span class="p">,</span> <span class="n">engine</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">engine</span><span class="p">,</span> <span class="n">use_cftime</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_subselect_initial_conditions</span><span class="p">(</span><span class="n">ds</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_subselect_initial_conditions</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">ds</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_indices</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">ic_indices</span> <span class="o">=</span> <span class="nb">slice</span><span class="p">(</span><span class="kc">None</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">start_indices</span><span class="p">,</span> <span class="n">TimestampList</span><span class="p">):</span>
+            <span class="n">time_index</span> <span class="o">=</span> <span class="n">xr</span><span class="o">.</span><span class="n">CFTimeIndex</span><span class="p">(</span><span class="n">ds</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">values</span><span class="p">)</span>
+            <span class="n">ic_indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">as_indices</span><span class="p">(</span><span class="n">time_index</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ic_indices</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">start_indices</span><span class="o">.</span><span class="n">as_indices</span><span class="p">()</span>
+        <span class="c1"># time is a required variable but not necessarily a dimension</span>
+        <span class="n">sample_dim_name</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">time</span><span class="o">.</span><span class="n">dims</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">ds</span><span class="o">.</span><span class="n">isel</span><span class="p">({</span><span class="n">sample_dim_name</span><span class="p">:</span> <span class="n">ic_indices</span><span class="p">})</span></div>
+
+
+<span class="k">def</span> <span class="nf">get_initial_condition</span><span class="p">(</span>
+    <span class="n">ds</span><span class="p">:</span> <span class="n">xr</span><span class="o">.</span><span class="n">Dataset</span><span class="p">,</span> <span class="n">prognostic_names</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">TensorMapping</span><span class="p">,</span> <span class="n">xr</span><span class="o">.</span><span class="n">DataArray</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Given a dataset, extract a mapping of variables to tensors.</span>
+<span class="sd">    and the time coordinate corresponding to the initial conditions.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        ds: Dataset containing initial condition data. Must include prognostic_names</span>
+<span class="sd">            as variables, and they must each have shape (n_samples, n_lat, n_lon).</span>
+<span class="sd">            Dataset must also include a &#39;time&#39; variable with length n_samples.</span>
+<span class="sd">        prognostic_names: Names of prognostic variables to extract from the dataset.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        A mapping of variable names to tensors and the time coordinate.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">initial_condition</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">prognostic_names</span><span class="p">:</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">ds</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Initial condition variables </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2"> must have shape &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;(n_samples, n_lat, n_lon). Got shape </span><span class="si">{</span><span class="n">ds</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">n_samples</span> <span class="o">=</span> <span class="n">ds</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">initial_condition</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="n">ds</span><span class="p">[</span><span class="n">name</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fme</span><span class="o">.</span><span class="n">get_device</span><span class="p">())</span>
+    <span class="k">if</span> <span class="s2">&quot;time&quot;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ds</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Initial condition dataset must have a &#39;time&#39; variable.&quot;</span><span class="p">)</span>
+    <span class="n">initial_times</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">time</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">initial_times</span><span class="p">)</span> <span class="o">!=</span> <span class="n">n_samples</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="s2">&quot;Length of &#39;time&#39; variable must match first dimension of variables &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;in initial condition dataset. Got </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">initial_times</span><span class="p">)</span><span class="si">}</span><span class="s2"> and </span><span class="si">{</span><span class="n">n_samples</span><span class="si">}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+    <span class="k">return</span> <span class="n">initial_condition</span><span class="p">,</span> <span class="n">initial_times</span>
+
+
+<div class="viewcode-block" id="InferenceConfig"><a class="viewcode-back" href="../../../../inference_config.html#fme.ace.InferenceConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">InferenceConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for running inference.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        experiment_dir: Directory to save results to.</span>
+<span class="sd">        n_forward_steps: Number of steps to run the model forward for.</span>
+<span class="sd">        checkpoint_path: Path to stepper checkpoint to load.</span>
+<span class="sd">        logging: Configuration for logging.</span>
+<span class="sd">        initial_condition: Configuration for initial condition data.</span>
+<span class="sd">        forcing_loader: Configuration for forcing data.</span>
+<span class="sd">        forward_steps_in_memory: Number of forward steps to complete in memory</span>
+<span class="sd">            at a time.</span>
+<span class="sd">        data_writer: Configuration for data writers.</span>
+<span class="sd">        aggregator: Configuration for inference aggregator.</span>
+<span class="sd">        ocean: Ocean configuration for running inference with a</span>
+<span class="sd">            different one than what is used in training.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">experiment_dir</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span>
+    <span class="n">checkpoint_path</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">logging</span><span class="p">:</span> <span class="n">LoggingConfig</span>
+    <span class="n">initial_condition</span><span class="p">:</span> <span class="n">InitialConditionConfig</span>
+    <span class="n">forcing_loader</span><span class="p">:</span> <span class="n">ForcingDataLoaderConfig</span>
+    <span class="n">forward_steps_in_memory</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span>
+    <span class="n">data_writer</span><span class="p">:</span> <span class="n">DataWriterConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">DataWriterConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">aggregator</span><span class="p">:</span> <span class="n">InferenceAggregatorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">InferenceAggregatorConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">ocean</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">OceanConfig</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_writer</span><span class="o">.</span><span class="n">time_coarsen</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">validate_time_coarsen_config</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">data_writer</span><span class="o">.</span><span class="n">time_coarsen</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">forward_steps_in_memory</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">n_forward_steps</span><span class="p">,</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">configure_logging</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">log_filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">configure_logging</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="n">log_filename</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">configure_wandb</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">env_vars</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">to_flat_dict</span><span class="p">(</span><span class="n">dataclasses</span><span class="o">.</span><span class="n">asdict</span><span class="p">(</span><span class="bp">self</span><span class="p">))</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">configure_wandb</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span> <span class="n">env_vars</span><span class="o">=</span><span class="n">env_vars</span><span class="p">,</span> <span class="n">resume</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">clean_wandb</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">clean_wandb</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">configure_gcs</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">logging</span><span class="o">.</span><span class="n">configure_gcs</span><span class="p">()</span>
+
+<div class="viewcode-block" id="InferenceConfig.load_stepper"><a class="viewcode-back" href="../../../../api.html#fme.ace.InferenceConfig.load_stepper">[docs]</a>    <span class="k">def</span> <span class="nf">load_stepper</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span> <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SingleModuleStepper</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            area: A tensor of shape (n_lat, n_lon) containing the area of</span>
+<span class="sd">                each grid cell.</span>
+<span class="sd">            sigma_coordinates: The sigma coordinates of the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loading trained model checkpoint from </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">stepper</span> <span class="o">=</span> <span class="n">load_stepper</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_path</span><span class="p">,</span>
+            <span class="n">area</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+            <span class="n">ocean_config</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">stepper</span></div>
+
+    <span class="k">def</span> <span class="nf">load_stepper_config</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SingleModuleStepperConfig</span><span class="p">:</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Loading trained model checkpoint from </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">load_stepper_config</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_path</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_data_writer</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">GriddedData</span><span class="p">,</span> <span class="n">prognostic_names</span><span class="p">:</span> <span class="n">Sequence</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataWriter</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">data_writer</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+            <span class="n">experiment_dir</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span>
+            <span class="n">n_samples</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">n_samples</span><span class="p">,</span>
+            <span class="n">n_timesteps</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">n_forward_steps</span><span class="p">,</span>
+            <span class="n">timestep</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">timestep</span><span class="p">,</span>
+            <span class="n">prognostic_names</span><span class="o">=</span><span class="n">prognostic_names</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span>
+            <span class="n">coords</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">coords</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">main</span><span class="p">(</span><span class="n">yaml_config</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">yaml_config</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">dacite</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span>
+        <span class="n">data_class</span><span class="o">=</span><span class="n">InferenceConfig</span><span class="p">,</span>
+        <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+        <span class="n">config</span><span class="o">=</span><span class="n">dacite</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span><span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="s2">&quot;config.yaml&quot;</span><span class="p">),</span> <span class="s2">&quot;w&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">yaml</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">default_flow_style</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">sort_keys</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+    <span class="n">run_inference_from_config</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">run_inference_from_config</span><span class="p">(</span><span class="n">config</span><span class="p">:</span> <span class="n">InferenceConfig</span><span class="p">):</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">isdir</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">):</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">makedirs</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">config</span><span class="o">.</span><span class="n">configure_logging</span><span class="p">(</span><span class="n">log_filename</span><span class="o">=</span><span class="s2">&quot;inference_out.log&quot;</span><span class="p">)</span>
+    <span class="n">env_vars</span> <span class="o">=</span> <span class="n">logging_utils</span><span class="o">.</span><span class="n">retrieve_env_vars</span><span class="p">()</span>
+    <span class="n">beaker_url</span> <span class="o">=</span> <span class="n">logging_utils</span><span class="o">.</span><span class="n">log_beaker_url</span><span class="p">()</span>
+    <span class="n">config</span><span class="o">.</span><span class="n">configure_wandb</span><span class="p">(</span><span class="n">env_vars</span><span class="o">=</span><span class="n">env_vars</span><span class="p">,</span> <span class="n">notes</span><span class="o">=</span><span class="n">beaker_url</span><span class="p">)</span>
+
+    <span class="n">torch</span><span class="o">.</span><span class="n">backends</span><span class="o">.</span><span class="n">cudnn</span><span class="o">.</span><span class="n">benchmark</span> <span class="o">=</span> <span class="kc">True</span>
+
+    <span class="n">logging_utils</span><span class="o">.</span><span class="n">log_versions</span><span class="p">()</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Current device is </span><span class="si">{</span><span class="n">fme</span><span class="o">.</span><span class="n">get_device</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">stepper_config</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">load_stepper_config</span><span class="p">()</span>
+    <span class="n">data_requirements</span> <span class="o">=</span> <span class="n">stepper_config</span><span class="o">.</span><span class="n">get_forcing_data_requirements</span><span class="p">(</span>
+        <span class="n">n_forward_steps</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">n_forward_steps</span>
+    <span class="p">)</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Loading initial condition data&quot;</span><span class="p">)</span>
+    <span class="n">initial_condition</span><span class="p">,</span> <span class="n">initial_times</span> <span class="o">=</span> <span class="n">get_initial_condition</span><span class="p">(</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">initial_condition</span><span class="o">.</span><span class="n">get_dataset</span><span class="p">(),</span> <span class="n">stepper_config</span><span class="o">.</span><span class="n">prognostic_names</span>
+    <span class="p">)</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Initializing forcing data loaded&quot;</span><span class="p">)</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">get_forcing_data</span><span class="p">(</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">forcing_loader</span><span class="p">,</span>
+        <span class="n">config</span><span class="o">.</span><span class="n">forward_steps_in_memory</span><span class="p">,</span>
+        <span class="n">data_requirements</span><span class="p">,</span>
+        <span class="n">initial_times</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">stepper</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">load_stepper</span><span class="p">(</span>
+        <span class="n">data</span><span class="o">.</span><span class="n">area_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fme</span><span class="o">.</span><span class="n">get_device</span><span class="p">()),</span>
+        <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">sigma_coordinates</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fme</span><span class="o">.</span><span class="n">get_device</span><span class="p">()),</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">stepper</span><span class="o">.</span><span class="n">timestep</span> <span class="o">!=</span> <span class="n">data</span><span class="o">.</span><span class="n">timestep</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Timestep of the loaded stepper, </span><span class="si">{</span><span class="n">stepper</span><span class="o">.</span><span class="n">timestep</span><span class="si">}</span><span class="s2">, does not &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;match that of the forcing data, </span><span class="si">{</span><span class="n">data</span><span class="o">.</span><span class="n">timestep</span><span class="si">}</span><span class="s2">.&quot;</span>
+        <span class="p">)</span>
+
+    <span class="n">aggregator</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">aggregator</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+        <span class="n">area_weights</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">area_weights</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fme</span><span class="o">.</span><span class="n">get_device</span><span class="p">()),</span>
+        <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+        <span class="n">timestep</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">timestep</span><span class="p">,</span>
+        <span class="n">n_timesteps</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">n_forward_steps</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="n">data</span><span class="o">.</span><span class="n">metadata</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">writer</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get_data_writer</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">stepper</span><span class="o">.</span><span class="n">prognostic_names</span><span class="p">)</span>
+
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Starting inference&quot;</span><span class="p">)</span>
+    <span class="n">timers</span> <span class="o">=</span> <span class="n">run_inference</span><span class="p">(</span>
+        <span class="n">stepper</span><span class="o">=</span><span class="n">stepper</span><span class="p">,</span>
+        <span class="n">initial_condition</span><span class="o">=</span><span class="n">initial_condition</span><span class="p">,</span>
+        <span class="n">forcing_data</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+        <span class="n">writer</span><span class="o">=</span><span class="n">writer</span><span class="p">,</span>
+        <span class="n">aggregator</span><span class="o">=</span><span class="n">aggregator</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="n">final_flush_start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Starting final flush of data writer&quot;</span><span class="p">)</span>
+    <span class="n">writer</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+    <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">ds</span> <span class="ow">in</span> <span class="n">aggregator</span><span class="o">.</span><span class="n">get_datasets</span><span class="p">((</span><span class="s2">&quot;time_mean&quot;</span><span class="p">,))</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="n">coords</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">coords</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ds</span><span class="o">.</span><span class="n">dims</span><span class="p">}</span>
+        <span class="n">ds</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">assign_coords</span><span class="p">(</span><span class="n">coords</span><span class="p">)</span>
+        <span class="n">ds</span><span class="o">.</span><span class="n">to_netcdf</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">experiment_dir</span><span class="p">)</span> <span class="o">/</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">_diagnostics.nc&quot;</span><span class="p">)</span>
+    <span class="n">final_flush_duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">final_flush_start_time</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Final writer flush duration: </span><span class="si">{</span><span class="n">final_flush_duration</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+    <span class="n">timers</span><span class="p">[</span><span class="s2">&quot;final_writer_flush&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">final_flush_duration</span>
+
+    <span class="n">duration</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+    <span class="n">total_steps</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">n_forward_steps</span> <span class="o">*</span> <span class="n">data</span><span class="o">.</span><span class="n">loader</span><span class="o">.</span><span class="n">dataset</span><span class="o">.</span><span class="n">n_samples</span>
+    <span class="n">total_steps_per_second</span> <span class="o">=</span> <span class="n">total_steps</span> <span class="o">/</span> <span class="n">duration</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Inference duration: </span><span class="si">{</span><span class="n">duration</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+    <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Total steps per second: </span><span class="si">{</span><span class="n">total_steps_per_second</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> steps/second&quot;</span><span class="p">)</span>
+
+    <span class="n">step_logs</span> <span class="o">=</span> <span class="n">aggregator</span><span class="o">.</span><span class="n">get_inference_logs</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;inference&quot;</span><span class="p">)</span>
+    <span class="n">wandb</span> <span class="o">=</span> <span class="n">WandB</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+    <span class="k">if</span> <span class="n">wandb</span><span class="o">.</span><span class="n">enabled</span><span class="p">:</span>
+        <span class="n">logging</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Starting logging of metrics to wandb&quot;</span><span class="p">)</span>
+        <span class="n">duration_logs</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;duration_seconds&quot;</span><span class="p">:</span> <span class="n">duration</span><span class="p">,</span>
+            <span class="s2">&quot;total_steps_per_second&quot;</span><span class="p">:</span> <span class="n">total_steps_per_second</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="n">wandb</span><span class="o">.</span><span class="n">log</span><span class="p">({</span><span class="o">**</span><span class="n">timers</span><span class="p">,</span> <span class="o">**</span><span class="n">duration_logs</span><span class="p">},</span> <span class="n">step</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">log</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">step_logs</span><span class="p">):</span>
+            <span class="n">wandb</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">log</span><span class="p">,</span> <span class="n">step</span><span class="o">=</span><span class="n">i</span><span class="p">,</span> <span class="n">sleep</span><span class="o">=</span><span class="mf">0.01</span><span class="p">)</span>
+
+    <span class="n">config</span><span class="o">.</span><span class="n">clean_wandb</span><span class="p">()</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">()</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;yaml_config&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">)</span>
+    <span class="n">args</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">parse_args</span><span class="p">()</span>
+    <span class="n">main</span><span class="p">(</span><span class="n">yaml_config</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">yaml_config</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
