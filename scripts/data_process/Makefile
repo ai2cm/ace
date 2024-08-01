@@ -2,6 +2,11 @@
 # which can be installed using fv3net's Makefile. See
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
+# Some data has been put to coldline storage making it expensive
+# to access.  In order to run processing on that data, set this
+# variable to true.
+ENABLE_COLDLINE ?= false
+
 RESOLUTION ?= 1deg
 LAYERS ?= 8layer
 
@@ -106,6 +111,14 @@ fv3gfs_climSST_dataset:
 fv3gfs_1deg_climSST_monthly_netcdfs:
 	$(MAKE) fv3gfs_climSST_monthly_netcdfs RESOLUTION=1deg
 
+.PHONY: enable_coldline_check
+enable_coldline_check:
+	@if [ "$(ENABLE_COLDLINE)" != "true" ]; then \
+		echo "Processing target is deprecated due to coldlined data" \
+		echo "to run, ENABLE_COLDLINE must be set to true. Exiting."; \
+		exit 1; \
+	fi
+
 .PHONY: fv3gfs_climSST_monthly_netcdfs
 fv3gfs_climSST_monthly_netcdfs:
 	./convert_to_monthly_netcdf_fv3gfs.sh \
@@ -119,15 +132,13 @@ fv3gfs_climSST_monthly_netcdfs:
 fv3gfs_1deg_climSST_stats_beaker_dataset:
 	$(MAKE) fv3gfs_climSST_stats_beaker_dataset RESOLUTION=1deg
 
-.PHONY: fv3gfs_climSST_stats_beaker_dataset
-fv3gfs_climSST_stats_beaker_dataset:
+fv3gfs_climSST_stats_beaker_dataset: enable_coldline_check
 	./compute_stats.sh --config configs/fv3gfs-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 # This took around ~10 hours to complete.  The roundtrip_filter adds significant computational time.
 # If we plan to do this regularly, paralellizing the script across time using xpartition to
 # launch jobs for different time chunks would probably be a good idea.
-.PHONY: fv3gfs_climSST_c48_baseline_dataset
-fv3gfs_climSST_c48_baseline_dataset:
+fv3gfs_climSST_c48_baseline_dataset: enable_coldline_check
 	./compute_dataset.sh --config configs/fv3gfs-c48-ensemble-1deg-8layer.yaml
 
 .PHONY: fv3gfs_climSST_c48_baseline_monthly_netcdfs
@@ -143,8 +154,7 @@ fv3gfs_climSST_c48_baseline_monthly_netcdfs:
 fv3gfs_1deg_AMIP_dataset:
 	$(MAKE) fv3gfs_AMIP_dataset RESOLUTION=1deg LAYERS=8layer
 
-.PHONY: fv3gfs_AMIP_dataset
-fv3gfs_AMIP_dataset:
+fv3gfs_AMIP_dataset: enable_coldline_check
 	./compute_dataset.sh --config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 .PHONY: fv3gfs_1deg_AMIP_monthly_netcdfs
@@ -164,8 +174,7 @@ fv3gfs_AMIP_monthly_netcdfs:
 fv3gfs_1deg_AMIP_stats_beaker_dataset:
 	$(MAKE) fv3gfs_AMIP_stats_beaker_dataset RESOLUTION=1deg
 
-.PHONY: fv3gfs_AMIP_stats_beaker_dataset
-fv3gfs_AMIP_stats_beaker_dataset:
+fv3gfs_AMIP_stats_beaker_dataset: enable_coldline_check
 	./compute_stats.sh --config configs/fv3gfs-amip-ensemble-$(RESOLUTION)-$(LAYERS).yaml
 
 # TODO: Add AMIP baseline C48 dataset processing when available
