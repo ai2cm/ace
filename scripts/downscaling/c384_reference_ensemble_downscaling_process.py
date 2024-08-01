@@ -57,6 +57,8 @@ paths = {
 
 outpaths = {"fine": "gaussian_grid_720_by_1440", "coarse": "gaussian_grid_90_by_180"}
 
+ENABLE_COLDLINE = False
+
 
 def read_dataset(
     resolution: Literal["fine", "coarse"], initial_condition: str
@@ -78,6 +80,12 @@ def read_dataset(
 
 
 def main():
+    if not ENABLE_COLDLINE:
+        raise ValueError(
+            "The data for this script have been moved to coldline storage."
+            "To re-run this operation, set the ENABLE_COLDLINE variable to True."
+            "But be aware that this will incur costs."
+        )
     for ic in initial_conditions:
         for resolution in ["coarse", "fine"]:
             print(f"Processing {ic}, '{resolution}'")
