@@ -299,6 +299,41 @@ class EnsoCoefficientEvaluatorAggregator:
         logs.update({f"{label}{name}": metrics[name] for name in metrics.keys()})
         return logs
 
+    def get_dataset(self) -> xr.Dataset:
+        """Get the coefficients as an xarray Dataset."""
+        target_coefficients, gen_coefficients = self._get_coefficients()
+        if target_coefficients is None or gen_coefficients is None:
+            return xr.Dataset()
+        target_coefficients_ds = xr.Dataset(
+            {
+                name: (
+                    ["lat", "lon"],
+                    target_coefficients[name].cpu().numpy(),
+                    self._get_var_attrs(name),
+                )
+                for name in target_coefficients.keys()
+            }
+        ).expand_dims({"source": ["target"]})
+        gen_coefficients_ds = xr.Dataset(
+            {
+                name: (["lat", "lon"], gen_coefficients[name].cpu().numpy())
+                for name in gen_coefficients.keys()
+            }
+        ).expand_dims({"source": ["prediction"]})
+        return xr.concat([target_coefficients_ds, gen_coefficients_ds], dim="source")
+
+    def _get_var_attrs(self, name: str) -> Dict[str, str]:
+        if name in self._metadata:
+            attrs_name = self._metadata[name].long_name
+            attrs_units = self._metadata[name].units
+        else:
+            attrs_name = name
+            attrs_units = "unknown units"
+        return {
+            "long_name": f"{attrs_name} regression coefficient with Nino3.4 index",
+            "units": f"{attrs_units} / K",
+        }
+
 
 def get_sample_index_series(
     index_data: xr.DataArray,

@@ -81,10 +81,11 @@ def test_enso_coefficient_aggregator_values(scaling):
     Check that:
         - The aggregator maintains a zero-mean subset of the enso index for
             each sample.
-        - The target and gen coefficients are scaled versions of 1.0 and -1.0 for
-            perfectly correlated and anti-correlated data, respectively.
-        - The global-mean coefficient RMSE is scaled from 2.0 (perfect
+        - The logged target and gen coefficients are scaled versions of 1.0 and
+            -1.0 for perfectly correlated and anti-correlated data,respectively.
+        - The logged global-mean coefficient RMSE is scaled from 2.0 (perfect
             correlation minus perfect anti-correlation).
+        - The above two are also true via the `get_dataset` method.
 
     Args:
         scaling: How much to scale up or down the target and generated data;
@@ -126,6 +127,15 @@ def test_enso_coefficient_aggregator_values(scaling):
     # since the target and gen data are perfectly correlated and anti-correlated, resp.
     np.testing.assert_almost_equal(
         logs["enso_coefficients/rmse/a"], 2.0 * scaling, decimal=5
+    )
+    enso_dataset = enso_agg.get_dataset()
+    # check that the coefficients are as expected in the dataset also
+    np.testing.assert_array_almost_equal(
+        enso_dataset["a"].sel(source="target").values, target_coefficients["a"].numpy()
+    )
+    np.testing.assert_array_almost_equal(
+        enso_dataset["a"].sel(source="prediction").values,
+        gen_coefficients["a"].numpy(),
     )
 
 

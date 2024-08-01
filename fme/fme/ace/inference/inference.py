@@ -3,7 +3,6 @@ import dataclasses
 import logging
 import os
 import time
-from pathlib import Path
 from typing import Literal, Optional, Sequence, Tuple, Union
 
 import dacite
@@ -14,7 +13,7 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
-from fme.ace.inference.loop import run_inference
+from fme.ace.inference.loop import run_inference, write_reduced_metrics
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
@@ -283,10 +282,8 @@ def run_inference_from_config(config: InferenceConfig):
     final_flush_start_time = time.time()
     logging.info("Starting final flush of data writer")
     writer.flush()
-    for name, ds in aggregator.get_datasets(("time_mean",)).items():
-        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
-        ds = ds.assign_coords(coords)
-        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
+    logging.info("Writing reduced metrics to disk in netcdf format.")
+    write_reduced_metrics(aggregator, data.coords, config.experiment_dir)
     final_flush_duration = time.time() - final_flush_start_time
     logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
     timers["final_writer_flush"] = final_flush_duration

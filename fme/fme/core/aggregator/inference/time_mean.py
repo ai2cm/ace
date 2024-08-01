@@ -361,7 +361,6 @@ class TimeMeanEvaluatorAggregator:
             bias_metadata = self._metadata.get(
                 pred.name, VariableMetadata(long_name=long_name, units=units)
             )._asdict()
-            gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
             data.update(
                 {
                     f"bias_map-{pred.name}": xr.DataArray(
