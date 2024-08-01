@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, Mapping, Optional, cast
 
 import numpy as np
@@ -170,6 +171,13 @@ class SeasonalAggregator:
         logs.update({f"{label}{name}": plots[name] for name in plots.keys()})
         logs.update({f"{label}{name}": val for name, val in metric_logs.items()})
         return logs
+
+    def get_dataset(self) -> xr.Dataset:
+        logging.debug(
+            "get_dataset not implemented for SeasonalAggregator. "
+            "Returning an empty dataset."
+        )
+        return xr.Dataset()
 
 
 ALL_SEASONS = np.asarray(["DJF", "MAM", "JJA", "SON"])
