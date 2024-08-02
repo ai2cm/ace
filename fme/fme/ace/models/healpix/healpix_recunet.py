@@ -1,5 +1,5 @@
 # flake8: noqa
-# Copied from https://github.com/ai2cm/modulus/commit/22df4a9427f5f12ff6ac891083220e7f2f54d229
+# Copied from https://github.com/NVIDIA/modulus/commit/89a6091bd21edce7be4e0539cbd91507004faf08
 # Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 #
