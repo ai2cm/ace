@@ -184,11 +184,11 @@ fv3gfs_AMIP_stats_beaker_dataset: enable_coldline_check
 
 .PHONY: e3smv2_1deg_climSST_dataset
 e3smv2_1deg_climSST_dataset:
-	sbatch -J 2023-11-22-generate_datasets_e3smv2 generate_datasets_e3smv2.sh \
-	--input-dir /global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts \
-	--time-invariant-input-dir /global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant \
-	--zarr $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr \
-	--output-dir $SCRATCH/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr
+	sbatch -J 2024-07-10-e3smv2-1deg-testing generate_datasets_e3smv2.sh \
+	--input-dir /global/cfs/cdirs/m4492/rebassoo/e3sm_test/post/atm/180x360_gaussian/ts \
+	--config configs/e3sm-1deg-8layer.yaml \
+	--zarr ${SCRATCH}/fme-preprocess/zarr/2024-07-10-e3smv2-1deg-testing.zarr \
+	--output-dir ${SCRATCH}/fme-preprocess/2024-07-10-e3smv2-1deg-testing
 
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:

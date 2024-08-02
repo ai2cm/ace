@@ -19,7 +19,9 @@ import click
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: 401
-from compute_dataset_fv3gfs import (
+from compute_dataset import (
+    DatasetComputationConfig,
+    DatasetConfig,
     assert_column_integral_of_moisture_is_conserved,
     assert_global_dry_air_mass_conservation,
     assert_global_moisture_conservation,
@@ -35,147 +37,25 @@ from xtorch_harmonics import roundtrip_filter
 
 # default paths for input/output; can be changed when calling this script
 INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: 501
-TIME_INVARIANT_INPUT_DIR = "/global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant"
 OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: 501
-
-# these are subdirs of INPUT_DIR
-INSTANT = "6hourly_instant/1yr"
-MEAN = "6hourly/1yr"
 
 REFERENCE_PRESSURE = 1e5  # Pa
 LIQUID_PRECIP_DENSITY = 1e3  # kg/m**3
 LATENT_HEAT_OF_VAPORIZATION = 2.501e6  # J/kg
 
-# 6-hourly instant
-SURFACE_PRESSURE = "PS"
-SURFACE_TEMPERATURE = "TS"
-AIR_TEMPERATURE = "T"
-EASTWARD_WIND = "U"
-NORTHWARD_WIND = "V"
-MEAN_SEA_LEVEL_PRESSURE = "PSL"
-GEOPOTENTIAL = "Z"
-RELATIVE_HUMIDITY = "RH"
-TOTAL_COLUMN_WATER_VAPOR = "TMQ"
-
-# 6-hourly mean
-TOTAL_PRECIP_RATE = "PRECT"  # m/s
-LATENT_HEAT_FLUX = "LHFLX"
-
 # derived variable names
-SPECIFIC_TOTAL_WATER = "specific_total_water"
-PRECIPITABLE_WATER_PATH = "precipitable_water_path"  # total from E3SMv2 model outputs
-TOTAL_WATER_PATH = "total_water_path"  # computed by vertical integration of 3D vars
-PRECIP_RATE = "surface_precipitation_rate"
 SURFACE_UP_LONGWAVE_FLUX = "surface_upward_longwave_flux"
 SURFACE_UP_SHORTWAVE_FLUX = "surface_upward_shortwave_flux"
 TOA_UP_SHORTWAVE_FLUX = "top_of_atmos_upward_shortwave_flux"
-PRESSURE_THICKNESS = "pressure_thickness_of_atmospheric_layer"
-
-# dims
-TIME_DIM = "time"
-HORIZONTAL_DIMS = ["lat", "lon"]
-LATITUDE_DIM = "lat"
-VERTICAL_DIM = "lev"
-VERTICAL_INTERFACE_DIM = "ilev"
-HYBRID_LEVEL_COEFFS = ["hyai", "hybi"]
-
-CHUNKS = {"time": 10, "lat": 180, "lon": 360}
-
-# assumed to be found in INSTANT dir
-FOURCASTNET_VANILLA = {
-    EASTWARD_WIND: ["1000", "850", "500"],
-    NORTHWARD_WIND: ["1000", "850", "500"],
-    AIR_TEMPERATURE: ["850", "500"],
-    GEOPOTENTIAL: ["1000", "500", "850", "050"],
-    RELATIVE_HUMIDITY: ["850", "500"],
-    SURFACE_PRESSURE: [""],
-    "TREFHT": [""],  # temp at 2m
-    MEAN_SEA_LEVEL_PRESSURE: [""],
-    TOTAL_COLUMN_WATER_VAPOR: [""],
-}
-
-# the variables / filename prefixes we need from the raw E3SMv2 output
-INPUT_VARIABLE_NAMES = {
-    INSTANT: [
-        SURFACE_PRESSURE,
-        SURFACE_TEMPERATURE,
-        AIR_TEMPERATURE,
-        EASTWARD_WIND,
-        NORTHWARD_WIND,
-        "Q",
-        "CLDLIQ",
-        "CLDICE",
-        "RAINQM",
-        "SNOWQM",
-        TOTAL_COLUMN_WATER_VAPOR,
-        "TGCLDLWP",
-        "TGCLDIWP",
-        "OCNFRAC",
-        "LANDFRAC",
-        "ICEFRAC",
-    ],
-    MEAN: [
-        TOTAL_PRECIP_RATE,
-        LATENT_HEAT_FLUX,
-        "SHFLX",
-        "FLNS",
-        "FLDS",
-        "FSNS",
-        "FSDS",
-        "FSNTOA",
-        "SOLIN",
-        "FLUT",
-        # only for water budget dataset:
-        "PRECSC",
-        "PRECSL",
-        "QFLX",
-    ],
-    "time_invariant": ["PHIS"],
-}
-
-
-WATER_SPECIES_NAMES = [
-    "Q",
-    "CLDLIQ",
-    "CLDICE",
-    "RAINQM",
-    "SNOWQM",
-]
-
-VARNAMES_3D = [
-    AIR_TEMPERATURE,
-    EASTWARD_WIND,
-    NORTHWARD_WIND,
-] + WATER_SPECIES_NAMES
-
-PRECIPITABLE_WATER_PATH_NAMES = [TOTAL_COLUMN_WATER_VAPOR, "TGCLDLWP", "TGCLDIWP"]
-
-VERTICALLY_RESOLVED_NAMES = [
-    SPECIFIC_TOTAL_WATER,
-    AIR_TEMPERATURE,
-    NORTHWARD_WIND,
-    EASTWARD_WIND,
-]
-
-TIME_DERIVATIVE_NAMES = [TOTAL_WATER_PATH]
-
-# computed here: https://github.com/ai2cm/explore/blob/master/jamesd/2023-06-09-e3smv2-vertical-interface-indices.ipynb  # noqa: 501
-VERTICAL_LEVEL_INTERFACES = [
-    (0, 19),
-    (19, 30),
-    (30, 38),
-    (38, 44),
-    (44, 48),
-    (48, 53),
-    (53, 61),
-    (61, 72),
-]
 
 RAD_FLUX_FORMULAS = {
     SURFACE_UP_LONGWAVE_FLUX: (lambda x, y: x + y, "FLNS", "FLDS"),
     SURFACE_UP_SHORTWAVE_FLUX: (lambda x, y: x - y, "FSDS", "FSNS"),
     TOA_UP_SHORTWAVE_FLUX: (lambda x, y: x - y, "SOLIN", "FSNTOA"),
 }
+
+SURFACE_PRECIPITATION = "surface_precipitation_rate"
+PRECIPITABLE_WATER_PATH_NAMES = ["TMQ", "TGCLDLWP", "TGCLDIWP"]
 
 DROP_VARIABLE_NAMES = {
     "2D": [  # variables to drop when opening 2D vars
@@ -197,45 +77,7 @@ DROP_VARIABLE_NAMES = {
         "hyam",
         "hybm",
     ],
-    "POST": [  # variables to drop at the end
-        AIR_TEMPERATURE,
-        EASTWARD_WIND,
-        NORTHWARD_WIND,
-        SPECIFIC_TOTAL_WATER,
-        PRESSURE_THICKNESS,
-        TOTAL_PRECIP_RATE,
-        PRECIPITABLE_WATER_PATH,
-        TOTAL_COLUMN_WATER_VAPOR,
-        VERTICAL_DIM,
-        VERTICAL_INTERFACE_DIM,
-        HYBRID_LEVEL_COEFFS[0],
-        HYBRID_LEVEL_COEFFS[1],
-        "Q",
-        "CLDLIQ",
-        "CLDICE",
-        "RAINQM",
-        "SNOWQM",
-        "TGCLDLWP",
-        "TGCLDIWP",
-        "FLNS",
-        "FSNS",
-        "FSNTOA",
-        "PRECSC",
-        "PRECSL",
-        "QFLX",
-    ],
 }
-
-# dataset of 2D vars for checking water conservation
-WATER_BUDGET_DATASET_VARS = PRECIPITABLE_WATER_PATH_NAMES + [
-    SURFACE_PRESSURE,
-    PRECIPITABLE_WATER_PATH,
-    TOTAL_PRECIP_RATE,
-    LATENT_HEAT_FLUX,
-    "PRECSC",
-    "PRECSL",
-    "QFLX",
-]
 
 
 def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str]:
@@ -246,45 +88,50 @@ def expand_names_by_level(variables: MutableMapping[str, List[str]]) -> List[str
 
 
 def get_nc_paths(
-    base_dir: str, var_names: Optional[List[str]] = None
+    base_dir: str, var_names: Sequence[str]
 ) -> MutableMapping[str, List[str]]:
-    if var_names is None:
-        paths = {"time_invariant": list(glob(os.path.join(base_dir, f"*.nc")))}
-    else:
-        paths = {
-            var_name: sorted(list(glob(os.path.join(base_dir, f"{var_name}_*.nc"))))
-            for var_name in var_names
-        }
+    paths = {
+        var_name: sorted(list(glob(os.path.join(base_dir, f"{var_name}_*.nc"))))
+        for var_name in var_names
+    }
+    return paths
+
+
+def get_time_invariant_nc_paths(
+    base_dir: Optional[str],
+) -> MutableMapping[str, List[str]]:
+    paths = {
+        "time_invariant": list(glob(os.path.join(base_dir, f"*.nc")))  # type: ignore
+    }
     return paths
 
 
 def open_dataset(
     dataset_dirs: MutableMapping[str, str],
-    time_invariant_dir: str,
-    input_variable_names: MutableMapping[str, List[str]] = INPUT_VARIABLE_NAMES,
-    varnames_3d: List[str] = VARNAMES_3D,
-    drop_variable_names: MutableMapping[str, List[str]] = DROP_VARIABLE_NAMES,
-    chunks: MutableMapping[str, int] = CHUNKS,
-    vanilla: bool = False,
+    config: DatasetComputationConfig,
 ) -> xr.Dataset:
     """Open datasets from NetCDF files in directory that match input variable names."""
-    if vanilla:
-        var_names = expand_names_by_level(FOURCASTNET_VANILLA)
-        var_paths = get_nc_paths(dataset_dirs[INSTANT], var_names)
-    else:
-        var_paths = {}
-        for key in dataset_dirs.keys():
-            var_paths.update(get_nc_paths(dataset_dirs[key], input_variable_names[key]))
-        var_paths.update(get_nc_paths(time_invariant_dir))
+    var_paths: MutableMapping[str, List[str]] = {}
+    input_variable_names = config.variable_sources
+    for key in dataset_dirs.keys():
+        var_paths.update(get_nc_paths(dataset_dirs[key], input_variable_names[key]))
+    var_paths.update(get_time_invariant_nc_paths(config.time_invariant_dir))
     print(
         f"Opening {len(list(chain.from_iterable(var_paths.values())))} files with "
         f"{len(var_paths.keys())} vars..."
     )
+    standard_names = config.standard_names
+    varnames_3D = [
+        standard_names.air_temperature,
+        standard_names.eastward_wind,
+        standard_names.northward_wind,
+    ] + standard_names.water_species
+    chunks = config.chunking.get_chunks(config.standard_names)
     datasets = {}
     start = time.time()
     if "time_invariant" in var_paths:
         for path in var_paths["time_invariant"]:
-            ds = xr.open_dataset(path).drop(drop_variable_names["2D"], errors="ignore")
+            ds = xr.open_dataset(path).drop(DROP_VARIABLE_NAMES["2D"], errors="ignore")
             if "time" in ds.coords:
                 ds = ds.isel(time=0, drop=True)
             for varname in input_variable_names["time_invariant"]:
@@ -293,10 +140,10 @@ def open_dataset(
         del var_paths["time_invariant"]
     for varname, paths in var_paths.items():
         var_start = time.time()
-        if varname in varnames_3d:
-            drop_vars = drop_variable_names["3D"]
+        if varname in varnames_3D:
+            drop_vars = DROP_VARIABLE_NAMES["3D"]
         else:
-            drop_vars = drop_variable_names["2D"]
+            drop_vars = DROP_VARIABLE_NAMES["2D"]
         datasets[varname] = xr.open_mfdataset(
             paths,
             chunks=chunks,
@@ -311,12 +158,12 @@ def open_dataset(
 
 def compute_pressure_thickness(
     ds: xr.Dataset,
-    vertical_dim: str = VERTICAL_DIM,
-    vertical_interface_dim: str = VERTICAL_INTERFACE_DIM,
-    hybrid_level_coeffs: List[str] = HYBRID_LEVEL_COEFFS,
-    reference_pressure: float = REFERENCE_PRESSURE,
-    surface_pressure: str = SURFACE_PRESSURE,
-    output_name: str = PRESSURE_THICKNESS,
+    vertical_dim: str,
+    vertical_interface_dim: str,
+    hybrid_level_coeffs: List[str],
+    reference_pressure: float,
+    surface_pressure: str,
+    output_name: str,
 ):
     hyai, hybi = hybrid_level_coeffs
     sfc_pressure = ds[surface_pressure].expand_dims(
@@ -336,9 +183,9 @@ def compute_pressure_thickness(
 
 def compute_coarse_ak_bk(
     ds: xr.Dataset,
-    interface_indices: Sequence[Tuple[int, int]] = VERTICAL_LEVEL_INTERFACES,
-    z_dim="ilev",
-    hybrid_level_coeffs: List[str] = HYBRID_LEVEL_COEFFS,
+    interface_indices: Sequence[Tuple[int, int]],
+    z_dim: str,
+    hybrid_level_coeffs: List[str],
     reference_pressure: float = REFERENCE_PRESSURE,
 ):
     """Return dataset with scalar ak and bk coordinates that define coarse
@@ -376,9 +223,9 @@ def compute_coarse_ak_bk(
 
 def compute_surface_precipitation_rate(
     ds: xr.Dataset,
-    total_precip_rate_name: str = TOTAL_PRECIP_RATE,
+    total_precip_rate_name,
     liquid_precip_density: float = LIQUID_PRECIP_DENSITY,
-    output_name: str = PRECIP_RATE,
+    output_name: str = SURFACE_PRECIPITATION,
 ):
     precip_mass_flux = ds[total_precip_rate_name] * liquid_precip_density
     precip_mass_flux.attrs["units"] = "kg/m2/s"
@@ -388,8 +235,8 @@ def compute_surface_precipitation_rate(
 
 def compute_precipitable_water_path(
     ds: xr.Dataset,
-    precipitable_water_path_names: List[str] = PRECIPITABLE_WATER_PATH_NAMES,
-    output_name: str = PRECIPITABLE_WATER_PATH,
+    output_name: str,
+    precipitable_water_path_names: List[str],
 ):
     water_path = sum([ds[name] for name in precipitable_water_path_names])
     water_path.attrs["units"] = "kg/m2"
@@ -412,53 +259,81 @@ def compute_rad_fluxes(
 
 
 def construct_lazy_dataset(
+    config: DatasetComputationConfig,
     dataset_dirs: MutableMapping[str, str],
-    time_invariant_dir: str,
-    vanilla: bool = False,
-    sht_roundtrip: bool = False,
 ) -> xr.Dataset:
     start = time.time()
+    standard_names = config.standard_names
     print(f"Opening dataset...")
-    ds = open_dataset(dataset_dirs, time_invariant_dir, vanilla=vanilla)
+    ds = open_dataset(dataset_dirs, config)
     print(f"Dataset opened in {time.time() - start:.2f} s total.")
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
-    if sht_roundtrip:
-        ds = roundtrip_filter(ds, lat_dim="lat", lon_dim="lon")
-    if not vanilla:
-        ds = compute_pressure_thickness(ds)
-        ds = compute_rad_fluxes(ds)
-        ds = compute_surface_precipitation_rate(ds)
-        ds = compute_precipitable_water_path(ds)  # only used for conservation check
-        ds = compute_specific_total_water(ds, WATER_SPECIES_NAMES, SPECIFIC_TOTAL_WATER)
-        ds = compute_vertical_coarsening(
+    if config.roundtrip_fraction_kept is not None:
+        ds = roundtrip_filter(
             ds,
-            VERTICALLY_RESOLVED_NAMES,
-            VERTICAL_LEVEL_INTERFACES,
-            VERTICAL_DIM,
-            PRESSURE_THICKNESS,
+            lat_dim=standard_names.latitude_dim,
+            lon_dim=standard_names.longitude_dim,
+            fraction_modes_kept=config.roundtrip_fraction_kept,
         )
-        ds = compute_column_moisture_integral(
-            ds,
-            SPECIFIC_TOTAL_WATER,
-            TOTAL_WATER_PATH,
-            PRESSURE_THICKNESS,
-            VERTICAL_DIM,
-        )
-        ds[TOTAL_WATER_PATH].attrs["units"] = "kg/m2"  # change to E3SMv2 format
-        ds = compute_tendencies(ds, TIME_DERIVATIVE_NAMES, TIME_DIM)
-        ds = compute_column_advective_moisture_tendency(
-            ds,
-            f"tendency_of_{TOTAL_WATER_PATH}",
-            LATENT_HEAT_FLUX,
-            PRECIP_RATE,
-            LATENT_HEAT_OF_VAPORIZATION,
-        )
-        ak_bk_ds = compute_coarse_ak_bk(ds, VERTICAL_LEVEL_INTERFACES)
-        ds = xr.merge([ds, ak_bk_ds])
-        ds_dirs = list(dataset_dirs.values())
-    else:
-        ds_dirs = [dataset_dirs[INSTANT]]
-    ds = ds.chunk(CHUNKS).astype(np.float32)
+
+    ds = compute_pressure_thickness(
+        ds,
+        vertical_dim=standard_names.vertical_dim,
+        vertical_interface_dim=standard_names.vertical_interface_dim,
+        hybrid_level_coeffs=standard_names.hybrid_level_coeffs,
+        reference_pressure=REFERENCE_PRESSURE,
+        surface_pressure=standard_names.surface_pressure,
+        output_name=standard_names.pressure_thickness,
+    )
+    ds = compute_rad_fluxes(ds)
+    ds = compute_surface_precipitation_rate(
+        ds,
+        total_precip_rate_name=standard_names.precip_rate,
+    )
+    water_species_name = [
+        item for item in standard_names.water_species if item.lower() != "none"
+    ]
+    ds = compute_specific_total_water(
+        ds,
+        water_condensate_names=water_species_name,
+        output_name=standard_names.specific_total_water,
+    )
+    ds = compute_vertical_coarsening(
+        ds,
+        vertically_resolved_names=standard_names.vertically_resolved,
+        interface_indices=config.vertical_coarsening_indices,
+        dim=standard_names.vertical_dim,
+        pressure_thickness_name=standard_names.pressure_thickness,
+    )
+    ds = compute_column_moisture_integral(
+        ds,
+        input_name=standard_names.specific_total_water,
+        output_name=standard_names.total_water_path,
+        pressure_thickness_name=standard_names.pressure_thickness,
+        dim=standard_names.vertical_dim,
+    )
+    ds = compute_tendencies(
+        ds,
+        time_derivative_names=standard_names.time_derivative_names,
+        dim=standard_names.time_dim,
+    )
+    ds = compute_column_advective_moisture_tendency(
+        ds,
+        pwat_tendency=standard_names.pwat_tendency,
+        latent_heat_flux=standard_names.latent_heat_flux,
+        precip=standard_names.precip_rate,
+        latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
+    )
+    ak_bk_ds = compute_coarse_ak_bk(
+        ds,
+        interface_indices=config.vertical_coarsening_indices,
+        z_dim=standard_names.vertical_interface_dim,
+        hybrid_level_coeffs=standard_names.hybrid_level_coeffs,
+    )
+    ds = xr.merge([ds, ak_bk_ds])
+    ds_dirs = list(dataset_dirs.values())
+    chunks = config.chunking.get_chunks(config.standard_names)
+    ds = ds.chunk(chunks).astype(np.float32)
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/e3smv2_data_process"
         "/compute_dataset_e3smv2.py"
@@ -474,94 +349,121 @@ def construct_lazy_dataset(
 
 
 @click.command()
-@click.option("--debug", is_flag=True, help="Print metadata instead of writing output.")
-@click.option("--subsample", is_flag=True, help="Subsample the data before writing.")
-@click.option("--vanilla", is_flag=True, help="Compute vanilla FourCastNet dataset.")
-@click.option("--check-conservation", is_flag=True, help="Check conservation.")
-@click.option(
-    "--water-budget-dataset",
-    is_flag=True,
-    help="Create a dataset of 2D vars for checking the water budget.",
-)
-@click.option("--sht-roundtrip", is_flag=True, help="SHT roundtrip as a first step.")
+@click.option("--config", help="Path to dataset configuration YAML file.")
 @click.option(
     "-i",
     "--input-dir",
     default=INPUT_DIR,
     help="Directory in which to find time-varying input ncs.",
 )
-@click.option(
-    "-t",
-    "--time-invariant-input-dir",
-    default=TIME_INVARIANT_INPUT_DIR,
-    help="Directory in which to find time-invariant input ncs.",
-)
 @click.option("-o", "--output", default=OUTPUT_URL, help="URL to write output to.")
-@click.option("--n-split", default=100, help="Number of steps to split job over.")
+@click.option("--debug", is_flag=True, help="Print metadata instead of writing output.")
+@click.option("--subsample", is_flag=True, help="Subsample the data before writing.")
+@click.option("--check-conservation", is_flag=True, help="Check conservation.")
+@click.option(
+    "--water-budget-dataset",
+    is_flag=True,
+    help="Create a dataset of 2D vars for checking the water budget.",
+)
 @click.option("--n-workers", default=4, help="Number of Dask workers.")
 def main(
+    config,
+    input_dir,
+    output,
     debug,
     subsample,
-    vanilla,
-    sht_roundtrip,
     check_conservation,
     water_budget_dataset,
-    input_dir,
-    time_invariant_input_dir,
-    output,
-    n_split,
     n_workers,
 ):
     xr.set_options(keep_attrs=True)
     _ = Client(n_workers=n_workers)
-
-    dataset_dirs = {
-        INSTANT: os.path.join(input_dir, INSTANT),
-        MEAN: os.path.join(input_dir, MEAN),
-    }
-    ds = construct_lazy_dataset(
-        dataset_dirs, time_invariant_input_dir, vanilla, sht_roundtrip
-    )
+    config = DatasetConfig.from_file(config).dataset_computation
+    standard_names = config.standard_names
+    dataset_dirs = {}
+    for key in config.variable_sources.keys():
+        if key != "time_invariant":
+            dataset_dirs[key] = os.path.join(input_dir, key)
+    ds = construct_lazy_dataset(config, dataset_dirs)
     if subsample:
         ds = ds.isel(time=slice(10, 13))
     if check_conservation:
         # these currently fail
+        ds = compute_precipitable_water_path(
+            ds,
+            output_name=standard_names.precipitable_water_path,
+            precipitable_water_path_names=PRECIPITABLE_WATER_PATH_NAMES,
+        )
         assert_column_integral_of_moisture_is_conserved(
-            ds, PRECIPITABLE_WATER_PATH, TOTAL_WATER_PATH
+            ds, standard_names.precipitable_water_path, standard_names.total_water_path
         )
         assert_global_dry_air_mass_conservation(
             ds,
-            dims=HORIZONTAL_DIMS,
-            surface_pressure_name=SURFACE_PRESSURE,
-            total_water_path_name=TOTAL_WATER_PATH,
-            latitude_dim=LATITUDE_DIM,
-            time_dim=TIME_DIM,
+            dims=standard_names.horizontal_dims,
+            surface_pressure_name=standard_names.surface_pressure,
+            total_water_path_name=standard_names.total_water_path,
+            latitude_dim=standard_names.latitude_dim,
+            time_dim=standard_names.time_dim,
         )
         assert_global_moisture_conservation(
             ds,
-            dims=HORIZONTAL_DIMS,
-            latitude_dim=LATITUDE_DIM,
-            total_water_path_name=TOTAL_WATER_PATH,
-            latent_heat_flux_name=LATENT_HEAT_FLUX,
+            dims=standard_names.horizontal_dims,
+            latitude_dim=standard_names.latitude_dim,
+            total_water_path_name=standard_names.total_water_path,
+            latent_heat_flux_name=standard_names.latent_heat_flux,
             latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
-            precip_rate_name=PRECIP_RATE,
-            time_dim=TIME_DIM,
+            precip_rate_name=standard_names.precip_rate,
+            time_dim=standard_names.time_dim,
         )
     if water_budget_dataset:
-        ds = ds[WATER_BUDGET_DATASET_VARS]
+        water_budget_dataset_vars = [
+            standard_names.surface_pressure,
+            standard_names.precipitable_water_path,
+            standard_names.precip_rate,
+            standard_names.latent_heat_flux,
+            "PRECSC",
+            "PRECSL",
+            "QFLX",
+            "TMQ",
+            "TGCLDLWP",
+            "TGCLDIWP",
+        ]
+
+        ds = ds[water_budget_dataset_vars]
     else:
-        ds = ds.drop(DROP_VARIABLE_NAMES["POST"], errors="ignore")
+        dropped_variables = (
+            [
+                item
+                for item in standard_names.dropped_variables
+                if item.lower() != "none"
+            ]
+            + standard_names.hybrid_level_coeffs
+            + [
+                standard_names.precip_rate,
+                standard_names.vertical_interface_dim,
+                "TMQ",
+                "TGCLDLWP",
+                "TGCLDIWP",
+                "FLNS",
+                "FSNS",
+                "FSNTOA",
+                "PRECSC",
+                "PRECSL",
+                "QFLX",
+            ]
+        )
+        ds = ds.drop(dropped_variables, errors="ignore")
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
             print(ds)
     else:
         ds.partition.initialize_store(output)
-        for i in range(n_split):
-            print(f"Writing segment {i + 1} / {n_split}")
+        for i in range(config.n_split):
+            print(f"Writing segment {i + 1} / {config.n_split}")
             with ProgressBar():
                 ds.partition.write(
-                    output, n_split, ["time"], i, collect_variable_writes=True
+                    output, config.n_split, ["time"], i, collect_variable_writes=True
                 )
 
 
