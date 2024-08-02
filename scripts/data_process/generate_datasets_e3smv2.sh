@@ -5,14 +5,14 @@
 #SBATCH -C cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH -t 08:00:00
+#SBATCH -t 01:00:00
 #SBATCH --output=joblogs/%x-%j.out
 
 while [[ "$#" -gt 0 ]]
 do case $1 in
     -i|--input-dir) INPUT_DIR="$2"
     shift;;
-    -t|--time-invariant-input-dir) TIME_INVARIANT_DIR="$2"
+    -c|--config) CONFIG="$2"
     shift;;
     -z|--zarr) ZARR="$2"
     shift;;
@@ -28,9 +28,9 @@ if [[ -z "${INPUT_DIR}" ]]
 then
     echo "Option -i, --input-dir missing"
     exit 1;
-elif [[ -z "${TIME_INVARIANT_DIR}" ]]
+elif [[ -z "${CONFIG}" ]]
 then
-    echo "Option -t, --time-invariant-input-dir missing"
+    echo "Option -c, --config missing"
     exit 1;
 elif [[ -z "${ZARR}" ]]
 then
@@ -58,48 +58,32 @@ source activate fv3net
 set -xe
 
 # create the zarr from E3SMv2 .nc files
-python -u compute_dataset_e3smv2.py --sht-roundtrip \
-    --n-split=400 --n-workers=16 \
-    -i ${INPUT_DIR} -t ${TIME_INVARIANT_DIR} -o ${ZARR}
+python -u compute_dataset_e3smv2.py --n-workers=16 --config=${CONFIG} \
+    -i ${INPUT_DIR} -o ${ZARR}
 
-# drop first 11 years of data because of stratospheric water drift, and save
-# next 42 years of data to netCDFs (intended for training)
+# Train on first year (intended for training)
 python -u convert_to_monthly_netcdf.py \
     ${ZARR} \
     ${OUTPUT_DIR}/traindata \
-    --start-date 0012-01-01 \
-    --end-date 0053-12-31 \
+    --start-date 1970-01-01 \
+    --end-date 1970-12-31 \
     --nc-format NETCDF4
 
-# save next 10 years of data to netCDFs (intended for validation)
+# Validation on next 6 months
 python -u convert_to_monthly_netcdf.py \
     ${ZARR} \
     ${OUTPUT_DIR}/validdata \
-    --start-date 0054-01-01 \
-    --end-date 0063-12-31 \
+    --start-date 1971-01-01 \
+    --end-date 1971-05-31 \
     --nc-format NETCDF4
 
-# save final 10 years of data to netCDFs (intended for prediction_data reference)
+# Final 6 months for preditiondata reference
 python -u convert_to_monthly_netcdf.py \
     ${ZARR} \
     ${OUTPUT_DIR}/predictiondata \
-    --start-date 0064-01-01 \
-    --end-date 0073-12-31 \
+    --start-date 1971-06-01 \
+    --end-date 1971-12-31 \
     --nc-format NETCDF4
 
-# compute residual scaling stats on training data
-python -u get_stats.py \
-    ${ZARR} \
-    ${OUTPUT_DIR}/statsdata/residual \
-    --start-date 0012-01-01 \
-    --end-date 0053-12-31 \
-    --data-type E3SMV2
-
-# compute full field scaling stats on training data
-python -u get_stats.py \
-    ${ZARR} \
-    ${OUTPUT_DIR}/statsdata/full_field \
-    --start-date 0012-01-01 \
-    --end-date 0053-12-31 \
-    --data-type E3SMV2 \
-    --full-field
+# compute all stats on training data
+python -u get_stats.py ${CONFIG} 0
