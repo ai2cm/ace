@@ -41,6 +41,7 @@ class StandardNameMapping:
     longitude_dim: str = "grid_xt"
     latitude_dim: str = "grid_yt"
     vertical_dim: str = "pfull"
+    vertical_interface_dim: str = "phalf"
     time_dim: str = "time"
     surface_pressure: str = "PRESsfc"
     latent_heat_flux: str = "LHTFLsfc"
@@ -56,6 +57,7 @@ class StandardNameMapping:
     snow_mixing_ratio: str = "snow_mixing_ratio"
     northward_wind: str = "northward_wind"
     eastward_wind: str = "eastward_wind"
+    hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self.horizontal_dims: List[str] = [self.longitude_dim, self.latitude_dim]
@@ -64,15 +66,6 @@ class StandardNameMapping:
         self.total_water_path = TOTAL_WATER_PATH
         self.pwat_tendency = f"tendency_of_{self.total_water_path}"
         self.time_derivative_names = [self.total_water_path]
-
-        self.water_species: List[str] = [
-            self.specific_humidity,
-            self.cloud_water_mixing_ratio,
-            self.cloud_ice_mixing_ratio,
-            self.graupel_mixing_ratio,
-            self.rain_mixing_ratio,
-            self.snow_mixing_ratio,
-        ]
 
         self.vertically_resolved: List[str] = [
             self.specific_total_water,
@@ -87,6 +80,21 @@ class StandardNameMapping:
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim, self.precipitable_water_path]
         )
+
+    @property
+    def water_species(self) -> List[str]:
+        return [
+            item
+            for item in [
+                self.specific_humidity,
+                self.cloud_water_mixing_ratio,
+                self.cloud_ice_mixing_ratio,
+                self.graupel_mixing_ratio,
+                self.rain_mixing_ratio,
+                self.snow_mixing_ratio,
+            ]
+            if item.lower() != "none"
+        ]
 
 
 @dataclasses.dataclass
@@ -123,6 +131,8 @@ class DatasetComputationConfig:
             names of variables in the dataset.
         chunking: (optional) mapping of standard dimension names to desired
             output chunk sizes
+        time_invariant_dir: (optional) path to directory containing time-invariant data
+            This option is used for E3SMv2 dataset.
     """
 
     reference_vertical_coordinate_file: str
@@ -133,6 +143,7 @@ class DatasetComputationConfig:
     roundtrip_fraction_kept: Optional[float] = None
     standard_names: StandardNameMapping = StandardNameMapping()
     chunking: ChunkingConfig = ChunkingConfig()
+    time_invariant_dir: Optional[str] = None
 
 
 @dataclasses.dataclass
