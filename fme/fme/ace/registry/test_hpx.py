@@ -148,8 +148,6 @@ def insolation_data():
     ],
 )
 def test_hpx_init(shape):
-    in_channels = 7
-    out_channels = 7
     n_constants = 1
     decoder_input_channels = 1
     input_time_dim = 2
@@ -171,8 +169,6 @@ def test_hpx_init(shape):
         "config": {
             "encoder": dataclasses.asdict(encoder),
             "decoder": dataclasses.asdict(decoder),
-            "input_channels": in_channels,
-            "output_channels": out_channels,
             "n_constants": n_constants,
             "decoder_input_channels": decoder_input_channels,
             "input_time_dim": input_time_dim,
