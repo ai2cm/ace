@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 COMPUTE_DATASET=true
 
 while [[ "$#" -gt 0 ]]
