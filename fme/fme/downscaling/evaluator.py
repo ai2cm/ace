@@ -1,8 +1,7 @@
-import abc
 import argparse
 import dataclasses
 import logging
-from typing import Any, List, Literal, Mapping, Optional, Union
+from typing import Any, List, Literal, Mapping, Union
 
 import dacite
 import torch
@@ -17,6 +16,8 @@ from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import DataLoaderConfig, GriddedData
 from fme.downscaling.models import (
+    DiffusionModel,
+    DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
@@ -29,11 +30,16 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 
 class Evaluator:
     def __init__(
-        self, data: GriddedData, model: Model, experiment_dir: Optional[str]
+        self,
+        data: GriddedData,
+        model: Union[Model, DiffusionModel],
+        experiment_dir: str,
+        n_samples: int,
     ) -> None:
         self.data = data
         self.model = model
         self.experiment_dir = experiment_dir
+        self.n_samples = n_samples
 
     def run(self):
         aggregator = Aggregator(
@@ -42,14 +48,23 @@ class Evaluator:
             self.model.downscale_factor,
         )
 
-        for batch in self.data.loader:
+        for batch_idx, batch in enumerate(self.data.loader):
+            logging.info(f"Processing batch {batch_idx} of {len(self.data.loader)}")
             inputs = FineResCoarseResPair(batch.fine, batch.coarse)
             with torch.no_grad():
+                logging.info("Generating predictions")
                 outputs = self.model.generate_on_batch(inputs)
+                logging.info("Recording diagnostics to aggregator")
                 aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
                 )
+                logging.info(
+                    f"Generating {self.n_samples} samples and writing them to disk."
+                )
+                for n in range(self.n_samples):
+                    # TODO(gideond): unused
+                    outputs = self.model.generate_on_batch(inputs)
 
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
@@ -62,23 +77,8 @@ class Evaluator:
             )
 
 
-class Config(abc.ABC):
-    @abc.abstractmethod
-    def build(
-        self,
-        area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
-    ) -> Model:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def data_requirements(self) -> DataRequirements:
-        ...
-
-
 @dataclasses.dataclass
-class InterpolateModelConfig(Config):
+class InterpolateModelConfig:
     mode: Literal["bicubic", "nearest"]
     downscale_factor: int
     in_names: List[str]
@@ -157,7 +157,20 @@ def clean_checkpoint_dict(checkpoint: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 @dataclasses.dataclass
-class CheckpointModelConfig(Config):
+class _CheckpointModelConfigSelector:
+    wrapper: Union[DownscalingModelConfig, DiffusionModelConfig]
+
+    @classmethod
+    def from_state(
+        cls, state: Mapping[str, Any]
+    ) -> Union[DownscalingModelConfig, DiffusionModelConfig]:
+        return dacite.from_dict(
+            data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
+        ).wrapper
+
+
+@dataclasses.dataclass
+class CheckpointModelConfig:
     checkpoint: str
 
     def __post_init__(self) -> None:
@@ -169,10 +182,17 @@ class CheckpointModelConfig(Config):
         self,
         area_weights: FineResCoarseResPair[torch.Tensor],
         fine_topography: torch.Tensor,
-    ) -> Model:
-        return Model.from_state(
-            self.checkpoint_dict["model"], area_weights, fine_topography
+    ) -> Union[Model, DiffusionModel]:
+        model = _CheckpointModelConfigSelector.from_state(
+            self.checkpoint_dict["model"]["config"]
+        ).build(
+            coarse_shape=self.checkpoint_dict["model"]["coarse_shape"],
+            downscale_factor=self.checkpoint_dict["model"]["downscale_factor"],
+            area_weights=area_weights,
+            fine_topography=fine_topography,
         )
+        model.module.load_state_dict(self.checkpoint_dict["model"]["module"])
+        return model
 
     @property
     def data_requirements(self) -> DataRequirements:
@@ -191,6 +211,7 @@ class EvaluatorConfig:
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
+    n_samples: int = 1
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -201,12 +222,15 @@ class EvaluatorConfig:
         self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
     def build(self) -> Evaluator:
-        dataset = self.data.build(False, requirements=self.model.data_requirements)
+        dataset = self.data.build(
+            train=False, requirements=self.model.data_requirements
+        )
         model = self.model.build(dataset.area_weights, dataset.fine_topography)
         return Evaluator(
-            dataset,
-            model,
-            self.experiment_dir,
+            data=dataset,
+            model=model,
+            experiment_dir=self.experiment_dir,
+            n_samples=self.n_samples,
         )
 
 
