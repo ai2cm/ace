@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from typing import Any, List, Mapping, Tuple, Union
 
 import dacite
@@ -24,7 +25,7 @@ class ModelOutputs:
     prediction: TensorMapping
     target: TensorMapping
     loss: torch.Tensor
-    latent_steps: List[torch.Tensor]
+    latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
 
 
 def _tensor_mapping_to_device(
@@ -364,6 +365,9 @@ class DiffusionModel:
         loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
         optimizer.step_weights(loss)
 
+        if self.config.predict_residual:
+            denoised_norm = denoised_norm + base_prediction
+
         target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=channel_axis)
@@ -388,6 +392,7 @@ class DiffusionModel:
         )
         latents = torch.randn_like(targets_norm)
 
+        logging.info("Running EDM sampler...")
         samples_norm, latent_steps = edm_sampler(
             self.module,
             latents,
@@ -397,6 +402,7 @@ class DiffusionModel:
             sigma_max=self.config.sigma_max,
             num_steps=self.config.num_diffusion_generation_steps,
         )
+        logging.info("Done running EDM sampler.")
 
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -409,7 +415,6 @@ class DiffusionModel:
                 self.downscale_factor,
             )
             samples_norm += base_prediction
-            latent_steps = [step + base_prediction for step in latent_steps]
 
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm, axis=channel_axis)
