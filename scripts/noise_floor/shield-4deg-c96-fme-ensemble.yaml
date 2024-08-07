@@ -1,0 +1,58 @@
+paths:
+  - gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset/ic_0001.zarr/
+start_date: "2036-01-01"
+end_date: "2059-12-31"
+stats_path: gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset-noise-floor/
+years_per_ensemble: 24
+is_amip: false
+names:
+  - PRESsfc
+  - surface_temperature
+  - air_temperature_0
+  - air_temperature_1
+  - air_temperature_2
+  - air_temperature_3
+  - air_temperature_4
+  - air_temperature_5
+  - air_temperature_6
+  - air_temperature_7
+  - specific_total_water_0
+  - specific_total_water_1
+  - specific_total_water_2
+  - specific_total_water_3
+  - specific_total_water_4
+  - specific_total_water_5
+  - specific_total_water_6
+  - specific_total_water_7
+  - eastward_wind_0
+  - eastward_wind_1
+  - eastward_wind_2
+  - eastward_wind_3
+  - eastward_wind_4
+  - eastward_wind_5
+  - eastward_wind_6
+  - eastward_wind_7
+  - northward_wind_0
+  - northward_wind_1
+  - northward_wind_2
+  - northward_wind_3
+  - northward_wind_4
+  - northward_wind_5
+  - northward_wind_6
+  - northward_wind_7
+  - LHTFLsfc
+  - SHTFLsfc
+  - PRATEsfc
+  - ULWRFsfc
+  - ULWRFtoa
+  - DLWRFsfc
+  - DSWRFsfc
+  - USWRFsfc
+  - USWRFtoa
+  - tendency_of_total_water_path_due_to_advection
+  - TMP850
+  - h500
+  - TMP2m
+  - Q2m
+  - UGRD10m
+  - VGRD10m

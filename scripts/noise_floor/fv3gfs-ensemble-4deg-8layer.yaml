@@ -9,7 +9,11 @@ paths:
   - gs://vcm-ml-intermediate/2024-06-04-vertically-resolved-4deg-fme-ensemble-dataset/ic_0008.zarr/
   - gs://vcm-ml-intermediate/2024-06-04-vertically-resolved-4deg-fme-ensemble-dataset/ic_0009.zarr/
   - gs://vcm-ml-intermediate/2024-06-04-vertically-resolved-4deg-fme-ensemble-dataset/ic_0010.zarr/
-  - gs://vcm-ml-intermediate/2024-06-04-vertically-resolved-4deg-fme-ensemble-dataset/ic_0011.zarr/
+start_date: "2021-01-01"
+end_date: "2030-12-31"
+stats_path: gs://vcm-ml-intermediate/2024-06-04-vertically-resolved-4deg-fme-ensemble-dataset-noise-floor/
+years_per_ensemble: 10
+is_amip: false
 names:
   - PRESsfc
   - surface_temperature
