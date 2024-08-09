@@ -149,9 +149,10 @@ def get_output_datasets(
         dims=["grid_yt", "grid_xt"],
     )
     annual = get_annual(dataset)
-    if len(annual) != years_per_ensemble:
+    available_years = annual.sizes["year"]
+    if available_years != years_per_ensemble:
         warnings.warn(
-            f"There are {len(annual)} years of data available, "
+            f"There are {available_years} years of data available, "
             f"but received value {years_per_ensemble} for years_per_ensemble."
         )
     annual = annual.isel(year=range(0, years_per_ensemble)).load()
