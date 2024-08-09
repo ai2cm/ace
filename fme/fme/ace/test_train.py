@@ -349,12 +349,15 @@ def _create_fine_tuning_config(path_to_train_config_yaml: str, path_to_checkpoin
     with open(path_to_train_config_yaml, "r") as config_file:
         config_data = yaml.safe_load(config_file)
         config_data["stepper"] = {"checkpoint_path": path_to_checkpoint}
+        current_experiment_dir = config_data["experiment_dir"]
+        new_experiment_dir = pathlib.Path(current_experiment_dir) / "fine_tuning"
+        config_data["experiment_dir"] = str(new_experiment_dir)
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
         ) as new_config_file:
             new_config_file.write(yaml.dump(config_data))
 
-    return new_config_file.name
+    return new_config_file.name, new_experiment_dir
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
@@ -362,16 +365,15 @@ def test_fine_tuning(tmp_path, nettype):
     """Check that fine tuning config runs without errors."""
     train_config, _ = _setup(tmp_path, nettype)
 
-    train_main(
-        yaml_config=train_config,
-    )
+    train_main(yaml_config=train_config)
 
     results_dir = tmp_path / "output"
     ckpt = f"{results_dir}/training_checkpoints/best_ckpt.tar"
 
-    fine_tuning_config = _create_fine_tuning_config(train_config, ckpt)
+    fine_tuning_config, new_results_dir = _create_fine_tuning_config(train_config, ckpt)
 
     train_main(yaml_config=fine_tuning_config)
+    assert (new_results_dir / "training_checkpoints" / "ckpt.tar").exists()
 
 
 def _create_copy_weights_after_batch_config(
