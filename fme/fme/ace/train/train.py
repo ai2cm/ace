@@ -158,7 +158,7 @@ class Trainer:
         self._no_optimization = NullOptimization()
 
         if config.resuming:
-            logging.info("Loading checkpoint %s" % config.latest_checkpoint_path)
+            logging.info(f"Resuming training from {config.latest_checkpoint_path}")
             self.restore_checkpoint(
                 config.latest_checkpoint_path, config.ema_checkpoint_path
             )
