@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 from copy import copy
 from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -131,6 +132,7 @@ class SingleModuleStepperConfig:
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ):
+        logging.info("Initializing stepper from provided config")
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
@@ -233,6 +235,7 @@ class ExistingStepperConfig:
 
     def get_stepper(self, img_shape, area, sigma_coordinates, timestep):
         del img_shape  # unused
+        logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return SingleModuleStepper.from_state(
             self._load_checkpoint()["stepper"],
             area=area,
