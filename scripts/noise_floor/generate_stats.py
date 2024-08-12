@@ -145,7 +145,7 @@ def get_output_datasets(
 ) -> Tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
     lat = dataset["grid_yt"]
     area = xr.DataArray(
-        metrics.spherical_area_weights(lat.values, 90),
+        metrics.spherical_area_weights(lat.values, dataset.sizes["grid_xt"]),
         dims=["grid_yt", "grid_xt"],
     )
     annual = get_annual(dataset)
