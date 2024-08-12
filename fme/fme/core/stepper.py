@@ -306,10 +306,8 @@ class SteppedData:
     ) -> "SteppedData":
         """
         Prepends an initial condition to the existing stepped data.
+        Assumes data are on the same device.
         """
-        initial_condition = _cast_tensordict(initial_condition)
-        normalized_initial_condition = _cast_tensordict(normalized_initial_condition)
-
         return SteppedData(
             metrics=self.metrics,
             gen_data=_prepend_timestep(self.gen_data, initial_condition),
@@ -518,7 +516,7 @@ class SingleModuleStepper:
         return output_timeseries
 
     def get_initial_condition(self, data: TensorDict) -> Tuple[TensorDict, TensorDict]:
-        ic = {k: v.select(self.TIME_DIM, 0) for k, v in data.items()}
+        ic = _cast_tensordict({k: v.select(self.TIME_DIM, 0) for k, v in data.items()})
         return ic, self.normalizer.normalize(ic)
 
     def run_on_batch(
