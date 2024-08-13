@@ -384,18 +384,7 @@ class XarrayDataset(Dataset):
         ds = self._open_file(0)
         self._get_metadata(ds)
 
-        for i in range(len(self.names)):
-            if self.names[i] in ds.variables:
-                img_shape = ds[self.names[i]].shape[-2:]
-                break
-        else:
-            raise ValueError(
-                f"None of the requested variables {self.names} are present "
-                f"in the dataset."
-            )
         logging.info(f"Found {self._n_initial_conditions} samples.")
-        logging.info(f"Image shape is {img_shape[0]} x {img_shape[1]}.")
-        logging.info(f"Following variables are available: {list(ds.variables)}.")
 
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
@@ -414,11 +403,22 @@ class XarrayDataset(Dataset):
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
                 else:
-                    dims = ds[name].dims
-                    if "time" in dims:
-                        time_dependent_names.append(name)
+                    try:
+                        da = ds[name]
+                    except KeyError:
+                        raise ValueError(
+                            f"Required variable not found in dataset: {name}."
+                        )
                     else:
-                        time_invariant_names.append(name)
+                        dims = da.dims
+                        if "time" in dims:
+                            time_dependent_names.append(name)
+                        else:
+                            time_invariant_names.append(name)
+            logging.info(
+                f"The required variables have been found in the dataset: {self.names}."
+            )
+
         return VariableNames(
             time_dependent_names,
             time_invariant_names,
@@ -463,6 +463,11 @@ class XarrayDataset(Dataset):
                 f"unexpected config.spatial_dimensions {config.spatial_dimensions},"
                 " should be one of 'latlon' or 'healpix'"
             )
+        coords_sizes = {
+            coord_name: len(coord)
+            for coord_name, coord in horizontal_coordinates.coords.items()
+        }
+        logging.info(f"Horizontal coordinate sizes are {coords_sizes}.")
         return horizontal_coordinates, area_weights, static_derived_data
 
     @property
