@@ -97,6 +97,20 @@ def test_infer_horizontal_dimension_names_healpix():
     assert result == expected
 
 
+@pytest.mark.parametrize(
+    ["coordinate_type", "coord_sizes"],
+    [
+        pytest.param(LatLonCoordinates, {"lat": 90, "lon": 180}),
+        pytest.param(HEALPixCoordinates, {"face": 12, "height": 64, "width": 64}),
+    ],
+)
+def test_horizonal_dimension_sizes(coordinate_type, coord_sizes):
+    coords = {name: torch.Tensor(np.arange(size)) for name, size in coord_sizes.items()}
+    horizontal_coords = coordinate_type(**coords)
+    for name, size in coord_sizes.items():
+        assert len(horizontal_coords.coords[name]) == size
+
+
 def test_infer_horizontal_dimension_names_error():
     spatial_dims = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
