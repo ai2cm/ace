@@ -90,7 +90,6 @@ validation_loader:
 optimization:
   optimizer_type: "Adam"
   lr: 0.001
-  enable_automatic_mixed_precision: true
   scheduler:
       type: CosineAnnealingLR
       kwargs:
