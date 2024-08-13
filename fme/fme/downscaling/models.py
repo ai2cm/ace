@@ -11,7 +11,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -22,7 +22,7 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 
 @dataclasses.dataclass
 class ModelOutputs:
-    prediction: TensorMapping
+    prediction: TensorDict
     target: TensorMapping
     loss: torch.Tensor
     latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
@@ -136,12 +136,22 @@ class Model:
         batch: FineResCoarseResPair[TensorMapping],
         optimization: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
-        return self._run_on_batch(batch, optimization)
+        result = self._run_on_batch(batch, optimization)
+        for k, v in result.prediction.items():
+            result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
+        return result
 
     def generate_on_batch(
-        self, batch: FineResCoarseResPair[TensorMapping]
+        self,
+        batch: FineResCoarseResPair[TensorMapping],
+        n_samples: int = 1,
     ) -> ModelOutputs:
-        return self._run_on_batch(batch, self.null_optimization)
+        if n_samples != 1:
+            raise ValueError("n_samples must be 1 for deterministic models")
+        result = self._run_on_batch(batch, self.null_optimization)
+        for k, v in result.prediction.items():
+            result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
+        return result
 
     def _run_on_batch(
         self,
@@ -369,6 +379,7 @@ class DiffusionModel:
             denoised_norm = denoised_norm + base_prediction
 
         target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        denoised_norm = denoised_norm.unsqueeze(1)
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=channel_axis)
         )
@@ -378,18 +389,25 @@ class DiffusionModel:
 
     @torch.no_grad()
     def generate_on_batch(
-        self, batch: FineResCoarseResPair[TensorMapping]
+        self,
+        batch: FineResCoarseResPair[TensorMapping],
+        n_samples: int = 1,
     ) -> ModelOutputs:
         channel_axis = -3
         coarse, fine = _tensor_mapping_to_device(
             batch.coarse, get_device()
         ), _tensor_mapping_to_device(batch.fine, get_device())
+        # repeat the batch dimension n times for sampling, we will reshape
+        # the data later to turn this into [batch, samples, ...] dimensions
+        # as the called modules only expect a single batch dimension
         coarse_norm = self.in_packer.pack(
             self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
-        )
+        ).repeat_interleave(dim=0, repeats=n_samples)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
         )
+        n_batch = targets_norm.shape[0]
+        targets_norm = targets_norm.repeat_interleave(dim=0, repeats=n_samples)
         latents = torch.randn_like(targets_norm)
 
         logging.info("Running EDM sampler...")
@@ -416,11 +434,16 @@ class DiffusionModel:
             )
             samples_norm += base_prediction
 
+        loss = self.loss(targets_norm, samples_norm)
+
+        # here we reshape the data to [batch, samples, ...] dimensions as promised
+        samples_norm_reshaped = samples_norm.reshape(
+            n_samples, n_batch, *samples_norm.shape[1:]
+        ).transpose(0, 1)
         samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm, axis=channel_axis)
+            self.out_packer.unpack(samples_norm_reshaped, axis=channel_axis)
         )
 
-        loss = self.loss(targets_norm, samples_norm)
         return ModelOutputs(
             prediction=samples, target=batch.fine, loss=loss, latent_steps=latent_steps
         )

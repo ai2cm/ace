@@ -97,7 +97,7 @@ def test_train_and_generate(use_opt, use_fine_topography):
 
     assert outputs.prediction.keys() == outputs.target.keys()
     for k in outputs.prediction:
-        assert outputs.prediction[k].shape == outputs.target[k].shape
+        assert outputs.prediction[k].shape == outputs.target[k].unsqueeze(1).shape
 
 
 @pytest.mark.parametrize(
@@ -235,7 +235,8 @@ def test_diffusion_model_train_and_generate(predict_residual):
 
     for generated_output in generated_outputs:
         assert (
-            generated_output.prediction["x"].shape == generated_output.target["x"].shape
+            generated_output.prediction["x"].shape
+            == generated_output.target["x"].unsqueeze(1).shape
         )
 
     assert torch.all(

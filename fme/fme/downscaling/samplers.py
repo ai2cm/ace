@@ -16,7 +16,7 @@ https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/gene
 """Generate random images using the techniques described in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
-import re
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -26,7 +26,7 @@ def edm_sampler(
     net, latents, coarse, randn_like=torch.randn_like,
     num_steps=18, sigma_min=0.002, sigma_max=80.0, rho=7,
     S_churn=0.0, S_min=0.0, S_max=float('inf'), S_noise=1,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     # Time step discretization.
     step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)
     t_steps = (sigma_max ** (1 / rho) + step_indices / (num_steps - 1) * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))) ** rho

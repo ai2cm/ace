@@ -200,7 +200,9 @@ class Trainer:
                     outputs=outputs,
                     coarse=inputs.coarse,
                 )
-                generated_outputs = self.model.generate_on_batch(inputs)
+                generated_outputs = self.model.generate_on_batch(
+                    inputs, n_samples=self.config.generate_n_samples
+                )
                 generation_aggregator.record_batch(
                     outputs=generated_outputs,
                     coarse=inputs.coarse,
@@ -282,6 +284,7 @@ class TrainerConfig:
     logging: LoggingConfig
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
+    generate_n_samples: int = 1
     segment_epochs: Optional[int] = None
 
     @property

@@ -53,18 +53,13 @@ class Evaluator:
             inputs = FineResCoarseResPair(batch.fine, batch.coarse)
             with torch.no_grad():
                 logging.info("Generating predictions")
-                outputs = self.model.generate_on_batch(inputs)
+                outputs = self.model.generate_on_batch(inputs, n_samples=self.n_samples)
                 logging.info("Recording diagnostics to aggregator")
                 aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
                 )
-                logging.info(
-                    f"Generating {self.n_samples} samples and writing them to disk."
-                )
-                for n in range(self.n_samples):
-                    # TODO(gideond): unused
-                    outputs = self.model.generate_on_batch(inputs)
+                # TODO: write generated outputs to disk
 
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
