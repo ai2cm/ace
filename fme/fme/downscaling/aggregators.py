@@ -1,6 +1,6 @@
 """Contains classes for aggregating evaluation metrics and various statistics."""
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -405,6 +405,58 @@ class _ComparisonAggregator(Protocol):
         ...
 
 
+def _fold_sample_dim(
+    truth: TensorMapping,
+    pred: TensorMapping,
+    coarse: TensorMapping,
+) -> Tuple[TensorMapping, TensorMapping, TensorMapping]:
+    """
+    Takes truth and coarse data with only a [batch, ...] dimension and predictions
+    with [batch, samples, ...] dimensions, and returns dictionaries
+    which each have a combined [batch * samples, ...] dimension.
+
+    This is used to pass data to aggregators written to expect a single
+    batch dimension, or which don't care whether two values come
+    from the same input or not.
+
+    Args:
+        truth: Dictionary of truth data, with only a batch dimension
+        pred: Dictionary of prediction data, with a batch and sample dimension
+        coarse: Dictionary of coarse data, with only a batch dimension
+
+    Returns:
+        Tuple of dictionaries with the same keys as the input dictionaries
+        but each with a combined [batch * samples, ...] dimension.
+    """
+    return_truth = {}
+    return_pred = {}
+    return_coarse = {}
+    for key, pred_value in pred.items():
+        samples = pred_value.shape[1]
+        if len(pred_value.shape) != len(truth[key].shape) + 1:
+            raise ValueError(
+                "expected pred to have a sample dimension, "
+                f"has shape {pred_value.shape} "
+                f"with truth shape {truth[key].shape}"
+            )
+        return_truth[key] = (
+            truth[key]
+            .unsqueeze(1)
+            .repeat_interleave(samples, dim=1)
+            .reshape(truth[key].shape[0] * samples, *truth[key].shape[1:])
+        )
+        return_coarse[key] = (
+            coarse[key]
+            .unsqueeze(1)
+            .repeat_interleave(samples, dim=1)
+            .reshape(coarse[key].shape[0] * samples, *coarse[key].shape[1:])
+        )
+        return_pred[key] = pred_value.reshape(
+            pred_value.shape[0] * samples, *pred_value.shape[2:]
+        )
+    return return_truth, return_pred, return_coarse
+
+
 class Aggregator:
     """
     Class for aggregating evaluation metrics and intrinsic statistics.
@@ -465,20 +517,26 @@ class Aggregator:
         """
         Records a batch of target and prediction tensors for metric computation.
 
+        Takes target data starting with dimensions [batch_member], and prediction
+        data starting with dimensions [batch_member, sample_realization].
+
         Args:
             target: Ground truth
             pred: Model outputs
         """
+        folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
+            outputs.target, outputs.prediction, coarse
+        )
         for _, comparison_aggregator in self._comparisons.items():
-            comparison_aggregator.record_batch(outputs.target, outputs.prediction)
+            comparison_aggregator.record_batch(folded_target, folded_prediction)
 
         for _, coarse_comparison_aggregator in self._coarse_comparisons.items():
             coarse_comparison_aggregator.record_batch(
-                outputs.target, outputs.prediction, coarse
+                folded_target, folded_prediction, folded_coarse
             )
 
         for input, input_type in zip(
-            (outputs.target, outputs.prediction), ("target", "prediction")
+            (folded_target, folded_prediction), ("target", "prediction")
         ):
             for _, intrinsic_aggregator in self._intrinsics[input_type].items():
                 intrinsic_aggregator.record_batch(input)
