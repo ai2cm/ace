@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.jit
 
-from fme.core.device import get_device
+from fme.core.device import cast_tensordict_to_device
 from fme.core.typing_ import TensorDict
 
 
@@ -94,8 +94,8 @@ class StandardNormalizer:
         means: TensorDict,
         stds: TensorDict,
     ):
-        self.means = means
-        self.stds = stds
+        self.means = cast_tensordict_to_device(means)
+        self.stds = cast_tensordict_to_device(stds)
 
     def normalize(self, tensors: TensorDict) -> TensorDict:
         return _normalize(tensors, means=self.means, stds=self.stds)
@@ -118,13 +118,9 @@ class StandardNormalizer:
         Loads state from a serializable data structure.
         """
         means = {
-            k: torch.tensor(v, device=get_device(), dtype=torch.float)
-            for k, v in state["means"].items()
+            k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
         }
-        stds = {
-            k: torch.tensor(v, device=get_device(), dtype=torch.float)
-            for k, v in state["stds"].items()
-        }
+        stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
         return StandardNormalizer(means=means, stds=stds)
 
 

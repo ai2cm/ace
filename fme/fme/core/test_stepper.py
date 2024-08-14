@@ -28,6 +28,7 @@ from fme.core.typing_ import TensorDict
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 TIMESTEP = datetime.timedelta(hours=6)
+DEVICE = fme.get_device()
 
 
 def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
@@ -36,10 +37,8 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
 
     lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
     for name in names:
-        data[name] = torch.rand(
-            n_samples, n_time, n_lat, n_lon, device=fme.get_device()
-        )
-    area_weights = fme.spherical_area_weights(lats, n_lon).to(fme.get_device())
+        data[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
+    area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
     ak, bk = torch.arange(nz), torch.arange(nz)
     sigma_coords = SigmaCoordinates(ak, bk)
     return SphericalData(data, area_weights, sigma_coords)
@@ -95,7 +94,7 @@ def test_stepper_config_all_names_property(
 def test_run_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
@@ -144,7 +143,7 @@ def test_run_on_batch_addition_series():
 
     n_steps = 4
     data_with_ic = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
@@ -197,7 +196,7 @@ def test_run_on_batch_with_prescribed_ocean():
         "b": np.array([3.0], dtype=np.float32),
         "mask": np.array([1.0], dtype=np.float32),
     }
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
@@ -248,7 +247,7 @@ def test_reloaded_stepper_gives_same_prediction():
         "a": (1, 1, 5, 5),
         "b": (1, 1, 5, 5),
     }
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],
@@ -256,7 +255,7 @@ def test_reloaded_stepper_gives_same_prediction():
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     new_stepper = SingleModuleStepper.from_state(
         stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates
     )
@@ -330,7 +329,7 @@ def _setup_and_run_on_batch(
     else:
         optimization = optimization_config.build(module.parameters(), 2)
 
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": module}),
@@ -586,7 +585,7 @@ def _get_stepper(
 
 def test_step():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
-    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
 
     output = stepper.step(input_data, {})
 
@@ -596,7 +595,7 @@ def test_step():
 
 def test_step_with_diagnostic():
     stepper = _get_stepper(["a"], ["a", "c"], module_name="RepeatChannel")
-    input_data = {"a": torch.rand(3, 5, 5)}
+    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
     output = stepper.step(input_data, {})
     torch.testing.assert_close(output["a"], input_data["a"])
     torch.testing.assert_close(output["c"], input_data["a"])
@@ -604,7 +603,7 @@ def test_step_with_diagnostic():
 
 def test_step_with_forcing_and_diagnostic():
     stepper = _get_stepper(["a", "b"], ["a", "c"])
-    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(input_data, {})
     torch.testing.assert_close(output["a"], input_data["a"] + 1)
     assert "b" not in output
@@ -615,8 +614,8 @@ def test_step_with_prescribed_ocean():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
     )
-    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b", "mask"]}
-    ocean_data = {x: torch.rand(3, 5, 5) for x in ["a", "mask"]}
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b", "mask"]}
+    ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output = stepper.step(input_data, ocean_data)
     expected_a_output = torch.where(
         torch.round(ocean_data["mask"]).to(int) == 1,
@@ -631,7 +630,7 @@ def test_step_with_prescribed_ocean():
 def test_predict():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
     n_steps = 3
-    input_data = {x: torch.rand(3, 5, 5) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     forcing_data = {}
     output = stepper.predict(input_data, forcing_data, n_steps)
     for variable in ["a", "b"]:
@@ -644,8 +643,8 @@ def test_predict():
 def test_predict_with_forcing():
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
-    input_data = {"a": torch.rand(3, 5, 5)}
-    forcing_data = {"b": torch.rand(3, n_steps + 1, 5, 5)}
+    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    forcing_data = {"b": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE)}
     output = stepper.predict(input_data, forcing_data, n_steps)
     assert "b" not in output
     assert output["a"].size(dim=1) == n_steps
@@ -660,8 +659,10 @@ def test_predict_with_forcing():
 def test_predict_with_ocean():
     stepper = _get_stepper(["a"], ["a"], ocean_config=OceanConfig("a", "mask"))
     n_steps = 3
-    input_data = {"a": torch.rand(3, 5, 5)}
-    forcing_data = {x: torch.rand(3, n_steps + 1, 5, 5) for x in ["a", "mask"]}
+    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    forcing_data = {
+        x: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for x in ["a", "mask"]
+    }
     output = stepper.predict(input_data, forcing_data, n_steps)
     assert "mask" not in output
     assert output["a"].size(dim=1) == n_steps
@@ -682,8 +683,8 @@ def test_next_step_forcing_names():
         module_name="ChannelSum",
         next_step_forcing_names=["c"],
     )
-    input_data = {x: torch.rand(1, 5, 5) for x in ["a"]}
-    forcing_data = {x: torch.rand(1, 2, 5, 5) for x in ["b", "c"]}
+    input_data = {x: torch.rand(1, 5, 5).to(DEVICE) for x in ["a"]}
+    forcing_data = {x: torch.rand(1, 2, 5, 5).to(DEVICE) for x in ["b", "c"]}
     stepper.predict(input_data, forcing_data, 1)
     torch.testing.assert_close(
         stepper.module.module.last_input[:, 1, :], forcing_data["b"][:, 0]
@@ -695,7 +696,7 @@ def test_next_step_forcing_names():
 
 def test_prepend_initial_condition():
     nt = 3
-    x = torch.rand(3, nt, 5).to(fme.get_device())
+    x = torch.rand(3, nt, 5).to(DEVICE)
     x_normed = (x - x.mean()) / x.std()
     stepped = SteppedData(
         gen_data={"a": x, "b": x + 1},
@@ -705,8 +706,8 @@ def test_prepend_initial_condition():
         metrics={"loss": torch.tensor(0.0)},
     )
     ic = {
-        "a": torch.rand(3, 5).to(fme.get_device()),
-        "b": torch.rand(3, 5).to(fme.get_device()),
+        "a": torch.rand(3, 5).to(DEVICE),
+        "b": torch.rand(3, 5).to(DEVICE),
     }
     ic_normed = {k: (v - v.mean()) / v.std() for k, v in ic.items()}
     prepended = stepped.prepend_initial_condition(ic, ic_normed)
@@ -776,7 +777,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         "b": (1, 1, 5, 5),
         "diagnostic": (1, 1, 5, 5),
     }
-    area = torch.ones((5, 5), device=fme.get_device())
+    area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     orig_stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],

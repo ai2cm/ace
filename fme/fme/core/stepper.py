@@ -12,7 +12,7 @@ from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
-from fme.core.device import get_device
+from fme.core.device import cast_tensordict_to_device, get_device
 from fme.core.distributed import Distributed
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
@@ -254,13 +254,6 @@ def _combine_normalizers(
     means.update(residual_normalizer.means)
     stds.update(residual_normalizer.stds)
     return StandardNormalizer(means=means, stds=stds)
-
-
-def _cast_tensordict(
-    data: TensorDict, dtype: Optional[torch.dtype] = None
-) -> TensorDict:
-    device = get_device()
-    return {name: value.to(device, dtype=dtype) for name, value in data.items()}
 
 
 def _prepend_timestep(
@@ -516,7 +509,9 @@ class SingleModuleStepper:
         return output_timeseries
 
     def get_initial_condition(self, data: TensorDict) -> Tuple[TensorDict, TensorDict]:
-        ic = _cast_tensordict({k: v.select(self.TIME_DIM, 0) for k, v in data.items()})
+        ic = cast_tensordict_to_device(
+            {k: v.select(self.TIME_DIM, 0) for k, v in data.items()}
+        )
         return ic, self.normalizer.normalize(ic)
 
     def run_on_batch(
@@ -540,7 +535,7 @@ class SingleModuleStepper:
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        data = _cast_tensordict(data, dtype=torch.float)
+        data = cast_tensordict_to_device(data, dtype=torch.float)
         time_dim = self.TIME_DIM
         if self.ocean is None:
             forcing_names = self._config.forcing_names

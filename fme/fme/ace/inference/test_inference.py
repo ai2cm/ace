@@ -155,7 +155,9 @@ def test_get_initial_condition():
     assert initial_times[0] == 0
     assert initial_times[1] == 5
     assert initial_condition["prog"].shape == (2, 16, 32)
-    np.testing.assert_allclose(initial_condition["prog"].numpy(), data["prog"].values)
+    np.testing.assert_allclose(
+        initial_condition["prog"].cpu().numpy(), data["prog"].values
+    )
     assert initial_condition["prog"].device == fme.get_device()
 
 
