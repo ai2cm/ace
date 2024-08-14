@@ -6,6 +6,7 @@ import warnings
 from typing import Callable, List, Optional, Sequence, Tuple
 
 import dacite
+import dask.diagnostics
 import fsspec
 import numpy as np
 import xarray as xr
@@ -155,7 +156,9 @@ def get_output_datasets(
             f"There are {available_years} years of data available, "
             f"but received value {years_per_ensemble} for years_per_ensemble."
         )
-    annual = annual.isel(year=range(0, years_per_ensemble)).load()
+    with dask.diagnostics.ProgressBar():
+        with dask.config.set(scheduler="processes"):
+            annual = annual.isel(year=range(0, years_per_ensemble)).load()
     m, s = combine_window_stats(
         [1, 2, 5, 10],
         years_per_ensemble,
