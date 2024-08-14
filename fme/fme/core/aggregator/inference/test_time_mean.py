@@ -63,10 +63,10 @@ def test_bias_values():
     agg = TimeMeanEvaluatorAggregator(area_weights, target="denorm")
     # use constant values so area-weighting doesn't matter
     target_data = {
-        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+        "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     gen_data = {
-        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+        "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     agg.record_batch(
         loss=1.0,
@@ -96,7 +96,7 @@ def test_aggregator_mean_values():
     agg = TimeMeanAggregator(area_weights)
     # use constant values so area-weighting doesn't matter
     data = {
-        "a": torch.rand(1) * torch.ones(size=[2, 3, 4, 5], device=get_device()),
+        "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     agg.record_batch(
         data=data,

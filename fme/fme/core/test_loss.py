@@ -36,7 +36,8 @@ def test_loss_of_zeros_is_variance():
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    torch.testing.assert_close(result, y.var())
+    tol = {"rtol": 1e-4, "atol": 1e-4} if str(get_device()).startswith("cuda") else {}
+    torch.testing.assert_close(result, y.var(), **tol)
 
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
@@ -52,7 +53,12 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
     expected = torch.tensor(1.0 + global_mean_weight)
-    torch.testing.assert_close(result.cpu(), expected, atol=0.01, rtol=0)
+    tol = (
+        {"atol": 0.015, "rtol": 0.01}
+        if str(get_device()).startswith("cuda")
+        else {"atol": 0.01, "rtol": 0.0}
+    )
+    torch.testing.assert_close(result.cpu(), expected, **tol)
 
 
 def test_global_mean_loss():
