@@ -123,6 +123,7 @@ class WandB:
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
+            wandb.require("core")
             wandb.init(**kwargs)
 
     def watch(self, modules):
