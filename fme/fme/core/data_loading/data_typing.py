@@ -111,7 +111,9 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def xyz(self) -> Tuple[float, float, float]:
-        lats, lons = np.broadcast_arrays(self.lat[:, None], self.lon[None, :])
+        lats, lons = np.broadcast_arrays(
+            self.coords["lat"][:, None], self.coords["lon"][None, :]
+        )
         return lon_lat_to_xyz(lons, lats)
 
     # TODO: https://github.com/ai2cm/full-model/issues/1003
@@ -164,7 +166,9 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def xyz(self) -> Tuple[float, float, float]:
         hp = HEALPix(nside=len(self.height), order="ring")
-        return hp.healpix_to_xyz([self.face, self.height, self.width])
+        return hp.healpix_to_xyz(
+            [self.coords["face"], self.coords["height"], self.coords["width"]]
+        )
 
     @property
     def dims(self) -> List[str]:

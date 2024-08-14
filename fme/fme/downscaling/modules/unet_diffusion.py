@@ -34,10 +34,12 @@ class UNetDiffusionModule(torch.nn.Module):
         fine_topography: Optional[torch.Tensor],
     ):
         super(UNetDiffusionModule, self).__init__()
-        self.unet = unet
+        self.unet = unet.to(get_device())
         self.coarse_shape = coarse_shape
         self.target_shape = target_shape
         self.downscale_factor = downscale_factor
+        if fine_topography is not None:
+            fine_topography = fine_topography.to(get_device())
         self.fine_topography = fine_topography
 
     def forward(
@@ -55,7 +57,7 @@ class UNetDiffusionModule(torch.nn.Module):
             noise_level: The noise level of each example in the batch.
         """
         interpolated = torch.nn.functional.interpolate(
-            coarse,
+            coarse.to(get_device()),
             scale_factor=(self.downscale_factor, self.downscale_factor),
             mode="bicubic",
             align_corners=True,
@@ -76,6 +78,11 @@ class UNetDiffusionModule(torch.nn.Module):
         else:
             inputs = interpolated
 
-        outputs = self.unet(latent, inputs, sigma=noise_level, class_labels=None)
+        outputs = self.unet(
+            latent.to(get_device()),
+            inputs,
+            sigma=noise_level.to(get_device()),
+            class_labels=None,
+        )
         fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
         return outputs[..., : fine_shape[0], : fine_shape[1]]

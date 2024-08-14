@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 import pytest
 import torch
 
+from fme import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
@@ -29,6 +30,8 @@ class LinearDownscaling(torch.nn.Module):
         super(LinearDownscaling, self).__init__()
         self.img_shape = img_shape
         self.n_channels = n_channels
+        if fine_topography is not None:
+            fine_topography = fine_topography.to(get_device())
         self.fine_topography = fine_topography
         height, width = img_shape
         self.linear = torch.nn.Linear(
