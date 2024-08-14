@@ -96,7 +96,7 @@ def test_enso_coefficient_aggregator_values(scaling):
     """
     n_samples, n_times, n_lat, n_lon = 2, 28, 3, 3
     scale = 3
-    area_weights = torch.ones([n_lat, n_lon])
+    area_weights = torch.ones([n_lat, n_lon], device=get_device())
     # get data that doesn't vary in space, but varies in time with the ENSO index
     enso_index, sample_times, target_data, gen_data = _get_data(
         scale, n_samples, n_times, n_lat, n_lon
@@ -131,11 +131,12 @@ def test_enso_coefficient_aggregator_values(scaling):
     enso_dataset = enso_agg.get_dataset()
     # check that the coefficients are as expected in the dataset also
     np.testing.assert_array_almost_equal(
-        enso_dataset["a"].sel(source="target").values, target_coefficients["a"].numpy()
+        enso_dataset["a"].sel(source="target").values,
+        target_coefficients["a"].cpu().numpy(),
     )
     np.testing.assert_array_almost_equal(
         enso_dataset["a"].sel(source="prediction").values,
-        gen_coefficients["a"].numpy(),
+        gen_coefficients["a"].cpu().numpy(),
     )
 
 

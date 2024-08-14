@@ -1,6 +1,9 @@
 import os
+from typing import Optional
 
 import torch
+
+from .typing_ import TensorDict
 
 
 def using_gpu() -> bool:
@@ -18,3 +21,10 @@ def get_device() -> torch.device:
             return torch.device("mps")
         else:
             return torch.device("cpu")
+
+
+def cast_tensordict_to_device(
+    data: TensorDict, dtype: Optional[torch.dtype] = None
+) -> TensorDict:
+    device = get_device()
+    return {name: value.to(device, dtype=dtype) for name, value in data.items()}

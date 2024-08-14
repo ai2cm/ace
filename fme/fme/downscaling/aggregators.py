@@ -13,6 +13,7 @@ from fme.core.aggregator.one_step.snapshot import (
 )
 from fme.core.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.device import get_device
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
@@ -81,7 +82,7 @@ class Mean:
         return {k: self._sum[k] / self._count for k in self._sum}
 
     def get_wandb(self) -> Mapping[str, Any]:
-        return {k: v.numpy() for k, v in self.get().items()}
+        return {k: v.detach().cpu().numpy() for k, v in self.get().items()}
 
 
 class MeanComparison:
@@ -143,7 +144,7 @@ class MeanComparison:
         return {k: self._sum[k] / self._count for k in self._sum}
 
     def get_wandb(self) -> Mapping[str, Any]:
-        return {k: v.numpy() for k, v in self.get().items()}
+        return {k: v.detach().cpu().numpy() for k, v in self.get().items()}
 
 
 class ZonalPowerSpectrum:
@@ -479,8 +480,12 @@ class Aggregator:
     ) -> None:
         self.downscale_factor = downscale_factor
 
+        area_weights = area_weights.to(get_device())
+
         def _area_weighted_rmse(truth, pred):
-            return metrics.root_mean_squared_error(truth, pred, area_weights)
+            return metrics.root_mean_squared_error(
+                truth.to(get_device()), pred.to(get_device()), area_weights
+            )
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
