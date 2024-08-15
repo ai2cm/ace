@@ -163,7 +163,7 @@ def test_performance_metrics(
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
     target = {"x": torch.zeros(*shape)}
-    prediction = {"x": torch.ones(*shape).unsqueeze(1)}
+    prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
     coarse = {
         "x": torch.ones(2, shape[1] // downscale_factor, shape[2] // downscale_factor)
     }

@@ -1,7 +1,10 @@
+import dataclasses
+
 import pytest
 import torch
 
 from fme.downscaling.metrics_and_maths import (
+    compute_crps,
     compute_psnr,
     compute_ssim,
     compute_zonal_power_spectrum,
@@ -25,6 +28,41 @@ def test_map_named_tensors():
     with pytest.raises(ValueError):
         tensors_mismatched = {"c": torch.tensor(3.0)}
         mapped_function(tensors_1, tensors_mismatched)
+
+
+@dataclasses.dataclass
+class CRPSExperiment:
+    name: str
+    truth_amount: float
+    random_amount: float
+
+
+def test_crps():
+    nx = 1
+    ny = 1
+    n_batch = 1000
+    n_sample = 10
+    truth_amount = 0.8
+    random_amount = 0.5
+    experiments = [
+        CRPSExperiment("perfect", truth_amount, random_amount),
+        CRPSExperiment("extra_variance", truth_amount, random_amount * 1.1),
+        CRPSExperiment("less_variance", truth_amount, random_amount * 0.9),
+        CRPSExperiment("deterministic", truth_amount, random_amount * 1e-5),
+    ]
+    torch.manual_seed(0)
+    x_predictable = torch.rand(n_batch, nx, ny)
+    x = truth_amount * x_predictable + random_amount * torch.rand(n_batch, nx, ny)
+    crps_values = {}
+    for experiment in experiments:
+        x_sample = experiment.truth_amount * x_predictable.unsqueeze(
+            1
+        ) + experiment.random_amount * torch.rand(n_batch, n_sample, nx, ny)
+        crps_values[experiment.name] = compute_crps(x, x_sample).mean()
+    assert crps_values["perfect"] < crps_values["extra_variance"]
+    assert crps_values["perfect"] < crps_values["less_variance"]
+    assert crps_values["extra_variance"] < crps_values["deterministic"]
+    assert crps_values["less_variance"] < crps_values["deterministic"]
 
 
 @pytest.mark.parametrize(

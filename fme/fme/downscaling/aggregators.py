@@ -18,6 +18,7 @@ from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
+    compute_crps,
     compute_zonal_power_spectrum,
     interpolate,
     map_tensor_mapping,
@@ -510,6 +511,7 @@ class Aggregator:
         self._coarse_comparisons = {
             "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
         }
+        self._probabilistic_comparisons = {"crps": MeanComparison(compute_crps)}
         self._latent_step_aggregator = LatentStepAggregator()
         self.loss = Mean(torch.mean)
 
@@ -529,6 +531,9 @@ class Aggregator:
             target: Ground truth
             pred: Model outputs
         """
+        for _, prob_comparison_aggregator in self._probabilistic_comparisons.items():
+            prob_comparison_aggregator.record_batch(outputs.target, outputs.prediction)
+
         folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
             outputs.target, outputs.prediction, coarse
         )
