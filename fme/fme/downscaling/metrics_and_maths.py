@@ -84,6 +84,56 @@ def _normalize_tensors(
     return min_max_normalization(x, min_, max_), min_max_normalization(x, min_, max_)
 
 
+def compute_crps(
+    target: torch.Tensor,
+    prediction: torch.Tensor,
+    sample_dim: int = 1,
+):
+    """
+    CRPS is defined for one-dimensional random variables as
+
+        CRPS(F, x) = integral_z (F(z) - H(z - x))^2 dz
+
+    where $F(x)$ is the cumulative distribution function (CDF) of the forecast
+    distribution $F$ and $H(x)$ denotes the Heaviside step function, where $x$
+    is an observation.
+
+    This implementation is based on the identity:
+
+        CRPS(F, x) = E_F|X - x| - 1/2 * E_F|X - X'|
+
+    where X and X' denote independent random variables drawn from the forecast
+    distribution F, and E_F denotes the expectation value under F.
+
+    This reference (but not the implementation) is taken from the
+    Proper Scoring repository [1]_. It can also be found on Wikipedia [2]_
+    and is taken originally from Gneiting and Raftery (2007) [3]_ Equation 21.
+
+    Args:
+        target: The target tensor without a sample dimension
+        prediction: The prediction tensor with a sample dimension
+        sample_dim: The dimension of `prediction` corresponding to sample.
+
+    .. [1] https://github.com/properscoring/properscoring/blob/master/properscoring/_crps.py  # noqa: E501
+    .. [2] https://en.wikipedia.org/wiki/Scoring_rule
+    .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf  # noqa: E501
+    """
+    n_samples = prediction.shape[sample_dim]
+    if n_samples == 1:
+        return torch.full_like(target, fill_value=torch.nan)
+    else:
+        sample_mae_estimate = torch.zeros_like(target)
+        for i in range(1, n_samples):
+            sample_mae_estimate += torch.abs(
+                prediction - torch.roll(prediction, shifts=i, dims=sample_dim)
+            ).mean(axis=1)
+        sample_mae_estimate /= n_samples - 1
+    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
+        axis=sample_dim
+    )
+    return truth_mae - 0.5 * sample_mae_estimate
+
+
 def compute_psnr(
     prediction: torch.Tensor, target: torch.Tensor, add_channel_dim: bool
 ) -> torch.Tensor:
