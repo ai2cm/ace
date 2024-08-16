@@ -471,7 +471,7 @@ class Aggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         latitudes: torch.Tensor,
         downscale_factor: int,
         n_histogram_bins: int = 300,
@@ -480,8 +480,8 @@ class Aggregator:
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> None:
         self.downscale_factor = downscale_factor
-
-        area_weights = area_weights.to(get_device())
+        if area_weights is not None:
+            area_weights = area_weights.to(get_device())
 
         def _area_weighted_rmse(truth, pred):
             return metrics.root_mean_squared_error(

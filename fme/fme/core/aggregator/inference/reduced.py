@@ -165,7 +165,7 @@ class AreaWeightedReducedMetric:
 class MeanAggregator:
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         target: Literal["norm", "denorm"],
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
@@ -184,77 +184,79 @@ class MeanAggregator:
             self._metadata = metadata
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
-        if self._variable_metrics is None:
-            self._variable_metrics = {
-                "weighted_rmse": {},
-                "weighted_mean_gen": {},
-                "weighted_mean_target": {},
-                "weighted_bias": {},
-                "weighted_std_gen": {},
-            }
+        if self._area_weights is None:
+            self._variable_metrics = {}
+        else:
+            if self._variable_metrics is None:
+                self._variable_metrics = {
+                    "weighted_rmse": {},
+                    "weighted_mean_gen": {},
+                    "weighted_mean_target": {},
+                    "weighted_bias": {},
+                    "weighted_std_gen": {},
+                }
 
-            if self._target == "denorm":
-                # redundant for the "norm" case
-                self._variable_metrics["weighted_grad_mag_percent_diff"] = {}
-
-            device = get_device()
-            for key in gen_data:
-                self._variable_metrics["weighted_rmse"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.root_mean_squared_error,
-                    n_timesteps=self._n_timesteps,
-                )
                 if self._target == "denorm":
-                    self._variable_metrics["weighted_grad_mag_percent_diff"][
+                    # redundant for the "norm" case
+                    self._variable_metrics["weighted_grad_mag_percent_diff"] = {}
+
+                device = get_device()
+                for key in gen_data:
+                    self._variable_metrics["weighted_rmse"][
                         key
                     ] = AreaWeightedReducedMetric(
                         area_weights=self._area_weights,
                         device=device,
-                        compute_metric=metrics.gradient_magnitude_percent_diff,
+                        compute_metric=metrics.root_mean_squared_error,
                         n_timesteps=self._n_timesteps,
                     )
-                self._variable_metrics["weighted_mean_gen"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=compute_metric_on(
-                        source="gen", metric=metrics.weighted_mean
-                    ),
-                    n_timesteps=self._n_timesteps,
-                )
-                self._variable_metrics["weighted_mean_target"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=compute_metric_on(
-                        source="target", metric=metrics.weighted_mean
-                    ),
-                    n_timesteps=self._n_timesteps,
-                )
-                self._variable_metrics["weighted_bias"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.weighted_mean_bias,
-                    n_timesteps=self._n_timesteps,
-                )
-                self._variable_metrics["weighted_std_gen"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=compute_metric_on(
-                        source="gen", metric=metrics.weighted_std
-                    ),
-                    n_timesteps=self._n_timesteps,
-                )
-
+                    if self._target == "denorm":
+                        self._variable_metrics["weighted_grad_mag_percent_diff"][
+                            key
+                        ] = AreaWeightedReducedMetric(
+                            area_weights=self._area_weights,
+                            device=device,
+                            compute_metric=metrics.gradient_magnitude_percent_diff,
+                            n_timesteps=self._n_timesteps,
+                        )
+                    self._variable_metrics["weighted_mean_gen"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=compute_metric_on(
+                            source="gen", metric=metrics.weighted_mean
+                        ),
+                        n_timesteps=self._n_timesteps,
+                    )
+                    self._variable_metrics["weighted_mean_target"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=compute_metric_on(
+                            source="target", metric=metrics.weighted_mean
+                        ),
+                        n_timesteps=self._n_timesteps,
+                    )
+                    self._variable_metrics["weighted_bias"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=metrics.weighted_mean_bias,
+                        n_timesteps=self._n_timesteps,
+                    )
+                    self._variable_metrics["weighted_std_gen"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=compute_metric_on(
+                            source="gen", metric=metrics.weighted_std
+                        ),
+                        n_timesteps=self._n_timesteps,
+                    )
         return self._variable_metrics
 
     @torch.no_grad()
@@ -326,8 +328,12 @@ class MeanAggregator:
                 datum.data, dims=["forecast_step"], attrs=metadata._asdict()
             )
 
-        n_forecast_steps = len(next(iter(data_vars.values())))
-        coords = {"forecast_step": np.arange(n_forecast_steps)}
+        if len(data_vars.values()) > 0:
+            n_forecast_steps = len(next(iter(data_vars.values())))
+            coords = {"forecast_step": np.arange(n_forecast_steps)}
+        else:
+            coords = {"forecast_step": np.arange(0)}
+
         return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
@@ -338,11 +344,12 @@ def data_to_table(data: Dict[str, np.ndarray]) -> Table:
     keys = sorted(list(data.keys()))
     wandb = WandB.get_instance()
     table = wandb.Table(columns=["forecast_step"] + keys)
-    for i in range(len(data[keys[0]])):
-        row = [i]
-        for key in keys:
-            row.append(data[key][i])
-        table.add_data(*row)
+    if len(keys) > 0:
+        for i in range(len(data[keys[0]])):
+            row = [i]
+            for key in keys:
+                row.append(data[key][i])
+            table.add_data(*row)
     return table
 
 
@@ -353,7 +360,7 @@ class AreaWeightedSingleTargetReducedMetric:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         device: torch.device,
         compute_metric: AreaWeightedSingleTargetFunction,
         n_timesteps: int,
@@ -395,7 +402,7 @@ class AreaWeightedSingleTargetReducedMetric:
 class SingleTargetMeanAggregator:
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
