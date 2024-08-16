@@ -326,7 +326,7 @@ class SingleModuleStepper:
         self,
         config: SingleModuleStepperConfig,
         img_shape: Tuple[int, int],
-        area: torch.Tensor,
+        area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -371,7 +371,11 @@ class SingleModuleStepper:
         self._is_distributed = dist.is_distributed()
         self.module = dist.wrap_module(self.module)
 
-        self.area = area.to(get_device())
+        if area is not None:
+            self.area = area.to(get_device())
+        else:
+            self.area = None
+
         self.sigma_coordinates = sigma_coordinates.to(get_device())
         self.timestep = timestep
 
@@ -618,7 +622,7 @@ class SingleModuleStepper:
     def from_state(
         cls,
         state,
-        area: torch.Tensor,
+        area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
     ) -> "SingleModuleStepper":
         """

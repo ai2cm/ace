@@ -2,7 +2,7 @@ import logging
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 import numpy as np
 import torch
@@ -105,8 +105,9 @@ class WindowStitcher:
         self,
         ic_data: Dict[str, torch.Tensor],
         ic_time: xr.DataArray,
+        snapshot_dims: List[str],
     ):
-        self.writer.save_initial_condition(ic_data, ic_time)
+        self.writer.save_initial_condition(ic_data, ic_time, snapshot_dims)
 
 
 def _inference_internal_loop(
@@ -115,21 +116,33 @@ def _inference_internal_loop(
     aggregator: InferenceEvaluatorAggregator,
     stitcher: WindowStitcher,
     batch_times: xr.DataArray,
+    snapshot_dims: List[str],
 ):
     """Do operations that need to be done on each time step of the inference loop.
 
     This function exists to de-duplicate code between run_inference_evaluator and
-    run_dataset_comparison."""
+    run_dataset_comparison.
 
-    # The first data window includes the IC, while subsequent windows don't.
-    # The aggregators use the full first window including IC.
-    # The data writers exclude the IC from the first window.
+    Args:
+        stepped: windowed data, which has dim (batch, time, <snapshot_dims>)
+        aggregator: the aggregator object
+        stitcher: stitches together windows of data from the inference loop.
+        batch_times: the times represented in this batch.
+        snapshot_dims: represent the dimensions of the time snapshot.
+            (B, <spatial dimensions>)
+
+    Note:
+        The first data window includes the IC, while subsequent windows don't.
+        The aggregators use the full first window including IC.
+        The data writers exclude the IC from the first window.
+    """
     if i_time == 0:
         i_time_aggregator = i_time
         stepped_no_ic = stepped.remove_initial_condition()
         stitcher.save_initial_condition(
             ic_data={k: v[:, 0] for k, v in stepped.target_data.items()},
             ic_time=batch_times.isel(time=0),
+            snapshot_dims=snapshot_dims,
         )
         batch_times_no_ic = batch_times.isel(time=slice(1, None))
     else:
@@ -297,7 +310,10 @@ def run_inference_evaluator(
             )
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
-            _inference_internal_loop(stepped, i_time, aggregator, stitcher, batch_times)
+            snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
+            _inference_internal_loop(
+                stepped, i_time, aggregator, stitcher, batch_times, snapshot_dims
+            )
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
             i_time += forward_steps_in_memory
@@ -363,12 +379,14 @@ def run_dataset_comparison(
 
         timers["run_on_batch"] += time.time() - current_time
         current_time = time.time()
+        snapshot_dims = ["sample"] + target_data.horizontal_coordinates.dims
         _inference_internal_loop(
             stepped,
             i_time,
             aggregator,
             stitcher,
             target_times,
+            snapshot_dims,
         )
         timers["writer_and_aggregator"] += time.time() - current_time
         current_time = time.time()

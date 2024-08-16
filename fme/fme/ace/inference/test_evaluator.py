@@ -2,7 +2,7 @@ import contextlib
 import dataclasses
 import datetime
 import pathlib
-from typing import List, Tuple
+from typing import List
 
 import dacite
 import numpy as np
@@ -19,7 +19,7 @@ from fme.ace.registry import ModuleSelector
 from fme.core import metrics
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig, annual
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import DimSize, SigmaCoordinates
 from fme.core.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -55,7 +55,7 @@ def save_plus_one_stepper(
     names: List[str],
     mean: float,
     std: float,
-    data_shape: Tuple[int, int, int],
+    data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
     config = SingleModuleStepperConfig(
@@ -72,7 +72,7 @@ def save_plus_one_stepper(
     area = torch.ones(data_shape[-2:], device=get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
-        img_shape=data_shape[-2:],
+        img_shape=(data_shape[-2], data_shape[-1]),
         area=area,
         sigma_coordinates=sigma_coordinates,
         timestep=timestep,
@@ -89,10 +89,11 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = DIR / "stepper_test_data"
+
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
     dim_sizes = DimSizes(
         n_time=8,
-        n_lat=4,
-        n_lon=8,
+        horizontal=horizontal,
         nz_interface=2,
     )
     std = 1.0
@@ -104,7 +105,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
             names=all_names,
             mean=0.0,
             std=std,
-            data_shape=dim_sizes.shape_2d,
+            data_shape=dim_sizes.shape_nd,
         )
         assert False, "stepper_test_data did not exist, it has been created"
     use_prediction_data = False
@@ -131,10 +132,11 @@ def test_inference_plus_one_model(
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
-        n_lat=16,
-        n_lon=32,
+        horizontal=horizontal,
         nz_interface=4,
     )
     if use_prediction_data:
@@ -147,7 +149,7 @@ def test_inference_plus_one_model(
         names=all_names,
         mean=0.0,
         std=std,
-        data_shape=dim_sizes.shape_2d,
+        data_shape=dim_sizes.shape_nd,
         timestep=datetime.timedelta(days=20),
     )
     inference_helper(
@@ -192,8 +194,7 @@ def inference_helper(
                 names=all_names,
                 dim_sizes=DimSizes(
                     n_time=48,
-                    n_lat=dim_sizes.n_lat,
-                    n_lon=dim_sizes.n_lon,
+                    horizontal=dim_sizes.horizontal,
                     nz_interface=1,
                 ),
                 n_ensemble=3,
@@ -345,14 +346,16 @@ def test_inference_writer_boundaries(
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
-        n_lat=4,
-        n_lon=8,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -469,14 +472,16 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+
     dim_sizes = DimSizes(
         n_time=9,
-        n_lat=16,
-        n_lon=32,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -595,14 +600,16 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     out_names = ["var", "PRESsfc", "specific_total_water_0", "specific_total_water_1"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
+
+    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
-        n_lat=16,
-        n_lon=32,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
     )
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     data = FV3GFSData(
@@ -678,14 +685,15 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     n_forward_steps = 8
+
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
-        n_lat=4,
-        n_lon=8,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_2d
+        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -728,14 +736,16 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     out_names = ["var"]
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper_test_data"
-    dim_sizes = DimSizes(n_time=8, n_lat=4, n_lon=8, nz_interface=2)
+
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    dim_sizes = DimSizes(n_time=8, horizontal=horizontal, nz_interface=2)
     std = 1.0
     save_plus_one_stepper(
         stepper_path,
         names=all_names,
         mean=0.0,
         std=std,
-        data_shape=dim_sizes.shape_2d,
+        data_shape=dim_sizes.shape_nd,
         timestep=TIMESTEP,
     )
     use_prediction_data = False

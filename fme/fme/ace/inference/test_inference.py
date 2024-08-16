@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import List, Tuple
+from typing import List
 
 import cftime
 import numpy as np
@@ -21,7 +21,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import DimSize, SigmaCoordinates
 from fme.core.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -47,7 +47,7 @@ def save_stepper(
     out_names: List[str],
     mean: float,
     std: float,
-    data_shape: Tuple[int, int, int],
+    data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
@@ -65,7 +65,7 @@ def save_stepper(
     area = torch.ones(data_shape[-2:], device=fme.get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
-        img_shape=data_shape[-2:],
+        img_shape=(data_shape[-2], data_shape[-1]),
         area=area,
         sigma_coordinates=sigma_coordinates,
         timestep=timestep,
@@ -78,10 +78,11 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     in_names = ["prog", "forcing_var"]
     out_names = ["prog", "diagnostic_var"]
     stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+
     dim_sizes = DimSizes(
         n_time=9,
-        n_lat=16,
-        n_lon=32,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_stepper(
@@ -90,7 +91,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         out_names=out_names,
         mean=0.0,
         std=1.0,
-        data_shape=dim_sizes.shape_2d,
+        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,

@@ -5,7 +5,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import Dataset, LatLonCoordinates
+from fme.core.data_loading.data_typing import Dataset, DimSize, LatLonCoordinates
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
 from fme.downscaling.requirements import DataRequirements
 
@@ -156,7 +156,11 @@ def test_dataloader_build(tmp_path):
         FV3GFSData(
             path=path,
             names=all_names,
-            dim_sizes=DimSizes(num_timesteps, h, w, num_vertical_levels),
+            dim_sizes=DimSizes(
+                num_timesteps,
+                [DimSize("grid_yt", h), DimSize("grid_xt", w)],
+                num_vertical_levels,
+            ),
             time_varying_values=[float(i) for i in range(num_timesteps)],
             timestep_days=0.25,
         )

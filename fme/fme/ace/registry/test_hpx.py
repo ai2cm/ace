@@ -50,11 +50,13 @@ def down_sampling_block_config():
     return DownsamplingBlockConfig(pooling=2, block_type="AvgPool")
 
 
-def encoder_config(conv_next_block_config, down_sampling_block_config):
+def encoder_config(
+    conv_next_block_config, down_sampling_block_config, n_channels=[136, 68, 34]
+):
     return UNetEncoderConfig(
         conv_block=conv_next_block_config,
         down_sampling_block=down_sampling_block_config,
-        n_channels=[136, 68, 34],
+        n_channels=n_channels,
         dilations=[1, 2, 4],
     )
 
@@ -97,13 +99,14 @@ def decoder_config(
     up_sampling_block_config,
     output_layer_config,
     recurrent_block_config,
+    n_channels=[34, 68, 136],
 ):
     decoder_config = UNetDecoderConfig(
         conv_block=conv_next_block_config,
         up_sampling_block=up_sampling_block_config,
         recurrent_block=recurrent_block_config,
         output_layer=output_layer_config,
-        n_channels=[34, 68, 136],
+        n_channels=n_channels,
         dilations=[4, 2, 1],
     )
     return decoder_config
@@ -113,7 +116,7 @@ def test_data():
     # create dummy data
     def generate_test_data(batch_size=8, time_dim=1, channels=7, img_size=16):
         device = get_device()
-        test_data = th.randn(batch_size, 12, time_dim, channels, img_size, img_size)
+        test_data = th.randn(batch_size, 12, time_dim * channels, img_size, img_size)
         return test_data.to(device)
 
     return generate_test_data
@@ -134,7 +137,7 @@ def insolation_data():
     # create dummy data
     def generate_insolation_data(batch_size=8, time_dim=1, img_size=16):
         device = get_device()
-        insolation = th.randn(batch_size, 12, time_dim, 1, img_size, img_size)
+        insolation = th.randn(batch_size, 12, time_dim, img_size, img_size)
 
         return insolation.to(device)
 
@@ -148,6 +151,9 @@ def insolation_data():
     ],
 )
 def test_hpx_init(shape):
+    in_channels = 7
+    out_channels = 7
+    prognostic_variables = min(in_channels, out_channels)
     n_constants = 1
     decoder_input_channels = 1
     input_time_dim = 2
@@ -169,6 +175,7 @@ def test_hpx_init(shape):
         "config": {
             "encoder": dataclasses.asdict(encoder),
             "decoder": dataclasses.asdict(decoder),
+            "prognostic_variables": prognostic_variables,
             "n_constants": n_constants,
             "decoder_input_channels": decoder_input_channels,
             "input_time_dim": input_time_dim,
@@ -247,8 +254,8 @@ def test_hpx_init(shape):
             2,
             3,
             None,
-            NotImplementedError,
-            "support for models with no constant fields and no decoder",
+            ValueError,
+            "'output_time_dim' must be a multiple of 'input_time_dim'",
         ),  # No constant fields and no decoder
     ],
 )
@@ -263,6 +270,7 @@ def test_HEALPixRecUNet_initialize(
     expected_exception,
     expected_message,
 ):
+    prognostic_variables = min(out_channels, in_channels)
     conv_next_block = conv_next_block_config()
     up_sampling_block = up_sampling_block_config()
     output_layer = output_layer_config()
@@ -280,6 +288,7 @@ def test_HEALPixRecUNet_initialize(
                 decoder=decoder,
                 input_channels=in_channels,
                 output_channels=out_channels,
+                prognostic_variables=prognostic_variables,
                 n_constants=n_constants,
                 decoder_input_channels=decoder_input_channels,
                 input_time_dim=input_time_dim,
@@ -292,6 +301,7 @@ def test_HEALPixRecUNet_initialize(
             decoder=decoder,
             input_channels=in_channels,
             output_channels=out_channels,
+            prognostic_variables=prognostic_variables,
             n_constants=n_constants,
             decoder_input_channels=decoder_input_channels,
             input_time_dim=input_time_dim,
@@ -304,6 +314,7 @@ def test_HEALPixRecUNet_initialize(
 def test_HEALPixRecUNet_integration_steps():
     in_channels = 2
     out_channels = 2
+    prognostic_variables = min(out_channels, in_channels)
     n_constants = 1
     decoder_input_channels = 0
     input_time_dim = 2
@@ -324,6 +335,7 @@ def test_HEALPixRecUNet_integration_steps():
         decoder=decoder,
         input_channels=in_channels,
         output_channels=out_channels,
+        prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
         input_time_dim=input_time_dim,
@@ -337,6 +349,7 @@ def test_HEALPixRecUNet_reset():
     # create a smaller version of the dlwp healpix model
     in_channels = 3
     out_channels = 3
+    prognostic_variables = min(out_channels, in_channels)
     n_constants = 2
     decoder_input_channels = 1
     input_time_dim = 2
@@ -354,16 +367,21 @@ def test_HEALPixRecUNet_reset():
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=2 * input_time_dim, channels=in_channels, img_size=size)
-    decoder_inputs = insolation_data()(time_dim=2 * output_time_dim, img_size=size)
+    x = test_data()(time_dim=input_time_dim, channels=in_channels, img_size=size)
+    decoder_inputs = insolation_data()(time_dim=input_time_dim, img_size=size)
     constants = constant_data()(channels=n_constants, img_size=size)
-    inputs = [x, decoder_inputs, constants]
+    batch_size = x.shape[0]
+    constants = constants.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
+    inputs = th.concat(
+        (x, decoder_inputs, constants), dim=-3
+    )  # [x, decoder_inputs, constants]
 
     model = HEALPixRecUNet(
         encoder=encoder,
         decoder=decoder,
         input_channels=in_channels,
         output_channels=out_channels,
+        prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
         input_time_dim=input_time_dim,
@@ -399,6 +417,7 @@ def test_HEALPixRecUNet_forward(
     n_constants,
     size,
 ):
+    prognostic_variables = min(out_channels, in_channels)
     device = get_device()
     conv_next_block = conv_next_block_config()
     up_sampling_block = up_sampling_block_config()
@@ -410,18 +429,25 @@ def test_HEALPixRecUNet_forward(
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=2 * input_time_dim, channels=in_channels, img_size=size)
-    decoder_inputs = insolation_data()(time_dim=2 * output_time_dim, img_size=size)
+    x = test_data()(time_dim=input_time_dim, channels=in_channels, img_size=size)
+    batch_size = x.shape[0]
+
+    if decoder_input_channels > 0:
+        decoder_inputs = insolation_data()(time_dim=input_time_dim, img_size=size)
+    else:
+        decoder_inputs = insolation_data()(time_dim=0, img_size=size)
     constants = constant_data()(channels=n_constants, img_size=size)
+    constants = constants.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
 
     all_inputs = [x, decoder_inputs, constants]
-    inputs = [all_inputs[i] for i in inputs_config]
+    inputs = th.concat(all_inputs, dim=-3)
 
     model = HEALPixRecUNet(
         encoder=encoder,
         decoder=decoder,
         input_channels=in_channels,
         output_channels=out_channels,
+        prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
         input_time_dim=input_time_dim,

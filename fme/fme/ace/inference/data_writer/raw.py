@@ -99,6 +99,13 @@ class RawDataWriter:
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
+        self._n_lat: Optional[int] = None
+        self._n_lon: Optional[int] = None
+        if "face" in coords:
+            # TODO: handle writing HEALPix data
+            # https://github.com/ai2cm/full-model/issues/1089
+            self.dataset: Optional[Dataset] = None
+            return
         filename = str(Path(path) / label)
         self._save_names = save_names
         self.metadata = metadata
@@ -112,8 +119,6 @@ class RawDataWriter:
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
         self.dataset.createVariable(VALID_TIME, "i8", (SAMPLE_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
-        self._n_lat: Optional[int] = None
-        self._n_lon: Optional[int] = None
 
     def _get_variable_names_to_save(
         self, *data_varnames: Iterable[str]
@@ -134,6 +139,8 @@ class RawDataWriter:
             start_timestep: Timestep (lead time dim) at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """
+        if self.dataset is None:
+            return
         n_samples_data = list(data.values())[0].shape[0]
         n_samples_time = batch_times.sizes["sample"]
         if n_samples_data != n_samples_time:

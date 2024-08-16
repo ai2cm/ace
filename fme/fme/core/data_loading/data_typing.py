@@ -2,7 +2,7 @@ import abc
 import dataclasses
 import datetime
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Tuple
+from typing import List, Literal, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -13,6 +13,12 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
 VariableMetadata = namedtuple("VariableMetadata", ["units", "long_name"])
+
+
+@dataclasses.dataclass
+class DimSize:
+    name: str
+    size: int
 
 
 @dataclasses.dataclass
@@ -69,7 +75,12 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def default_sizes(self) -> Dict[str, int]:
+    def sizes(self) -> List[DimSize]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def default_sizes(self) -> List[DimSize]:
         pass
 
     @property
@@ -125,8 +136,15 @@ class LatLonCoordinates(HorizontalCoordinates):
         return [self.lat_name, self.lon_name]
 
     @property
-    def default_sizes(self) -> Dict[str, int]:
-        return {self.lat_name: 12, self.lon_name: 6}
+    def sizes(self) -> List[DimSize]:
+        return [
+            DimSize(self.lat_name, len(self.lat)),
+            DimSize(self.lon_name, len(self.lon)),
+        ]
+
+    @property
+    def default_sizes(self) -> List[DimSize]:
+        return [DimSize(self.lat_name, 16), DimSize(self.lon_name, 32)]
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss"]:
@@ -175,8 +193,20 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return ["face", "height", "width"]
 
     @property
-    def default_sizes(cls) -> Dict[str, int]:
-        return {"face": 12, "width": 64, "height": 64}
+    def sizes(self) -> List[DimSize]:
+        return [
+            DimSize("face", len(self.face)),
+            DimSize("height", len(self.width)),
+            DimSize("width", len(self.height)),
+        ]
+
+    @property
+    def default_sizes(cls) -> List[DimSize]:
+        return [
+            DimSize("face", 12),
+            DimSize("height", 16),
+            DimSize("width", 16),
+        ]
 
     # TODO: https://github.com/ai2cm/full-model/issues/1003
     # This is currently the dummy solution.
@@ -197,7 +227,7 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
         ...
 
     @abc.abstractproperty
-    def area_weights(self) -> torch.Tensor:
+    def area_weights(self) -> Optional[torch.Tensor]:
         ...
 
     @abc.abstractproperty
@@ -242,13 +272,13 @@ class GriddedData:
         loader: torch DataLoader, which returns batches of type
             TensorMapping where keys indicate variable name.
             Each tensor has shape
-            [batch_size, time_window_size, n_channels, n_lat, n_lon].
+            [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
         metadata: Metadata for each variable.
         area_weights: Weights for each grid cell, used for computing area-weighted
-            averages. Has shape [n_lat, n_lon].
+            averages. Has shape [n_x_coord, n_y_coord].
         sigma_coordinates: Sigma coordinates for each grid cell, used for computing
             pressure levels.
-        horizontal_coordinates: Lat/lon coordinates for the data.
+        horizontal_coordinates: horizontal coordinates for the data.
         timestep: Timestep of the model.
         sampler: Optional sampler for the data loader. Provided to allow support for
             distributed training.
@@ -256,7 +286,7 @@ class GriddedData:
 
     loader: torch.utils.data.DataLoader
     metadata: Mapping[str, VariableMetadata]
-    area_weights: torch.Tensor
+    area_weights: Optional[torch.Tensor]
     sigma_coordinates: SigmaCoordinates
     horizontal_coordinates: HorizontalCoordinates
     timestep: datetime.timedelta

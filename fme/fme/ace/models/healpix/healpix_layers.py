@@ -103,7 +103,8 @@ class HEALPixUnfoldFaces(nn.Module):
 
         """
         NF, C, H, W = tensor.shape
-        tensor = th.reshape(tensor, shape=(-1, self.num_faces, C, H, W))
+        N = int(NF / self.num_faces)
+        tensor = th.reshape(tensor, shape=(N, self.num_faces, C, H, W))
 
         return tensor
 

@@ -35,6 +35,7 @@ class HEALPixRecUNet(nn.Module):
         decoder: UNetDecoderConfig,
         input_channels: int,
         output_channels: int,
+        prognostic_variables: int,
         n_constants: int,
         decoder_input_channels: int,
         input_time_dim: int,
@@ -91,9 +92,10 @@ class HEALPixRecUNet(nn.Module):
         self.input_channels = input_channels
 
         if n_constants == 0 and decoder_input_channels == 0:
-            raise NotImplementedError(
-                "support for models with no constant fields and no decoder inputs (TOA insolation) is not available at this time."
-            )
+            pass
+            # raise NotImplementedError(
+            #    "support for models with no constant fields and no decoder inputs (TOA insolation) is not available at this time."
+            # )
         if couplings is not None:
             if len(couplings) > 0:
                 if n_constants == 0:
@@ -113,6 +115,7 @@ class HEALPixRecUNet(nn.Module):
         self.train_couplers = None
         self.output_channels = output_channels
         self.n_constants = n_constants
+        self.prognostic_variables = prognostic_variables
         self.decoder_input_channels = decoder_input_channels
         self.input_time_dim = input_time_dim
         self.output_time_dim = output_time_dim
@@ -189,132 +192,123 @@ class HEALPixRecUNet(nn.Module):
         """
         return (1 if self.is_diagnostic else self.input_time_dim) * self.output_channels
 
-    def _reshape_inputs(self, inputs: Sequence, step: int = 0) -> th.Tensor:
-        """
-        Returns a single tensor to pass into the model encoder/decoder. Squashes the time/channel dimension and
-        concatenates in constants and decoder inputs.
+    # def _reshape_inputs(self, inputs: Sequence, step: int = 0) -> th.Tensor:
+    #     """
+    #     Returns a single tensor to pass into the model encoder/decoder. Squashes the time/channel dimension and
+    #     concatenates in constants and decoder inputs.
 
-        Args:
-            inputs: list of expected input tensors (inputs, decoder_inputs, constants)
-            step: step number in the sequence of integration_steps
+    #     Args:
+    #         inputs: list of expected input tensors (inputs, decoder_inputs, constants)
+    #         step: step number in the sequence of integration_steps
 
-        Returns:
-            reshaped Tensor in expected shape for model encoder
-        """
+    #     Returns:
+    #         reshaped Tensor in expected shape for model encoder
+    #     """
 
-        if len(self.couplings) > 0:
-            result = [
-                inputs[0].flatten(
-                    start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                ),
-                inputs[1][
-                    :,
-                    :,
-                    slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
-                    ...,
-                ].flatten(
-                    start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                ),  # DI
-                inputs[2].expand(
-                    *tuple([inputs[0].shape[0]] + len(inputs[2].shape) * [-1])
-                ),  # constants
-                inputs[3].permute(0, 2, 1, 3, 4),  # coupled inputs
-            ]
-            res = th.cat(result, dim=self.channel_dim)
+    #     # if len(self.couplings) > 0:
+    #     #     result = [
+    #     #         inputs[0].flatten(
+    #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #         ),
+    #     #         inputs[1][
+    #     #             :,
+    #     #             :,
+    #     #             slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
+    #     #             ...,
+    #     #         ].flatten(
+    #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #         ),  # DI
+    #     #         inputs[2].expand(
+    #     #             *tuple([inputs[0].shape[0]] + len(inputs[2].shape) * [-1])
+    #     #         ),  # constants
+    #     #         inputs[3].permute(0, 2, 1, 3, 4),  # coupled inputs
+    #     #     ]
+    #     #     res = th.cat(result, dim=self.channel_dim)
 
-        else:
-            if self.n_constants == 0:
-                result = [
-                    inputs[0].flatten(
-                        start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                    ),
-                    inputs[1][
-                        :,
-                        :,
-                        slice(
-                            step * self.input_time_dim, (step + 1) * self.input_time_dim
-                        ),
-                        ...,
-                    ].flatten(
-                        start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                    ),  # DI
-                ]
-                res = th.cat(result, dim=self.channel_dim)
+    #     # else:
+    #     #     if self.n_constants == 0:
+    #     #         result = [  # This logic changes for no insolation layer for the time being
+    #     #             inputs[0].flatten(
+    #     #                 start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #             ),
+    #     #             # inputs[0].flatten(
+    #     #             #     start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #             # ),
+    #     #             # inputs[1][
+    #     #             #     :,
+    #     #             #     :,
+    #     #             #     slice(
+    #     #             #         step * self.input_time_dim, (step + 1) * self.input_time_dim
+    #     #             #     ),
+    #     #             #     ...,
+    #     #             # ].flatten(
+    #     #             #     start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #             # ),  # DI
+    #     #         ]
+    #     #         res = th.cat(result, dim=self.channel_dim)
 
-                # fold faces into batch dim
-                res = self.fold(res)
+    #     #         # fold faces into batch dim
+    #     #         res = self.fold(res)
 
-                return res
+    #     #         return res
 
-            if self.decoder_input_channels == 0:
-                result = [
-                    inputs[0].flatten(
-                        start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                    ),
-                    inputs[1].expand(
-                        *tuple([inputs[0].shape[0]] + len(inputs[1].shape) * [-1])
-                    ),  # constants
-                ]
-                print(f"result 1 is {result[0].shape}")
-                print(f"result 2 is {result[1].shape}")
+    #     #     if self.decoder_input_channels == 0:
+    #     #         result = [
+    #     #             inputs[0].flatten(
+    #     #                 start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #             ),
+    #     #             inputs[1].expand(
+    #     #                 *tuple([inputs[0].shape[0]] + len(inputs[1].shape) * [-1])
+    #     #             ),  # inputs
+    #     #         ]
+    #     #         print(f"result 1 is {result[0].shape}")
+    #     #         print(f"result 2 is {result[1].shape}")
 
-                res = th.cat(result, dim=self.channel_dim)
+    #     #         res = th.cat(result, dim=self.channel_dim)
 
-                # fold faces into batch dim
-                res = self.fold(res)
+    #     #         # fold faces into batch dim
+    #     #         res = self.fold(res)
 
-                return res
+    #     #         return res
 
-            result = [
-                inputs[0].flatten(
-                    start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                ),
-                inputs[1][
-                    :,
-                    :,
-                    slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
-                    ...,
-                ].flatten(
-                    start_dim=self.channel_dim, end_dim=self.channel_dim + 1
-                ),  # DI
-                inputs[2].expand(
-                    *tuple([inputs[0].shape[0]] + len(inputs[2].shape) * [-1])
-                ),  # constants
-            ]
-            res = th.cat(result, dim=self.channel_dim)
+    #     #     result = [
+    #     #         inputs[0].flatten(
+    #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #         ),
+    #     #         inputs[1][
+    #     #             :,
+    #     #             :,
+    #     #             slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
+    #     #             ...,
+    #     #         ].flatten(
+    #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
+    #     #         ),  # DI
+    #     #         inputs[2].expand(
+    #     #             *tuple([inputs[0].shape[0]] + len(inputs[2].shape) * [-1])
+    #     #         ),  # constants
+    #     #     ]
+    #     #     res = th.cat(result, dim=self.channel_dim)
 
-        # fold faces into batch dim
-        res = self.fold(res)
-        return res
+    #     # fold faces into batch dim
+    #     # res = self.fold(res)
+    #     # res = self.fold(inputs)
+    #     # return res
 
-    def _reshape_outputs(self, outputs: th.Tensor) -> th.Tensor:
-        """Returns a multiple tensors to from the model decoder.
-        Splits the time/channel dimensions.
+    # def _reshape_outputs(self, outputs: th.Tensor) -> th.Tensor:
+    #     """Returns a multiple tensors to from the model decoder.
+    #     Splits the time/channel dimensions.
 
-        Args:
-            inputs: list of expected input tensors (inputs, decoder_inputs, constants)
-            step: step number in the sequence of integration_steps
+    #     Args:
+    #         inputs: list of expected input tensors (inputs, decoder_inputs, constants)
+    #         step: step number in the sequence of integration_steps
 
-        Returns:
-            reshaped Tensor in expected shape for model outputs
-        """
-        # unfold:
-        outputs = self.unfold(outputs)
+    #     Returns:
+    #         reshaped Tensor in expected shape for model outputs
+    #     """
+    #     # unfold:
+    #     outputs = self.unfold(outputs)
 
-        # extract shape and reshape
-        shape = tuple(outputs.shape)
-        res = th.reshape(
-            outputs,
-            shape=(
-                shape[0],
-                shape[1],
-                1 if self.is_diagnostic else self.input_time_dim,
-                -1,
-                *shape[3:],
-            ),
-        )
-
-        return res
+    #     return outputs
 
     def _initialize_hidden(
         self, inputs: Sequence, outputs: Sequence, step: int
@@ -331,7 +325,7 @@ class HEALPixRecUNet(nn.Module):
             if step < self.presteps:
                 s = step + prestep
                 if len(self.couplings) > 0:
-                    input_tensor = self._reshape_inputs(
+                    input_tensor = self.fold(
                         inputs=[
                             inputs[0][
                                 :,
@@ -344,7 +338,7 @@ class HEALPixRecUNet(nn.Module):
                         step=step + prestep,
                     )
                 else:
-                    input_tensor = self._reshape_inputs(
+                    input_tensor = self.fold(
                         inputs=[
                             inputs[0][
                                 :,
@@ -358,95 +352,77 @@ class HEALPixRecUNet(nn.Module):
             else:
                 s = step - self.presteps + prestep
                 if len(self.couplings) > 0:
-                    input_tensor = self._reshape_inputs(
+                    input_tensor = self.fold(
                         inputs=[outputs[s - 1]]
                         + list(inputs[1:3])
                         + [inputs[3][step - (prestep - self.presteps)]],
                         step=s + 1,
                     )
                 else:
-                    input_tensor = self._reshape_inputs(
+                    input_tensor = self.fold(
                         inputs=[outputs[s - 1]] + list(inputs[1:]), step=s + 1
                     )
             self.decoder(self.encoder(input_tensor))
 
-    def forward(self, inputs: Sequence, output_only_last=False) -> th.Tensor:
+    def forward(self, inputs: th.Tensor, output_only_last=False) -> th.Tensor:
         """
         Forward pass of the HEALPixUnet
 
         Args:
-            inputs: Inputs to the model, of the form [prognostics|TISR|constants]
-                [B, F, T, C, H, W] is the format for prognostics and TISR
-                [F, C, H, W] is the format for constants
+            inputs: Inputs to the model, which is currently in the form [B, F, C, H, W].
+                (We assume that constants have been preprocessed to persist across batch)
+                (We also assume for now that the time is implied to be 1)
+
+            Originally, this was expected to be a sequence of the form [prognostics|TISR|constants]:
+                [B, F, T, C, H, W] the format for prognostics and TISR
+                [F, C, H, W] the format for constants
+
             output_only_last: If only the last dimension of the outputs should
                 be returned
 
         Returns:
             Predicted outputs
         """
-        self.reset()
-        outputs: list = []
-        for step in range(self.integration_steps):
-            # (Re-)initialize recurrent hidden states
-            if (step * (self.delta_t * self.input_time_dim)) % self.reset_cycle == 0:
-                self._initialize_hidden(inputs=inputs, outputs=outputs, step=step)
-
-            # Construct concatenated input: [prognostics|TISR|constants]
-            if step == 0:
-                s = self.presteps
-                if len(self.couplings) > 0:
-                    input_tensor = self._reshape_inputs(
-                        inputs=[
-                            inputs[0][
-                                :,
-                                :,
-                                s * self.input_time_dim : (s + 1) * self.input_time_dim,
-                            ]
-                        ]
-                        + list(inputs[1:3])
-                        + [inputs[3][s]],
-                        step=s,
-                    )
-                else:
-                    input_tensor = self._reshape_inputs(
-                        inputs=[
-                            inputs[0][
-                                :,
-                                :,
-                                s * self.input_time_dim : (s + 1) * self.input_time_dim,
-                            ]
-                        ]
-                        + list(inputs[1:]),
-                        step=s,
-                    )
-            else:
-                if len(self.couplings) > 0:
-                    input_tensor = self._reshape_inputs(
-                        inputs=[outputs[-1]]
-                        + list(inputs[1:3])
-                        + [inputs[3][self.presteps + step]],
-                        step=step + self.presteps,
-                    )
-                else:
-                    input_tensor = self._reshape_inputs(
-                        inputs=[outputs[-1]] + list(inputs[1:]),
-                        step=step + self.presteps,
-                    )
-
-            # Forward through model
-            encodings = self.encoder(input_tensor)
-            decodings = self.decoder(encodings)
-
-            # Residual prediction
-            reshaped = self._reshape_outputs(
-                input_tensor[:, : self.input_channels * self.input_time_dim] + decodings
+        self.reset()  # will reset every step for now
+        # We need to make sure that the new input is the correct size, since we no longer have the ability
+        # to differentiate between the inputs, decoder inputs, and constants
+        if self._compute_input_channels() != inputs.shape[2]:
+            raise ValueError(
+                f"Expected input should have channels {self._compute_input_channels()},"
+                f" got {inputs.shape[2]}."
             )
-            outputs.append(reshaped)
 
-        if output_only_last:
-            return outputs[-1]
+        # The input logic gets really changed now that we just have a prognostic vars channel in the inputs.
+        # Basically we assume that all the batch-wise expansion for the inputs has already been done.
 
-        return th.cat(outputs, dim=self.channel_dim)
+        # (Re-)initialize recurrent hidden states
+        # if (step * (self.delta_t * self.input_time_dim)) % self.reset_cycle == 0:
+        #     self._initialize_hidden(inputs=inputs, outputs=outputs, step=step)
+        # Skipping this for now. We assume a single input time step, and resetting every step.
+        # s = self.presteps
+        input_tensor = self.fold(
+            inputs
+        )  # Padding happens in HEALPixPadding, which will
+        # unfold this tensor to handle it.
+
+        encodings = self.encoder(input_tensor)
+        decodings = self.decoder(encodings)
+
+        # Residual prediction
+        n_prognostic_channels = self.prognostic_variables * self.input_time_dim
+        prognostic_outputs = (
+            input_tensor[:, :n_prognostic_channels]
+            + decodings[:, :n_prognostic_channels]
+        )
+
+        outputs_only = decodings[:, n_prognostic_channels:]
+
+        reshaped = th.cat(
+            [self.unfold(prognostic_outputs), self.unfold(outputs_only)],
+            dim=self.channel_dim,
+        )
+
+        return reshaped
 
     def reset(self):
         """Resets the state of the network"""

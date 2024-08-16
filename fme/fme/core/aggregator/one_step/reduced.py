@@ -28,7 +28,7 @@ class MeanAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         target_time: int = 1,
     ):
         self._area_weights = area_weights
@@ -41,35 +41,39 @@ class MeanAggregator:
         self._dist = Distributed.get_instance()
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
-        if self._variable_metrics is None:
-            self._variable_metrics = {
-                "weighted_rmse": {},
-                "weighted_bias": {},
-                "weighted_grad_mag_percent_diff": {},
-            }
-            device = get_device()
-            for key in gen_data:
-                self._variable_metrics["weighted_rmse"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.root_mean_squared_error,
-                )
-                self._variable_metrics["weighted_bias"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.weighted_mean_bias,
-                )
-                self._variable_metrics["weighted_grad_mag_percent_diff"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    area_weights=self._area_weights,
-                    device=device,
-                    compute_metric=metrics.gradient_magnitude_percent_diff,
-                )
+        if self._area_weights is None:
+            self._variable_metrics = {}
+        else:
+            if self._variable_metrics is None:
+                self._variable_metrics = {
+                    "weighted_rmse": {},
+                    "weighted_bias": {},
+                    "weighted_grad_mag_percent_diff": {},
+                }
+                device = get_device()
+                for key in gen_data:
+                    self._variable_metrics["weighted_rmse"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=metrics.root_mean_squared_error,
+                    )
+                    self._variable_metrics["weighted_bias"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=metrics.weighted_mean_bias,
+                    )
+                    self._variable_metrics["weighted_grad_mag_percent_diff"][
+                        key
+                    ] = AreaWeightedReducedMetric(
+                        area_weights=self._area_weights,
+                        device=device,
+                        compute_metric=metrics.gradient_magnitude_percent_diff,
+                    )
+
         return self._variable_metrics
 
     @torch.no_grad()
