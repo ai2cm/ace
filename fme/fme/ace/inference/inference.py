@@ -170,7 +170,7 @@ class InferenceConfig:
         self.logging.configure_gcs()
 
     def load_stepper(
-        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+        self, area: Optional[torch.Tensor], sigma_coordinates: SigmaCoordinates
     ) -> SingleModuleStepper:
         """
         Args:
@@ -250,8 +250,12 @@ def run_inference_from_config(config: InferenceConfig):
         initial_times,
     )
 
+    if data.area_weights is not None:
+        area_weights = data.area_weights.to(fme.get_device())
+    else:
+        area_weights = None
     stepper = config.load_stepper(
-        data.area_weights.to(fme.get_device()),
+        area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:
@@ -261,7 +265,7 @@ def run_inference_from_config(config: InferenceConfig):
         )
 
     aggregator = config.aggregator.build(
-        area_weights=data.area_weights.to(fme.get_device()),
+        area_weights=area_weights,
         sigma_coordinates=data.sigma_coordinates,
         timestep=data.timestep,
         n_timesteps=config.n_forward_steps + 1,

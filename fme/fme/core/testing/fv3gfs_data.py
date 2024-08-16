@@ -1,13 +1,14 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, List, Optional, Sequence, Tuple
 
 import cftime
 import numpy as np
 import xarray as xr
 
 from fme.core.data_loading.config import XarrayDataConfig
+from fme.core.data_loading.data_typing import DimSize
 from fme.core.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -30,31 +31,35 @@ def _coord_value(
 @dataclasses.dataclass
 class DimSizes:
     n_time: int
-    n_lat: int
-    n_lon: int
+    horizontal: List[DimSize]
     nz_interface: int
 
     @property
-    def shape_2d(self) -> Tuple[int, int, int]:
-        return (self.n_time, self.n_lat, self.n_lon)
+    def shape_nd(self) -> List[int]:
+        return [self.n_time] + [dim.size for dim in self.horizontal]
 
     @property
-    def dims_2d(self) -> Tuple[str, str, str]:
-        return ("time", "grid_yt", "grid_xt")
+    def dims_nd(self) -> List[str]:
+        return ["time"] + [dim.name for dim in self.horizontal]
 
     @property
     def shape_vertical_interface(self) -> Tuple[int]:
         return (self.nz_interface,)
 
+    @property
     def items(self):
-        return [
-            ("time", self.n_time),
-            ("grid_yt", self.n_lat),
-            ("grid_xt", self.n_lon),
+        return [("time", self.n_time)] + [
+            (dim.name, dim.size) for dim in self.horizontal
         ]
 
+    def get_size(self, key: str) -> int:
+        for item in self.horizontal:
+            if item.name == key:
+                return item.size
+        raise KeyError(f"Dimension with name '{key}' not found.")
 
-def save_2d_netcdf(
+
+def save_nd_netcdf(
     filename,
     dim_sizes: DimSizes,
     variable_names: List[str],
@@ -62,7 +67,7 @@ def save_2d_netcdf(
     time_varying_values: Optional[List[float]] = None,
 ):
     """
-    Save a 2D netcdf file with random data for the given variable names and
+    Save a ND netcdf file with random data for the given variable names and
     dimensions.
 
     Args:
@@ -71,7 +76,7 @@ def save_2d_netcdf(
         variable_names: The names of the variables to save.
         time_varying_values: If not None, the values to use for each time step.
     """
-    ds = get_2d_dataset(
+    ds = get_nd_dataset(
         dim_sizes=dim_sizes,
         variable_names=variable_names,
         timestep_days=timestep_days,
@@ -133,7 +138,7 @@ class FV3GFSData:
                 f"Number of time-varying values ({len(self.time_varying_values)}) "
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
-        save_2d_netcdf(
+        save_nd_netcdf(
             self._data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
@@ -172,7 +177,7 @@ class MonthlyReferenceData:
 
     def __post_init__(self):
         self.data_path.mkdir(parents=True, exist_ok=True)
-        ds = get_2d_dataset(
+        ds = get_nd_dataset(
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
         )
@@ -207,33 +212,42 @@ class MonthlyReferenceData:
         return self.data_path / "monthly.nc"
 
 
-def get_2d_dataset(
-    dim_sizes: DimSizes,
-    variable_names: Sequence[str],
-    timestep_days: float = 1.0,
-):
-    """
-    Gets a dataset of [time, lat, lon] data.
-    """
-    data_vars = {}
-    for name in variable_names:
-        data = np.random.randn(*dim_sizes.shape_2d).astype(np.float32)
-        data_vars[name] = xr.DataArray(
-            data,
-            dims=["time", "grid_yt", "grid_xt"],
-            attrs={"units": "m", "long_name": name},
-        )
-
-    grid_yt = np.linspace(-89.5, 89.5, dim_sizes.n_lat)
-    grid_xt_start = 360.0 / dim_sizes.n_lon / 2
-    grid_xt = np.linspace(grid_xt_start, 360.0 - grid_xt_start, dim_sizes.n_lon)
+def get_nd_overrides(dim_sizes: DimSizes, timestep_days: float) -> dict[str, Any]:
+    coords_override: dict[str, Any]
     time = [
         cftime.DatetimeProlepticGregorian(2000, 1, 1)
         + i * timestep_days * datetime.timedelta(days=1)
         for i in range(dim_sizes.n_time)
     ]
+    coords_override = {"time": time}
+    if "grid_yt" in dim_sizes.dims_nd:
+        n_lat = dim_sizes.get_size("grid_yt")  # n_lat
+        n_lon = dim_sizes.get_size("grid_xt")  # n_lon
+        grid_yt = np.linspace(-89.5, 89.5, n_lat)
+        grid_xt_start = 360.0 / n_lon / 2
+        grid_xt = np.linspace(grid_xt_start, 360.0 - grid_xt_start, n_lon)
+        coords_override["grid_yt"] = grid_yt
+        coords_override["grid_xt"] = grid_xt
+    return coords_override
 
-    coords_override = {"grid_yt": grid_yt, "grid_xt": grid_xt, "time": time}
+
+def get_nd_dataset(
+    dim_sizes: DimSizes,
+    variable_names: Sequence[str],
+    timestep_days: float = 1.0,
+):
+    """
+    Gets a dataset of [time, <horizontal dims>] data.
+    """
+    data_vars = {}
+    for name in variable_names:
+        data = np.random.randn(*dim_sizes.shape_nd).astype(np.float32)
+        data_vars[name] = xr.DataArray(
+            data,
+            dims=dim_sizes.dims_nd,
+            attrs={"units": "m", "long_name": name},
+        )
+    coords_override = get_nd_overrides(dim_sizes=dim_sizes, timestep_days=timestep_days)
 
     coords = {
         dim_name: (
@@ -244,7 +258,7 @@ def get_2d_dataset(
             if dim_name not in coords_override
             else coords_override[dim_name]
         )
-        for dim_name, size in dim_sizes.items()
+        for dim_name, size in dim_sizes.items
     }
 
     for i in range(dim_sizes.nz_interface):

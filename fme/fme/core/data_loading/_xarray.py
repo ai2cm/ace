@@ -427,7 +427,7 @@ class XarrayDataset(Dataset):
 
     def configure_horizontal_coordinates(self, config, first_dataset):
         horizontal_coordinates: HorizontalCoordinates
-        area_weights: torch.Tensor
+        area_weights: Optional[torch.Tensor]
         static_derived_data: StaticDerivedData
         dims = get_horizontal_dimensions(first_dataset)
 
@@ -454,9 +454,8 @@ class XarrayDataset(Dataset):
                 height=torch.as_tensor(height, device=fme.get_device()),
                 width=torch.as_tensor(width, device=fme.get_device()),
             )
-            # Area weights should be all 1's of shape (face, height, width),
-            # since area is uniform.
-            area_weights = torch.ones((len(face), len(height), len(width)))
+            # No area weighting needed for HEALPix, uniform area grid
+            area_weights = None
             static_derived_data = StaticDerivedData(horizontal_coordinates)
         else:
             raise ValueError(
@@ -471,7 +470,7 @@ class XarrayDataset(Dataset):
         return horizontal_coordinates, area_weights, static_derived_data
 
     @property
-    def area_weights(self) -> torch.Tensor:
+    def area_weights(self) -> Optional[torch.Tensor]:
         return self._area_weights
 
     @property

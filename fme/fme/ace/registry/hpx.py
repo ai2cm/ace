@@ -17,10 +17,12 @@ class HEALPixRecUNetBuilder(ModuleConfig):
 
     Attributes:
         presteps: Number of pre-steps, by default 1.
-        delta_time: Delta time interval, by default "6h".
         input_time_dim: Input time dimension, by default 0.
         output_time_dim: Output time dimension, by default 0.
+        delta_time: Delta time interval, by default "6h".
         reset_cycle: Reset cycle interval, by default "24h".
+        input_channels: Number of input channels, by default 8.
+        output_channels: Number of output channels, by default 8.
         n_constants: Number of constant input channels, by default 2.
         decoder_input_channels: Number of input channels for the decoder, by default 1.
         enable_nhwc: Flag to enable NHWC data format, by default False.
@@ -36,6 +38,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
     reset_cycle: str = "24h"
     n_constants: int = 2
     decoder_input_channels: int = 1
+    prognostic_variables: int = 7
     enable_nhwc: bool = False
     enable_healpixpad: bool = False
 
@@ -56,12 +59,13 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         Returns:
             HEALPixRecUNet model.
         """
-        # Construct the HEALPixRecUNet module here using the parameters.
+        # Construct the HEALPixRecUNet module here using the parameters
         return HEALPixRecUNet(
             encoder=self.encoder,
             decoder=self.decoder,
             input_channels=n_in_channels,
             output_channels=n_out_channels,
+            prognostic_variables=self.prognostic_variables,
             n_constants=self.n_constants,
             decoder_input_channels=self.decoder_input_channels,
             input_time_dim=self.input_time_dim,

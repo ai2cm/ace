@@ -9,6 +9,7 @@ import xarray as xr
 
 import fme
 from fme.core.aggregator.inference.annual import GlobalMeanAnnualAggregator
+from fme.core.data_loading.data_typing import DimSize
 from fme.core.device import get_device
 from fme.core.testing import DimSizes, MonthlyReferenceData, mock_distributed
 
@@ -23,13 +24,13 @@ def test_annual_aggregator(tmpdir):
     n_time = 365 * 4 * 2
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     names = ["a"]
+    horizontal = [DimSize("grid_yt", n_lat), DimSize("grid_xt", n_lon)]
     monthly_reference_data = MonthlyReferenceData(
         path=pathlib.Path(tmpdir),
         names=names,
         dim_sizes=DimSizes(
             n_time=48,
-            n_lat=n_lat,
-            n_lon=n_lon,
+            horizontal=horizontal,
             nz_interface=1,
         ),
         n_ensemble=3,

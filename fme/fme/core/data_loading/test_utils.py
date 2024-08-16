@@ -1,5 +1,6 @@
 import copy
 import datetime
+from typing import List
 
 import numpy as np
 import pytest
@@ -7,6 +8,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading.data_typing import (
+    DimSize,
     HEALPixCoordinates,
     HorizontalCoordinates,
     LatLonCoordinates,
@@ -35,8 +37,8 @@ def get_sizes(
         lon_name=LON_DIM,
     )
 ):
-    spatial_sizes: dict = copy.deepcopy(spatial_dims.default_sizes)
-    spatial_sizes[TIME_DIM] = 3
+    spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.default_sizes)
+    spatial_sizes.append(DimSize(TIME_DIM, 3))
     return spatial_sizes
 
 
@@ -49,8 +51,8 @@ def create_reference_dataset(
     )
 ):
     dims = [TIME_DIM] + spatial_dims.dims
-    sizes = get_sizes(spatial_dims=spatial_dims)
-    shape = tuple(sizes[dim] for dim in dims)
+    dim_sizes = get_sizes(spatial_dims=spatial_dims)
+    shape = tuple(dim_size.size for dim_size in dim_sizes)
     data = np.arange(np.prod(shape)).reshape(shape)
     coords = [np.arange(size) for size in shape]
     full = xr.DataArray(data, dims=dims, coords=coords, name=FULL_NAME)
@@ -91,7 +93,7 @@ def test_infer_horizontal_dimension_names_healpix():
         width=torch.Tensor(np.arange(64)),
         height=torch.Tensor(np.arange(64)),
     )
-    ds = create_reference_dataset(hpx_coords)
+    ds = create_reference_dataset(spatial_dims=hpx_coords)
     expected = hpx_coords.dims
     result = infer_horizontal_dimension_names(ds)
     assert result == expected
@@ -137,8 +139,10 @@ def test_infer_horizontal_dimension_names_error():
     ids=lambda x: f"{x}",
 )
 def test__get_indexers(variable_dims, expected):
-    sizes = get_sizes()
-    shape = tuple(sizes[dim] for dim in variable_dims)
+    dim_sizes = get_sizes()
+    shape = tuple(
+        dim_size.size for dim_size in dim_sizes if dim_size.name in variable_dims
+    )
     variable = xr.Variable(variable_dims, np.zeros(shape))
     dims = (TIME_DIM, LAT_DIM, LON_DIM)
     result = _get_indexers(variable, dims)

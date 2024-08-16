@@ -1,6 +1,6 @@
 import re
 from types import MappingProxyType
-from typing import List, Mapping, Union
+from typing import List, Mapping, Optional, Union
 
 import torch
 
@@ -270,7 +270,9 @@ class ClimateData:
 
 
 def compute_dry_air_absolute_differences(
-    climate_data: ClimateData, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+    climate_data: ClimateData,
+    area: Optional[torch.Tensor],
+    sigma_coordinates: SigmaCoordinates,
 ) -> torch.Tensor:
     """
     Computes the absolute value of the dry air tendency of each time step.

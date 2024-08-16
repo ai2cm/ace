@@ -1,6 +1,9 @@
+import copy
+import dataclasses
 import pathlib
 import subprocess
 import tempfile
+import textwrap
 import unittest.mock
 
 import numpy as np
@@ -10,14 +13,28 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.evaluator import main as inference_evaluator_main
+from fme.ace.registry.test_hpx import (
+    conv_next_block_config,
+    decoder_config,
+    down_sampling_block_config,
+    encoder_config,
+    output_layer_config,
+    recurrent_block_config,
+    up_sampling_block_config,
+)
 from fme.ace.train.train import _restore_checkpoint, count_parameters
 from fme.ace.train.train import main as train_main
 from fme.ace.train.train_config import epoch_checkpoint_enabled
 from fme.core.data_loading.config import Slice
+from fme.core.data_loading.data_typing import (
+    HEALPixCoordinates,
+    HorizontalCoordinates,
+    LatLonCoordinates,
+)
 from fme.core.testing import (
     DimSizes,
     MonthlyReferenceData,
-    save_2d_netcdf,
+    save_nd_netcdf,
     save_scalar_netcdf,
 )
 from fme.core.testing.wandb import mock_wandb
@@ -46,7 +63,65 @@ def _get_test_yaml_files(
     max_epochs=1,
     segment_epochs=1,
     inference_forward_steps=2,
+    use_healpix=False,
 ):
+    if use_healpix:
+        in_channels = len(in_variable_names)
+        out_channels = len(out_variable_names)
+        prognostic_variables = min(
+            out_channels, in_channels
+        )  # how many variables in/out share.
+        # in practice, we will need to compare variable names, since there
+        # are some input-only and some output-only channels.
+        # TODO: https://github.com/ai2cm/full-model/issues/1046
+        n_constants = 0
+        decoder_input_channels = 0  # was 1, to indicate insolation - now 0
+        input_time_dim = 1  # was 2, but this is a flattened input now
+        output_time_dim = 1  # was 4, but we are now just asking the next timestep
+        spatial_dimensions_str = "healpix"
+
+        conv_next_block = conv_next_block_config(in_channels=in_channels)
+        down_sampling_block = down_sampling_block_config()
+        recurrent_block = recurrent_block_config()
+        encoder = encoder_config(
+            conv_next_block, down_sampling_block, n_channels=[16, 8, 4]
+        )
+        up_sampling_block = up_sampling_block_config()
+        output_layer = output_layer_config()
+        decoder = decoder_config(
+            conv_next_block,
+            up_sampling_block,
+            output_layer,
+            recurrent_block,
+            n_channels=[4, 8, 16],
+        )
+
+        # Need to manually indent these YAML strings
+        encoder_yaml = yaml.dump(
+            dataclasses.asdict(encoder), default_flow_style=False, indent=2
+        )
+        decoder_yaml = yaml.dump(
+            dataclasses.asdict(decoder), default_flow_style=False, indent=2
+        )
+        encoder_yaml_indented = textwrap.indent(encoder_yaml, "        ")
+        decoder_yaml_indented = textwrap.indent(decoder_yaml, "        ")
+        config_str = f"""
+      encoder:
+{encoder_yaml_indented}
+      decoder:
+{decoder_yaml_indented}
+      prognostic_variables: {prognostic_variables}
+      n_constants: {n_constants}
+      decoder_input_channels: {decoder_input_channels}
+      input_time_dim: {input_time_dim}
+      output_time_dim: {output_time_dim}
+        """
+    else:
+        config_str = """
+      num_layers: 2
+      embed_dim: 12"""
+        spatial_dimensions_str = "latlon"
+
     new_stepper_config = f"""
   in_names: {in_variable_names}
   out_names: {out_variable_names}
@@ -57,12 +132,10 @@ def _get_test_yaml_files(
     global_means_path: '{global_means_path}'
     global_stds_path: '{global_stds_path}'
   loss:
-    global_mean_type: "LpLoss"
+    type: "MSE"
   builder:
     type: {nettype}
-    config:
-      num_layers: 2
-      embed_dim: 12
+    config: {config_str}
   ocean:
     surface_temperature_name: {in_variable_names[0]}
     ocean_fraction_name: {mask_name}
@@ -80,11 +153,13 @@ def _get_test_yaml_files(
 train_loader:
   dataset:
     - data_path: '{train_data_path}'
+      spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 1
 validation_loader:
   dataset:
     - data_path: '{valid_data_path}'
+      spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 1
 optimization:
@@ -101,7 +176,8 @@ inference:
     monthly_reference_data: {monthly_data_filename}
   loader:
     dataset:
-        data_path: '{valid_data_path}'
+      data_path: '{valid_data_path}'
+      spatial_dimensions: {spatial_dimensions_str}
     start_indices:
       first: 0
       n_initial_conditions: 2
@@ -138,6 +214,7 @@ logging:
 loader:
   dataset:
     data_path: '{valid_data_path}'
+    spatial_dimensions: {spatial_dimensions_str}
   start_indices:
     first: 0
     n_initial_conditions: 2
@@ -155,6 +232,23 @@ loader:
     return f_train.name, f_inference.name
 
 
+def get_sizes(
+    spatial_dims: HorizontalCoordinates = LatLonCoordinates(
+        lon=torch.Tensor(np.arange(32)),
+        lat=torch.Tensor(np.arange(16)),
+        lat_name="grid_yt",
+        lon_name="grid_xt",
+    ),
+    n_time=3,
+    nz_interface=7,
+) -> DimSizes:
+    return DimSizes(
+        n_time=n_time,
+        horizontal=copy.deepcopy(spatial_dims.sizes),
+        nz_interface=nz_interface,
+    )
+
+
 def _setup(
     path,
     nettype,
@@ -164,6 +258,7 @@ def _setup(
     n_time=10,
     timestep_days=5,
     inference_forward_steps=2,
+    use_healpix=False,
 ):
     if not path.exists():
         path.mkdir()
@@ -174,12 +269,15 @@ def _setup(
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names))
 
-    dim_sizes = DimSizes(
-        n_time=n_time,
-        n_lat=16,
-        n_lon=32,
-        nz_interface=7,
-    )
+    if use_healpix:
+        hpx_coords = HEALPixCoordinates(
+            face=torch.Tensor(np.arange(12)),
+            width=torch.Tensor(np.arange(16)),
+            height=torch.Tensor(np.arange(16)),
+        )
+        dim_sizes = get_sizes(spatial_dims=hpx_coords, n_time=n_time)
+    else:
+        dim_sizes = get_sizes(n_time=n_time)
 
     data_dir = path / "data"
     stats_dir = path / "stats"
@@ -187,7 +285,7 @@ def _setup(
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
-    save_2d_netcdf(
+    save_nd_netcdf(
         data_dir / "data.nc",
         dim_sizes,
         variable_names=all_variable_names + [mask_name],
@@ -202,15 +300,22 @@ def _setup(
         variable_names=all_variable_names,
     )
 
+    monthly_dim_sizes: DimSizes
+    if use_healpix:
+        hpx_coords = HEALPixCoordinates(
+            face=torch.Tensor(np.arange(12)),
+            width=torch.Tensor(np.arange(16)),
+            height=torch.Tensor(np.arange(16)),
+        )
+        monthly_dim_sizes = get_sizes(
+            spatial_dims=hpx_coords, n_time=10 * 12, nz_interface=1
+        )
+    else:
+        monthly_dim_sizes = get_sizes(n_time=10 * 12, nz_interface=1)
     monthly_reference_data = MonthlyReferenceData(
         path=data_dir,
         names=out_variable_names,
-        dim_sizes=DimSizes(
-            n_time=10 * 12,
-            n_lat=16,
-            n_lon=32,
-            nz_interface=1,
-        ),
+        dim_sizes=monthly_dim_sizes,
         n_ensemble=3,
     )
 
@@ -229,12 +334,13 @@ def _setup(
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
         inference_forward_steps=inference_forward_steps,
+        use_healpix=use_healpix,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype", ["SphericalFourierNeuralOperatorNet", "SFNO-v0.1.0"]
+    "nettype", ["SphericalFourierNeuralOperatorNet", "HEALPixRecUNet", "SFNO-v0.1.0"]
 )
 def test_train_and_inference_inline(tmp_path, nettype):
     """Make sure that training and inference run without errors
@@ -245,12 +351,14 @@ def test_train_and_inference_inline(tmp_path, nettype):
         debug: option for developers to allow use of pdb.
     """
     # need multi-year to cover annual aggregator
+
     train_config, inference_config = _setup(
         tmp_path,
         nettype,
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        use_healpix=(nettype == "HEALPixRecUNet"),
     )
     # using pdb requires calling main functions directly
     train_main(
@@ -260,22 +368,28 @@ def test_train_and_inference_inline(tmp_path, nettype):
     (tmp_path / "stats" / "stats-mean.nc").unlink()
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
     inference_logs = inference_evaluator_main(yaml_config=inference_config)
-    assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
+
     prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
-    assert prediction_output_path.exists()
     best_checkpoint_path = (
         tmp_path / "output" / "training_checkpoints" / "best_ckpt.tar"
     )
-    assert best_checkpoint_path.exists()
     best_inference_checkpoint_path = (
         tmp_path / "output" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
-    assert best_inference_checkpoint_path.exists()
-    ds_prediction = xr.open_dataset(prediction_output_path)
-    assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
-    assert np.sum(np.isnan(ds_prediction["bar"].values)) == 0
-    ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
-    assert np.sum(np.isnan(ds_target["baz"].values)) == 0
+    assert best_checkpoint_path.exists()
+    if nettype != "HEALPixRecUNet":
+        assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
+        assert prediction_output_path.exists()
+        assert best_inference_checkpoint_path.exists()
+        ds_prediction = xr.open_dataset(prediction_output_path)
+        assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
+        assert np.sum(np.isnan(ds_prediction["bar"].values)) == 0
+        ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
+        assert np.sum(np.isnan(ds_target["baz"].values)) == 0
+    else:
+        assert (len(inference_logs)) == 0  # inference logs don't run for Healpix yet
+        assert not prediction_output_path.exists()
+        assert not best_inference_checkpoint_path.exists()
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
