@@ -350,13 +350,15 @@ class Trainer:
             self._ema.restore(parameters=self.stepper.modules.parameters())
 
     def validate_one_epoch(self):
+        area_weights = self.train_data.area_weights
+        if area_weights is not None:
+            area_weights = area_weights.to(fme.get_device())
         aggregator = OneStepAggregator(
-            self.train_data.area_weights.to(fme.get_device()),
-            self.train_data.sigma_coordinates,
-            self.train_data.metadata,
+            area_weights=area_weights,
+            sigma_coordinates=self.train_data.sigma_coordinates,
+            metadata=self.train_data.metadata,
             loss_scaling=self.stepper.effective_loss_scaling,
         )
-
         with torch.no_grad(), self._validation_context():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.run_on_batch(
@@ -392,8 +394,11 @@ class Trainer:
         for batch in self._inference_data.loader:
             initial_times = batch.times.isel(time=0)
             break
+        area_weights = self.train_data.area_weights
+        if area_weights is not None:
+            area_weights = area_weights.to(fme.get_device())
         aggregator = aggregator_config.build(
-            area_weights=self.train_data.area_weights.to(fme.get_device()),
+            area_weights=area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
             timestep=self.train_data.timestep,
             initial_times=initial_times,

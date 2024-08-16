@@ -129,7 +129,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -190,7 +190,7 @@ class InferenceEvaluatorAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -229,7 +229,11 @@ class InferenceEvaluatorAggregator:
             data_grid: The grid type of the data, used for spherical power spectrum.
             time_mean_reference_data: Reference time means for computing bias stats.
         """
-        self._aggregators: Dict[str, _EvaluatorAggregator] = {
+        self._aggregators: Dict[str, _EvaluatorAggregator] = {}
+        self._time_dependent_aggregators: Dict[
+            str, _TimeDependentEvaluatorAggregator
+        ] = {}
+        self._aggregators = {
             "mean": MeanAggregator(
                 area_weights,
                 target="denorm",
@@ -242,71 +246,70 @@ class InferenceEvaluatorAggregator:
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             ),
-            "time_mean": TimeMeanEvaluatorAggregator(
-                area_weights,
-                metadata=metadata,
-                reference_means=time_mean_reference_data,
-            ),
-            "time_mean_norm": TimeMeanEvaluatorAggregator(
-                area_weights,
-                target="norm",
-                metadata=metadata,
-            ),
         }
-        if len(area_weights.shape) == 2:
-            self._aggregators[
-                "spherical_power_spectrum"
-            ] = PairedSphericalPowerSpectrumAggregator(
-                area_weights.shape[-2],
-                area_weights.shape[-1],
-                data_grid,
-            )
-        else:
-            warnings.warn(
-                "Area weights are not 2D, spherical power spectrum will not be computed"
-            )
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 area_weights, target_time=20
             )
-        if log_video:
-            self._aggregators["video"] = VideoAggregator(
-                n_timesteps=n_timesteps,
-                enable_extended_videos=enable_extended_videos,
-                metadata=metadata,
-            )
-        if log_zonal_mean_images:
-            self._aggregators["zonal_mean"] = ZonalMeanAggregator(
-                n_timesteps=n_timesteps,
-                metadata=metadata,
-            )
-        if log_histograms:
-            self._aggregators["histogram"] = HistogramAggregator()
-        self._time_dependent_aggregators: Dict[
-            str, _TimeDependentEvaluatorAggregator
-        ] = {}
-        if log_seasonal_means:
-            self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
-                area_weights=area_weights,
-                metadata=metadata,
-            )
-        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
-            self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
-                area_weights=area_weights,
-                timestep=timestep,
-                metadata=metadata,
-                monthly_reference_data=monthly_reference_data,
-            )
-        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-            self._time_dependent_aggregators[
-                "enso_coefficient"
-            ] = EnsoCoefficientEvaluatorAggregator(
-                initial_times,
-                n_timesteps - 1,
-                timestep,
+        if area_weights is not None:
+            self._aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
                 area_weights,
                 metadata=metadata,
+                reference_means=time_mean_reference_data,
             )
+            self._aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
+                area_weights,
+                target="norm",
+                metadata=metadata,
+            )
+            if len(area_weights.shape) == 2:
+                self._aggregators[
+                    "spherical_power_spectrum"
+                ] = PairedSphericalPowerSpectrumAggregator(
+                    area_weights.shape[-2],
+                    area_weights.shape[-1],
+                    data_grid,
+                )
+            else:
+                warnings.warn(
+                    "Area weights are not 2D, spherical power spectrum \
+                        will not be computed"
+                )
+            if log_video:
+                self._aggregators["video"] = VideoAggregator(
+                    n_timesteps=n_timesteps,
+                    enable_extended_videos=enable_extended_videos,
+                    metadata=metadata,
+                )
+            if log_zonal_mean_images:
+                self._aggregators["zonal_mean"] = ZonalMeanAggregator(
+                    n_timesteps=n_timesteps,
+                    metadata=metadata,
+                )
+            if log_histograms:
+                self._aggregators["histogram"] = HistogramAggregator()
+            if log_seasonal_means:
+                self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
+                    area_weights=area_weights,
+                    metadata=metadata,
+                )
+            if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+                self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
+                    area_weights=area_weights,
+                    timestep=timestep,
+                    metadata=metadata,
+                    monthly_reference_data=monthly_reference_data,
+                )
+            if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+                self._time_dependent_aggregators[
+                    "enso_coefficient"
+                ] = EnsoCoefficientEvaluatorAggregator(
+                    initial_times,
+                    n_timesteps - 1,
+                    timestep,
+                    area_weights,
+                    metadata=metadata,
+                )
 
     @torch.no_grad()
     def record_batch(
@@ -444,7 +447,7 @@ class InferenceAggregatorConfig:
 
     def build(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -474,7 +477,7 @@ class InferenceAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -490,17 +493,19 @@ class InferenceAggregator:
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
         """
-        self._aggregators: Dict[str, _Aggregator] = {
+        aggregators: Dict[str, _Aggregator] = {
             "mean": SingleTargetMeanAggregator(
                 area_weights,
                 n_timesteps=n_timesteps,
-            ),
-            "time_mean": TimeMeanAggregator(
+            )
+        }
+        if area_weights is not None:
+            aggregators["time_mean"] = TimeMeanAggregator(
                 area_weights,
                 metadata=metadata,
                 reference_means=time_mean_reference_data,
-            ),
-        }
+            )
+        self._aggregators = aggregators
         self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
 
     @torch.no_grad()

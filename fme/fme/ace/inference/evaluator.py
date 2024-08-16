@@ -37,7 +37,7 @@ def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
 
 def load_stepper(
     checkpoint_file: str,
-    area: torch.Tensor,
+    area: Optional[torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     ocean_config: Optional[OceanConfig] = None,
 ) -> SingleModuleStepper:
@@ -136,7 +136,7 @@ class InferenceEvaluatorConfig:
         self.logging.configure_gcs()
 
     def load_stepper(
-        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
+        self, area: Optional[torch.Tensor], sigma_coordinates: SigmaCoordinates
     ) -> SingleModuleStepper:
         """
         Args:
@@ -211,8 +211,12 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         data_requirements,
     )
 
+    if data.area_weights is not None:
+        area_weights = data.area_weights.to(fme.get_device())
+    else:
+        area_weights = data.area_weights
     stepper = config.load_stepper(
-        data.area_weights.to(fme.get_device()),
+        area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:
@@ -226,7 +230,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         initial_times = batch.times.isel(time=0)
         break
     aggregator = aggregator_config.build(
-        area_weights=data.area_weights.to(fme.get_device()),
+        area_weights=area_weights,
         sigma_coordinates=data.sigma_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,

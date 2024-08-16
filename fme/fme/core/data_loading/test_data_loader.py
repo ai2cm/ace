@@ -160,7 +160,7 @@ def test_xarray_loader(tmp_path):
 def test_xarray_loader_hpx(tmp_path):
     """Checks that sigma coordinates are present."""
     n_times = 3
-    data_dim_sizes = {"time": n_times, "face": 12, "width": 64, "height": 64}
+    data_dim_sizes = {"time": n_times, "face": 12, "width": 16, "height": 16}
     _create_dataset_on_disk(tmp_path, data_dim_sizes=data_dim_sizes, n_times=n_times)
     config = DataLoaderConfig(
         [
@@ -177,7 +177,7 @@ def test_xarray_loader_hpx(tmp_path):
     for batch in data.loader:
         assert batch is not None
         # expect healpix shape
-        assert batch.data["foo"].shape == (1, window_timesteps, 12, 64, 64)
+        assert batch.data["foo"].shape == (1, window_timesteps, 12, 16, 16)
         break
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 

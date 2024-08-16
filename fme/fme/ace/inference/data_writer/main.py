@@ -172,6 +172,10 @@ class PairedDataWriter:
         self.metadata = metadata
         self.prognostic_names = prognostic_names
 
+        if "face" in coords:
+            # TODO: handle writing HEALPix data
+            # https://github.com/ai2cm/full-model/issues/1089
+            return
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
         else:
@@ -242,6 +246,7 @@ class PairedDataWriter:
         self,
         ic_data: Dict[str, torch.Tensor],
         ic_time: xr.DataArray,
+        snapshot_dims: List[str],
     ):
         data_arrays = {}
         for name in self.prognostic_names:
@@ -250,7 +255,7 @@ class PairedDataWriter:
                     f"Initial condition data missing for prognostic variable {name}."
                 )
             data = ic_data[name].cpu().numpy()
-            data_arrays[name] = xr.DataArray(data, dims=["sample", "lat", "lon"])
+            data_arrays[name] = xr.DataArray(data, dims=snapshot_dims)
             if name in self.metadata:
                 data_arrays[name].attrs = {
                     "long_name": self.metadata[name].long_name,
@@ -323,6 +328,10 @@ class DataWriter:
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
         self._writers: List[Subwriter] = []
+        if "face" in coords:
+            # TODO: handle writing HEALPix data
+            # https://github.com/ai2cm/full-model/issues/1089
+            return
 
         def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
             if time_coarsen is not None:
@@ -415,5 +424,6 @@ class NullDataWriter:
         self,
         ic_data: Dict[str, torch.Tensor],
         ic_time: xr.DataArray,
+        snapshot_dims: List[str],
     ):
         pass

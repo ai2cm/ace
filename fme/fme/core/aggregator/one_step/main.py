@@ -1,4 +1,4 @@
-from typing import Mapping, Optional, Protocol
+from typing import Dict, Mapping, Optional, Protocol
 
 import torch
 
@@ -36,7 +36,7 @@ class OneStepAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
@@ -49,12 +49,14 @@ class OneStepAggregator:
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
         """
-        self._aggregators: Mapping[str, _Aggregator] = {
-            "snapshot": SnapshotAggregator(metadata),
-            "mean": MeanAggregator(area_weights),
-            "derived": DerivedMetricsAggregator(area_weights, sigma_coordinates),
-            "mean_map": MapAggregator(metadata),
-        }
+        aggregators: Dict[str, _Aggregator] = {"mean": MeanAggregator(area_weights)}
+        if area_weights is not None:  # Not HEALPix data
+            aggregators["snapshot"] = SnapshotAggregator(metadata)
+            aggregators["derived"] = DerivedMetricsAggregator(
+                area_weights, sigma_coordinates
+            )
+            aggregators["mean_map"] = MapAggregator(metadata)
+        self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()

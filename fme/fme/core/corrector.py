@@ -98,7 +98,7 @@ class CorrectorConfig:
 
     def build(
         self,
-        area: torch.Tensor,
+        area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ) -> Optional["Corrector"]:
@@ -114,7 +114,7 @@ class Corrector:
     def __init__(
         self,
         config: CorrectorConfig,
-        area: torch.Tensor,
+        area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ):
@@ -167,7 +167,7 @@ def _force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
 def _force_conserve_dry_air(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area: torch.Tensor,
+    area: Optional[torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
 ) -> TensorDict:
     """
@@ -223,7 +223,7 @@ def _force_conserve_dry_air(
 
 def _force_zero_global_mean_moisture_advection(
     gen_data: TensorMapping,
-    area: torch.Tensor,
+    area: Optional[torch.Tensor],
 ) -> TensorDict:
     """
     Update the generated data so advection conserves moisture.
@@ -252,7 +252,7 @@ def _force_zero_global_mean_moisture_advection(
 def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area: torch.Tensor,
+    area: Optional[torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
     terms_to_modify: Literal[

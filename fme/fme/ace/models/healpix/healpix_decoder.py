@@ -16,7 +16,7 @@
 # limitations under the License.
 
 import dataclasses
-from typing import Optional, Sequence
+from typing import List, Optional, Sequence
 
 import torch as th
 import torch.nn as nn
@@ -46,8 +46,8 @@ class UNetDecoderConfig:
     up_sampling_block: ConvBlockConfig
     output_layer: ConvBlockConfig
     recurrent_block: Optional[RecurrentBlockConfig] = None
-    n_channels: Sequence[int] = (34, 68, 136)
-    n_layers: Sequence[int] = (1, 2, 2)
+    n_channels: List[int] = dataclasses.field(default_factory=lambda: [34, 68, 136])
+    n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 2])
     output_channels: int = 1
     dilations: Optional[list] = None
     enable_nhwc: bool = False
