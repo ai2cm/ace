@@ -46,9 +46,10 @@ jobs:
           sudo apt-get install -y make git
           python -m pip install uv==0.2.5
           uv pip install --system -c constraints.txt -e fme[dev]
-      - name: Run pytest
+      - name: Run CUDA check and pytest
         run: |
             export PATH=/usr/local/nvidia/bin:${PATH}
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+            python3 fme/fme/require_gpu.py
             make test
 
