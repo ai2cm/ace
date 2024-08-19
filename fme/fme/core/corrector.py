@@ -199,21 +199,25 @@ def _force_conserve_dry_air(
     if input.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
     gen = ClimateData(gen_data)
+    if area is not None:
+        area = area.to(torch.float64)
     gen_dry_air = gen.surface_pressure_due_to_dry_air(sigma_coordinates)
-    global_gen_dry_air = metrics.weighted_mean(gen_dry_air, weights=area, dim=(-2, -1))
+    global_gen_dry_air = metrics.weighted_mean(
+        gen_dry_air.to(torch.float64), weights=area, dim=(-2, -1)
+    )
     global_target_gen_dry_air = metrics.weighted_mean(
-        input.surface_pressure_due_to_dry_air(sigma_coordinates),
+        input.surface_pressure_due_to_dry_air(sigma_coordinates).to(torch.float64),
         weights=area,
         dim=(-2, -1),
     )
     error = global_gen_dry_air - global_target_gen_dry_air
-    new_gen_dry_air = gen_dry_air - error[..., None, None]
+    new_gen_dry_air = gen_dry_air.to(torch.float64) - error[..., None, None]
     try:
-        wat = gen.specific_total_water
+        wat = gen.specific_total_water.to(torch.float64)
     except KeyError:
         raise ValueError("specific_total_water is required for conservation")
-    ak_diff = sigma_coordinates.ak.diff()
-    bk_diff = sigma_coordinates.bk.diff()
+    ak_diff = sigma_coordinates.ak.diff().to(torch.float64)
+    bk_diff = sigma_coordinates.bk.diff().to(torch.float64)
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
