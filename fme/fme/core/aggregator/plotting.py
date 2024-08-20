@@ -27,6 +27,10 @@ def plot_imshow(
     use_colorbar: bool = True,
 ) -> Figure:
     """Plot a 2D array using imshow, ensuring figure size is same as array size."""
+    min_ = np.min(data) if vmin is None else vmin
+    max_ = np.max(data) if vmax is None else vmax
+    if len(data.shape) == 3:
+        data = fold_healpix_data(data, fill_value=0.5 * (min_ + max_))
     if flip_lat:
         lat_dim = -2
         data = np.flip(data, axis=lat_dim)
@@ -34,8 +38,6 @@ def plot_imshow(
     if use_colorbar:
         height, width = data.shape
         colorbar_width = max(1, int(0.025 * width))
-        min_ = np.min(data) if vmin is None else vmin
-        max_ = np.max(data) if vmax is None else vmax
         range_ = np.linspace(min_, max_, height)
         range_ = np.repeat(range_[:, np.newaxis], repeats=colorbar_width, axis=1)
         range_ = np.flipud(range_)  # wandb images start from top (and left)
@@ -49,6 +51,44 @@ def plot_imshow(
     ax.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax)
     ax.set_axis_off()
     return fig
+
+
+def fold_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
+    if data.shape[0] != 12:
+        raise ValueError(
+            "first dimension must be 12 (face) for healpix data, "
+            f"got shape {data.shape}"
+        )
+    # we want to panel the data like this, numbered by first dimension index
+    # -----------------
+    # |   |   |   |   |
+    # |   |   |   |3  |
+    # -----------------
+    # |   |   |   |   |
+    # |   |   |2  |7  |
+    # -----------------
+    # |   |   |   |   |
+    # |   |1  |6  |10 |
+    # -----------------
+    # |   |   |   |   |
+    # |0  |5  |9  |   |
+    # -----------------
+    # |   |   |   |   |
+    # |4  |8  |   |   |
+    # -----------------
+    # |   |   |   |   |
+    # |11 |   |   |   |
+    # -----------------
+    blank_panel = np.full_like(data[0], fill_value)
+    panels = [
+        [blank_panel, blank_panel, blank_panel, data[3]],
+        [blank_panel, blank_panel, data[2], data[7]],
+        [blank_panel, data[1], data[6], data[10]],
+        [data[0], data[5], data[9], blank_panel],
+        [data[4], data[8], blank_panel, blank_panel],
+        [data[11], blank_panel, blank_panel, blank_panel],
+    ]
+    return np.concatenate([np.concatenate(row, axis=1) for row in panels], axis=0)
 
 
 def plot_paneled_data(
