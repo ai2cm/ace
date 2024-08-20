@@ -561,7 +561,7 @@ class XarrayDataset(Dataset):
         # load time-invariant variables from first dataset
         if len(self.time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
-            dims = ["time"] + self._horizontal_coordinates.dims
+            dims = ["time"] + self._horizontal_coordinates.loaded_dims
             shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
             for name in self.time_invariant_names:
                 variable = ds[name].variable

@@ -71,16 +71,25 @@ class HorizontalCoordinates(abc.ABC):
     @property
     @abc.abstractmethod
     def dims(self) -> List[str]:
+        """names of model horizontal dimensions"""
         pass
 
     @property
     @abc.abstractmethod
-    def sizes(self) -> List[DimSize]:
+    def loaded_dims(self) -> List[str]:
+        """names of horizontal dimensions as loaded from training dataset"""
         pass
 
     @property
     @abc.abstractmethod
-    def default_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> List[DimSize]:
+        """sizes of horizontal dimensions as loaded from training dataset"""
+        pass
+
+    @property
+    @abc.abstractmethod
+    def loaded_default_sizes(self) -> List[DimSize]:
+        """default sizes of horizontal data dimensions, used by testing code"""
         pass
 
     @property
@@ -133,17 +142,21 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def dims(self) -> List[str]:
+        return ["lat", "lon"]
+
+    @property
+    def loaded_dims(self) -> List[str]:
         return [self.lat_name, self.lon_name]
 
     @property
-    def sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> List[DimSize]:
         return [
             DimSize(self.lat_name, len(self.lat)),
             DimSize(self.lon_name, len(self.lon)),
         ]
 
     @property
-    def default_sizes(self) -> List[DimSize]:
+    def loaded_default_sizes(self) -> List[DimSize]:
         return [DimSize(self.lat_name, 16), DimSize(self.lon_name, 32)]
 
     @property
@@ -193,7 +206,11 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return ["face", "height", "width"]
 
     @property
-    def sizes(self) -> List[DimSize]:
+    def loaded_dims(self) -> List[str]:
+        return self.dims
+
+    @property
+    def loaded_sizes(self) -> List[DimSize]:
         return [
             DimSize("face", len(self.face)),
             DimSize("height", len(self.width)),
@@ -201,7 +218,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         ]
 
     @property
-    def default_sizes(cls) -> List[DimSize]:
+    def loaded_default_sizes(cls) -> List[DimSize]:
         return [
             DimSize("face", 12),
             DimSize("height", 16),
