@@ -241,6 +241,15 @@ def inference_helper(
         # is being used instead of the prediction_data
         assert log["inference/mean/weighted_rmse/var"] == 0.0
         assert log["inference/mean/weighted_bias/var"] == 0.0
+
+    initial_condition_ds = xr.open_dataset(
+        tmp_path / "initial_condition.nc", decode_timedelta=False
+    )
+    for dim_name in ["lat", "lon"]:
+        assert dim_name in initial_condition_ds.dims
+        assert dim_name in initial_condition_ds.data_vars["var"].dims
+        assert dim_name in initial_condition_ds.coords
+
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
         decode_timedelta=False,
