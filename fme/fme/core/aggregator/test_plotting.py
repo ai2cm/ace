@@ -1,7 +1,12 @@
 import numpy as np
 import pytest
 
-from .plotting import _stitch_data_panels, get_cmap_limits, plot_imshow
+from .plotting import (
+    _stitch_data_panels,
+    fold_healpix_data,
+    get_cmap_limits,
+    plot_imshow,
+)
 
 
 def test_cmap_limits():
@@ -22,6 +27,29 @@ def test_cmap_limits_diverging():
 def test_plot_imshow(use_colorbar):
     shape = [10, 15]
     data = np.random.randn(*shape)
+    fig = plot_imshow(np.array(data), use_colorbar=use_colorbar)
+    width, height = (fig.get_size_inches() * fig.dpi).astype(int)
+    if use_colorbar:
+        # colorbar is no more than 15% of the width but greater than 0 pixels
+        assert shape[1] < width <= int(shape[1] * 1.15)
+        assert height == shape[0]
+    else:
+        assert [height, width] == shape
+
+
+def test_fold_healpix_data():
+    face_shape = [2, 3]
+    data = np.random.randn(12, *face_shape)
+    folded = fold_healpix_data(data, fill_value=0)
+    expected_shape = (6 * face_shape[0], 4 * face_shape[1])
+    assert folded.shape == expected_shape
+
+
+@pytest.mark.parametrize("use_colorbar", [True, False])
+def test_plot_imshow_healpix(use_colorbar):
+    face_shape = [4, 6]
+    shape = [6 * face_shape[0], 4 * face_shape[1]]
+    data = np.random.randn(12, *face_shape)
     fig = plot_imshow(np.array(data), use_colorbar=use_colorbar)
     width, height = (fig.get_size_inches() * fig.dpi).astype(int)
     if use_colorbar:
