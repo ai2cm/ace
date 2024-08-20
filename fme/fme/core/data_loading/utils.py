@@ -115,7 +115,7 @@ def load_series_data(
     spatial_dims: HorizontalCoordinates,
 ):
     time_slice = slice(idx, idx + n_steps)
-    dims = [time_dim] + spatial_dims.dims
+    dims = [time_dim] + spatial_dims.loaded_dims
     shape = [n_steps] + [ds.sizes[spatial_dim] for spatial_dim in dims[1:]]
     loaded = _load_all_variables(ds, names, time_slice)
     arrays = {}

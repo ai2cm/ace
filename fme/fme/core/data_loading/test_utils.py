@@ -37,7 +37,7 @@ def get_sizes(
         lon_name=LON_DIM,
     )
 ):
-    spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.default_sizes)
+    spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.loaded_default_sizes)
     spatial_sizes.append(DimSize(TIME_DIM, 3))
     return spatial_sizes
 
@@ -50,7 +50,7 @@ def create_reference_dataset(
         lon_name=LON_DIM,
     )
 ):
-    dims = [TIME_DIM] + spatial_dims.dims
+    dims = [TIME_DIM] + spatial_dims.loaded_dims
     dim_sizes = get_sizes(spatial_dims=spatial_dims)
     shape = tuple(dim_size.size for dim_size in dim_sizes)
     data = np.arange(np.prod(shape)).reshape(shape)
@@ -94,7 +94,7 @@ def test_infer_horizontal_dimension_names_healpix():
         height=torch.Tensor(np.arange(64)),
     )
     ds = create_reference_dataset(spatial_dims=hpx_coords)
-    expected = hpx_coords.dims
+    expected = hpx_coords.loaded_dims
     result = infer_horizontal_dimension_names(ds)
     assert result == expected
 

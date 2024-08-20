@@ -244,7 +244,7 @@ def get_sizes(
 ) -> DimSizes:
     return DimSizes(
         n_time=n_time,
-        horizontal=copy.deepcopy(spatial_dims.sizes),
+        horizontal=copy.deepcopy(spatial_dims.loaded_sizes),
         nz_interface=nz_interface,
     )
 
