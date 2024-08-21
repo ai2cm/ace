@@ -86,7 +86,9 @@ def test_aggregator_raises_on_no_data():
         assert "No data" in str(excinfo.value)
 
 
-def test_derived():
+def test_derived(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     n_sample = 5
     n_time = 3
     nx, ny, nz = 2, 4, 3
