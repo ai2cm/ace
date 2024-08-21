@@ -160,8 +160,11 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
     return outpath
 
 
-def test_train_main(trainer_config):
+def test_train_main(trainer_config, very_fast_only: bool):
     """Check that training loop records the appropriate logs."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
     with mock_wandb() as wandb:
         main(trainer_config)
         logs = wandb.get_logs()
@@ -213,9 +216,11 @@ def test_restore_checkpoint(trainer_config, tmp_path):
     )
 
 
-def test_train_eval_modes(trainer_config):
+def test_train_eval_modes(trainer_config, very_fast_only: bool):
     """Checks that at training time the model is stochastic (due to dropout) but
     that at validation time, it is deterministic."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
 
     with open(trainer_config, "r") as f:
         trainer_config_dict = yaml.safe_load(f)
@@ -246,8 +251,10 @@ def test_train_eval_modes(trainer_config):
     assert torch.all(outputs1.prediction["x"] == outputs2.prediction["x"])
 
 
-def test_resume(trainer_config, tmp_path):
+def test_resume(trainer_config, tmp_path, very_fast_only: bool):
     """Make sure the training is resumed from a checkpoint when restarted."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
 
     with open(trainer_config, "r") as f:
         trainer_config_dict = yaml.safe_load(f)

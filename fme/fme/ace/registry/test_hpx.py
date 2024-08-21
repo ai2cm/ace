@@ -345,7 +345,9 @@ def test_HEALPixRecUNet_integration_steps():
     assert model.integration_steps == output_time_dim // input_time_dim
 
 
-def test_HEALPixRecUNet_reset():
+def test_HEALPixRecUNet_reset(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     # create a smaller version of the dlwp healpix model
     in_channels = 3
     out_channels = 3
@@ -416,7 +418,10 @@ def test_HEALPixRecUNet_forward(
     output_time_dim,
     n_constants,
     size,
+    very_fast_only: bool,
 ):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     prognostic_variables = min(out_channels, in_channels)
     device = get_device()
     conv_next_block = conv_next_block_config()

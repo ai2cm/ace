@@ -342,16 +342,17 @@ def _setup(
 @pytest.mark.parametrize(
     "nettype", ["SphericalFourierNeuralOperatorNet", "HEALPixRecUNet", "SFNO-v0.1.0"]
 )
-def test_train_and_inference_inline(tmp_path, nettype):
+def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     """Make sure that training and inference run without errors
 
     Args:
         tmp_path: pytext fixture for temporary workspace.
         nettype: parameter indicating model architecture to use.
-        debug: option for developers to allow use of pdb.
+        very_fast_only: parameter indicating whether to skip slow tests.
     """
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     # need multi-year to cover annual aggregator
-
     train_config, inference_config = _setup(
         tmp_path,
         nettype,
@@ -393,8 +394,10 @@ def test_train_and_inference_inline(tmp_path, nettype):
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_resume(tmp_path, nettype):
+def test_resume(tmp_path, nettype, very_fast_only: bool):
     """Make sure the training is resumed from a checkpoint when restarted."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
     with unittest.mock.patch("fme.ace.train.train._restore_checkpoint", new=mock):
@@ -474,8 +477,10 @@ def _create_fine_tuning_config(path_to_train_config_yaml: str, path_to_checkpoin
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
-def test_fine_tuning(tmp_path, nettype):
+def test_fine_tuning(tmp_path, nettype, very_fast_only: bool):
     """Check that fine tuning config runs without errors."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     train_config, _ = _setup(tmp_path, nettype)
 
     train_main(yaml_config=train_config)
