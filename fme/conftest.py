@@ -36,8 +36,16 @@ def timeout_handler(signum, frame):
     raise TimeoutException("Test took too long")
 
 
+@pytest.fixture
+def pdb_enabled(request):
+    return request.config.getoption("--pdb")
+
+
 @pytest.fixture(autouse=True, scope="function")
-def enforce_timeout(skip_slow, very_fast_only):
+def enforce_timeout(skip_slow, very_fast_only, pdb_enabled):
+    if pdb_enabled:
+        yield  # Do not enforce timeout if we are debugging
+        return
     if very_fast_only:
         timeout_seconds = 5
     elif skip_slow:
