@@ -440,8 +440,8 @@ class XarrayDataset(Dataset):
             horizontal_coordinates = LatLonCoordinates(
                 lon=torch.as_tensor(lons, device=fme.get_device()),
                 lat=torch.as_tensor(lats, device=fme.get_device()),
-                lat_name=lat_name,
-                lon_name=lon_name,
+                loaded_lat_name=lat_name,
+                loaded_lon_name=lon_name,
             )
             area_weights = metrics.spherical_area_weights(lats, len(lons))
             static_derived_data = StaticDerivedData(horizontal_coordinates)
@@ -539,12 +539,12 @@ class XarrayDataset(Dataset):
             n_steps = stop - start + 1
             total_steps += n_steps
             tensor_dict = load_series_data(
-                start,
-                n_steps,
-                ds,
-                self.time_dependent_names,
-                "time",
-                self._horizontal_coordinates,
+                idx=start,
+                n_steps=n_steps,
+                ds=ds,
+                names=self.time_dependent_names,
+                time_dim="time",
+                spatial_dim_names=self._horizontal_coordinates.loaded_dims,
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])

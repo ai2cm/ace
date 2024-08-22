@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 import torch
 import xarray as xr
 
-from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image, WandB
 
+from ..gridded_ops import GriddedOperations
 from ..plotting import get_cmap_limits, plot_imshow
 
 
@@ -19,26 +19,27 @@ class _TargetGenPair:
     name: str
     target: torch.Tensor
     gen: torch.Tensor
+    ops: GriddedOperations
 
     def bias(self):
         return self.gen - self.target
 
-    def rmse(self, weights: torch.Tensor) -> float:
+    def rmse(self) -> float:
         ret = float(
-            metrics.root_mean_squared_error(
+            self.ops.area_weighted_rmse(
                 predicted=self.gen,
                 truth=self.target,
-                weights=weights,
             )
             .cpu()
             .numpy()
         )
         return ret
 
-    def weighted_mean_bias(self, weights: torch.Tensor) -> float:
+    def weighted_mean_bias(self) -> float:
         return float(
-            metrics.weighted_mean_bias(
-                predicted=self.gen, truth=self.target, weights=weights
+            self.ops.area_weighted_mean_bias(
+                predicted=self.gen,
+                truth=self.target,
             )
             .cpu()
             .numpy()
@@ -58,14 +59,14 @@ class TimeMeanAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        ops: GriddedOperations,
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
     ):
         """
         Args:
-            area_weights: Area weights for each grid cell.
+            ops: Computes gridded operations.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
@@ -73,7 +74,7 @@ class TimeMeanAggregator:
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
         """
-        self._area_weights = area_weights
+        self._ops = ops
         self._target = target
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
@@ -166,6 +167,7 @@ class TimeMeanAggregator:
                         self._reference_means[name].values, device=pred.device
                     ),
                     gen=pred,
+                    ops=self._ops,
                 )
                 bias_map = pair.bias().cpu().numpy()
                 vmin_bias, vmax_bias = get_cmap_limits(bias_map, diverging=True)
@@ -176,10 +178,8 @@ class TimeMeanAggregator:
                     bias_fig,
                     caption=self._get_caption("bias_map", name, vmin_bias, vmax_bias),
                 )
-                logs.update(
-                    {f"ref_bias/{name}": pair.weighted_mean_bias(self._area_weights)}
-                )
-                logs.update({f"ref_rmse/{name}": pair.rmse(self._area_weights)})
+                logs.update({f"ref_bias/{name}": pair.weighted_mean_bias()})
+                logs.update({f"ref_rmse/{name}": pair.rmse()})
                 logs.update({f"ref_bias_map/{name}": bias_image})
 
         if len(label) != 0:
@@ -233,14 +233,16 @@ class TimeMeanEvaluatorAggregator:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        ops: GriddedOperations,
+        horizontal_dims: List[str],
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
     ):
         """
         Args:
-            area_weights: Area weights for each grid cell.
+            ops: Computes gridded operations.
+            horizontal_dims: Names of the horizontal dimensions.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
@@ -248,7 +250,8 @@ class TimeMeanEvaluatorAggregator:
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
         """
-        self._area_weights = area_weights
+        self._ops = ops
+        self._horizontal_dims = horizontal_dims
         self._target = target
         self._dist = Distributed.get_instance()
         if metadata is None:
@@ -256,11 +259,9 @@ class TimeMeanEvaluatorAggregator:
         else:
             self._metadata = metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._target_agg = TimeMeanAggregator(
-            area_weights=area_weights, target=target, metadata=metadata
-        )
+        self._target_agg = TimeMeanAggregator(ops=ops, target=target, metadata=metadata)
         self._gen_agg = TimeMeanAggregator(
-            area_weights=area_weights,
+            ops=ops,
             target=target,
             metadata=metadata,
             reference_means=reference_means,
@@ -289,7 +290,12 @@ class TimeMeanEvaluatorAggregator:
         ret = []
         for name in gen_data.keys():
             ret.append(
-                _TargetGenPair(gen=gen_data[name], target=target_data[name], name=name)
+                _TargetGenPair(
+                    gen=gen_data[name],
+                    target=target_data[name],
+                    name=name,
+                    ops=self._ops,
+                )
             )
         return ret
 
@@ -313,15 +319,13 @@ class TimeMeanEvaluatorAggregator:
                 ),
             )
             plt.close("all")
-            rmse_all_channels[pred.name] = pred.rmse(weights=self._area_weights)
+            rmse_all_channels[pred.name] = pred.rmse()
             logs.update({f"rmse/{pred.name}": rmse_all_channels[pred.name]})
             if self._target == "denorm":
                 logs.update(
                     {
                         f"{bias_map_key}/{pred.name}": bias_image,
-                        f"bias/{pred.name}": pred.weighted_mean_bias(
-                            weights=self._area_weights
-                        ),
+                        f"bias/{pred.name}": pred.weighted_mean_bias(),
                     }
                 )
         if self._target == "norm":
@@ -349,7 +353,6 @@ class TimeMeanEvaluatorAggregator:
     def get_dataset(self) -> xr.Dataset:
         data = {}
         preds = self._get_target_gen_pairs()
-        dims = ("lat", "lon")
         for pred in preds:
             if pred.name in self._metadata:
                 long_name = self._metadata[pred.name].long_name
@@ -364,11 +367,13 @@ class TimeMeanEvaluatorAggregator:
             data.update(
                 {
                     f"bias_map-{pred.name}": xr.DataArray(
-                        pred.bias().cpu(), dims=dims, attrs=bias_metadata
+                        pred.bias().cpu(),
+                        dims=self._horizontal_dims,
+                        attrs=bias_metadata,
                     ),
                     f"gen_map-{pred.name}": xr.DataArray(
                         pred.gen.cpu(),
-                        dims=dims,
+                        dims=self._horizontal_dims,
                         attrs=gen_metadata,
                     ),
                 }

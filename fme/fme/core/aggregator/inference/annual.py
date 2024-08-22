@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -10,19 +10,20 @@ from matplotlib.figure import Figure
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.metrics import weighted_mean
 from fme.core.typing_ import TensorMapping
+
+from ..gridded_ops import GriddedOperations
 
 
 class GlobalMeanAnnualAggregator:
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        ops: GriddedOperations,
         timestep: datetime.timedelta,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
     ):
-        self.area_weights = area_weights
+        self._area_weighted_mean = ops.area_weighted_mean
         self.timestep = timestep
         self.metadata = metadata
         self._target_datasets: Optional[List[xr.Dataset]] = None
@@ -37,7 +38,7 @@ class GlobalMeanAnnualAggregator:
             if name not in self._monthly_reference_data:
                 return None
             self._variable_reference_data[name] = process_monthly_reference(
-                self._monthly_reference_data, self.area_weights, name
+                self._monthly_reference_data, self._area_weighted_mean, name
             )
         return self._variable_reference_data[name]
 
@@ -51,12 +52,10 @@ class GlobalMeanAnnualAggregator:
         """Record a batch of data for computing time variability statistics."""
         target_data_area_mean, gen_data_area_mean = {}, {}
         for name in gen_data.keys():
-            target_data_area_mean[name] = weighted_mean(
-                target_data[name], self.area_weights, dim=(-1, -2)
+            target_data_area_mean[name] = self._area_weighted_mean(
+                target_data[name]
             ).cpu()
-            gen_data_area_mean[name] = weighted_mean(
-                gen_data[name], self.area_weights, dim=(-1, -2)
-            ).cpu()
+            gen_data_area_mean[name] = self._area_weighted_mean(gen_data[name]).cpu()
         target_ds = to_dataset(target_data_area_mean, time)
         gen_ds = to_dataset(gen_data_area_mean, time)
 
@@ -212,14 +211,12 @@ class VariableReferenceData:
 
 
 def process_monthly_reference(
-    monthly_reference_data: xr.Dataset, area_weights: torch.Tensor, name: str
+    monthly_reference_data: xr.Dataset,
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+    name: str,
 ) -> VariableReferenceData:
     ref_global_mean = xr.DataArray(
-        weighted_mean(
-            torch.as_tensor(monthly_reference_data[name].values),
-            weights=area_weights.cpu(),
-            dim=(-1, -2),
-        ),
+        area_weighted_mean(torch.as_tensor(monthly_reference_data[name].values)),
         dims=monthly_reference_data[name].dims[:-2],
         coords={"time": monthly_reference_data[name].coords["time"]},
     )

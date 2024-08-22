@@ -85,7 +85,7 @@ class EnsoCoefficientEvaluatorAggregator:
         initial_times: xr.DataArray,
         n_forward_timesteps: int,
         timestep: datetime.timedelta,
-        area_weights: torch.Tensor,
+        area_weights: Optional[torch.Tensor],
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._sample_index_series: List[
