@@ -52,20 +52,22 @@ def patch_annual_aggregator_min_samples(value):
 
 def save_plus_one_stepper(
     path: pathlib.Path,
-    names: List[str],
+    in_names: List[str],
+    out_names: List[str],
     mean: float,
     std: float,
     data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
+    all_names = list(set(in_names).union(out_names))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=["var"],
-        out_names=["var"],
+        in_names=in_names,
+        out_names=out_names,
         normalization=FromStateNormalizer(
             state={
-                "means": {name: mean for name in names},
-                "stds": {name: std for name in names},
+                "means": {name: mean for name in all_names},
+                "stds": {name: std for name in all_names},
             }
         ),
     )
@@ -102,7 +104,8 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         # to re-generate, just delete the data and run the test (it will fail)
         save_plus_one_stepper(
             stepper_path,
-            names=all_names,
+            in_names,
+            out_names,
             mean=0.0,
             std=std,
             data_shape=dim_sizes.shape_nd,
@@ -146,7 +149,8 @@ def test_inference_plus_one_model(
         std = 1.0
     save_plus_one_stepper(
         stepper_path,
-        names=all_names,
+        in_names,
+        out_names,
         mean=0.0,
         std=std,
         data_shape=dim_sizes.shape_nd,
@@ -364,7 +368,12 @@ def test_inference_writer_boundaries(
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -490,7 +499,12 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -615,10 +629,15 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
         horizontal=horizontal,
-        nz_interface=4,
+        nz_interface=3,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
     )
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     data = FV3GFSData(
@@ -702,7 +721,12 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         nz_interface=4,
     )
     save_plus_one_stepper(
-        stepper_path, names=all_names, mean=0.0, std=1.0, data_shape=dim_sizes.shape_nd
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -751,7 +775,8 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     std = 1.0
     save_plus_one_stepper(
         stepper_path,
-        names=all_names,
+        in_names,
+        out_names,
         mean=0.0,
         std=std,
         data_shape=dim_sizes.shape_nd,
