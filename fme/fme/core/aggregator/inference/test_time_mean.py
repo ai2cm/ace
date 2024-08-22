@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 
+from fme.core.aggregator.gridded_ops import get_gridded_operations
 from fme.core.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
@@ -11,7 +12,11 @@ from fme.core.device import get_device
 def test_rmse_of_time_mean_all_channels():
     torch.manual_seed(0)
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanEvaluatorAggregator(area_weights, target="norm")
+    agg = TimeMeanEvaluatorAggregator(
+        get_gridded_operations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="norm",
+    )
     target_data_norm = {
         "a": torch.ones([2, 3, 4, 4], device=get_device()),
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
@@ -35,7 +40,11 @@ def test_rmse_of_time_mean_all_channels():
 
 def test_mean_all_channels_not_in_denorm():
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanEvaluatorAggregator(area_weights, target="denorm")
+    agg = TimeMeanEvaluatorAggregator(
+        get_gridded_operations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="denorm",
+    )
     target_data = {
         "a": torch.ones([2, 3, 4, 4], device=get_device()),
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 3,
@@ -60,7 +69,11 @@ def test_mean_all_channels_not_in_denorm():
 
 def test_bias_values():
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanEvaluatorAggregator(area_weights, target="denorm")
+    agg = TimeMeanEvaluatorAggregator(
+        get_gridded_operations(area_weights),
+        horizontal_dims=["lat", "lon"],
+        target="denorm",
+    )
     # use constant values so area-weighting doesn't matter
     target_data = {
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
@@ -93,7 +106,7 @@ def test_bias_values():
 
 def test_aggregator_mean_values():
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanAggregator(area_weights)
+    agg = TimeMeanAggregator(get_gridded_operations(area_weights))
     # use constant values so area-weighting doesn't matter
     data = {
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),

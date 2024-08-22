@@ -400,12 +400,12 @@ class Trainer:
         aggregator = aggregator_config.build(
             area_weights=area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
+            horizontal_coordinates=self.train_data.horizontal_coordinates,
             timestep=self.train_data.timestep,
             initial_times=initial_times,
             record_step_20=record_step_20,
             n_timesteps=self.config.inference.n_forward_steps + 1,
             metadata=self.train_data.metadata,
-            data_grid=self.train_data.grid,
         )
         with torch.no_grad(), self._validation_context():
             run_inference_evaluator(

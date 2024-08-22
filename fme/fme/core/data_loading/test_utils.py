@@ -33,8 +33,8 @@ def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        lat_name=LAT_DIM,
-        lon_name=LON_DIM,
+        loaded_lat_name=LAT_DIM,
+        loaded_lon_name=LON_DIM,
     )
 ):
     spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.loaded_default_sizes)
@@ -46,8 +46,8 @@ def create_reference_dataset(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        lat_name=LAT_DIM,
-        lon_name=LON_DIM,
+        loaded_lat_name=LAT_DIM,
+        loaded_lon_name=LON_DIM,
     )
 ):
     dims = [TIME_DIM] + spatial_dims.loaded_dims
@@ -73,11 +73,13 @@ def test_infer_horizontal_dimension_names(lon_dim, lat_dim, warns):
     spatial_dims = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        lat_name=lat_dim,
-        lon_name=lon_dim,
+        loaded_lat_name=lat_dim,
+        loaded_lon_name=lon_dim,
     )
     ds = create_reference_dataset(spatial_dims=spatial_dims)
     expected = [lon_dim, lat_dim]
+    for dim in expected:
+        assert dim in ds.dims
     if warns:
         with pytest.warns(UserWarning, match="Familiar"):
             infer_horizontal_dimension_names(ds)
@@ -117,8 +119,8 @@ def test_infer_horizontal_dimension_names_error():
     spatial_dims = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        lat_name="foo",
-        lon_name="bar",
+        loaded_lat_name="foo",
+        loaded_lon_name="bar",
     )
     ds = create_reference_dataset(spatial_dims=spatial_dims)
     ds = ds.isel(time=0)
