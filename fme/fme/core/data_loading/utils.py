@@ -11,8 +11,6 @@ from torch.utils.data import default_collate
 
 from fme.core.typing_ import TensorMapping
 
-from .data_typing import HorizontalCoordinates
-
 SLICE_NONE = slice(None)
 
 
@@ -112,10 +110,10 @@ def load_series_data(
     ds: xr.Dataset,
     names: List[str],
     time_dim: Hashable,
-    spatial_dims: HorizontalCoordinates,
+    spatial_dim_names: List[str],
 ):
     time_slice = slice(idx, idx + n_steps)
-    dims = [time_dim] + spatial_dims.loaded_dims
+    dims = [time_dim] + spatial_dim_names
     shape = [n_steps] + [ds.sizes[spatial_dim] for spatial_dim in dims[1:]]
     loaded = _load_all_variables(ds, names, time_slice)
     arrays = {}

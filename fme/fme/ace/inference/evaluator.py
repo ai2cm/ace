@@ -232,11 +232,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     aggregator = aggregator_config.build(
         area_weights=area_weights,
         sigma_coordinates=data.sigma_coordinates,
+        horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
-        data_grid=data.grid,
         initial_times=initial_times,
     )
 

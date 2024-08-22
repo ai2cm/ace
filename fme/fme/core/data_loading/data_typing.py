@@ -113,13 +113,16 @@ class LatLonCoordinates(HorizontalCoordinates):
     Attributes:
         lat: 1-dimensional tensor of latitudes
         lon: 1-dimensional tensor of longitudes
+        loaded_lat_name: name of the latitude dimension
+            as loaded from training dataset
+        loaded_lon_name: name of the longitude dimension
+            as loaded from training dataset
     """
 
     lon: torch.Tensor
     lat: torch.Tensor
-
-    lat_name: str = "lat"
-    lon_name: str = "lon"
+    loaded_lat_name: str = "lat"
+    loaded_lon_name: str = "lon"
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -136,7 +139,6 @@ class LatLonCoordinates(HorizontalCoordinates):
         )
         return lon_lat_to_xyz(lons, lats)
 
-    # TODO: https://github.com/ai2cm/full-model/issues/1003
     def get_lat(self) -> torch.Tensor:
         return self.lat
 
@@ -146,18 +148,18 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def loaded_dims(self) -> List[str]:
-        return [self.lat_name, self.lon_name]
+        return [self.loaded_lat_name, self.loaded_lon_name]
 
     @property
     def loaded_sizes(self) -> List[DimSize]:
         return [
-            DimSize(self.lat_name, len(self.lat)),
-            DimSize(self.lon_name, len(self.lon)),
+            DimSize(self.loaded_lat_name, len(self.lat)),
+            DimSize(self.loaded_lon_name, len(self.lon)),
         ]
 
     @property
     def loaded_default_sizes(self) -> List[DimSize]:
-        return [DimSize(self.lat_name, 16), DimSize(self.lon_name, 32)]
+        return [DimSize(self.loaded_lat_name, 16), DimSize(self.loaded_lon_name, 32)]
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss"]:
@@ -319,9 +321,3 @@ class GriddedData:
             **self.horizontal_coordinates.coords,
             **self.sigma_coordinates.coords,
         }
-
-    @property
-    def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
-        """If the latitudes are equiangular, assume a regular grid and otherwise
-        assume a gaussian, or 'legendre-gauss' grid."""
-        return self.horizontal_coordinates.grid

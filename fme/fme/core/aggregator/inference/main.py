@@ -1,15 +1,20 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Dict, Iterable, List, Literal, Mapping, Optional, Protocol, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
 import xarray as xr
 
-from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
+from fme.core.data_loading.data_typing import (
+    HorizontalCoordinates,
+    SigmaCoordinates,
+    VariableMetadata,
+)
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
+from ..gridded_ops import get_gridded_operations
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
 from .enso import EnsoCoefficientEvaluatorAggregator
@@ -131,13 +136,11 @@ class InferenceEvaluatorAggregatorConfig:
         self,
         area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
+        horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
         initial_times: xr.DataArray,
         record_step_20: bool = False,
-        data_grid: Literal[
-            "legendre-gauss", "equiangular", "healpix"
-        ] = "legendre-gauss",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
@@ -164,6 +167,7 @@ class InferenceEvaluatorAggregatorConfig:
         return InferenceEvaluatorAggregator(
             area_weights=area_weights,
             sigma_coordinates=sigma_coordinates,
+            horizontal_coordinates=horizontal_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
             initial_times=initial_times,
@@ -176,7 +180,6 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             metadata=metadata,
-            data_grid=data_grid,
         )
 
 
@@ -192,6 +195,7 @@ class InferenceEvaluatorAggregator:
         self,
         area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
+        horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
         initial_times: xr.DataArray,
@@ -203,9 +207,6 @@ class InferenceEvaluatorAggregator:
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
-        data_grid: Literal[
-            "legendre-gauss", "equiangular", "healpix"
-        ] = "legendre-gauss",
         time_mean_reference_data: Optional[xr.Dataset] = None,
     ):
         """
@@ -233,6 +234,7 @@ class InferenceEvaluatorAggregator:
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
+        ops = get_gridded_operations(area_weights)
         self._aggregators = {
             "mean": MeanAggregator(
                 area_weights,
@@ -252,23 +254,18 @@ class InferenceEvaluatorAggregator:
                 area_weights, target_time=20
             )
         if area_weights is not None:
-            self._aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
-                area_weights,
-                metadata=metadata,
-                reference_means=time_mean_reference_data,
-            )
-            self._aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
-                area_weights,
-                target="norm",
-                metadata=metadata,
-            )
+            if log_zonal_mean_images:
+                self._aggregators["zonal_mean"] = ZonalMeanAggregator(
+                    n_timesteps=n_timesteps,
+                    metadata=metadata,
+                )
             if len(area_weights.shape) == 2:
                 self._aggregators[
                     "spherical_power_spectrum"
                 ] = PairedSphericalPowerSpectrumAggregator(
                     area_weights.shape[-2],
                     area_weights.shape[-1],
-                    data_grid,
+                    horizontal_coordinates.grid,
                 )
             else:
                 warnings.warn(
@@ -281,35 +278,42 @@ class InferenceEvaluatorAggregator:
                     enable_extended_videos=enable_extended_videos,
                     metadata=metadata,
                 )
-            if log_zonal_mean_images:
-                self._aggregators["zonal_mean"] = ZonalMeanAggregator(
-                    n_timesteps=n_timesteps,
-                    metadata=metadata,
-                )
-            if log_histograms:
-                self._aggregators["histogram"] = HistogramAggregator()
-            if log_seasonal_means:
-                self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
-                    area_weights=area_weights,
-                    metadata=metadata,
-                )
-            if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
-                self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
-                    area_weights=area_weights,
-                    timestep=timestep,
-                    metadata=metadata,
-                    monthly_reference_data=monthly_reference_data,
-                )
-            if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-                self._time_dependent_aggregators[
-                    "enso_coefficient"
-                ] = EnsoCoefficientEvaluatorAggregator(
-                    initial_times,
-                    n_timesteps - 1,
-                    timestep,
-                    area_weights,
-                    metadata=metadata,
-                )
+        self._aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
+            ops,
+            horizontal_dims=horizontal_coordinates.dims,
+            metadata=metadata,
+            reference_means=time_mean_reference_data,
+        )
+        self._aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
+            ops,
+            horizontal_dims=horizontal_coordinates.dims,
+            target="norm",
+            metadata=metadata,
+        )
+        if log_histograms:
+            self._aggregators["histogram"] = HistogramAggregator()
+        if log_seasonal_means:
+            self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
+                ops=ops,
+                metadata=metadata,
+            )
+        if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
+            self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
+                ops=ops,
+                timestep=timestep,
+                metadata=metadata,
+                monthly_reference_data=monthly_reference_data,
+            )
+        if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
+            self._time_dependent_aggregators[
+                "enso_coefficient"
+            ] = EnsoCoefficientEvaluatorAggregator(
+                initial_times,
+                n_timesteps - 1,
+                timestep,
+                area_weights,
+                metadata=metadata,
+            )
 
     @torch.no_grad()
     def record_batch(
@@ -411,7 +415,7 @@ def to_inference_logs(
         if isinstance(val, Table):
             n_rows = max(n_rows, len(val.data))
     logs: List[Dict[str, Union[float, int]]] = []
-    for i in range(n_rows):
+    for i in range(max(1, n_rows)):  # need at least one for non-series values
         logs.append({})
     for key, val in log.items():
         if isinstance(val, Table):
@@ -499,12 +503,12 @@ class InferenceAggregator:
                 n_timesteps=n_timesteps,
             )
         }
-        if area_weights is not None:
-            aggregators["time_mean"] = TimeMeanAggregator(
-                area_weights,
-                metadata=metadata,
-                reference_means=time_mean_reference_data,
-            )
+        ops = get_gridded_operations(area_weights)
+        aggregators["time_mean"] = TimeMeanAggregator(
+            ops,
+            metadata=metadata,
+            reference_means=time_mean_reference_data,
+        )
         self._aggregators = aggregators
         self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
 

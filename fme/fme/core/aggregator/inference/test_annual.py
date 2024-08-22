@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 
 import fme
+from fme.core.aggregator.gridded_ops import get_gridded_operations
 from fme.core.aggregator.inference.annual import GlobalMeanAnnualAggregator
 from fme.core.data_loading.data_typing import DimSize
 from fme.core.device import get_device
@@ -37,7 +38,7 @@ def test_annual_aggregator(tmpdir):
     )
     monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
     agg = GlobalMeanAnnualAggregator(
-        area_weights=area_weights,
+        ops=get_gridded_operations(area_weights),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
     )
@@ -78,7 +79,7 @@ def test__get_gathered_means(use_mock_distributed):
     n_time = 365 * 4 * 2  # two years, approximately
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     agg = GlobalMeanAnnualAggregator(
-        area_weights=area_weights,
+        ops=get_gridded_operations(area_weights),
         timestep=TIMESTEP,
     )
     target_data = {
