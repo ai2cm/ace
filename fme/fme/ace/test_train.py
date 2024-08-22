@@ -236,8 +236,8 @@ def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(32)),
         lat=torch.Tensor(np.arange(16)),
-        lat_name="grid_yt",
-        lon_name="grid_xt",
+        loaded_lat_name="grid_yt",
+        loaded_lon_name="grid_xt",
     ),
     n_time=3,
     nz_interface=7,
@@ -388,9 +388,10 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
         ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
         assert np.sum(np.isnan(ds_target["baz"].values)) == 0
     else:
-        assert (len(inference_logs)) == 0  # inference logs don't run for Healpix yet
+        # inference logs don't produce series for Healpix yet, so only 1 not 7
+        assert (len(inference_logs)) == 1
         assert not prediction_output_path.exists()
-        assert not best_inference_checkpoint_path.exists()
+        assert best_inference_checkpoint_path.exists()
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])

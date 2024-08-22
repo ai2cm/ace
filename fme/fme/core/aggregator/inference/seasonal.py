@@ -5,21 +5,22 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core import metrics
 from fme.core.aggregator.plotting import plot_paneled_data
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
 
+from ..gridded_ops import GriddedOperations
+
 
 class SeasonalAggregator:
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        ops: GriddedOperations,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
-        self.area_weights = area_weights
+        self._area_weighted_mean = ops.area_weighted_mean
         self._metadata = metadata
         self._target_dataset: Optional[xr.Dataset] = None
         self._gen_dataset: Optional[xr.Dataset] = None
@@ -148,10 +149,8 @@ class SeasonalAggregator:
             )
             plots[f"bias/{name}"] = image_err
 
-            mse_tensor = metrics.weighted_mean(
+            mse_tensor = self._area_weighted_mean(
                 torch.as_tensor(bias[name].values ** 2),
-                weights=self.area_weights.cpu(),
-                dim=(-2, -1),
             )
             for i, season in enumerate(bias[name].season.values):
                 rmse = float(mse_tensor[i].sqrt().numpy())

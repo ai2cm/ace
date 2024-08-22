@@ -7,7 +7,7 @@ import xarray as xr
 
 import fme
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -26,14 +26,21 @@ def test_logs_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
     initial_times = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
-        TIMESTEP,
-        n_time,
-        initial_times,
+        horizontal_coordinates=horizontal_coordinates,
+        timestep=TIMESTEP,
+        n_timesteps=n_time,
+        initial_times=initial_times,
         record_step_20=True,
         log_video=True,
         log_zonal_mean_images=True,
@@ -78,10 +85,17 @@ def test_inference_logs_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
     initial_times = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
+        horizontal_coordinates,
         TIMESTEP,
         n_time,
         initial_times,
@@ -126,20 +140,28 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     overlap = 1  # tested code assumes windows have one overlapping point
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
+    nx, ny = 4, 4
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
     initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
+        horizontal_coordinates,
         TIMESTEP,
         (window_len - overlap) * n_windows + 1,
         initial_times,
     )
-    target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+    target_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
     time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
     i_start = 0
     for i in range(n_windows):
-        sample_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+        sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
         agg.record_batch(
@@ -176,20 +198,28 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     """
     area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
+    nx, ny = 4, 4
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
     initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         area_weights,
         sigma_coordinates,
+        horizontal_coordinates,
         TIMESTEP,
         (window_len - overlap) * n_windows + overlap,
         initial_times,
     )
-    target_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+    target_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
     time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
     i_start = 0
     for i in range(n_windows):
-        sample_data = {"a": torch.zeros([2, window_len, 4, 4], device=get_device())}
+        sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
         agg.record_batch(
