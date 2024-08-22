@@ -118,20 +118,60 @@ def compute_crps(
     .. [2] https://en.wikipedia.org/wiki/Scoring_rule
     .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf  # noqa: E501
     """
-    n_samples = prediction.shape[sample_dim]
-    if n_samples == 1:
-        return torch.full_like(target, fill_value=torch.nan)
-    else:
-        sample_mae_estimate = torch.zeros_like(target)
-        for i in range(1, n_samples):
-            sample_mae_estimate += torch.abs(
-                prediction - torch.roll(prediction, shifts=i, dims=sample_dim)
-            ).mean(axis=1)
-        sample_mae_estimate /= n_samples - 1
+    sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
     truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
         axis=sample_dim
     )
     return truth_mae - 0.5 * sample_mae_estimate
+
+
+def get_sample_mae_estimate(prediction: torch.Tensor, sample_dim: int = 1):
+    n_samples = prediction.shape[sample_dim]
+    out_shape = list(prediction.shape)
+    out_shape.pop(sample_dim)
+    if n_samples == 1:
+        return torch.full(
+            out_shape,
+            fill_value=torch.nan,
+            device=prediction.device,
+            dtype=prediction.dtype,
+        )
+    else:
+        sample_mae_estimate = torch.zeros(
+            out_shape, device=prediction.device, dtype=prediction.dtype
+        )
+        for i in range(1, n_samples):
+            sample_mae_estimate += torch.abs(
+                prediction - torch.roll(prediction, shifts=i, dims=sample_dim)
+            ).mean(axis=sample_dim)
+        sample_mae_estimate /= n_samples - 1
+    return sample_mae_estimate
+
+
+def compute_mae_error(
+    target: torch.Tensor,
+    prediction: torch.Tensor,
+    sample_dim: int = 1,
+):
+    """
+    Computes the following metric, which is like CRPS but goes
+    to zero for a perfect forecast:
+
+        mae_error(F, x) = E_F|X - x| - E_F|X - X'|
+
+    where X and X' denote independent random variables drawn from the forecast
+    distribution F, and E_F denotes the expectation value under F.
+
+    Args:
+        target: The target tensor without a sample dimension
+        prediction: The prediction tensor with a sample dimension
+        sample_dim: The dimension of `prediction` corresponding to sample.
+    """
+    sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
+    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
+        axis=sample_dim
+    )
+    return truth_mae - sample_mae_estimate
 
 
 def compute_psnr(

@@ -19,6 +19,7 @@ from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.metrics_and_maths import (
     compute_crps,
+    compute_mae_error,
     compute_zonal_power_spectrum,
     interpolate,
     map_tensor_mapping,
@@ -511,7 +512,10 @@ class Aggregator:
         self._coarse_comparisons = {
             "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
         }
-        self._probabilistic_comparisons = {"crps": MeanComparison(compute_crps)}
+        self._probabilistic_comparisons = {
+            "crps": MeanComparison(compute_crps),
+            "mae_error": MeanComparison(compute_mae_error),
+        }
         self._latent_step_aggregator = LatentStepAggregator()
         self.loss = Mean(torch.mean)
 
