@@ -277,7 +277,7 @@ def surface_pressure_due_to_dry_air(
     ):
         raise ValueError(
             (
-                "Number of vertical levels in ak, bk, and specific_total_water must"
+                "Number of vertical levels in ak, bk, and specific_total_water must "
                 "be the same."
             )
         )
