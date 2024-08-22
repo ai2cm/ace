@@ -214,18 +214,21 @@ def run_inference(
             )
             timers["run_on_batch"] += time.time() - current_time
 
-            # Replicates the timestep range of the stepped.target_data
-            # used in the evaluator computation of derived quantities, which drops
-            # the initial condition.
-            forcing_data_at_prediction_steps = {
-                k: window_forcing_data[k][:, 1:] for k in window_forcing_data
+            time_dim = 1
+            prediction_with_ic = {
+                k: torch.cat(
+                    [initial_condition[k].unsqueeze(time_dim), prediction[k]],
+                    dim=time_dim,
+                )
+                for k in stepper.prognostic_names
             }
-            prediction = compute_derived_quantities(
-                prediction,
+            prediction_with_ic = compute_derived_quantities(
+                prediction_with_ic,
                 forcing_data.sigma_coordinates,
                 forcing_data.timestep,
-                forcing_data=forcing_data_at_prediction_steps,
+                forcing_data=window_forcing_data,
             )
+            prediction = {k: prediction_with_ic[k][:, 1:] for k in prediction_with_ic}
 
             forward_times = window_forcing.times.isel(time=slice(1, None))
             writer.append_batch(prediction, i_time, forward_times)
@@ -267,6 +270,7 @@ def run_inference_evaluator(
         timers: Dict[str, float] = defaultdict(float)
         current_time = time.time()
         i_time = 0
+        target_initial_condition, normed_target_initial_condition = None, None
         for i, window_batch_data in enumerate(data.loader):
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
@@ -289,18 +293,19 @@ def run_inference_evaluator(
                 n_forward_steps=forward_steps_in_memory,
             )
 
-            # Prepend initial (pre-first-timestep) output for the first window
-            if i == 0:
-                (
-                    initial_condition,
-                    normed_initial_condition,
-                ) = stepper.get_initial_condition(window_data)
-                stepped = stepped.prepend_initial_condition(
-                    initial_condition, normed_initial_condition
-                )
-                batch_times = window_batch_data.times
-            else:
-                batch_times = window_batch_data.times.isel(time=slice(1, None))
+            # Prepend initial generated (pre-first-timestep) output for all windows
+            # to calculate derived quantities
+            (
+                initial_condition,
+                normed_initial_condition,
+            ) = stepper.get_initial_condition(window_data)
+            stepped = stepped.prepend_initial_condition(
+                initial_condition,
+                normed_initial_condition,
+                target_initial_condition,
+                normed_target_initial_condition,
+            )
+
             stepped = compute_stepped_derived_quantities(
                 stepped,
                 data.sigma_coordinates,
@@ -310,6 +315,14 @@ def run_inference_evaluator(
             )
             timers["run_on_batch"] += time.time() - current_time
             current_time = time.time()
+
+            # Remove initial condition for windows >0
+            if i > 0:
+                stepped = stepped.remove_initial_condition()
+                batch_times = window_batch_data.times.isel(time=slice(1, None))
+            else:
+                batch_times = window_batch_data.times
+
             snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
             _inference_internal_loop(
                 stepped, i_time, aggregator, stitcher, batch_times, snapshot_dims
@@ -317,6 +330,13 @@ def run_inference_evaluator(
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
             i_time += forward_steps_in_memory
+
+            # Save last target data timestep to use as IC for calculating
+            # tendencies in next window
+            target_initial_condition, normed_target_initial_condition = (
+                {k: v[:, -1] for k, v in stepped.target_data.items()},
+                {k: v[:, -1] for k, v in stepped.target_data_norm.items()},
+            )
 
         for name, duration in timers.items():
             logging.info(f"{name} duration: {duration:.2f}s")
