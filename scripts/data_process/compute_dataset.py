@@ -10,9 +10,11 @@
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
 # it on our GKE cluster.
 
+import abc
 import dataclasses
 import os
-from typing import List, Mapping, MutableMapping, Optional, Sequence, Tuple
+import sys
+from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 import click
 import dacite
@@ -23,6 +25,9 @@ import xpartition  # noqa: 401
 import xtorch_harmonics
 import yaml
 from dask.diagnostics import ProgressBar
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from get_stats import StatsConfig
 
 # constants are defined as in FV3GFS model
 # https://github.com/ai2cm/fv3gfs-fortran/blob/master/FMS/constants/constants.F90
@@ -98,17 +103,65 @@ class StandardNameMapping:
 
 
 @dataclasses.dataclass
-class ChunkingConfig:
+class DLWPNameMapping(StandardNameMapping):
+    longitude_dim: str = "longitude"
+    latitude_dim: str = "latitude"
+    face_dim: str = "face"
+    width_dim: str = "width"
+    height_dim: str = "height"
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.horizontal_dims: List[str] = [
+            self.face_dim,
+            self.width_dim,
+            self.height_dim,
+        ]
+        self.lat_lon_dims: List[str] = [self.latitude_dim, self.longitude_dim]
+
+
+@dataclasses.dataclass
+class _ChunkingConfig(abc.ABC):
     time_dim: int = 160
+
+    @abc.abstractmethod
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
+        ...
+
+
+@dataclasses.dataclass
+class ChunkingConfig(_ChunkingConfig):
     latitude_dim: int = -1
     longitude_dim: int = -1
 
-    def get_chunks(self, standard_names: StandardNameMapping):
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
         return {
             standard_names.time_dim: self.time_dim,
             standard_names.longitude_dim: self.longitude_dim,
             standard_names.latitude_dim: self.latitude_dim,
         }
+
+
+@dataclasses.dataclass
+class DLWPChunkingConfig(_ChunkingConfig):
+    face_dim: int = -1
+    width_dim: int = -1
+    height_dim: int = -1
+
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
+        dlwp_names = standard_names
+        if not isinstance(dlwp_names, DLWPNameMapping):
+            raise TypeError(
+                "Expected DLWPChunkingConfig to be passed type of DLWPNameMapping."
+            )
+        chunks = {
+            dlwp_names.time_dim: self.time_dim,
+            dlwp_names.face_dim: self.face_dim,
+            dlwp_names.width_dim: self.width_dim,
+            dlwp_names.height_dim: self.height_dim,
+        }
+        return chunks
 
 
 @dataclasses.dataclass
@@ -141,8 +194,12 @@ class DatasetComputationConfig:
     n_split: int = 65
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
-    standard_names: StandardNameMapping = StandardNameMapping()
-    chunking: ChunkingConfig = ChunkingConfig()
+    standard_names: Union[StandardNameMapping, DLWPNameMapping] = dataclasses.field(
+        default_factory=StandardNameMapping
+    )
+    chunking: Union[ChunkingConfig, DLWPChunkingConfig] = dataclasses.field(
+        default_factory=ChunkingConfig
+    )
     time_invariant_dir: Optional[str] = None
 
 
@@ -155,11 +212,13 @@ class DatasetConfig:
         output_directory: path to place output of computation script.
         dataset_computation: configuration details for dataset
             computation.
+        stats_config: configuration to retrieve statistics dataset
     """
 
     runs: Mapping[str, str]
     data_output_directory: str
     dataset_computation: DatasetComputationConfig
+    stats: StatsConfig
 
     @classmethod
     def from_file(cls, path: str) -> "DatasetConfig":
@@ -167,7 +226,7 @@ class DatasetConfig:
             data = yaml.safe_load(file)
 
         return dacite.from_dict(
-            data_class=cls, data=data, config=dacite.Config(cast=[tuple])
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
         )
 
 
@@ -336,8 +395,12 @@ def assert_global_dry_air_mass_conservation(
     column_dry_air_mass = (
         ds[surface_pressure_name] - ds[total_water_path_name] * GRAVITY
     )
-    weights = np.cos(np.deg2rad(ds[latitude_dim]))
-    global_dry_air_mass = column_dry_air_mass.weighted(weights).mean(dim=dims)
+    if latitude_dim in dims:
+        weights = np.cos(np.deg2rad(ds[latitude_dim]))
+        global_dry_air_mass = column_dry_air_mass.weighted(weights).mean(dim=dims)
+    else:
+        global_dry_air_mass = column_dry_air_mass.mean(dim=dims)
+
     global_dry_air_mass_tendency = global_dry_air_mass.diff(time_dim)
     print("Mean absolute global dry air pressure tendency [Pa]:")
     print(np.abs(global_dry_air_mass_tendency).mean().values)
