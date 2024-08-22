@@ -296,20 +296,27 @@ class SteppedData:
         self,
         initial_condition: TensorDict,
         normalized_initial_condition: TensorDict,
+        target_initial_condition: Optional[TensorDict] = None,
+        normalized_target_initial_condition: Optional[TensorDict] = None,
     ) -> "SteppedData":
         """
         Prepends an initial condition to the existing stepped data.
         Assumes data are on the same device.
+        For data windows > 0, the target IC is different from the generated IC
+            and may be provided for correct calculation of tendencies.
         """
         return SteppedData(
             metrics=self.metrics,
             gen_data=_prepend_timestep(self.gen_data, initial_condition),
-            target_data=_prepend_timestep(self.target_data, initial_condition),
+            target_data=_prepend_timestep(
+                self.target_data, target_initial_condition or initial_condition
+            ),
             gen_data_norm=_prepend_timestep(
                 self.gen_data_norm, normalized_initial_condition
             ),
             target_data_norm=_prepend_timestep(
-                self.target_data_norm, normalized_initial_condition
+                self.target_data_norm,
+                normalized_target_initial_condition or normalized_initial_condition,
             ),
         )
 
