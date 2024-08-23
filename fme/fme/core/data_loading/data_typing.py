@@ -241,23 +241,28 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
 
 class Dataset(torch.utils.data.Dataset, abc.ABC):
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def metadata(self) -> Mapping[str, VariableMetadata]:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def area_weights(self) -> Optional[torch.Tensor]:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def sigma_coordinates(self) -> SigmaCoordinates:
         ...
 
-    @abc.abstractproperty
+    @property
+    @abc.abstractmethod
     def is_remote(self) -> bool:
         ...
 
