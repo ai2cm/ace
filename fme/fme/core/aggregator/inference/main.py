@@ -14,7 +14,7 @@ from fme.core.data_loading.data_typing import (
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
-from ..gridded_ops import get_gridded_operations
+from ...gridded_ops import get_gridded_operations
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
 from .enso import EnsoCoefficientEvaluatorAggregator

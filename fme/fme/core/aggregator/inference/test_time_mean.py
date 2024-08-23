@@ -1,12 +1,12 @@
 import numpy as np
 import torch
 
-from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
 )
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 
 def test_rmse_of_time_mean_all_channels():
