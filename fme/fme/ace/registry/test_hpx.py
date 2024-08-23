@@ -494,7 +494,7 @@ def test_UNetEncoder_initialize():
         down_sampling_block=down_sampling_block_config,
         n_channels=n_channels,
         input_channels=channels,
-        dilations=(1, 1, 1),
+        dilations=[1, 1, 1],
     ).to(device)
     assert isinstance(encoder, UNetEncoder)
 
@@ -611,7 +611,7 @@ def test_UNetDecoder_initilization():
         output_layer=output_layer_config,
         recurrent_block=None,
         n_channels=n_channels,
-        dilations=(1, 1, 1),
+        dilations=[1, 1, 1],
     ).to(device)
     assert isinstance(decoder, UNetDecoder)
 
@@ -680,7 +680,7 @@ def test_UNetDecoder_forward():
         output_layer=output_layer_config,
         recurrent_block=None,
         n_channels=n_channels,
-        dilations=(1, 1, 1),
+        dilations=[1, 1, 1],
     ).to(device)
 
     outvar = decoder(invars)

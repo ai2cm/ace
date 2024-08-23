@@ -105,11 +105,15 @@ def test__get_gathered_means(use_mock_distributed):
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
-            target, gen = agg._get_gathered_means()
+            result = agg._get_gathered_means()
+            assert result is not None
+            target, gen = result
             combined = agg.get_dataset()
     else:
         world_size = 1
-        target, gen = agg._get_gathered_means()
+        result = agg._get_gathered_means()
+        assert result is not None
+        target, gen = result
         combined = agg.get_dataset()
     for dataset in (target, gen, combined):
         assert set(dataset.dims).issuperset({"sample", "year"})
