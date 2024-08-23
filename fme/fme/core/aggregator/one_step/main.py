@@ -50,12 +50,12 @@ class OneStepAggregator:
                 used in loss computation.
         """
         aggregators: Dict[str, _Aggregator] = {"mean": MeanAggregator(area_weights)}
+        aggregators["snapshot"] = SnapshotAggregator(metadata)
         if area_weights is not None:  # Not HEALPix data
-            aggregators["snapshot"] = SnapshotAggregator(metadata)
             aggregators["derived"] = DerivedMetricsAggregator(
                 area_weights, sigma_coordinates
             )
-            aggregators["mean_map"] = MapAggregator(metadata)
+        aggregators["mean_map"] = MapAggregator(metadata)
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 
