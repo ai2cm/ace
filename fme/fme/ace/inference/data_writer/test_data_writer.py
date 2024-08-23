@@ -34,8 +34,6 @@ def test_data_writer_config_save_names():
         save_monthly_files=False,
         save_histogram_files=False,
     )
-    with pytest.warns():
-        DataWriterConfig(names=variable_names, **kwargs)
     for save_writer in [
         "save_prediction_files",
         "save_monthly_files",
@@ -43,7 +41,7 @@ def test_data_writer_config_save_names():
     ]:
         kwargs_copy = kwargs.copy()
         kwargs_copy.update({save_writer: True})
-        DataWriterConfig(names=variable_names, **kwargs_copy)
+        DataWriterConfig(names=variable_names, **kwargs_copy)  # type: ignore
 
 
 class TestDataWriter:

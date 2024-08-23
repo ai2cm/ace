@@ -3,6 +3,7 @@ import datetime
 import pytest
 import torch
 
+from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.stepper import SteppedData
 
@@ -17,7 +18,9 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 def test_compute_derived_variable():
     fake_data = {"PRESsfc": torch.tensor([1.0]), "PRATEsfc": torch.tensor([2.0])}
-    sigma_coordinates = None
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
+    )
     derived_variable = DerivedVariableRegistryEntry(
         func=lambda data, *_: data.surface_pressure + data.precipitation_rate
     )
@@ -29,9 +32,15 @@ def test_compute_derived_variable():
 
 def test_compute_derived_variable_raises_value_error_when_overwriting():
     fake_data = {"PRESsfc": torch.tensor([1.0]), "PRATEsfc": torch.tensor([2.0])}
-    sigma_coordinates = None
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
+    )
+
+    def add_surface_pressure_and_precipitation(data: ClimateData, *_) -> torch.Tensor:
+        return data.surface_pressure + data.precipitation_rate
+
     derived_variable = DerivedVariableRegistryEntry(
-        func=lambda data, _: data.surface_pressure + data.precipitation_rate
+        func=add_surface_pressure_and_precipitation
     )
     with pytest.raises(ValueError):
         _compute_derived_variable(

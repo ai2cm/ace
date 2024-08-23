@@ -15,7 +15,7 @@ class MockModule(torch.nn.Module):
 
 
 @dataclasses.dataclass
-class MockModuleBuilder:
+class MockModuleBuilder(registry.ModuleConfig):
     param_shapes: Iterable[Tuple[int, ...]]
 
     def build(self, n_in_channels, n_out_channels, img_shape):
