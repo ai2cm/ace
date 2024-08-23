@@ -6,9 +6,9 @@ import torch
 import xarray as xr
 
 import fme
-from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.seasonal import SeasonalAggregator
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 
 def get_zero_time(shape, dims):

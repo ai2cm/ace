@@ -12,7 +12,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
 
-from ..gridded_ops import GriddedOperations
+from ...gridded_ops import GriddedOperations
 
 
 class GlobalMeanAnnualAggregator:

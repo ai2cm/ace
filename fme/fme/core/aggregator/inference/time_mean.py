@@ -10,7 +10,7 @@ from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Image, WandB
 
-from ..gridded_ops import GriddedOperations
+from ...gridded_ops import GriddedOperations
 from ..plotting import get_cmap_limits, plot_imshow
 
 
