@@ -4,12 +4,9 @@ from typing import Any, Dict, List, Literal, Mapping, Optional
 import torch
 import torch.linalg
 
-from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorDict, TensorMapping
-
-from .climate_data import ClimateData, compute_dry_air_absolute_differences
+from fme.core.typing_ import TensorDict
 
 
 class NaNLoss(torch.nn.Module):
@@ -35,27 +32,6 @@ class MappingLoss:
         target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
 
         return self.loss(predict_tensors, target_tensors)
-
-
-def get_dry_air_nonconservation(
-    data: TensorMapping,
-    area_weights: Optional[torch.Tensor],
-    sigma_coordinates: SigmaCoordinates,
-):
-    """
-    Computes the time-average one-step absolute difference in surface pressure due to
-    changes in globally integrated dry air.
-
-    Args:
-        data: A mapping from variable name to tensor of shape
-            [sample, time, lat, lon], in physical units. specific_total_water in kg/kg
-            and surface_pressure in Pa must be present.
-        area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
-        sigma_coordinates: The sigma coordinates of the model.
-    """
-    return compute_dry_air_absolute_differences(
-        ClimateData(data), area=area_weights, sigma_coordinates=sigma_coordinates
-    ).mean()
 
 
 def _construct_weight_tensor(
