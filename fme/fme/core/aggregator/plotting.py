@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.colors import Colormap
 from matplotlib.figure import Figure
 
-from fme.core.wandb import WandB
+from fme.core.wandb import Image, WandB
 
 
 def get_cmap_limits(data: np.ndarray, diverging=False) -> Tuple[float, float]:
@@ -91,11 +91,17 @@ def fold_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
     return np.concatenate([np.concatenate(row, axis=1) for row in panels], axis=0)
 
 
+def fold_if_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
+    if data.shape[0] == 12:
+        return fold_healpix_data(data, fill_value)
+    return data
+
+
 def plot_paneled_data(
     data: List[List[np.ndarray]],
     diverging: bool,
     caption: Optional[str] = None,
-) -> Figure:
+) -> Image:
     """Plot a list of 2D data arrays in a paneled plot."""
     if diverging:
         cmap = "RdBu_r"
@@ -117,7 +123,11 @@ def plot_paneled_data(
 
     caption += f"vmin={vmin:.4g}, vmax={vmax:.4g}."
 
-    all_data = _stitch_data_panels(data, vmin=vmin)
+    if diverging:
+        fill_value = 0.5 * (vmin + vmax)
+    else:
+        fill_value = vmin
+    all_data = _stitch_data_panels(data, fill_value=fill_value)
 
     fig = plot_imshow(all_data, vmin=vmin, vmax=vmax, cmap=cmap)
     wandb = WandB.get_instance()
@@ -131,10 +141,14 @@ def plot_paneled_data(
     return wandb_image
 
 
-def _stitch_data_panels(data: List[List[np.ndarray]], vmin) -> np.ndarray:
+def _stitch_data_panels(data: List[List[np.ndarray]], fill_value) -> np.ndarray:
     for row in data:
         if len(row) != len(data[0]):
             raise ValueError("All rows must have the same number of panels.")
+    data = [
+        [fold_if_healpix_data(arr, fill_value=fill_value) for arr in row]
+        for row in data
+    ]
     n_rows = len(data)
     n_cols = len(data[0])
     for row in data:
@@ -142,14 +156,12 @@ def _stitch_data_panels(data: List[List[np.ndarray]], vmin) -> np.ndarray:
             if arr.shape != data[0][0].shape:
                 raise ValueError("All panels must have the same shape.")
 
-    stitched_data = (
-        np.zeros(
-            (
-                n_rows * data[0][0].shape[0] + n_rows - 1,
-                n_cols * data[0][0].shape[1] + n_cols - 1,
-            )
-        )
-        + vmin
+    stitched_data = np.full(
+        (
+            n_rows * data[0][0].shape[0] + n_rows - 1,
+            n_cols * data[0][0].shape[1] + n_cols - 1,
+        ),
+        fill_value=fill_value,
     )
 
     # iterate over rows backwards, as the image starts in the bottom left
