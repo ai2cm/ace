@@ -1,9 +1,9 @@
 import torch
 
-from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.reduced import MeanAggregator
 from fme.core.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.testing import mock_distributed
 
 

@@ -8,10 +8,10 @@ import torch
 import xarray as xr
 
 import fme
-from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.annual import GlobalMeanAnnualAggregator
 from fme.core.data_loading.data_typing import DimSize
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.testing import DimSizes, MonthlyReferenceData, mock_distributed
 
 TIMESTEP = datetime.timedelta(hours=6)
