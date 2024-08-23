@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, Mapping, Optional, cast
+from typing import Any, Dict, Mapping, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -10,6 +10,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import Image
 
 from ...gridded_ops import GriddedOperations
 
@@ -86,8 +87,8 @@ class SeasonalAggregator:
         target = cast(xr.Dataset, target / target["counts"])  # type: ignore
         gen = cast(xr.Dataset, gen / gen["counts"])  # type: ignore
         bias = gen - target
-        plots = {}
-        metric_logs = {}
+        plots: Dict[str, Image] = {}
+        metric_logs: Dict[str, float] = {}
 
         for name in gen.data_vars.keys():
             if name == "counts":
@@ -166,7 +167,7 @@ class SeasonalAggregator:
 
         if len(label) > 0:
             label = label + "/"
-        logs = {}
+        logs: Dict[str, Union[Image, float]] = {}
         logs.update({f"{label}{name}": plots[name] for name in plots.keys()})
         logs.update({f"{label}{name}": val for name, val in metric_logs.items()})
         return logs

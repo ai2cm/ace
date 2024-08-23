@@ -6,6 +6,7 @@ from .plotting import (
     fold_healpix_data,
     get_cmap_limits,
     plot_imshow,
+    plot_paneled_data,
 )
 
 
@@ -65,7 +66,7 @@ def test_stitch_data_panels():
         [np.array([[1, 2]]), np.array([[3, 4]])],
         [np.array([[5, 6]]), np.array([[7, 8]])],
     ]
-    stitched = _stitch_data_panels(data, vmin=1)
+    stitched = _stitch_data_panels(data, fill_value=1)
     expected = np.array(
         [  # vertical orientation is swapped as data starts from bottom-left
             [5, 6, 1, 7, 8],
@@ -74,3 +75,36 @@ def test_stitch_data_panels():
         ]
     )
     assert np.array_equal(stitched, expected)
+
+
+@pytest.mark.parametrize(
+    "shape, img_shape",
+    [
+        pytest.param(
+            [12, 2, 3],
+            [
+                27,  # 3 * 4 + 1 (divider) + 3 * 4 + 2 (colorbar)
+                25,  # 2 * 6 + 1 (divider) + 2 * 6 + 2 (colorbar)
+            ],
+            id="healpix",
+        ),
+        pytest.param(
+            [2, 3],
+            [
+                9,  # 3 + 1 (divider) + 3 + 2 (colorbar)
+                5,  # 2 + 1 (divider) + 2 (colorbar)
+            ],
+            id="latlon",
+        ),
+    ],
+)
+def test_plot_paneled_data(shape, img_shape):
+    panel = np.random.uniform(size=shape)
+    data = [
+        [panel, panel],
+        [panel, panel],
+    ]
+    fig = plot_paneled_data(data, diverging=False)
+    assert np.array_equal(fig.image.size, img_shape)
+    fig = plot_paneled_data(data, diverging=True)
+    assert np.array_equal(fig.image.size, img_shape)
