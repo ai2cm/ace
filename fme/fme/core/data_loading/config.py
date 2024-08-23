@@ -74,6 +74,21 @@ class XarrayDataConfig:
             the additional requirement that the data be ordered and evenly
             spaced in time. It must be set to True if n_repeats > 1 in order
             to be able to infer the full time coordinate.
+
+    Examples:
+        If data is stored in a directory with multiple netCDF files which can be
+        concatenated along the time dimension, use:
+
+        >>> fme.ace.XarrayDataConfig(data_path="/some/directory", file_pattern="*.nc") # doctest: +IGNORE_OUTPUT  # noqa: E501
+
+        If data is stored in a single zarr store at ``/some/directory/dataset.zarr``,
+        use:
+
+        >>> fme.ace.XarrayDataConfig(
+        ...     data_path="/some/directory",
+        ...     file_pattern="dataset.zarr",
+        ...     engine="zarr"
+        ... ) # doctest: +IGNORE_OUTPUT
     """
 
     data_path: str

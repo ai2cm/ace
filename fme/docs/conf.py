@@ -176,3 +176,9 @@ texinfo_documents = [
         "Miscellaneous",
     ),
 ]
+
+
+# -- Options for doctest -----------------------------------------------
+doctest_global_setup = """
+import fme
+"""
