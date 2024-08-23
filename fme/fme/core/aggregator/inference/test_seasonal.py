@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 import fme
-from fme.core.aggregator.gridded_ops import get_gridded_operations
+from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.seasonal import SeasonalAggregator
 from fme.core.device import get_device
 
@@ -24,7 +24,7 @@ def test_seasonal_aggregator():
     n_time = int(365 / 10 * 2 / n_time_step + 1) * n_time_step
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     agg = SeasonalAggregator(
-        get_gridded_operations(area_weights),
+        LatLonOperations(area_weights),
     )
     target_data = {
         "a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())
