@@ -1,6 +1,6 @@
 import torch
 
-from fme.core.aggregator.gridded_ops import get_gridded_operations
+from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.reduced import MeanAggregator
 from fme.core.aggregator.inference.time_mean import TimeMeanEvaluatorAggregator
 from fme.core.device import get_device
@@ -35,7 +35,7 @@ def test_time_mean_metrics_call_distributed():
     with mock_distributed(0.0) as mock:
         area_weights = torch.ones(1).to(get_device())
         agg = TimeMeanEvaluatorAggregator(
-            get_gridded_operations(area_weights), horizontal_dims=["lat", "lon"]
+            LatLonOperations(area_weights), horizontal_dims=["lat", "lon"]
         )
         target_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         gen_data = {"a": torch.randn([2, 3, 4, 4], device=get_device())}

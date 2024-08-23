@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from fme.core.aggregator.gridded_ops import get_gridded_operations
+from fme.core.aggregator.gridded_ops import LatLonOperations
 from fme.core.aggregator.inference.time_mean import (
     TimeMeanAggregator,
     TimeMeanEvaluatorAggregator,
@@ -13,7 +13,7 @@ def test_rmse_of_time_mean_all_channels():
     torch.manual_seed(0)
     area_weights = torch.ones(1).to(get_device())
     agg = TimeMeanEvaluatorAggregator(
-        get_gridded_operations(area_weights),
+        LatLonOperations(area_weights),
         horizontal_dims=["lat", "lon"],
         target="norm",
     )
@@ -41,7 +41,7 @@ def test_rmse_of_time_mean_all_channels():
 def test_mean_all_channels_not_in_denorm():
     area_weights = torch.ones(1).to(get_device())
     agg = TimeMeanEvaluatorAggregator(
-        get_gridded_operations(area_weights),
+        LatLonOperations(area_weights),
         horizontal_dims=["lat", "lon"],
         target="denorm",
     )
@@ -70,7 +70,7 @@ def test_mean_all_channels_not_in_denorm():
 def test_bias_values():
     area_weights = torch.ones(1).to(get_device())
     agg = TimeMeanEvaluatorAggregator(
-        get_gridded_operations(area_weights),
+        LatLonOperations(area_weights),
         horizontal_dims=["lat", "lon"],
         target="denorm",
     )
@@ -106,7 +106,7 @@ def test_bias_values():
 
 def test_aggregator_mean_values():
     area_weights = torch.ones(1).to(get_device())
-    agg = TimeMeanAggregator(get_gridded_operations(area_weights))
+    agg = TimeMeanAggregator(LatLonOperations(area_weights))
     # use constant values so area-weighting doesn't matter
     data = {
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
