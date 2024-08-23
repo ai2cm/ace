@@ -388,9 +388,9 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
                     "time"
                 )
                 data, times = dataset[global_idx]
-                data = data[var_name]
-                assert data.shape[0] == n_steps
-                assert torch.equal(data, target_data)
+                data_tensor = data[var_name]
+                assert data_tensor.shape[0] == n_steps
+                assert torch.equal(data_tensor, target_data)
                 xr.testing.assert_equal(times, target_times)
 
 

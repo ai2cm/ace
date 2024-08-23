@@ -110,6 +110,7 @@ def test_enso_coefficient_aggregator_values(scaling):
         )
     assert len(enso_agg._sample_index_series) == n_samples
     for index_values in enso_agg._sample_index_series:
+        assert index_values is not None
         # check that the index values are zero-mean for each sample
         assert np.isclose(index_values.mean().item(), 0.0)
     target_data["a"] *= scaling
@@ -118,6 +119,8 @@ def test_enso_coefficient_aggregator_values(scaling):
     enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
     coefficients = enso_agg._get_coefficients()
     target_coefficients, gen_coefficients = coefficients
+    assert target_coefficients is not None
+    assert gen_coefficients is not None
     # check that the target coefficients are 1.0 * scaling (perfectly correlated)
     assert torch.allclose(target_coefficients["a"], torch.tensor(scaling))
     # check that the gen coefficients are -1.0 * scaling (perfectly anti-correlated)
@@ -170,6 +173,8 @@ def test_enso_index_inference_overlap(shift):
         assert not target_coefficients
         assert not gen_coefficients
     else:
+        assert target_coefficients is not None
+        assert gen_coefficients is not None
         assert isinstance(target_coefficients["a"], torch.Tensor)
         assert isinstance(gen_coefficients["a"], torch.Tensor)
 
