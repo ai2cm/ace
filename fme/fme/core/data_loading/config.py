@@ -62,9 +62,7 @@ class XarrayDataConfig:
         n_repeats: Number of times to repeat the dataset (in time). It is up
             to the user to ensure that the input dataset to repeat results in
             data that is reasonably continuous across repetitions.
-        engine: Backend for xarray.open_dataset. Currently supported options
-            are "netcdf4" (the default) and "h5netcdf". Only valid when using
-            XarrayDataset.
+        engine: Backend used in xarray.open_dataset call.
         spatial_dimensions: Specifies the spatial dimensions for the grid, default
             is lat/lon.
         subset: Slice defining a subset of the XarrayDataset to load. This can
@@ -81,7 +79,7 @@ class XarrayDataConfig:
     data_path: str
     file_pattern: str = "*.nc"
     n_repeats: int = 1
-    engine: Optional[Literal["netcdf4", "h5netcdf", "zarr"]] = None
+    engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
