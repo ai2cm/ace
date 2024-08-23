@@ -1,4 +1,3 @@
-import contextlib
 import dataclasses
 import datetime
 import pathlib
@@ -17,7 +16,7 @@ from fme.ace.inference.derived_variables import compute_stepped_derived_quantiti
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
 from fme.ace.registry import ModuleSelector
 from fme.core import metrics
-from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig, annual
+from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import DimSize, SigmaCoordinates
 from fme.core.data_loading.inference import (
@@ -38,16 +37,6 @@ TIMESTEP = datetime.timedelta(hours=6)
 class PlusOne(torch.nn.Module):
     def forward(self, x):
         return x + 1
-
-
-@contextlib.contextmanager
-def patch_annual_aggregator_min_samples(value):
-    original = annual.MIN_SAMPLES
-    try:
-        annual.MIN_SAMPLES = value
-        yield
-    finally:
-        annual.MIN_SAMPLES = original
 
 
 def save_plus_one_stepper(
@@ -570,13 +559,13 @@ def test_compute_derived_quantities(has_required_fields):
             for var in vars
         }
 
-    loss = 42.0
+    metrics = {"loss": 42.0}
     fake_data = {
         k: _make_data()
         for k in ("gen_data", "target_data", "gen_data_norm", "target_data_norm")
     }
     stepped = SteppedData(
-        loss,
+        metrics,
         fake_data["gen_data"],
         fake_data["target_data"],
         fake_data["gen_data_norm"],

@@ -24,7 +24,7 @@ from fme.core.stepper import (
     SteppedData,
     _combine_normalizers,
 )
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 TIMESTEP = datetime.timedelta(hours=6)
@@ -96,14 +96,15 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    normalization_config = NormalizationConfig(
+        means=get_scalar_data(["a", "b"], 0.0),
+        stds=get_scalar_data(["a", "b"], 1.0),
+    )
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
         in_names=["a", "b"],
         out_names=["a", "b"],
-        normalization=NormalizationConfig(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=get_scalar_data(["a", "b"], 1.0),
-        ),
+        normalization=normalization_config,
         loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
@@ -111,7 +112,8 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     assert torch.allclose(
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
     )  # as std=1, mean=0, no change
-    config.normalization.stds = get_scalar_data(["a", "b"], 2.0)
+    normalization_config.stds = get_scalar_data(["a", "b"], 2.0)
+    config.normalization = normalization_config
     config.loss_normalization = NormalizationConfig(
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 3.0),
@@ -631,7 +633,7 @@ def test_predict():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
     n_steps = 3
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    forcing_data = {}
+    forcing_data: TensorMapping = {}
     output = stepper.predict(input_data, forcing_data, n_steps)
     for variable in ["a", "b"]:
         assert output[variable].size(dim=1) == n_steps
@@ -753,24 +755,22 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     # stepper loaded from state should have the appropriately combined
     # full field and residual values in its loss_normalizer
     torch.manual_seed(0)
-    full_field_normalization = {
-        "means": {"a": 0.0, "b": 0.0, "diagnostic": 0.0},
-        "stds": {"a": 1.0, "b": 1.0, "diagnostic": 1.0},
-    }
+    full_field_means = {"a": 0.0, "b": 0.0, "diagnostic": 0.0}
+    full_field_stds = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
     # residual scalings might have diagnostic variables but the stepper
     # should detect which prognostic variables to use from the set
-    residual_normalization = {
-        "means": {"a": 1.0, "b": 1.0, "diagnostic": 1.0},
-        "stds": {"a": 2.0, "b": 2.0, "diagnostic": 2.0},
-    }
+    residual_means = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
+    residual_stds = {"a": 2.0, "b": 2.0, "diagnostic": 2.0}
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
         in_names=["a", "b"],
         out_names=["a", "b", "diagnostic"],
-        normalization=NormalizationConfig(**full_field_normalization),
-        residual_normalization=NormalizationConfig(**residual_normalization),
+        normalization=NormalizationConfig(means=full_field_means, stds=full_field_stds),
+        residual_normalization=NormalizationConfig(
+            means=residual_means, stds=residual_stds
+        ),
     )
     shapes = {
         "a": (1, 1, 5, 5),
@@ -790,10 +790,16 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     )
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_normalizer.means == {"a": 1.0, "b": 1.0, "diagnostic": 0.0}
-        assert stepper.loss_normalizer.stds == {"a": 2.0, "b": 2.0, "diagnostic": 1.0}
-        assert stepper.normalizer.means == full_field_normalization["means"]
-        assert stepper.normalizer.stds == full_field_normalization["stds"]
+        assert stepper.loss_normalizer.means == {
+            **residual_means,
+            "diagnostic": full_field_means["diagnostic"],
+        }
+        assert stepper.loss_normalizer.stds == {
+            **residual_stds,
+            "diagnostic": full_field_stds["diagnostic"],
+        }
+        assert stepper.normalizer.means == full_field_means
+        assert stepper.normalizer.stds == full_field_stds
 
 
 def test_stepper_effective_loss_scaling():

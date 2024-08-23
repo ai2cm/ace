@@ -1,7 +1,7 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Tuple
+from typing import Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -250,7 +250,7 @@ class ComparedDynamicHistograms:
         return fig
 
     def get_wandb(self) -> Dict[str, float]:
-        return_dict: Dict[str, float] = {}
+        return_dict: Dict[str, Union[matplotlib.figure.Figure, float]] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")

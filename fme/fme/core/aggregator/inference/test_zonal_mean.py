@@ -13,6 +13,7 @@ def test_zonal_mean_dims():
     gen_data = {"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())}
     agg.record_batch(loss, target_data, gen_data, target_data, gen_data, i_time_start=0)
     for data in (agg._target_data, agg._gen_data):
+        assert data is not None
         assert data["a"].size() == (
             n_sample,
             n_time,
@@ -28,6 +29,7 @@ def test_zonal_mean_lat_varying():
         loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
     )
     for data in (agg._target_data, agg._gen_data):
+        assert data is not None
         torch.testing.assert_close(
             data["a"][0, 0, :],  # one time row of the zonal mean
             torch.arange(ny, dtype=torch.float32, device=get_device()),
@@ -42,6 +44,7 @@ def test_zonal_mean_zonally_varying():
         loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
     )
     for data in (agg._target_data, agg._gen_data):
+        assert data is not None
         torch.testing.assert_close(
             data["a"][0, 0, :],  # one time row of the zonal mean
             arr.mean() * torch.ones(ny, dtype=torch.float32, device=get_device()),
@@ -57,6 +60,7 @@ def test_zonal_mean_batch_varying():
             loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
         )
     for data in (agg._target_data, agg._gen_data):
+        assert data is not None
         torch.testing.assert_close(
             data["a"].sum(dim=0)[0, 0],  # sum over batches, then pick a time/lat point
             torch.arange(n_sample, dtype=torch.float32, device=get_device()).sum()
@@ -75,6 +79,7 @@ def test_zonal_mean_mulitple_time_slices():
             loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=i_time
         )
     for data in (agg._target_data, agg._gen_data):
+        assert data is not None
         torch.testing.assert_close(
             (data["a"] / agg._n_batches)[0, 0, :],
             torch.arange(ny, dtype=torch.float32, device=get_device()),
