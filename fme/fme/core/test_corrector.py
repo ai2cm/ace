@@ -1,4 +1,5 @@
 import datetime
+from typing import Optional
 
 import numpy as np
 import pytest
@@ -6,6 +7,7 @@ import torch
 
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
+from fme.core.climate_data import compute_dry_air_absolute_differences
 from fme.core.corrector import (
     _force_conserve_dry_air,
     _force_conserve_moisture,
@@ -13,9 +15,30 @@ from fme.core.corrector import (
     _force_zero_global_mean_moisture_advection,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.loss import get_dry_air_nonconservation
+from fme.core.typing_ import TensorMapping
 
 TIMESTEP = datetime.timedelta(hours=6)
+
+
+def get_dry_air_nonconservation(
+    data: TensorMapping,
+    area_weights: Optional[torch.Tensor],
+    sigma_coordinates: SigmaCoordinates,
+):
+    """
+    Computes the time-average one-step absolute difference in surface pressure due to
+    changes in globally integrated dry air.
+
+    Args:
+        data: A mapping from variable name to tensor of shape
+            [sample, time, lat, lon], in physical units. specific_total_water in kg/kg
+            and surface_pressure in Pa must be present.
+        area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
+        sigma_coordinates: The sigma coordinates of the model.
+    """
+    return compute_dry_air_absolute_differences(
+        ClimateData(data), area=area_weights, sigma_coordinates=sigma_coordinates
+    ).mean()
 
 
 def test_force_no_global_mean_moisture_advection():
