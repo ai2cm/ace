@@ -291,7 +291,7 @@ class XarrayDataset(Dataset):
         self.names = requirements.names
         self.path = config.data_path
         self.file_pattern = config.file_pattern
-        self.engine = "netcdf4" if config.engine is None else config.engine
+        self.engine = config.engine
         self._default_file_pattern_check()
         fs = _get_fs(self.path)
         glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
