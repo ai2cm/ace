@@ -3,6 +3,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
     GlobalMeanLoss,
@@ -19,7 +20,7 @@ from fme.core.packer import Packer
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area, reduction="mean")
+    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -30,7 +31,7 @@ def test_loss_builds_and_runs(global_mean_type):
 def test_loss_of_zeros_is_variance():
     config = LossConfig(global_mean_type=None)
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area, reduction="mean")
+    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -46,7 +47,7 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         global_mean_type="LpLoss", global_mean_weight=global_mean_weight
     )
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(area, reduction="mean")
+    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -63,7 +64,9 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
 
 def test_global_mean_loss():
     area = torch.randn(10, 10, device=get_device())
-    loss = GlobalMeanLoss(area=area, loss=torch.nn.MSELoss())
+    loss = GlobalMeanLoss(
+        LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()
+    )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -83,7 +86,7 @@ def test_area_weighted_mse():
     x = torch.rand(10, 10).to(get_device())
     target = torch.rand(10, 10).to(get_device())
     area = torch.rand(10, 10).to(get_device())
-    area_weighted_mse = AreaWeightedMSELoss(area)
+    area_weighted_mse = AreaWeightedMSELoss(LatLonOperations(area).area_weighted_mean)
     result = area_weighted_mse(x, target)
     expected = metrics.weighted_mean(
         torch.nn.MSELoss(reduction="none")(x, target), weights=area, dim=(-2, -1)
@@ -166,9 +169,10 @@ def test_WeightedMappingLossConfig_no_weights():
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
+    area_weighted_mean = LatLonOperations(area).area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
-    loss = loss_config.build(area, reduction="mean")
-    mapping_loss = mapping_loss_config.build(area, out_names, channel_dim)
+    loss = loss_config.build(area_weighted_mean, reduction="mean")
+    mapping_loss = mapping_loss_config.build(area_weighted_mean, out_names, channel_dim)
     packer = Packer(out_names)
 
     x_mapping = {name: torch.randn(4, 5, 5).to(get_device()) for name in out_names}
@@ -186,7 +190,9 @@ def test_WeightedMappingLossConfig_weights():
     mapping_loss_config = WeightedMappingLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
-    mapping_loss = mapping_loss_config.build(area, out_names, channel_dim)
+    mapping_loss = mapping_loss_config.build(
+        LatLonOperations(area).area_weighted_mean, out_names, channel_dim
+    )
 
     x0 = torch.ones(4, 5, 5).to(get_device())
     x1 = 2.0 * x0

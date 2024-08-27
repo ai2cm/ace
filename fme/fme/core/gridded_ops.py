@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, List, Literal, Optional, Type, TypeVar
+from typing import Any, Dict, List, Type, TypeVar
 
 import torch
 
@@ -8,11 +8,6 @@ from fme.core.device import get_device
 
 
 class GriddedOperations(abc.ABC):
-    @property
-    @abc.abstractmethod
-    def area_weights(self) -> Optional[torch.Tensor]:
-        pass
-
     @abc.abstractmethod
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
@@ -102,10 +97,6 @@ def get_all_subclasses(cls: Type[T]) -> List[Type[T]]:
 class LatLonOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-2, -1)
 
-    @property
-    def area_weights(self) -> torch.Tensor:
-        return self._device_area
-
     def __init__(self, area_weights: torch.Tensor):
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
@@ -138,10 +129,6 @@ class LatLonOperations(GriddedOperations):
 
 class HEALPixOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-3, -2, -1)
-
-    @property
-    def area_weights(self) -> Literal[None]:
-        return None
 
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
