@@ -1,5 +1,6 @@
 from .climate_data import ClimateData
 from .device import get_device, using_gpu
+from .gridded_ops import GriddedOperations
 from .metrics import (
     root_mean_squared_error,
     spherical_area_weights,
@@ -23,4 +24,5 @@ __all__ = [
     "SingleModuleStepper",
     "SingleModuleStepperConfig",
     "ClimateData",
+    "GriddedOperations",
 ]

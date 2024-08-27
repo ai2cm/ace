@@ -28,6 +28,7 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
@@ -66,7 +67,7 @@ def save_stepper(
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         img_shape=(data_shape[-2], data_shape[-1]),
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=timestep,
     )
