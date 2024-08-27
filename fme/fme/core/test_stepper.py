@@ -12,6 +12,7 @@ from fme.ace.inference.derived_variables import compute_stepped_derived_quantiti
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
@@ -95,6 +96,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     area = torch.ones((5, 5), device=DEVICE)
+    gridded_operations = LatLonOperations(area)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     normalization_config = NormalizationConfig(
         means=get_scalar_data(["a", "b"], 0.0),
@@ -107,7 +109,9 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         normalization=normalization_config,
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
+    stepper = config.get_stepper(
+        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+    )
     stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.gen_data_norm["a"]
@@ -118,7 +122,9 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 3.0),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
+    stepper = config.get_stepper(
+        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+    )
     stepped_double_std = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
@@ -146,6 +152,7 @@ def test_run_on_batch_addition_series():
     n_steps = 4
     data_with_ic = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
     area = torch.ones((5, 5), device=DEVICE)
+    gridded_operations = LatLonOperations(area)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
@@ -157,7 +164,9 @@ def test_run_on_batch_addition_series():
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    stepper = config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
+    stepper = config.get_stepper(
+        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+    )
     stepped = stepper.run_on_batch(
         data=data_with_ic, optimization=MagicMock(), n_forward_steps=n_steps
     )
@@ -199,6 +208,7 @@ def test_run_on_batch_with_prescribed_ocean():
         "mask": np.array([1.0], dtype=np.float32),
     }
     area = torch.ones((5, 5), device=DEVICE)
+    gridded_operations = LatLonOperations(area)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
@@ -210,7 +220,9 @@ def test_run_on_batch_with_prescribed_ocean():
         ),
         ocean=OceanConfig("b", "mask"),
     )
-    stepper = config.get_stepper(area.shape, area, sigma_coordinates, TIMESTEP)
+    stepper = config.get_stepper(
+        area.shape, gridded_operations, sigma_coordinates, TIMESTEP
+    )
     stepped = stepper.run_on_batch(
         data, optimization=MagicMock(), n_forward_steps=n_steps
     )
@@ -253,13 +265,14 @@ def test_reloaded_stepper_gives_same_prediction():
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
     new_stepper = SingleModuleStepper.from_state(
-        stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates
+        stepper.get_state(),
+        sigma_coordinates=sigma_coordinates,
     )
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.run_on_batch(
@@ -343,7 +356,9 @@ def _setup_and_run_on_batch(
         ),
         ocean=ocean_config,
     )
-    stepper = config.get_stepper(area.shape, area, sigma_coordinates, TIMESTEP)
+    stepper = config.get_stepper(
+        area.shape, LatLonOperations(area), sigma_coordinates, TIMESTEP
+    )
     return stepper.run_on_batch(
         data, optimization=optimization, n_forward_steps=n_forward_steps
     )
@@ -375,7 +390,7 @@ def test_run_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescri
     else:
         ocean_config = None
 
-    data, area_weights, sigma_coords = get_data(all_names, 3, n_forward_steps + 1)
+    data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
 
     if is_train:
         optimization = OptimizationConfig()
@@ -467,7 +482,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     )
     stepper = stepper_config.get_stepper(
         img_shape=data["PRESsfc"].shape[2:],
-        area=area_weights,
+        gridded_operations=LatLonOperations(area_weights),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
@@ -582,7 +597,9 @@ def _get_stepper(
         ocean=ocean_config,
         **kwargs,
     )
-    return config.get_stepper((5, 5), area, sigma_coordinates, TIMESTEP)
+    return config.get_stepper(
+        (5, 5), LatLonOperations(area), sigma_coordinates, TIMESTEP
+    )
 
 
 def test_step():
@@ -781,12 +798,13 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     orig_stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
     stepper_from_state = SingleModuleStepper.from_state(
-        orig_stepper.get_state(), area=area, sigma_coordinates=sigma_coordinates
+        orig_stepper.get_state(),
+        sigma_coordinates=sigma_coordinates,
     )
 
     for stepper in [orig_stepper, stepper_from_state]:

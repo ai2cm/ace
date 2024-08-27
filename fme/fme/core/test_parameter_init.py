@@ -12,6 +12,7 @@ import torch
 from fme.core import parameter_init
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
@@ -46,7 +47,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=(16, 32),
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
@@ -75,7 +76,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         with_builder_stepper_config_data
     ).get_stepper(
         img_shape=(16, 32),
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
@@ -157,7 +158,7 @@ def test_builder_with_weights_sfno_init(
                 with_builder_stepper_config_data
             ).get_stepper(
                 img_shape=built_shape,
-                area=area,
+                gridded_operations=LatLonOperations(area),
                 sigma_coordinates=sigma_coordinates,
                 timestep=TIMESTEP,
             )
@@ -166,7 +167,7 @@ def test_builder_with_weights_sfno_init(
             with_builder_stepper_config_data
         ).get_stepper(
             img_shape=built_shape,
-            area=area,
+            gridded_operations=LatLonOperations(area),
             sigma_coordinates=sigma_coordinates,
             timestep=TIMESTEP,
         )
@@ -217,7 +218,7 @@ def get_config(
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=loaded_shape,
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
@@ -257,7 +258,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
         with_builder_stepper_config_data
     ).get_stepper(
         img_shape=img_shape,
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
@@ -265,7 +266,8 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
     stepper = SingleModuleStepper.from_state(
-        stepper_state, area=area, sigma_coordinates=sigma_coordinates
+        stepper_state,
+        sigma_coordinates=sigma_coordinates,
     )
     assert isinstance(stepper, SingleModuleStepper)
 

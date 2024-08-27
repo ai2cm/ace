@@ -18,6 +18,7 @@ from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
 
@@ -201,7 +202,7 @@ def test_hpx_init(shape):
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=shape,
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
