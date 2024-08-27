@@ -3,9 +3,9 @@ from typing import Dict, Optional, Union
 import torch
 import xarray as xr
 
-from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from .reduced_metrics import AreaWeightedReducedMetric, ReducedMetric
@@ -28,12 +28,10 @@ class MeanAggregator:
 
     def __init__(
         self,
-        area_weights: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         target_time: int = 1,
     ):
-        self._area_weights = area_weights
-        self._shape_x = None
-        self._shape_y = None
+        self._gridded_operations = gridded_operations
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
         self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
@@ -41,38 +39,32 @@ class MeanAggregator:
         self._dist = Distributed.get_instance()
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
-        if self._area_weights is None:
-            self._variable_metrics = {}
-        else:
-            if self._variable_metrics is None:
-                self._variable_metrics = {
-                    "weighted_rmse": {},
-                    "weighted_bias": {},
-                    "weighted_grad_mag_percent_diff": {},
-                }
-                device = get_device()
-                for key in gen_data:
-                    self._variable_metrics["weighted_rmse"][
-                        key
-                    ] = AreaWeightedReducedMetric(
-                        area_weights=self._area_weights,
-                        device=device,
-                        compute_metric=metrics.root_mean_squared_error,
-                    )
-                    self._variable_metrics["weighted_bias"][
-                        key
-                    ] = AreaWeightedReducedMetric(
-                        area_weights=self._area_weights,
-                        device=device,
-                        compute_metric=metrics.weighted_mean_bias,
-                    )
-                    self._variable_metrics["weighted_grad_mag_percent_diff"][
-                        key
-                    ] = AreaWeightedReducedMetric(
-                        area_weights=self._area_weights,
-                        device=device,
-                        compute_metric=metrics.gradient_magnitude_percent_diff,
-                    )
+        if self._variable_metrics is None:
+            self._variable_metrics = {
+                "weighted_rmse": {},
+                "weighted_bias": {},
+                "weighted_grad_mag_percent_diff": {},
+            }
+            device = get_device()
+            for key in gen_data:
+                self._variable_metrics["weighted_rmse"][
+                    key
+                ] = AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_rmse,
+                )
+                self._variable_metrics["weighted_bias"][
+                    key
+                ] = AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_mean_bias,
+                )
+                self._variable_metrics["weighted_grad_mag_percent_diff"][
+                    key
+                ] = AreaWeightedReducedMetric(
+                    device=device,
+                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff,  # noqa: E501
+                )
 
         return self._variable_metrics
 

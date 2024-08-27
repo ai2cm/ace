@@ -14,6 +14,7 @@ from fme.core.climate_data import (
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 
@@ -45,12 +46,12 @@ class DryAir(DerivedMetric):
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         device: torch.device,
         spatial_dims=(2, 3),
     ):
-        self._area_weights = area_weights
+        self._gridded_operations = gridded_operations
         self._sigma_coordinates = sigma_coordinates
         self._dry_air_target_total: Optional[torch.Tensor] = None
         self._dry_air_gen_total: Optional[torch.Tensor] = None
@@ -61,7 +62,7 @@ class DryAir(DerivedMetric):
         def _compute_dry_air_helper(climate_data: ClimateData) -> torch.Tensor:
             return compute_dry_air_absolute_differences(
                 climate_data,
-                area=self._area_weights,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 sigma_coordinates=self._sigma_coordinates,
             )[0]
 
@@ -90,19 +91,18 @@ class DryAir(DerivedMetric):
 class DerivedMetricsAggregator:
     def __init__(
         self,
-        area_weights: torch.Tensor,
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         climate_field_name_prefixes: Mapping[
             str, List[str]
         ] = CLIMATE_FIELD_NAME_PREFIXES,
     ):
-        self.area_weights = area_weights
         self.sigma_coordinates = sigma_coordinates
         self.climate_field_name_prefixes = climate_field_name_prefixes
         device = get_device()
         self._derived_metrics: Dict[str, DerivedMetric] = {
             "surface_pressure_due_to_dry_air": DryAir(
-                self.area_weights, self.sigma_coordinates, device=device
+                gridded_operations, self.sigma_coordinates, device=device
             )
         }
         self._n_batches = 0
