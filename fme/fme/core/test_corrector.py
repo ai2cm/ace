@@ -1,5 +1,5 @@
 import datetime
-from typing import Callable
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import pytest
@@ -15,7 +15,7 @@ from fme.core.corrector import (
     _force_zero_global_mean_moisture_advection,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -59,7 +59,7 @@ def test_force_no_global_mean_moisture_advection():
     assert (original_mean.abs() > 0.0).all()
     fixed_data = _force_zero_global_mean_moisture_advection(
         data,
-        area=area_weights,
+        area_weighted_mean=LatLonOperations(area_weights).area_weighted_mean,
     )
     new_mean = metrics.weighted_mean(
         fixed_data["tendency_of_total_water_path_due_to_advection"],
@@ -70,22 +70,37 @@ def test_force_no_global_mean_moisture_advection():
     np.testing.assert_almost_equal(new_mean.cpu().numpy(), 0.0, decimal=6)
 
 
-def test_force_conserve_dry_air():
+@pytest.mark.parametrize(
+    "size, use_area",
+    [
+        pytest.param((3, 2, 5, 5), True, id="latlon"),
+        pytest.param((3, 12, 2, 3, 3), False, id="healpix"),
+    ],
+)
+def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
     torch.random.manual_seed(0)
     data = {
-        "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)),
-        "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
-        "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
+        "PRESsfc": 10.0 + torch.rand(size=size),
+        "specific_total_water_0": torch.rand(size=size),
+        "specific_total_water_1": torch.rand(size=size),
     }
     sigma_coordinates = SigmaCoordinates(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
-    area_weights = 1.0 + torch.rand(size=(5, 5))
-    ops = LatLonOperations(area_weights)
+    if use_area:
+        area_weights: Optional[torch.Tensor] = 1.0 + torch.rand(
+            size=(size[-2], size[-1])
+        )
+    else:
+        area_weights = None
+    if area_weights is not None:
+        gridded_operations: GriddedOperations = LatLonOperations(area_weights)
+    else:
+        gridded_operations = HEALPixOperations()
     original_nonconservation = get_dry_air_nonconservation(
         data,
         sigma_coordinates=sigma_coordinates,
-        area_weighted_mean=ops.area_weighted_mean,
+        area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     assert original_nonconservation > 0.0
     in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
@@ -94,7 +109,7 @@ def test_force_conserve_dry_air():
         in_data,
         out_data,
         sigma_coordinates=sigma_coordinates,
-        area=area_weights,
+        area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     new_data = {
         k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
@@ -102,7 +117,7 @@ def test_force_conserve_dry_air():
     new_nonconservation = get_dry_air_nonconservation(
         new_data,
         sigma_coordinates=sigma_coordinates,
-        area_weighted_mean=ops.area_weighted_mean,
+        area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     assert new_nonconservation < original_nonconservation
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
@@ -176,7 +191,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         in_data,
         out_data,
         sigma_coordinates=sigma_coordinates,
-        area=area_weights,
+        area_weighted_mean=LatLonOperations(area_weights).area_weighted_mean,
         timestep=TIMESTEP,
         terms_to_modify=terms_to_modify,
     )
