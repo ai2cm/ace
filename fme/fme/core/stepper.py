@@ -387,7 +387,7 @@ class SingleModuleStepper:
         )
 
         self._corrector = config.corrector.build(
-            area=gridded_operations.area_weights,
+            gridded_operations=gridded_operations,
             sigma_coordinates=self.sigma_coordinates,
             timestep=timestep,
         )

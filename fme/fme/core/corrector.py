@@ -1,12 +1,12 @@
 import dataclasses
 import datetime
-from typing import List, Literal, Optional
+from typing import Callable, List, Literal, Optional, Protocol
 
 import torch
 
-from fme.core import metrics
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -98,13 +98,13 @@ class CorrectorConfig:
 
     def build(
         self,
-        area: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ) -> Optional["Corrector"]:
         return Corrector(
             config=self,
-            area=area,
+            gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
         )
@@ -114,12 +114,12 @@ class Corrector:
     def __init__(
         self,
         config: CorrectorConfig,
-        area: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ):
         self._config = config
-        self._area = area
+        self._gridded_operations = gridded_operations
         self._sigma_coordinates = sigma_coordinates
         self._timestep = timestep
 
@@ -136,19 +136,19 @@ class Corrector:
             gen_data = _force_conserve_dry_air(
                 input_data=input_data,
                 gen_data=gen_data,
-                area=self._area,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 sigma_coordinates=self._sigma_coordinates,
             )
         if self._config.zero_global_mean_moisture_advection:
             gen_data = _force_zero_global_mean_moisture_advection(
                 gen_data=gen_data,
-                area=self._area,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
             )
         if self._config.moisture_budget_correction is not None:
             gen_data = _force_conserve_moisture(
                 input_data=input_data,
                 gen_data=gen_data,
-                area=self._area,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 sigma_coordinates=self._sigma_coordinates,
                 timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
@@ -164,10 +164,15 @@ def _force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
     return out
 
 
+class AreaWeightedMean(Protocol):
+    def __call__(self, data: torch.Tensor, keepdim: bool) -> torch.Tensor:
+        ...
+
+
 def _force_conserve_dry_air(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area: Optional[torch.Tensor],
+    area_weighted_mean: AreaWeightedMean,
     sigma_coordinates: SigmaCoordinates,
 ) -> TensorDict:
     """
@@ -199,19 +204,14 @@ def _force_conserve_dry_air(
     if input.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
     gen = ClimateData(gen_data)
-    if area is not None:
-        area = area.to(torch.float64)
     gen_dry_air = gen.surface_pressure_due_to_dry_air(sigma_coordinates)
-    global_gen_dry_air = metrics.weighted_mean(
-        gen_dry_air.to(torch.float64), weights=area, dim=(-2, -1)
-    )
-    global_target_gen_dry_air = metrics.weighted_mean(
+    global_gen_dry_air = area_weighted_mean(gen_dry_air.to(torch.float64), keepdim=True)
+    global_target_gen_dry_air = area_weighted_mean(
         input.surface_pressure_due_to_dry_air(sigma_coordinates).to(torch.float64),
-        weights=area,
-        dim=(-2, -1),
+        keepdim=True,
     )
     error = global_gen_dry_air - global_target_gen_dry_air
-    new_gen_dry_air = gen_dry_air.to(torch.float64) - error[..., None, None]
+    new_gen_dry_air = gen_dry_air.to(torch.float64) - error
     try:
         wat = gen.specific_total_water.to(torch.float64)
     except KeyError:
@@ -227,7 +227,7 @@ def _force_conserve_dry_air(
 
 def _force_zero_global_mean_moisture_advection(
     gen_data: TensorMapping,
-    area: Optional[torch.Tensor],
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
 ) -> TensorDict:
     """
     Update the generated data so advection conserves moisture.
@@ -236,15 +236,13 @@ def _force_zero_global_mean_moisture_advection(
 
     Args:
         gen_data: The generated data.
-        area: (n_lat, n_lon) array containing relative gridcell area, in any
-            units including unitless.
+        area_weighted_mean: Computes an area-weighted mean,
+            removing horizontal dimensions.
     """
     gen = ClimateData(gen_data)
 
-    mean_moisture_advection = metrics.weighted_mean(
+    mean_moisture_advection = area_weighted_mean(
         gen.tendency_of_total_water_path_due_to_advection,
-        weights=area,
-        dim=(-2, -1),
     )
     gen.tendency_of_total_water_path_due_to_advection = (
         gen.tendency_of_total_water_path_due_to_advection
@@ -256,7 +254,7 @@ def _force_zero_global_mean_moisture_advection(
 def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area: Optional[torch.Tensor],
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
     terms_to_modify: Literal[
@@ -278,8 +276,8 @@ def _force_conserve_moisture(
     Args:
         input_data: The input data.
         gen_data: The generated data one timestep after the input data.
-        area: (n_lat, n_lon) array containing relative gridcell area, in any
-            units including unitless.
+        area_weighted_mean: Computes an area-weighted mean,
+            removing horizontal dimensions.
         sigma_coordinates: The sigma coordinates.
         timestep: Timestep of the model.
         terms_to_modify: Which terms to modify, in addition to modifying surface
@@ -297,15 +295,9 @@ def _force_conserve_moisture(
     twp_total_tendency = (
         gen_total_water_path - input.total_water_path(sigma_coordinates)
     ) / timestep_seconds
-    twp_tendency_global_mean = metrics.weighted_mean(
-        twp_total_tendency, weights=area, dim=(-2, -1)
-    )
-    evaporation_global_mean = metrics.weighted_mean(
-        gen.evaporation_rate, weights=area, dim=(-2, -1)
-    )
-    precipitation_global_mean = metrics.weighted_mean(
-        gen.precipitation_rate, weights=area, dim=(-2, -1)
-    )
+    twp_tendency_global_mean = area_weighted_mean(twp_total_tendency)
+    evaporation_global_mean = area_weighted_mean(gen.evaporation_rate)
+    precipitation_global_mean = area_weighted_mean(gen.precipitation_rate)
     if terms_to_modify.endswith("precipitation"):
         # We want to achieve
         #     global_mean(twp_total_tendency) = (
