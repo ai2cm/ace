@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 from .enso import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggregator
 
@@ -106,7 +107,7 @@ def test_enso_coefficient_aggregator_values(scaling):
             initial_times=sample_times.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
-            area_weights=area_weights,
+            gridded_operations=LatLonOperations(area_weights),
         )
     assert len(enso_agg._sample_index_series) == n_samples
     for index_values in enso_agg._sample_index_series:
@@ -164,7 +165,7 @@ def test_enso_index_inference_overlap(shift):
             initial_times=sample_times.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
-            area_weights=area_weights,
+            gridded_operations=LatLonOperations(area_weights),
         )
     enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
@@ -205,7 +206,7 @@ def test_enso_agg_calendar(calendar):
             initial_times=sample_times.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
-            area_weights=area_weights,
+            gridded_operations=LatLonOperations(area_weights),
         )
     enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()

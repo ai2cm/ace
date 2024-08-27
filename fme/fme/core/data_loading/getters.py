@@ -77,7 +77,6 @@ def get_dataset(
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
     ensemble.metadata = datasets[0].metadata  # type: ignore
-    ensemble.area_weights = datasets[0].area_weights  # type: ignore
     ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
     ensemble.timestep = datasets[0].timestep  # type: ignore
     ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
@@ -136,7 +135,6 @@ def get_data_loader(
     return GriddedData(
         loader=dataloader,
         metadata=dataset.metadata,
-        area_weights=dataset.area_weights,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
         timestep=dataset.timestep,
@@ -184,7 +182,6 @@ def get_inference_data(
     return GriddedData(
         loader=loader,
         metadata=dataset.metadata,
-        area_weights=dataset.area_weights,
         sigma_coordinates=dataset.sigma_coordinates,
         timestep=dataset.timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,

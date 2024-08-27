@@ -10,7 +10,7 @@ from fme.core.aggregator.plotting import get_cmap_limits, plot_imshow, plot_pane
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.metrics import root_mean_squared_error
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
@@ -76,7 +76,7 @@ class EnsoCoefficientEvaluatorAggregator:
         initial_times: Initial times for each sample.
         n_forward_timesteps: Number of timesteps for each sample.
         timestep: Timestep duration.
-        area_weights: Area weights for spatial averaging.
+        gridded_operations: GriddedOperations instance for area-weighted RMSE.
         metadata: Metadata for the variables in the data.
     """
 
@@ -85,7 +85,7 @@ class EnsoCoefficientEvaluatorAggregator:
         initial_times: xr.DataArray,
         n_forward_timesteps: int,
         timestep: datetime.timedelta,
-        area_weights: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._sample_index_series: List[
@@ -93,7 +93,7 @@ class EnsoCoefficientEvaluatorAggregator:
         ] = get_sample_index_series(
             self.enso_index, initial_times, n_forward_timesteps, timestep
         )
-        self._area_weights: torch.Tensor = area_weights
+        self._ops = gridded_operations
         if metadata is not None:
             self._metadata: Mapping[str, VariableMetadata] = metadata
         else:
@@ -267,10 +267,9 @@ class EnsoCoefficientEvaluatorAggregator:
             )
             images.update({f"coefficient_maps/{name}": coefficient_map})
             rmse = float(
-                root_mean_squared_error(
+                self._ops.area_weighted_rmse(
                     predicted=gen_coefficients[name],
                     truth=target_coefficients[name],
-                    weights=self._area_weights,
                 )
                 .cpu()
                 .numpy()
