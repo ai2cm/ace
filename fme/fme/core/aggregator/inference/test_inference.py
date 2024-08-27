@@ -8,6 +8,7 @@ import fme
 from fme.core.aggregator.inference import InferenceAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -25,7 +26,7 @@ def test_logs_labels_exist():
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
-        area_weights,
+        LatLonOperations(area_weights),
         sigma_coordinates,
         TIMESTEP,
         n_timesteps=n_time,
@@ -58,7 +59,7 @@ def test_logs_labels_exist_with_reference_time_means():
         }
     )
     agg = InferenceAggregator(
-        area_weights,
+        LatLonOperations(area_weights),
         sigma_coordinates,
         TIMESTEP,
         n_timesteps=n_time,
@@ -84,7 +85,7 @@ def test_inference_logs_labels_exist():
     area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
-        area_weights,
+        LatLonOperations(area_weights),
         sigma_coordinates,
         TIMESTEP,
         n_timesteps=n_time,

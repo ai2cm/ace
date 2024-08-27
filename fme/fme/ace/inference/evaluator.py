@@ -211,12 +211,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         data_requirements,
     )
 
-    if data.area_weights is not None:
-        area_weights = data.area_weights.to(fme.get_device())
-    else:
-        area_weights = data.area_weights
     stepper = config.load_stepper(
-        area_weights,
+        data.horizontal_coordinates.area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:
@@ -230,7 +226,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         initial_times = batch.times.isel(time=0)
         break
     aggregator = aggregator_config.build(
-        area_weights=area_weights,
         sigma_coordinates=data.sigma_coordinates,
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,

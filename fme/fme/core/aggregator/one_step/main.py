@@ -4,6 +4,7 @@ import torch
 
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from .map import MapAggregator
@@ -36,25 +37,26 @@ class OneStepAggregator:
 
     def __init__(
         self,
-        area_weights: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
     ):
         """
         Args:
-            area_weights: Weights for each horizontal grid coordinate
+            gridded_operations: Operations for computing metrics on gridded data.
             sigma_coordinates: Coordinates for defining pressure levels.
             metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
         """
-        aggregators: Dict[str, _Aggregator] = {"mean": MeanAggregator(area_weights)}
+        aggregators: Dict[str, _Aggregator] = {
+            "mean": MeanAggregator(gridded_operations)
+        }
         aggregators["snapshot"] = SnapshotAggregator(metadata)
-        if area_weights is not None:  # Not HEALPix data
-            aggregators["derived"] = DerivedMetricsAggregator(
-                area_weights, sigma_coordinates
-            )
+        aggregators["derived"] = DerivedMetricsAggregator(
+            gridded_operations, sigma_coordinates
+        )
         aggregators["mean_map"] = MapAggregator(metadata)
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}

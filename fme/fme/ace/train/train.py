@@ -146,7 +146,7 @@ class Trainer:
         logging.info("Starting model initialization")
         self.stepper = config.stepper.get_stepper(
             img_shape=img_shape,
-            area=self.train_data.area_weights,
+            area=self.train_data.horizontal_coordinates.area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
             timestep=self.train_data.timestep,
         )
@@ -350,11 +350,8 @@ class Trainer:
             self._ema.restore(parameters=self.stepper.modules.parameters())
 
     def validate_one_epoch(self):
-        area_weights = self.train_data.area_weights
-        if area_weights is not None:
-            area_weights = area_weights.to(fme.get_device())
         aggregator = OneStepAggregator(
-            area_weights=area_weights,
+            gridded_operations=self.train_data.gridded_operations,
             sigma_coordinates=self.train_data.sigma_coordinates,
             metadata=self.train_data.metadata,
             loss_scaling=self.stepper.effective_loss_scaling,
@@ -394,11 +391,7 @@ class Trainer:
         for batch in self._inference_data.loader:
             initial_times = batch.times.isel(time=0)
             break
-        area_weights = self.train_data.area_weights
-        if area_weights is not None:
-            area_weights = area_weights.to(fme.get_device())
         aggregator = aggregator_config.build(
-            area_weights=area_weights,
             sigma_coordinates=self.train_data.sigma_coordinates,
             horizontal_coordinates=self.train_data.horizontal_coordinates,
             timestep=self.train_data.timestep,
@@ -513,7 +506,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
     ema_stepper: SingleModuleStepper = SingleModuleStepper.from_state(
         ema_checkpoint["stepper"],
-        area=trainer.train_data.area_weights,
+        area=trainer.train_data.horizontal_coordinates.area_weights,
         sigma_coordinates=trainer.train_data.sigma_coordinates,
     )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)

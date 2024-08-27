@@ -59,14 +59,14 @@ class TimeMeanAggregator:
 
     def __init__(
         self,
-        ops: GriddedOperations,
+        gridded_operations: GriddedOperations,
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
     ):
         """
         Args:
-            ops: Computes gridded operations.
+            gridded_operations: Computes gridded operations.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
             metadata: Mapping of variable names their metadata that will
@@ -74,7 +74,7 @@ class TimeMeanAggregator:
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
         """
-        self._ops = ops
+        self._ops = gridded_operations
         self._target = target
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
@@ -259,9 +259,11 @@ class TimeMeanEvaluatorAggregator:
         else:
             self._metadata = metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._target_agg = TimeMeanAggregator(ops=ops, target=target, metadata=metadata)
+        self._target_agg = TimeMeanAggregator(
+            gridded_operations=ops, target=target, metadata=metadata
+        )
         self._gen_agg = TimeMeanAggregator(
-            ops=ops,
+            gridded_operations=ops,
             target=target,
             metadata=metadata,
             reference_means=reference_means,

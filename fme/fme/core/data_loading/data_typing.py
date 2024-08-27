@@ -9,6 +9,8 @@ import torch
 import xarray as xr
 from astropy_healpix import HEALPix
 
+from fme.core import metrics
+from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
@@ -104,6 +106,16 @@ class HorizontalCoordinates(abc.ABC):
     def get_lat(self) -> torch.Tensor:
         pass
 
+    @property
+    @abc.abstractmethod
+    def area_weights(self) -> Optional[torch.Tensor]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def gridded_operations(self) -> GriddedOperations:
+        pass
+
 
 @dataclasses.dataclass
 class LatLonCoordinates(HorizontalCoordinates):
@@ -123,6 +135,13 @@ class LatLonCoordinates(HorizontalCoordinates):
     lat: torch.Tensor
     loaded_lat_name: str = "lat"
     loaded_lon_name: str = "lon"
+
+    def __post_init__(self):
+        self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
+
+    @property
+    def area_weights(self) -> torch.Tensor:
+        return self._area_weights
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -170,6 +189,10 @@ class LatLonCoordinates(HorizontalCoordinates):
             return "equiangular"
         else:
             return "legendre-gauss"
+
+    @property
+    def gridded_operations(self) -> LatLonOperations:
+        return LatLonOperations(self.area_weights)
 
 
 @dataclasses.dataclass
@@ -239,16 +262,19 @@ class HEALPixCoordinates(HorizontalCoordinates):
     def grid(self) -> Literal["healpix"]:
         return "healpix"
 
+    @property
+    def area_weights(self) -> Literal[None]:
+        return None
+
+    @property
+    def gridded_operations(self) -> HEALPixOperations:
+        return HEALPixOperations()
+
 
 class Dataset(torch.utils.data.Dataset, abc.ABC):
     @property
     @abc.abstractmethod
     def metadata(self) -> Mapping[str, VariableMetadata]:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def area_weights(self) -> Optional[torch.Tensor]:
         ...
 
     @property
@@ -310,7 +336,6 @@ class GriddedData:
 
     loader: torch.utils.data.DataLoader
     metadata: Mapping[str, VariableMetadata]
-    area_weights: Optional[torch.Tensor]
     sigma_coordinates: SigmaCoordinates
     horizontal_coordinates: HorizontalCoordinates
     timestep: datetime.timedelta
@@ -326,3 +351,11 @@ class GriddedData:
             **self.horizontal_coordinates.coords,
             **self.sigma_coordinates.coords,
         }
+
+    @property
+    def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
+        return self.horizontal_coordinates.grid
+
+    @property
+    def gridded_operations(self) -> GriddedOperations:
+        return self.horizontal_coordinates.gridded_operations

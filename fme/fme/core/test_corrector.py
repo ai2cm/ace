@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -15,6 +15,7 @@ from fme.core.corrector import (
     _force_zero_global_mean_moisture_advection,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorMapping
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -22,7 +23,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 def get_dry_air_nonconservation(
     data: TensorMapping,
-    area_weights: Optional[torch.Tensor],
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
 ):
     """
@@ -33,11 +34,14 @@ def get_dry_air_nonconservation(
         data: A mapping from variable name to tensor of shape
             [sample, time, lat, lon], in physical units. specific_total_water in kg/kg
             and surface_pressure in Pa must be present.
-        area_weights: The area of each grid cell as a [lat, lon] tensor, in m^2.
+        area_weighted_mean: Computes the area-weighted mean of a tensor, removing the
+            horizontal dimensions.
         sigma_coordinates: The sigma coordinates of the model.
     """
     return compute_dry_air_absolute_differences(
-        ClimateData(data), area=area_weights, sigma_coordinates=sigma_coordinates
+        ClimateData(data),
+        area_weighted_mean=area_weighted_mean,
+        sigma_coordinates=sigma_coordinates,
     ).mean()
 
 
@@ -77,10 +81,11 @@ def test_force_conserve_dry_air():
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     area_weights = 1.0 + torch.rand(size=(5, 5))
+    ops = LatLonOperations(area_weights)
     original_nonconservation = get_dry_air_nonconservation(
         data,
         sigma_coordinates=sigma_coordinates,
-        area_weights=area_weights,
+        area_weighted_mean=ops.area_weighted_mean,
     )
     assert original_nonconservation > 0.0
     in_data = {k: v.select(dim=1, index=0) for k, v in data.items()}
@@ -97,7 +102,7 @@ def test_force_conserve_dry_air():
     new_nonconservation = get_dry_air_nonconservation(
         new_data,
         sigma_coordinates=sigma_coordinates,
-        area_weights=area_weights,
+        area_weighted_mean=ops.area_weighted_mean,
     )
     assert new_nonconservation < original_nonconservation
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)

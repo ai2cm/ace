@@ -4,6 +4,7 @@ import torch
 from fme.core.aggregator.one_step import OneStepAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 
 def test_labels_exist():
@@ -13,7 +14,7 @@ def test_labels_exist():
     loss = 1.0
     area_weights = torch.ones(ny).to(get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = OneStepAggregator(area_weights, sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -41,7 +42,7 @@ def test_loss():
     area_weights = torch.ones(1).to(get_device())
     nz = 3
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    aggregator = OneStepAggregator(area_weights, sigma_coordinates)
+    aggregator = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     aggregator.record_batch(
         loss=1.0,
         target_data=example_data,
@@ -77,7 +78,7 @@ def test_aggregator_raises_on_no_data():
     ny, nz = 2, 3
     area_weights = torch.ones(ny).to(get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = OneStepAggregator(area_weights, sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             loss=1.0, target_data={}, gen_data={}, target_data_norm={}, gen_data_norm={}
@@ -97,7 +98,7 @@ def test_derived(very_fast_only: bool):
     sigma_coordinates = SigmaCoordinates(
         torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
     )
-    agg = OneStepAggregator(area_weights, sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
 
     def _make_data():
         fields = ["a", "PRESsfc"] + [f"specific_total_water_{i}" for i in range(nz)]
@@ -132,7 +133,7 @@ def test_derived_missing_surface_pressure():
     sigma_coordinates = SigmaCoordinates(
         torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
     )
-    agg = OneStepAggregator(area_weights, sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
 
     def _make_data():
         fields = ["a"]  # N.B. no surface pressure or water fields.
@@ -163,7 +164,9 @@ def test__get_loss_scaled_mse_components():
         "b": torch.tensor(0.5),
     }
     agg = OneStepAggregator(
-        area_weights=torch.ones(10).to(get_device()),
+        gridded_operations=LatLonOperations(
+            area_weights=torch.ones(10).to(get_device())
+        ),
         sigma_coordinates=SigmaCoordinates(x, x),
         loss_scaling=loss_scaling,
     )
