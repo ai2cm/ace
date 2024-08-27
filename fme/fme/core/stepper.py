@@ -383,7 +383,7 @@ class SingleModuleStepper:
         self.timestep = timestep
 
         self.loss_obj = config.loss.build(
-            gridded_operations.area_weights, config.out_names, self.CHANNEL_DIM
+            gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
         )
 
         self._corrector = config.corrector.build(
