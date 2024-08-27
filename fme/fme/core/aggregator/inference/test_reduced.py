@@ -19,7 +19,6 @@ def test_area_weighted_reduced_metric_includes_later_window_starts():
         return truth.mean(dim=(2, 3))
 
     metric = AreaWeightedReducedMetric(
-        area_weights=torch.ones([4]),
         device=get_device(),
         compute_metric=compute_metric,
         n_timesteps=7,

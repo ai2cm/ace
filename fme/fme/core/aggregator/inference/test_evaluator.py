@@ -5,7 +5,6 @@ import pytest
 import torch
 import xarray as xr
 
-import fme
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
 from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
@@ -24,7 +23,6 @@ def test_logs_labels_exist():
     ny = 2
     nz = 3
     loss = 1.0
-    area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
@@ -35,7 +33,6 @@ def test_logs_labels_exist():
     initial_times = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
-        area_weights,
         sigma_coordinates,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
@@ -83,7 +80,6 @@ def test_inference_logs_labels_exist():
     ny = 2
     nz = 3
     loss = 1.0
-    area_weights = torch.ones(ny).to(fme.get_device())
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
@@ -93,7 +89,6 @@ def test_inference_logs_labels_exist():
     )
     initial_times = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        area_weights,
         sigma_coordinates,
         horizontal_coordinates,
         TIMESTEP,
@@ -138,7 +133,6 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     # while this directly tests the "mean" result, this is really a test that
     # the data from the correct timestep is piped into the aggregator.
     overlap = 1  # tested code assumes windows have one overlapping point
-    area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     nx, ny = 4, 4
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
@@ -150,7 +144,6 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
     )
     initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        area_weights,
         sigma_coordinates,
         horizontal_coordinates,
         TIMESTEP,
@@ -196,7 +189,6 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     Test that the inference logs are the correct length when using one or more
     possibly-overlapping windows.
     """
-    area_weights = torch.ones(4).to(fme.get_device())
     nz = 3
     nx, ny = 4, 4
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
@@ -208,7 +200,6 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
     )
     initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        area_weights,
         sigma_coordinates,
         horizontal_coordinates,
         TIMESTEP,

@@ -250,12 +250,8 @@ def run_inference_from_config(config: InferenceConfig):
         initial_times,
     )
 
-    if data.area_weights is not None:
-        area_weights = data.area_weights.to(fme.get_device())
-    else:
-        area_weights = None
     stepper = config.load_stepper(
-        area_weights,
+        data.horizontal_coordinates.area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:
@@ -265,7 +261,7 @@ def run_inference_from_config(config: InferenceConfig):
         )
 
     aggregator = config.aggregator.build(
-        area_weights=area_weights,
+        gridded_operations=data.gridded_operations,
         sigma_coordinates=data.sigma_coordinates,
         timestep=data.timestep,
         n_timesteps=config.n_forward_steps + 1,

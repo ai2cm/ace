@@ -1,6 +1,6 @@
 import re
 from types import MappingProxyType
-from typing import List, Mapping, Optional, Union
+from typing import Callable, List, Mapping, Union
 
 import torch
 
@@ -271,7 +271,7 @@ class ClimateData:
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData,
-    area: Optional[torch.Tensor],
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
 ) -> torch.Tensor:
     """
@@ -291,21 +291,14 @@ def compute_dry_air_absolute_differences(
         pressure = climate_data.surface_pressure
     except KeyError:
         return torch.tensor([torch.nan])
-    return (
-        metrics.weighted_mean(
-            metrics.surface_pressure_due_to_dry_air(
-                water,  # (sample, time, y, x, level)
-                pressure,
-                sigma_coordinates.ak,
-                sigma_coordinates.bk,
-            ),
-            area,
-            dim=(2, 3),
-        )
-        .diff(dim=-1)
-        .abs()
-        .mean(dim=0)
+    ps_dry = metrics.surface_pressure_due_to_dry_air(
+        water,  # (sample, time, y, x, level)
+        pressure,
+        sigma_coordinates.ak,
+        sigma_coordinates.bk,
     )
+    ps_dry_mean = area_weighted_mean(ps_dry)
+    return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 
 
 def _layer_thickness(

@@ -4,11 +4,9 @@ and aggregating them into a single metric value. The functions here mainly exist
 to turn metric functions that may have different APIs into a common API,
 so that they can be iterated over and called in the same way in a loop.
 """
-from typing import Optional, Protocol
+from typing import Protocol
 
 import torch
-
-from fme.core.metrics import Dimension
 
 
 class AreaWeightedFunction(Protocol):
@@ -21,8 +19,6 @@ class AreaWeightedFunction(Protocol):
         self,
         truth: torch.Tensor,
         predicted: torch.Tensor,
-        weights: Optional[torch.Tensor] = None,
-        dim: Dimension = (),
     ) -> torch.Tensor:
         ...
 
@@ -52,11 +48,9 @@ class AreaWeightedReducedMetric:
 
     def __init__(
         self,
-        area_weights: torch.Tensor,
         device: torch.device,
         compute_metric: AreaWeightedFunction,
     ):
-        self._area_weights = area_weights
         self._compute_metric = compute_metric
         self._total = None
         self._device = device
@@ -68,9 +62,7 @@ class AreaWeightedReducedMetric:
             target: Target data. Should have shape [batch, time, height, width].
             gen: Generated data. Should have shape [batch, time, height, width].
         """
-        new_value = self._compute_metric(
-            target, gen, weights=self._area_weights, dim=(-2, -1)
-        ).mean(dim=0)
+        new_value = self._compute_metric(target, gen).mean(dim=0)
         if self._total is None:
             self._total = torch.zeros_like(new_value, device=self._device)
         self._total += new_value

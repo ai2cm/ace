@@ -15,14 +15,26 @@ class GriddedOperations(abc.ABC):
         ...
 
     def area_weighted_mean_bias(
-        self, predicted: torch.Tensor, truth: torch.Tensor
+        self, truth: torch.Tensor, predicted: torch.Tensor
     ) -> torch.Tensor:
         return self.area_weighted_mean(predicted - truth)
 
     def area_weighted_rmse(
-        self, predicted: torch.Tensor, truth: torch.Tensor
+        self, truth: torch.Tensor, predicted: torch.Tensor
     ) -> torch.Tensor:
         return torch.sqrt(self.area_weighted_mean((predicted - truth) ** 2))
+
+    def area_weighted_std(self, data: torch.Tensor, keepdim: bool = False):
+        return self.area_weighted_mean(
+            (data - self.area_weighted_mean(data, keepdim=True)) ** 2,
+            keepdim=keepdim,
+        ).sqrt()
+
+    @abc.abstractmethod
+    def area_weighted_gradient_magnitude_percent_diff(
+        self, truth: torch.Tensor, predicted: torch.Tensor
+    ):
+        ...
 
     def to_state(self) -> Dict[str, Any]:
         return {
@@ -83,6 +95,8 @@ def get_all_subclasses(cls: Type[T]) -> List[Type[T]]:
 
 
 class LatLonOperations(GriddedOperations):
+    HORIZONTAL_DIMS = (-2, -1)
+
     def __init__(self, area_weights: torch.Tensor):
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
@@ -94,17 +108,39 @@ class LatLonOperations(GriddedOperations):
             area_weights = self._cpu_area
         else:
             area_weights = self._device_area
-        return metrics.weighted_mean(data, area_weights, dim=(-2, -1), keepdim=keepdim)
+        return metrics.weighted_mean(
+            data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+
+    def area_weighted_gradient_magnitude_percent_diff(
+        self, truth: torch.Tensor, predicted: torch.Tensor
+    ):
+        if predicted.device.type == "cpu":
+            area_weights = self._cpu_area
+        else:
+            area_weights = self._device_area
+        return metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
+        )
 
     def get_initialization_kwargs(self) -> Dict[str, Any]:
         return {"area_weights": self._cpu_area}
 
 
 class HEALPixOperations(GriddedOperations):
+    HORIZONTAL_DIMS = (-3, -2, -1)
+
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
     ) -> torch.Tensor:
-        return data.mean(dim=(-3, -2, -1), keepdim=keepdim)
+        return data.mean(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
+
+    def area_weighted_gradient_magnitude_percent_diff(
+        self, truth: torch.Tensor, predicted: torch.Tensor
+    ):
+        return metrics.gradient_magnitude_percent_diff(
+            truth, predicted, weights=None, dim=self.HORIZONTAL_DIMS
+        )
 
     def get_initialization_kwargs(self) -> Dict[str, Any]:
         return {}

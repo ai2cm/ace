@@ -8,13 +8,14 @@ import xarray as xr
 
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
+    LatLonCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
-from ...gridded_ops import get_gridded_operations
+from ...gridded_ops import GriddedOperations
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator
 from .enso import EnsoCoefficientEvaluatorAggregator
@@ -134,7 +135,6 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -165,7 +165,6 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            area_weights=area_weights,
             sigma_coordinates=sigma_coordinates,
             horizontal_coordinates=horizontal_coordinates,
             timestep=timestep,
@@ -193,7 +192,6 @@ class InferenceEvaluatorAggregator:
 
     def __init__(
         self,
-        area_weights: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -211,8 +209,8 @@ class InferenceEvaluatorAggregator:
     ):
         """
         Args:
-            area_weights: Area weights for each grid cell.
             sigma_coordinates: Data sigma coordinates
+            horizontal_coordinates: Data horizontal coordinates
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
             initial_times: Initial times for each sample.
@@ -234,16 +232,16 @@ class InferenceEvaluatorAggregator:
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
-        ops = get_gridded_operations(area_weights)
+        ops = horizontal_coordinates.gridded_operations
         self._aggregators = {
             "mean": MeanAggregator(
-                area_weights,
+                ops,
                 target="denorm",
                 n_timesteps=n_timesteps,
                 metadata=metadata,
             ),
             "mean_norm": MeanAggregator(
-                area_weights,
+                ops,
                 target="norm",
                 n_timesteps=n_timesteps,
                 metadata=metadata,
@@ -251,27 +249,21 @@ class InferenceEvaluatorAggregator:
         }
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
-                area_weights, target_time=20
+                ops, target_time=20
             )
-        if area_weights is not None:
+        if isinstance(horizontal_coordinates, LatLonCoordinates):
             if log_zonal_mean_images:
                 self._aggregators["zonal_mean"] = ZonalMeanAggregator(
                     n_timesteps=n_timesteps,
                     metadata=metadata,
                 )
-            if len(area_weights.shape) == 2:
-                self._aggregators[
-                    "spherical_power_spectrum"
-                ] = PairedSphericalPowerSpectrumAggregator(
-                    area_weights.shape[-2],
-                    area_weights.shape[-1],
-                    horizontal_coordinates.grid,
-                )
-            else:
-                warnings.warn(
-                    "Area weights are not 2D, spherical power spectrum \
-                        will not be computed"
-                )
+            self._aggregators[
+                "spherical_power_spectrum"
+            ] = PairedSphericalPowerSpectrumAggregator(
+                horizontal_coordinates.area_weights.shape[-2],
+                horizontal_coordinates.area_weights.shape[-1],
+                horizontal_coordinates.grid,
+            )
             if log_video:
                 self._aggregators["video"] = VideoAggregator(
                     n_timesteps=n_timesteps,
@@ -311,7 +303,7 @@ class InferenceEvaluatorAggregator:
                 initial_times,
                 n_timesteps - 1,
                 timestep,
-                area_weights,
+                gridded_operations=ops,
                 metadata=metadata,
             )
 
@@ -451,7 +443,7 @@ class InferenceAggregatorConfig:
 
     def build(
         self,
-        area_weights: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -462,7 +454,7 @@ class InferenceAggregatorConfig:
         else:
             time_means = None
         return InferenceAggregator(
-            area_weights=area_weights,
+            gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
@@ -481,7 +473,7 @@ class InferenceAggregator:
 
     def __init__(
         self,
-        area_weights: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -490,7 +482,7 @@ class InferenceAggregator:
     ):
         """
         Args:
-            area_weights: Area weights for each grid cell.
+            gridded_operations: Gridded operations for computing horizontal reductions.
             sigma_coordinates: Data sigma coordinates
             timestep: Timestep of the model.
             metadata: Mapping of variable names their metadata that will
@@ -499,13 +491,12 @@ class InferenceAggregator:
         """
         aggregators: Dict[str, _Aggregator] = {
             "mean": SingleTargetMeanAggregator(
-                area_weights,
+                gridded_operations,
                 n_timesteps=n_timesteps,
             )
         }
-        ops = get_gridded_operations(area_weights)
         aggregators["time_mean"] = TimeMeanAggregator(
-            ops,
+            gridded_operations=gridded_operations,
             metadata=metadata,
             reference_means=time_mean_reference_data,
         )
