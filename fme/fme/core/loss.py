@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
 
 import torch
 import torch.linalg
@@ -96,15 +96,12 @@ class LpLoss(torch.nn.Module):
 
 
 class AreaWeightedMSELoss(torch.nn.Module):
-    def __init__(self, area: Optional[torch.Tensor]):
+    def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
         super(AreaWeightedMSELoss, self).__init__()
-        if area is not None:
-            self._area_weights = area / area.mean()
-        else:
-            self._area_weights = 1
+        self._area_weighted_mean = area_weighted_mean
 
     def __call__(self, x, y):
-        return torch.mean((x - y) ** 2 * self._area_weights)
+        return torch.mean(self._area_weighted_mean((x - y) ** 2))
 
 
 class WeightedSum(torch.nn.Module):
@@ -136,17 +133,21 @@ class GlobalMeanLoss(torch.nn.Module):
     A module which computes a loss on the global mean of each sample.
     """
 
-    def __init__(self, area: Optional[torch.Tensor], loss: torch.nn.Module):
+    def __init__(
+        self,
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        loss: torch.nn.Module,
+    ):
         """
         Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
+            area_weighted_mean: Computes an area-weighted mean, removing the
+                horizontal dimensions.
             loss: A loss function which takes two tensors of shape
                 (n_samples, n_timesteps, n_channels) and returns a scalar
                 tensor.
         """
         super().__init__()
-        self.global_mean = GlobalMean(area)
+        self.global_mean = GlobalMean(area_weighted_mean)
         self.loss = loss
 
     def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -156,17 +157,14 @@ class GlobalMeanLoss(torch.nn.Module):
 
 
 class GlobalMean(torch.nn.Module):
-    def __init__(self, area: Optional[torch.Tensor]):
+    def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
         """
         Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
+            area_weighted_mean: Computes an area-weighted mean, removing the
+                horizontal dimensions.
         """
         super().__init__()
-        if area is not None:
-            self.area_weights = area / area.sum()
-        else:
-            self.area_weights = None
+        self._area_weighted_mean = area_weighted_mean
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -174,15 +172,7 @@ class GlobalMean(torch.nn.Module):
             x: A tensor with spatial dimensions in shape (n_samples, n_timesteps,
              n_channels, n_lat, n_lon)
         """
-        if self.area_weights is not None:
-            return (x * self.area_weights).sum(dim=(-1, -2))
-        else:  # this is healpix data, which shouldn't be used in global mean code
-            # this would be how to handle it if we did want to
-            # return x.sum(dim=(-1, -2, -4))
-            raise NotImplementedError(
-                "GlobalMean loss not implemented for healpix data. Please use a \
-                different loss."
-            )
+        return self._area_weighted_mean(x)
 
 
 class VariableWeightingLoss(torch.nn.Module):
@@ -232,12 +222,17 @@ class LossConfig:
             raise NotImplementedError(self.global_mean_type)
 
     def build(
-        self, area: Optional[torch.Tensor], reduction: Literal["mean", "none"]
+        self,
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        reduction: Literal["mean", "none"],
     ) -> Any:
         """
         Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
+            area_weighted_mean: Computes an area-weighted mean, removing the
+                horizontal dimensions. Only used if the loss function is
+                AreaWeightedMSE.
+            reduction: The reduction to apply to the loss, either "mean" or "none".
+                Only used if the loss function is L1, MSE, or LpLoss.
         """
         if self.type == "LpLoss":
             main_loss = LpLoss(**self.kwargs)
@@ -246,13 +241,14 @@ class LossConfig:
         elif self.type == "MSE":
             main_loss = torch.nn.MSELoss(reduction=reduction)
         elif self.type == "AreaWeightedMSE":
-            main_loss = AreaWeightedMSELoss(area)
+            main_loss = AreaWeightedMSELoss(area_weighted_mean)
         elif self.type == "NaN":
             main_loss = NaNLoss()
 
         if self.global_mean_type is not None:
             global_mean_loss = GlobalMeanLoss(
-                area=area, loss=LpLoss(**self.global_mean_kwargs)
+                area_weighted_mean=area_weighted_mean,
+                loss=LpLoss(**self.global_mean_kwargs),
             )
             final_loss = WeightedSum(
                 modules=[main_loss, global_mean_loss],
@@ -305,9 +301,12 @@ class WeightedMappingLossConfig:
         )
 
     def build(
-        self, area: Optional[torch.Tensor], out_names: List[str], channel_dim: int = -3
+        self,
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        out_names: List[str],
+        channel_dim: int = -3,
     ) -> Any:
-        loss = self.loss_config.build(area, reduction="mean")
+        loss = self.loss_config.build(area_weighted_mean, reduction="mean")
         weighted_loss = VariableWeightingLoss(
             weights=_construct_weight_tensor(
                 self.weights, out_names, channel_dim=channel_dim
