@@ -37,13 +37,13 @@ def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
 
 def load_stepper(
     checkpoint_file: str,
-    area: Optional[torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     ocean_config: Optional[OceanConfig] = None,
 ) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
     stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
+        checkpoint["stepper"],
+        sigma_coordinates=sigma_coordinates,
     )
     if ocean_config is not None:
         logging.info(
@@ -136,18 +136,17 @@ class InferenceEvaluatorConfig:
         self.logging.configure_gcs()
 
     def load_stepper(
-        self, area: Optional[torch.Tensor], sigma_coordinates: SigmaCoordinates
+        self,
+        sigma_coordinates: SigmaCoordinates,
     ) -> SingleModuleStepper:
         """
         Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
+            gridded_operations: The gridded operations to use for the model.
             sigma_coordinates: The sigma coordinates of the model.
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = load_stepper(
             self.checkpoint_path,
-            area=area,
             sigma_coordinates=sigma_coordinates,
             ocean_config=self.ocean,
         )
@@ -212,7 +211,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     )
 
     stepper = config.load_stepper(
-        data.horizontal_coordinates.area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:

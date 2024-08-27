@@ -170,18 +170,16 @@ class InferenceConfig:
         self.logging.configure_gcs()
 
     def load_stepper(
-        self, area: Optional[torch.Tensor], sigma_coordinates: SigmaCoordinates
+        self,
+        sigma_coordinates: SigmaCoordinates,
     ) -> SingleModuleStepper:
         """
         Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
             sigma_coordinates: The sigma coordinates of the model.
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = load_stepper(
             self.checkpoint_path,
-            area=area,
             sigma_coordinates=sigma_coordinates,
             ocean_config=self.ocean,
         )
@@ -251,7 +249,6 @@ def run_inference_from_config(config: InferenceConfig):
     )
 
     stepper = config.load_stepper(
-        data.horizontal_coordinates.area_weights,
         sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
     )
     if stepper.timestep != data.timestep:

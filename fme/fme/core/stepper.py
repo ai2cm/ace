@@ -14,6 +14,7 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import cast_tensordict_to_device, get_device
 from fme.core.distributed import Distributed
+from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
     FromStateNormalizer,
@@ -128,7 +129,7 @@ class SingleModuleStepperConfig:
     def get_stepper(
         self,
         img_shape: Tuple[int, int],
-        area: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
     ):
@@ -136,7 +137,7 @@ class SingleModuleStepperConfig:
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
-            area=area,
+            gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
         )
@@ -233,12 +234,11 @@ class ExistingStepperConfig:
             self._load_checkpoint()["stepper"]["config"]
         ).get_base_weights()
 
-    def get_stepper(self, img_shape, area, sigma_coordinates, timestep):
+    def get_stepper(self, img_shape, gridded_operations, sigma_coordinates, timestep):
         del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return SingleModuleStepper.from_state(
             self._load_checkpoint()["stepper"],
-            area=area,
             sigma_coordinates=sigma_coordinates,
         )
 
@@ -333,7 +333,7 @@ class SingleModuleStepper:
         self,
         config: SingleModuleStepperConfig,
         img_shape: Tuple[int, int],
-        area: Optional[torch.Tensor],
+        gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -349,6 +349,7 @@ class SingleModuleStepper:
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
+        self._gridded_operations = gridded_operations  # stored for serializing
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
@@ -378,18 +379,15 @@ class SingleModuleStepper:
         self._is_distributed = dist.is_distributed()
         self.module = dist.wrap_module(self.module)
 
-        if area is not None:
-            self.area = area.to(get_device())
-        else:
-            self.area = None
-
         self.sigma_coordinates = sigma_coordinates.to(get_device())
         self.timestep = timestep
 
-        self.loss_obj = config.loss.build(self.area, config.out_names, self.CHANNEL_DIM)
+        self.loss_obj = config.loss.build(
+            gridded_operations.area_weights, config.out_names, self.CHANNEL_DIM
+        )
 
         self._corrector = config.corrector.build(
-            area=self.area,
+            area=gridded_operations.area_weights,
             sigma_coordinates=self.sigma_coordinates,
             timestep=timestep,
         )
@@ -605,7 +603,7 @@ class SingleModuleStepper:
             "normalizer": self.normalizer.get_state(),
             "img_shape": self._img_shape,
             "config": self._config.get_state(),
-            "area": self.area,
+            "gridded_operations": self._gridded_operations.to_state(),
             "sigma_coordinates": self.sigma_coordinates.as_dict(),
             "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
@@ -629,7 +627,6 @@ class SingleModuleStepper:
     def from_state(
         cls,
         state,
-        area: Optional[torch.Tensor],
         sigma_coordinates: SigmaCoordinates,
     ) -> "SingleModuleStepper":
         """
@@ -637,8 +634,6 @@ class SingleModuleStepper:
 
         Args:
             state: The state to load.
-            area: (n_lat, n_lon) array containing relative gridcell area, in any
-                units including unitless.
             sigma_coordinates: The sigma coordinates.
 
         Returns:
@@ -655,7 +650,14 @@ class SingleModuleStepper:
         # loss scalings are saved in initial training as the loss_normalization
         config["residual_normalization"] = None
 
-        area = state.get("area", area)
+        if "area" in state:
+            # backwards-compatibility, these older checkpoints are always lat-lon
+            gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+        else:
+            gridded_operations = GriddedOperations.from_state(
+                state["gridded_operations"]
+            )
+
         if "sigma_coordinates" in state:
             sigma_coordinates = dacite.from_dict(
                 data_class=SigmaCoordinates,
@@ -674,7 +676,7 @@ class SingleModuleStepper:
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
             img_shape=img_shape,
-            area=area,
+            gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
             # don't need to initialize weights, we're about to load_state
