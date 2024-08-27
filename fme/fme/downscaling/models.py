@@ -431,7 +431,7 @@ class DiffusionModel:
                     axis=channel_axis,
                 ),
                 self.downscale_factor,
-            )
+            ).repeat_interleave(dim=0, repeats=n_samples)
             samples_norm += base_prediction
 
         loss = self.loss(targets_norm, samples_norm)

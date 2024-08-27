@@ -44,7 +44,7 @@ class LinearDownscaling(torch.nn.Module):
         x = self.linear(torch.flatten(x, start_dim=1))
         x = x.view(x.shape[0], self.n_channels, *self.img_shape)
         if self.fine_topography is not None:
-            x += self.fine_topography  # arbitrary use of fine_topography
+            x = x + self.fine_topography  # arbitrary use of fine_topography
         return x
 
 
