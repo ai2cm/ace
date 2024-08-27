@@ -24,6 +24,7 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
 )
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -64,7 +65,7 @@ def save_plus_one_stepper(
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
     stepper = config.get_stepper(
         img_shape=(data_shape[-2], data_shape[-1]),
-        area=area,
+        gridded_operations=LatLonOperations(area),
         sigma_coordinates=sigma_coordinates,
         timestep=timestep,
     )
@@ -740,7 +741,6 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
     )
     stepper = config.load_stepper(
         sigma_coordinates=SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)),
-        area=torch.ones(10),
     )
     assert isinstance(stepper.ocean, Ocean)
     assert (

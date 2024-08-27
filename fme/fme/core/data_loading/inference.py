@@ -163,7 +163,6 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._dataset = dataset
         self._sigma_coordinates = dataset.sigma_coordinates
         self._metadata = dataset.metadata
-        self._area_weights = dataset.area_weights
         self._horizontal_coordinates = dataset.horizontal_coordinates
         self._timestep = dataset.timestep
         self._forward_steps_in_memory = forward_steps_in_memory
@@ -209,10 +208,6 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def metadata(self) -> xr.Dataset:
         return self._metadata
-
-    @property
-    def area_weights(self) -> xr.DataArray:
-        return self._area_weights
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:

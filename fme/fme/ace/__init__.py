@@ -34,6 +34,7 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
 from fme.core.ocean import SlabOceanConfig

@@ -14,7 +14,6 @@ import torch
 import xarray as xr
 
 import fme
-from fme.core import metrics
 from fme.core.typing_ import TensorDict
 
 from .config import Slice, TimeSlice, XarrayDataConfig
@@ -54,7 +53,6 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     logging.info(f"Subsetting dataset samples according to {subset}.")
     subsetted_dataset = torch.utils.data.Subset(dataset, indices)
     subsetted_dataset.metadata = dataset.metadata
-    subsetted_dataset.area_weights = dataset.area_weights
     subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
     subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
     subsetted_dataset.timestep = dataset.timestep
@@ -310,7 +308,6 @@ class XarrayDataset(Dataset):
         )
         (
             self._horizontal_coordinates,
-            self._area_weights,
             self._static_derived_data,
         ) = self.configure_horizontal_coordinates(config, first_dataset)
         (
@@ -427,7 +424,6 @@ class XarrayDataset(Dataset):
 
     def configure_horizontal_coordinates(self, config, first_dataset):
         horizontal_coordinates: HorizontalCoordinates
-        area_weights: Optional[torch.Tensor]
         static_derived_data: StaticDerivedData
         dims = get_horizontal_dimensions(first_dataset)
 
@@ -443,7 +439,6 @@ class XarrayDataset(Dataset):
                 loaded_lat_name=lat_name,
                 loaded_lon_name=lon_name,
             )
-            area_weights = metrics.spherical_area_weights(lats, len(lons))
             static_derived_data = StaticDerivedData(horizontal_coordinates)
         elif config.spatial_dimensions == "healpix":
             face = dims[0]
@@ -454,8 +449,6 @@ class XarrayDataset(Dataset):
                 height=torch.as_tensor(height, device=fme.get_device()),
                 width=torch.as_tensor(width, device=fme.get_device()),
             )
-            # No area weighting needed for HEALPix, uniform area grid
-            area_weights = None
             static_derived_data = StaticDerivedData(horizontal_coordinates)
         else:
             raise ValueError(
@@ -467,11 +460,7 @@ class XarrayDataset(Dataset):
             for coord_name, coord in horizontal_coordinates.coords.items()
         }
         logging.info(f"Horizontal coordinate sizes are {coords_sizes}.")
-        return horizontal_coordinates, area_weights, static_derived_data
-
-    @property
-    def area_weights(self) -> Optional[torch.Tensor]:
-        return self._area_weights
+        return horizontal_coordinates, static_derived_data
 
     @property
     def metadata(self) -> Mapping[str, VariableMetadata]:
