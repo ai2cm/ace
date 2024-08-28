@@ -254,7 +254,7 @@ def _force_zero_global_mean_moisture_advection(
 def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
-    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+    area_weighted_mean: AreaWeightedMean,
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
     terms_to_modify: Literal[
@@ -295,9 +295,9 @@ def _force_conserve_moisture(
     twp_total_tendency = (
         gen_total_water_path - input.total_water_path(sigma_coordinates)
     ) / timestep_seconds
-    twp_tendency_global_mean = area_weighted_mean(twp_total_tendency)
-    evaporation_global_mean = area_weighted_mean(gen.evaporation_rate)
-    precipitation_global_mean = area_weighted_mean(gen.precipitation_rate)
+    twp_tendency_global_mean = area_weighted_mean(twp_total_tendency, keepdim=True)
+    evaporation_global_mean = area_weighted_mean(gen.evaporation_rate, keepdim=True)
+    precipitation_global_mean = area_weighted_mean(gen.precipitation_rate, keepdim=True)
     if terms_to_modify.endswith("precipitation"):
         # We want to achieve
         #     global_mean(twp_total_tendency) = (
@@ -320,20 +320,16 @@ def _force_conserve_moisture(
         #    new_precip_rate = (
         #        new_global_precip_rate / current_global_precip_rate
         #    ) * current_precip_rate
-        gen.precipitation_rate = (
-            gen.precipitation_rate
-            * (new_precipitation_global_mean / precipitation_global_mean)[
-                ..., None, None
-            ]
+        gen.precipitation_rate = gen.precipitation_rate * (
+            new_precipitation_global_mean / precipitation_global_mean
         )
     elif terms_to_modify.endswith("evaporation"):
         # Derived similarly as for "precipitation" case.
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
-        gen.evaporation_rate = (
-            gen.evaporation_rate
-            * (new_evaporation_global_mean / evaporation_global_mean)[..., None, None]
+        gen.evaporation_rate = gen.evaporation_rate * (
+            new_evaporation_global_mean / evaporation_global_mean
         )
     if terms_to_modify.startswith("advection"):
         # Having already corrected the global-mean budget, we recompute
