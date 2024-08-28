@@ -2,6 +2,7 @@ import argparse
 import datetime
 import logging
 import os
+from typing import Dict, Optional
 
 import apache_beam as beam
 import metview
@@ -187,6 +188,8 @@ DESIRED_ATTRS = {
 # that the uppermost layer uses the higher model top of ECMWF model.
 N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
 DEFAULT_OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
+OUTPUT_LAYER_INDICES = [*DEFAULT_OUTPUT_LAYER_INDICES]
+N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
 
 OUTPUT_PRESSURE_LEVELS = [850, 500, 200]  # additionally save these pressure levels
 OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200]
@@ -212,6 +215,7 @@ RENAME_PRESSURE_LEVEL = {
     **RENAME_V_PRES,
     **RENAME_Z_PRES,
 }
+RENAME_NATIVE: Optional[Dict[str, str]] = None
 
 
 def set_nlayer_globals(output_layer_indices):
@@ -455,7 +459,9 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
 
     output = _adjust_latlon(output)
 
-    output = output.rename(RENAME_NATIVE)  # type: ignore[name-defined]
+    if RENAME_NATIVE is None:
+        raise RuntimeError("RENAME_NATIVE not set. Did you call set_nlayer_globals?")
+    output = output.rename(RENAME_NATIVE)
     for name, attrs in DESIRED_ATTRS.items():
         if name in output:
             output[name] = output[name].assign_attrs(**attrs)
