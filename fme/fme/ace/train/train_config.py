@@ -34,7 +34,9 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
+        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
+            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
+        )
     )
 
     def __post_init__(self):
@@ -46,6 +48,17 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
+        if (
+            self.aggregator.log_global_mean_time_series
+            or self.aggregator.log_global_mean_norm_time_series
+        ):
+            logging.warning(
+                "Both of log_global_mean_time_series and "
+                "log_global_mean_norm_time_series must be False for inline inference. "
+                "Setting them to False."
+            )
+            self.aggregator.log_global_mean_time_series = False
+            self.aggregator.log_global_mean_norm_time_series = False
 
 
 @dataclasses.dataclass

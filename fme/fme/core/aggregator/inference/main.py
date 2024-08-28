@@ -121,6 +121,9 @@ class InferenceEvaluatorAggregatorConfig:
         log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
             time dimension.
         log_seasonal_means: Whether to log seasonal mean metrics and images.
+        log_global_mean_time_series: Whether to log global mean time series metrics.
+        log_global_mean_norm_time_series: Whether to log the normalized global mean
+            time series metrics.
         monthly_reference_data: Path to monthly reference data to compare against.
         time_mean_reference_data: Path to reference time means to compare against.
     """
@@ -130,6 +133,8 @@ class InferenceEvaluatorAggregatorConfig:
     log_extended_video: bool = False
     log_zonal_mean_images: bool = True
     log_seasonal_means: bool = False
+    log_global_mean_time_series: bool = True
+    log_global_mean_norm_time_series: bool = True
     monthly_reference_data: Optional[str] = None
     time_mean_reference_data: Optional[str] = None
 
@@ -175,6 +180,8 @@ class InferenceEvaluatorAggregatorConfig:
             enable_extended_videos=self.log_extended_video,
             log_zonal_mean_images=log_zonal_mean_images,
             log_seasonal_means=self.log_seasonal_means,
+            log_global_mean_time_series=self.log_global_mean_time_series,
+            log_global_mean_norm_time_series=self.log_global_mean_norm_time_series,
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
@@ -202,6 +209,8 @@ class InferenceEvaluatorAggregator:
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
         log_seasonal_means: bool = False,
+        log_global_mean_time_series: bool = True,
+        log_global_mean_norm_time_series: bool = True,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
@@ -221,6 +230,9 @@ class InferenceEvaluatorAggregator:
             log_zonal_mean_images: Whether to log zonal-mean images (hovmollers) with a
                 time dimension.
             log_seasonal_means: Whether to log seasonal means metrics and images.
+            log_global_mean_time_series: Whether to log global mean time series metrics.
+            log_global_mean_norm_time_series: Whether to log the normalized global mean
+                time series metrics.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
@@ -233,20 +245,23 @@ class InferenceEvaluatorAggregator:
             str, _TimeDependentEvaluatorAggregator
         ] = {}
         ops = horizontal_coordinates.gridded_operations
-        self._aggregators = {
-            "mean": MeanAggregator(
+        self.log_time_series = (
+            log_global_mean_time_series or log_global_mean_norm_time_series
+        )
+        if log_global_mean_time_series:
+            self._aggregators["mean"] = MeanAggregator(
                 ops,
                 target="denorm",
                 n_timesteps=n_timesteps,
                 metadata=metadata,
-            ),
-            "mean_norm": MeanAggregator(
+            )
+        if log_global_mean_norm_time_series:
+            self._aggregators["mean_norm"] = MeanAggregator(
                 ops,
                 target="norm",
                 n_timesteps=n_timesteps,
                 metadata=metadata,
-            ),
-        }
+            )
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
                 ops, target_time=20
@@ -368,6 +383,24 @@ class InferenceEvaluatorAggregator:
         return to_inference_logs(self.get_logs(label=label))
 
     @torch.no_grad()
+    def get_inference_logs_slice(self, label: str, step_slice: slice):
+        """
+        Returns a subset of the time series for applicable metrics
+        for a specific slice of as can be reported to WandB.
+
+        Args:
+            label: Label to prepend to all log keys.
+            step_slice: Timestep slice to determine the time series subset.
+
+        """
+        logs = {}
+        for name, aggregator in self._aggregators.items():
+            if isinstance(aggregator, MeanAggregator):
+                logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        logs = {f"{label}/{key}": val for key, val in logs.items()}
+        return to_inference_logs(logs)
+
+    @torch.no_grad()
     def get_datasets(
         self, excluded_aggregators: Optional[Iterable[str]] = None
     ) -> Dict[str, xr.Dataset]:
@@ -396,7 +429,7 @@ class InferenceEvaluatorAggregator:
 
 
 def to_inference_logs(
-    log: Mapping[str, Union[Table, float, int]]
+    log: Mapping[str, Union[Table, float, int]],
 ) -> List[Dict[str, Union[float, int]]]:
     # we have a dictionary which contains WandB tables
     # which we will convert to a list of dictionaries, one for each
