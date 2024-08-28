@@ -133,39 +133,49 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
         (False, "advection_and_evaporation"),
     ],
 )
-def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_modify):
+@pytest.mark.parametrize(
+    "size, use_area",
+    [
+        pytest.param((3, 2, 5, 5), True, id="latlon"),
+        pytest.param((3, 12, 2, 3, 3), False, id="healpix"),
+    ],
+)
+def test_force_conserve_moisture(
+    fv3_data: bool,
+    global_only: bool,
+    terms_to_modify,
+    size: Tuple[int, ...],
+    use_area: bool,
+):
     torch.random.manual_seed(0)
     if fv3_data:
         data = {
-            "PRESsfc": 10.0 + torch.rand(size=(3, 2, 5, 5)),
-            "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
-            "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
-            "PRATEsfc": torch.rand(size=(3, 2, 5, 5)),
-            "LHTFLsfc": torch.rand(size=(3, 2, 5, 5)),
-            "tendency_of_total_water_path_due_to_advection": torch.rand(
-                size=(3, 2, 5, 5)
-            ),
+            "PRESsfc": 10.0 + torch.rand(size=size),
+            "specific_total_water_0": torch.rand(size=size),
+            "specific_total_water_1": torch.rand(size=size),
+            "PRATEsfc": torch.rand(size=size),
+            "LHTFLsfc": torch.rand(size=size),
+            "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
         }
     else:
         data = {
-            "PS": 10.0 + torch.rand(size=(3, 2, 5, 5)),
-            "specific_total_water_0": torch.rand(size=(3, 2, 5, 5)),
-            "specific_total_water_1": torch.rand(size=(3, 2, 5, 5)),
-            "surface_precipitation_rate": torch.rand(size=(3, 2, 5, 5)),
-            "LHFLX": torch.rand(size=(3, 2, 5, 5)),
-            "tendency_of_total_water_path_due_to_advection": torch.rand(
-                size=(3, 2, 5, 5)
-            ),
+            "PS": 10.0 + torch.rand(size=size),
+            "specific_total_water_0": torch.rand(size=size),
+            "specific_total_water_1": torch.rand(size=size),
+            "surface_precipitation_rate": torch.rand(size=size),
+            "LHFLX": torch.rand(size=size),
+            "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
         }
     sigma_coordinates = SigmaCoordinates(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
-    area_weights = 1.0 + torch.rand(size=(5, 5))
-    data["tendency_of_total_water_path_due_to_advection"] -= metrics.weighted_mean(
-        data["tendency_of_total_water_path_due_to_advection"],
-        weights=area_weights,
-        dim=[-2, -1],
-    )[..., None, None]
+    if use_area:
+        ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
+    else:
+        ops = HEALPixOperations()
+    data["tendency_of_total_water_path_due_to_advection"] -= ops.area_weighted_mean(
+        data["tendency_of_total_water_path_due_to_advection"], keepdim=True
+    )
     original_budget_residual = total_water_path_budget_residual(
         ClimateData(data),
         sigma_coordinates=sigma_coordinates,
@@ -174,8 +184,8 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         :, 1
     ]  # no meaning for initial value data, want first timestep
     if global_only:
-        original_budget_residual = metrics.weighted_mean(
-            original_budget_residual, weights=area_weights, dim=[-2, -1]
+        original_budget_residual = ops.area_weighted_mean(
+            original_budget_residual, keepdim=True
         )
     original_budget_residual = original_budget_residual.cpu().numpy()
     original_dry_air = (
@@ -191,7 +201,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         in_data,
         out_data,
         sigma_coordinates=sigma_coordinates,
-        area_weighted_mean=LatLonOperations(area_weights).area_weighted_mean,
+        area_weighted_mean=ops.area_weighted_mean,
         timestep=TIMESTEP,
         terms_to_modify=terms_to_modify,
     )
@@ -212,11 +222,7 @@ def test_force_conserve_moisture(fv3_data: bool, global_only: bool, terms_to_mod
         .numpy()
     )
 
-    global_budget_residual = (
-        metrics.weighted_mean(new_budget_residual, weights=area_weights, dim=[-2, -1])
-        .cpu()
-        .numpy()
-    )
+    global_budget_residual = ops.area_weighted_mean(new_budget_residual).cpu().numpy()
     np.testing.assert_almost_equal(global_budget_residual, 0.0, decimal=6)
 
     if not global_only:
