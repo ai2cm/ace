@@ -311,7 +311,7 @@ def _layer_thickness(
     ACE does not currently prognose specific humidity, so here we closely
     approximate this using specific total water."""
     tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
-    dlogp = torch.log(pressure_at_interface).diff(dim=-1)
+    dlogp = torch.clamp(torch.log(pressure_at_interface), min=-100.0).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
 
 
