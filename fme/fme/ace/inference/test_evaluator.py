@@ -226,15 +226,24 @@ def inference_helper(
         inference_logs = main(
             yaml_config=str(config_filename),
         )
+        wandb_logs = wandb.get_logs()
 
     # Unlike the data writer outputs, aggregator logs include IC step
     assert len(inference_logs) == config.n_forward_steps + 1
-    assert len(wandb.get_logs()) == len(inference_logs)
-    for log in inference_logs:
+    assert len(wandb_logs) == len(inference_logs)
+    for i, log in enumerate(inference_logs):
         # if these are off by something like 90% then probably the stepper
         # is being used instead of the prediction_data
         assert log["inference/mean/weighted_rmse/var"] == 0.0
         assert log["inference/mean/weighted_bias/var"] == 0.0
+        for metric, val in log.items():
+            # check that time series metrics match
+            if "inference/mean" in metric:
+                assert metric in wandb_logs[i]
+                if np.isnan(val):
+                    assert np.isnan(wandb_logs[i][metric])
+                else:
+                    assert wandb_logs[i][metric] == val
 
     initial_condition_ds = xr.open_dataset(
         tmp_path / "initial_condition.nc", decode_timedelta=False

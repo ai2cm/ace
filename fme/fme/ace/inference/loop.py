@@ -20,6 +20,7 @@ from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
 from fme.core.typing_ import TensorMapping
+from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
 from .derived_variables import (
@@ -136,6 +137,8 @@ def _inference_internal_loop(
         The aggregators use the full first window including IC.
         The data writers exclude the IC from the first window.
     """
+    timers = {}
+    current_time = time.time()
     if i_time == 0:
         i_time_aggregator = i_time
         stepped_no_ic = stepped.remove_initial_condition()
@@ -167,6 +170,49 @@ def _inference_internal_loop(
         gen_data_norm=stepped.gen_data_norm,
         i_time_start=i_time_aggregator,
     )
+    timers["writer_and_aggregator"] = time.time() - current_time
+    current_time = time.time()
+
+    _log_window_to_wandb(
+        aggregator,
+        window_slice=slice(
+            i_time_aggregator, i_time_aggregator + len(batch_times["time"])
+        ),
+        label="inference",
+    )
+    timers["wandb_logging"] = time.time() - current_time
+
+    return timers
+
+
+def _log_window_to_wandb(
+    aggregator: InferenceEvaluatorAggregator,
+    window_slice: slice,
+    label: str,
+):
+    if not aggregator.log_time_series:
+        return
+    wandb = WandB.get_instance()
+    if wandb.enabled:
+        logging.info(f"Logging inference window to wandb")
+        current_time = time.time()
+        step_logs = aggregator.get_inference_logs_slice(
+            label=label,
+            step_slice=window_slice,
+        )
+        aggregator_duration = time.time() - current_time
+        current_time = time.time()
+        for j, log in enumerate(step_logs):
+            wandb.log(log, step=window_slice.start + j)
+        wandb.log(
+            {
+                "aggregator_get_inference_logs_steps_per_second": len(step_logs)
+                / aggregator_duration,
+                "wandb_log_steps_per_second": len(step_logs)
+                / (time.time() - current_time),
+            },
+            step=window_slice.start + len(step_logs) - 1,
+        )
 
 
 def _to_device(
@@ -323,11 +369,15 @@ def run_inference_evaluator(
             else:
                 batch_times = window_batch_data.times
 
+            timers["writer_and_aggregator"] += time.time() - current_time
+
             snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
-            _inference_internal_loop(
+            internal_timers = _inference_internal_loop(
                 stepped, i_time, aggregator, stitcher, batch_times, snapshot_dims
             )
-            timers["writer_and_aggregator"] += time.time() - current_time
+            timers["writer_and_aggregator"] += internal_timers["writer_and_aggregator"]
+            timers["wandb_logging"] += internal_timers["wandb_logging"]
+
             current_time = time.time()
             i_time += forward_steps_in_memory
 
@@ -388,6 +438,9 @@ def run_dataset_comparison(
             stepped, target_data.sigma_coordinates, target_data.timestep
         )
 
+        timers["run_on_batch"] += time.time() - current_time
+        current_time = time.time()
+
         # Windows here all include an initial condition at start.
         # Remove IC and time coord for windows >0 to be consistent with
         # run_on_batch outputs before passing to the shared _inference_internal_loop.
@@ -397,10 +450,10 @@ def run_dataset_comparison(
         else:
             target_times = target.times
 
-        timers["run_on_batch"] += time.time() - current_time
-        current_time = time.time()
+        timers["writer_and_aggregator"] += time.time() - current_time
+
         snapshot_dims = ["sample"] + target_data.horizontal_coordinates.dims
-        _inference_internal_loop(
+        internal_timers = _inference_internal_loop(
             stepped,
             i_time,
             aggregator,
@@ -408,9 +461,12 @@ def run_dataset_comparison(
             target_times,
             snapshot_dims,
         )
-        timers["writer_and_aggregator"] += time.time() - current_time
+        timers["writer_and_aggregator"] += internal_timers["writer_and_aggregator"]
+        timers["wandb_logging"] += internal_timers["wandb_logging"]
+
         current_time = time.time()
         i_time += forward_steps_in_memory
+
     for name, duration in timers.items():
         logging.info(f"{name} duration: {duration:.2f}s")
     return timers

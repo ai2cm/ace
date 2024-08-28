@@ -356,19 +356,29 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     train_config, inference_config = _setup(
         tmp_path,
         nettype,
+        log_to_wandb=True,
         timestep_days=20,
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
         use_healpix=(nettype == "HEALPixRecUNet"),
     )
     # using pdb requires calling main functions directly
-    train_main(
-        yaml_config=train_config,
-    )
+    with mock_wandb() as wandb:
+        train_main(
+            yaml_config=train_config,
+        )
+        wandb_logs = wandb.get_logs()
+
+        for log in wandb_logs.values():
+            # ensure inference time series is not logged
+            assert "inference/mean/forecast_step" not in log
+
     # inference should not require stats files
     (tmp_path / "stats" / "stats-mean.nc").unlink()
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
-    inference_logs = inference_evaluator_main(yaml_config=inference_config)
+
+    with mock_wandb() as wandb:
+        inference_logs = inference_evaluator_main(yaml_config=inference_config)
 
     prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     best_checkpoint_path = (

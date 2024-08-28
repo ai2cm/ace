@@ -276,21 +276,20 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     duration = time.time() - start_time
     total_steps = config.n_forward_steps * config.loader.n_samples
-    total_steps_per_second = total_steps / duration
+    total_steps_per_second = total_steps / (duration - timers["wandb_logging"])
     logging.info(f"Inference duration: {duration:.2f} seconds")
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
 
     step_logs = aggregator.get_inference_logs(label="inference")
     wandb = WandB.get_instance()
-    if wandb.enabled:
-        logging.info("Starting logging of metrics to wandb")
+    if wandb.enabled and len(step_logs) > 0:
+        logging.info("Starting logging of timing and final step metrics to wandb")
         duration_logs = {
             "duration_seconds": duration,
             "total_steps_per_second": total_steps_per_second,
         }
-        wandb.log({**timers, **duration_logs}, step=0)
-        for i, log in enumerate(step_logs):
-            wandb.log(log, step=i, sleep=0.01)
+        final_step_logs = {**timers, **duration_logs, **step_logs[-1]}
+        wandb.log(final_step_logs, step=len(step_logs) - 1)
 
     config.clean_wandb()
 
