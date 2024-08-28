@@ -141,7 +141,7 @@ class AreaWeightedReducedMetric:
                 self._total = torch.zeros(
                     [self._n_timesteps], dtype=new_value.dtype, device=self._device
                 )
-            time_slice = slice(i_time_start, i_time_start + gen.shape[1])
+            time_slice = slice(i_time_start, i_time_start + gen.shape[time_dim])
             self._total[time_slice] += new_value
             self._n_batches[time_slice] += 1
 
@@ -274,7 +274,7 @@ class MeanAggregator:
                     i_time_start=i_time_start,
                 )
 
-    def _get_series_data(self) -> List[_SeriesData]:
+    def _get_series_data(self, step_slice: Optional[slice] = None) -> List[_SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._variable_metrics is None:
             raise ValueError("No batches have been recorded.")
@@ -283,6 +283,8 @@ class MeanAggregator:
             sorted_keys = sorted(list(self._variable_metrics[metric].keys()))
             for key in sorted_keys:
                 arr = self._variable_metrics[metric][key].get().detach()
+                if step_slice is not None:
+                    arr = arr[step_slice]
                 datum = _SeriesData(
                     metric_name=metric,
                     var_name=key,
@@ -292,7 +294,7 @@ class MeanAggregator:
         return data
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str, step_slice: Optional[slice] = None):
         """
         Returns logs as can be reported to WandB.
 
@@ -301,9 +303,11 @@ class MeanAggregator:
         """
         logs = {}
         series_data: Dict[str, np.ndarray] = {
-            datum.get_wandb_key(): datum.data for datum in self._get_series_data()
+            datum.get_wandb_key(): datum.data
+            for datum in self._get_series_data(step_slice)
         }
-        table = data_to_table(series_data)
+        init_step = 0 if step_slice is None else step_slice.start
+        table = data_to_table(series_data, init_step)
         logs[f"{label}/series"] = table
         return logs
 
@@ -330,16 +334,19 @@ class MeanAggregator:
         return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
-def data_to_table(data: Dict[str, np.ndarray]) -> Table:
+def data_to_table(data: Dict[str, np.ndarray], init_step: int = 0) -> Table:
     """
     Convert a dictionary of 1-dimensional timeseries data to a wandb Table.
+
+    Args:
+        init_step: initial step corresponding to the first row's "forecast_step"
     """
     keys = sorted(list(data.keys()))
     wandb = WandB.get_instance()
     table = wandb.Table(columns=["forecast_step"] + keys)
     if len(keys) > 0:
         for i in range(len(data[keys[0]])):
-            row = [i]
+            row = [init_step + i]
             for key in keys:
                 row.append(data[key][i])
             table.add_data(*row)
