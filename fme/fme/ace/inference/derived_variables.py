@@ -24,7 +24,11 @@ _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = 
 def register(
     required_inputs: Optional[List[str]] = None,
 ):
-    """Decorator for registering a function that computes a derived variable."""
+    """Decorator for registering a function that computes a derived variable.
+    Args:
+        required_inputs: refers to the keys of CLIMATE_FIELD_NAME_PREFIXES
+            in fme.core.climate_data
+    """
 
     def decorator(
         func: Callable[
@@ -97,7 +101,7 @@ def total_water_path_budget_residual(
 
 @register(
     required_inputs=[
-        "DSWRFtoa",
+        "toa_down_sw_radiative_flux",
     ]
 )
 def net_energy_flux_toa_into_atmosphere(
@@ -105,7 +109,11 @@ def net_energy_flux_toa_into_atmosphere(
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
 ):
-    return data.data["DSWRFtoa"] - data.data["USWRFtoa"] - data.data["ULWRFtoa"]
+    return (
+        data.toa_down_sw_radiative_flux
+        - data.toa_up_sw_radiative_flux
+        - data.toa_up_lw_radiative_flux
+    )
 
 
 @register()
@@ -119,7 +127,11 @@ def net_energy_flux_sfc_into_atmosphere(
     return -data.net_surface_energy_flux_without_frozen_precip
 
 
-@register(required_inputs=["DSWRFtoa"])
+@register(
+    required_inputs=[
+        "toa_down_sw_radiative_flux",
+    ]
+)
 def net_energy_flux_into_atmospheric_column(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -130,7 +142,7 @@ def net_energy_flux_into_atmospheric_column(
     ) + net_energy_flux_toa_into_atmosphere(data, sigma_coordinates, timestep)
 
 
-@register(required_inputs=["HGTsfc"])
+@register(required_inputs=["surface_height"])
 def column_moist_static_energy(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -144,7 +156,7 @@ def column_moist_static_energy(
     )
 
 
-@register(required_inputs=["HGTsfc"])
+@register(required_inputs=["surface_height"])
 def column_moist_static_energy_tendency(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -201,10 +213,12 @@ def _compute_derived_variable(
 
     try:
         if forcing_data and derived_variable.required_inputs:
+            climate_forcing_data = ClimateData(forcing_data)
             for v in derived_variable.required_inputs:
-                if v not in forcing_data:
+                if not hasattr(climate_forcing_data, v):
                     raise KeyError(v)
-                climate_data.data.update({v: forcing_data[v]})
+                model_name = climate_forcing_data.model_name(v)
+                climate_data.data.update({model_name: climate_forcing_data[v]})
         output = derived_variable.func(climate_data, sigma_coordinates, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
