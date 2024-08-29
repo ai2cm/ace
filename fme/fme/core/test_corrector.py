@@ -123,7 +123,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
     np.testing.assert_almost_equal(new_nonconservation.cpu().numpy(), 0.0, decimal=6)
 
 
-@pytest.mark.parametrize("fv3_data", [True, False])
+@pytest.mark.parametrize("dataset", ["fv3", "e3sm"])
 @pytest.mark.parametrize(
     "global_only, terms_to_modify",
     [
@@ -141,14 +141,14 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
     ],
 )
 def test_force_conserve_moisture(
-    fv3_data: bool,
+    dataset: str,
     global_only: bool,
     terms_to_modify,
     size: Tuple[int, ...],
     use_area: bool,
 ):
     torch.random.manual_seed(0)
-    if fv3_data:
+    if dataset == "fv3":
         data = {
             "PRESsfc": 10.0 + torch.rand(size=size),
             "specific_total_water_0": torch.rand(size=size),
@@ -157,7 +157,7 @@ def test_force_conserve_moisture(
             "LHTFLsfc": torch.rand(size=size),
             "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
         }
-    else:
+    if dataset == "e3sm":
         data = {
             "PS": 10.0 + torch.rand(size=size),
             "specific_total_water_0": torch.rand(size=size),
