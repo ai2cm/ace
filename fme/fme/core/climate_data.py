@@ -20,17 +20,21 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
         "surface_height": ["HGTsfc"],
+        "surface_geopotential": ["PHIS"],
         "tendency_of_total_water_path_due_to_advection": [
             "tendency_of_total_water_path_due_to_advection"
         ],
         "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
-        "sensible_heat_flux": ["SHTFLsfc"],
+        "sensible_heat_flux": ["SHTFLsfc", "SHFLX"],
         "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
-        "sfc_down_sw_radiative_flux": ["DSWRFsfc"],
-        "sfc_up_sw_radiative_flux": ["USWRFsfc"],
-        "sfc_down_lw_radiative_flux": ["DLWRFsfc"],
-        "sfc_up_lw_radiative_flux": ["ULWRFsfc"],
-        "air_temperature": ["air_temperature_"],
+        "sfc_down_sw_radiative_flux": ["DSWRFsfc", "FSDS"],
+        "sfc_up_sw_radiative_flux": ["USWRFsfc", "surface_upward_shortwave_flux"],
+        "sfc_down_lw_radiative_flux": ["DLWRFsfc", "FLDS"],
+        "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux"],
+        "toa_up_lw_radiative_flux": ["ULWRFtoa", "FLUT"],
+        "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux"],
+        "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
+        "air_temperature": ["air_temperature_", "T_"],
     }
 )
 
@@ -120,6 +124,9 @@ class ClimateData:
                 return self._get_prefix(prefix)
         raise KeyError(name)
 
+    def __getitem__(self, name: str):
+        return getattr(self, name)
+
     def _get_prefix(self, prefix):
         return self._data[prefix]
 
@@ -154,7 +161,18 @@ class ClimateData:
 
     @property
     def surface_height(self) -> torch.Tensor:
-        return self._get("surface_height")
+        try:
+            return self._get("surface_height")
+        except KeyError:
+            # E3SM saves geopotential not surface height so need to convert
+            # by using g value from e3sm
+            GRAVITY_E3SM = 9.80616
+            return self._get("surface_geopotential") / GRAVITY_E3SM
+
+    def model_name(self, name: str):
+        for prefix in self._prefixes[name]:
+            if prefix in self._data.keys():
+                return prefix
 
     @property
     def surface_pressure(self) -> torch.Tensor:
@@ -163,6 +181,30 @@ class ClimateData:
     @surface_pressure.setter
     def surface_pressure(self, value: torch.Tensor):
         self._set("surface_pressure", value)
+
+    @property
+    def toa_down_sw_radiative_flux(self) -> torch.Tensor:
+        return self._get("toa_down_sw_radiative_flux")
+
+    @toa_down_sw_radiative_flux.setter
+    def toa_down_sw_radiative_flux(self, value: torch.Tensor):
+        self._set("toa_down_sw_radiative_flux", value)
+
+    @property
+    def toa_up_sw_radiative_flux(self) -> torch.Tensor:
+        return self._get("toa_up_sw_radiative_flux")
+
+    @toa_up_sw_radiative_flux.setter
+    def toa_up_sw_radiative_flux(self, value: torch.Tensor):
+        self._set("toa_up_sw_radiative_flux", value)
+
+    @property
+    def toa_up_lw_radiative_flux(self) -> torch.Tensor:
+        return self._get("toa_up_lw_radiative_flux")
+
+    @toa_up_lw_radiative_flux.setter
+    def toa_up_lw_radiative_flux(self, value: torch.Tensor):
+        self._set("toa_up_lw_radiative_flux", value)
 
     def surface_pressure_due_to_dry_air(
         self, sigma_coordinates: SigmaCoordinates
