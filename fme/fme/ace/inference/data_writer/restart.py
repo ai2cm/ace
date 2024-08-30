@@ -83,6 +83,18 @@ class RestartWriter:
         self.metadata = metadata
         self.coords = coords
         self.is_restart_step = is_restart_step
+        self._get_horizontal_dims()
+
+    def _get_horizontal_dims(self):
+        if {"lat", "lon"} <= self.coords.keys():
+            self._horizontal_dims = ["lat", "lon"]
+        elif {"face", "height", "width"} <= self.coords.keys():
+            self._horizontal_dims = ["face", "height", "width"]
+        else:
+            raise ValueError(
+                "Coordinates must contain either {'face', 'height', 'width'}"
+                "for HEALPix data or {'lat', 'lon'} for lat-lon data."
+            )
 
     def append_batch(
         self,
@@ -117,9 +129,9 @@ class RestartWriter:
     ):
         data_vars = {}
         for name in self._save_names:
-            prediction_data = prediction[name][:, i_window, :, :].cpu().numpy()
+            prediction_data = prediction[name][:, i_window, ...].cpu().numpy()
             data_vars[name] = xr.DataArray(
-                prediction_data, dims=["sample", "lat", "lon"]
+                prediction_data, dims=["sample", *self._horizontal_dims]
             )
             if name in self.metadata:
                 data_vars[name].attrs = {

@@ -172,10 +172,6 @@ class PairedDataWriter:
         self.metadata = metadata
         self.prognostic_names = prognostic_names
 
-        if "face" in coords:
-            # TODO: handle writing HEALPix data
-            # https://github.com/ai2cm/full-model/issues/1089
-            return
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
         else:

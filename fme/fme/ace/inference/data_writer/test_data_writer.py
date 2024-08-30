@@ -84,30 +84,54 @@ class TestDataWriter:
         }
 
     @pytest.fixture
-    def sample_target_data(self):
+    def sample_target_data(self, request):
+        shape = request.param
         data = {
-            # sample, time, lat, lon
-            "temp": torch.rand((2, 3, 4, 5)),
-            "humidity": torch.rand((2, 3, 4, 5)),  # input-only variable
+            # sample, time, *horizontal_dims
+            "temp": torch.rand(shape),
+            "humidity": torch.rand(shape),  # input-only variable
             "pressure": torch.rand(
-                (2, 3, 4, 5)
+                shape
             ),  # Extra variable for which there's no metadata
-            "precipitation": torch.rand((2, 3, 4, 5)),  # optionally saved
+            "precipitation": torch.rand(shape),  # optionally saved
         }
         return data
 
     @pytest.fixture
-    def sample_prediction_data(self):
+    def sample_prediction_data(self, request):
+        shape = request.param
         data = {
             # sample, time, lat, lon
-            "temp": torch.rand((2, 3, 4, 5)),
+            "temp": torch.rand(shape),
             "pressure": torch.rand(
-                (2, 3, 4, 5)
+                shape
             ),  # Extra variable for which there's no metadata
-            "precipitation": torch.rand((2, 3, 4, 5)),  # optionally saved
+            "precipitation": torch.rand(shape),  # optionally saved
         }
         return data
 
+    @pytest.fixture
+    def coords(self, request):
+        return request.param
+
+    @pytest.mark.parametrize(
+        "sample_target_data, sample_prediction_data, coords",
+        [
+            pytest.param(
+                (2, 3, 4, 5),
+                (2, 3, 4, 5),
+                {"lat": np.arange(4), "lon": np.arange(5)},
+                id="LatLon",
+            ),
+            pytest.param(
+                (2, 3, 6, 4, 5),
+                (2, 3, 6, 4, 5),
+                {"face": np.arange(6), "height": np.arange(4), "width": np.arange(5)},
+                id="HEALPix",
+            ),
+        ],
+        indirect=True,
+    )
     def test_append_batch(
         self,
         sample_metadata,
@@ -115,6 +139,7 @@ class TestDataWriter:
         sample_prediction_data,
         tmp_path,
         calendar,
+        coords,
     ):
         n_samples = 2
         n_timesteps = 6
@@ -124,7 +149,7 @@ class TestDataWriter:
             n_timesteps=n_timesteps,
             timestep=TIMESTEP,
             metadata=sample_metadata,
-            coords={"lat": np.arange(4), "lon": np.arange(5)},
+            coords=coords,
             enable_prediction_netcdfs=True,
             enable_video_netcdfs=False,
             enable_monthly_netcdfs=True,
@@ -169,14 +194,10 @@ class TestDataWriter:
         assert dataset["time"].units == "microseconds"
         assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
         assert dataset["init_time"].calendar == calendar
+        horizontal_shape = (4, 5) if "lat" in coords else (6, 4, 5)
         for var_name in set(sample_prediction_data.keys()):
             var_data = dataset.variables[var_name][:]
-            assert var_data.shape == (
-                n_samples,
-                n_timesteps,
-                4,
-                5,
-            )  # sample, time, lat, lon
+            assert var_data.shape == (n_samples, n_timesteps, *horizontal_shape)
             assert not np.isnan(var_data).any(), "unexpected NaNs in prediction data"
             if var_name in sample_metadata:
                 assert (
@@ -194,7 +215,7 @@ class TestDataWriter:
 
         # Open the target output file and do smaller set of checks
         dataset = Dataset(tmp_path / "autoregressive_target.nc", "r")
-        coord_names = {"time", "init_time", "valid_time", "lat", "lon"}
+        coord_names = {"time", "init_time", "valid_time", *set(coords)}
         assert set(dataset.variables) == set(sample_target_data) | coord_names
 
         # Open the file again with xarray and check the time coordinates,
@@ -251,6 +272,11 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
 
+    @pytest.mark.parametrize(
+        "sample_target_data, sample_prediction_data",
+        [pytest.param((2, 3, 4, 5), (2, 3, 4, 5), id="LatLon")],
+        indirect=True,
+    )
     @pytest.mark.parametrize(
         ["save_names"],
         [
@@ -327,6 +353,11 @@ class TestDataWriter:
             }
         )
 
+    @pytest.mark.parametrize(
+        "sample_target_data, sample_prediction_data",
+        [pytest.param((2, 3, 4, 5), (2, 3, 4, 5), id="LatLon")],
+        indirect=True,
+    )
     def test_append_batch_data_time_mismatch(
         self, sample_metadata, sample_target_data, sample_prediction_data, tmp_path
     ):

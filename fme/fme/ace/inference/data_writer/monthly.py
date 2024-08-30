@@ -9,7 +9,11 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.inference.data_writer.utils import get_all_names
+from fme.ace.inference.data_writer.utils import (
+    DIM_INFO_HEALPIX,
+    DIM_INFO_LATLON,
+    get_all_names,
+)
 from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -137,10 +141,10 @@ class MonthlyDataWriter:
         )
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
         self.dataset.variables[COUNTS][:] = 0
-        self._n_lat: Optional[int] = None
-        self._n_lon: Optional[int] = None
+
         self._init_years = np.full([n_samples], -1, dtype=int)
         self._init_months = np.full([n_samples], -1, dtype=int)
+        self._dataset_dims_created = False
 
     def _get_initial_year_and_month(
         self,
@@ -224,20 +228,19 @@ class MonthlyDataWriter:
                 f"and times has {n_times_time} times."
             )
 
-        if self._n_lat is None:
-            self._n_lat = data[next(iter(data.keys()))].shape[-2]
-            self.dataset.createDimension("lat", self._n_lat)
-            if "lat" in self.coords:
-                self.dataset.createVariable("lat", "f4", ("lat",))
-                self.dataset.variables["lat"][:] = self.coords["lat"]
-        if self._n_lon is None:
-            self._n_lon = data[next(iter(data.keys()))].shape[-1]
-            self.dataset.createDimension("lon", self._n_lon)
-            if "lon" in self.coords:
-                self.dataset.createVariable("lon", "f4", ("lon",))
-                self.dataset.variables["lon"][:] = self.coords["lon"]
+        if not self._dataset_dims_created:
+            _dim_info = DIM_INFO_HEALPIX if "face" in self.coords else DIM_INFO_LATLON
+            _ordered_names = []
+            for dim in _dim_info:
+                dim_size = data[next(iter(data.keys()))].shape[dim.index]
+                self.dataset.createDimension(dim.name, dim_size)
+                if dim.name in self.coords:
+                    self.dataset.createVariable(dim.name, "f4", (dim.name,))
+                    self.dataset.variables[dim.name][:] = self.coords[dim.name]
+                _ordered_names.append(dim.name)
+            dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, *_ordered_names)
+            self._dataset_dims_created = True
 
-        dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, "lat", "lon")
         save_names = self._get_variable_names_to_save(data.keys())
         months = self._get_month_indices(batch_times)
         month_min = np.min(months)
