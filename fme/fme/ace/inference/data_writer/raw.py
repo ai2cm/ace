@@ -9,7 +9,11 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.inference.data_writer.utils import get_all_names
+from fme.ace.inference.data_writer.utils import (
+    DIM_INFO_HEALPIX,
+    DIM_INFO_LATLON,
+    get_all_names,
+)
 from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
@@ -99,13 +103,6 @@ class RawDataWriter:
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
-        self._n_lat: Optional[int] = None
-        self._n_lon: Optional[int] = None
-        if "face" in coords:
-            # TODO: handle writing HEALPix data
-            # https://github.com/ai2cm/full-model/issues/1089
-            self.dataset: Optional[Dataset] = None
-            return
         filename = str(Path(path) / label)
         self._save_names = save_names
         self.metadata = metadata
@@ -119,6 +116,7 @@ class RawDataWriter:
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
         self.dataset.createVariable(VALID_TIME, "i8", (SAMPLE_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
+        self._dataset_dims_created = False
 
     def _get_variable_names_to_save(
         self, *data_varnames: Iterable[str]
@@ -156,20 +154,19 @@ class RawDataWriter:
                 f"and times has {n_times_time} times."
             )
 
-        if self._n_lat is None:
-            self._n_lat = data[next(iter(data.keys()))].shape[-2]
-            self.dataset.createDimension("lat", self._n_lat)
-            if "lat" in self.coords:
-                self.dataset.createVariable("lat", "f4", ("lat",))
-                self.dataset.variables["lat"][:] = self.coords["lat"]
-        if self._n_lon is None:
-            self._n_lon = data[next(iter(data.keys()))].shape[-1]
-            self.dataset.createDimension("lon", self._n_lon)
-            if "lon" in self.coords:
-                self.dataset.createVariable("lon", "f4", ("lon",))
-                self.dataset.variables["lon"][:] = self.coords["lon"]
+        if not self._dataset_dims_created:
+            _dim_info = DIM_INFO_HEALPIX if "face" in self.coords else DIM_INFO_LATLON
+            _ordered_names = []
+            for dim in _dim_info:
+                dim_size = data[next(iter(data.keys()))].shape[dim.index]
+                self.dataset.createDimension(dim.name, dim_size)
+                if dim.name in self.coords:
+                    self.dataset.createVariable(dim.name, "f4", (dim.name,))
+                    self.dataset.variables[dim.name][:] = self.coords[dim.name]
+                _ordered_names.append(dim.name)
+            dims = (SAMPLE_DIM, LEAD_TIME_DIM, *_ordered_names)
+            self._dataset_dims_created = True
 
-        dims = (SAMPLE_DIM, LEAD_TIME_DIM, "lat", "lon")
         save_names = self._get_variable_names_to_save(data.keys())
         for variable_name in save_names:
             # define the variable if it doesn't exist
