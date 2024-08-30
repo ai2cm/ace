@@ -390,15 +390,12 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
     assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
-    if nettype != "HEALPixRecUNet":
-        assert prediction_output_path.exists()
-        ds_prediction = xr.open_dataset(prediction_output_path)
-        assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
-        assert np.sum(np.isnan(ds_prediction["bar"].values)) == 0
-        ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
-        assert np.sum(np.isnan(ds_target["baz"].values)) == 0
-    else:
-        assert not prediction_output_path.exists()
+    assert prediction_output_path.exists()
+    ds_prediction = xr.open_dataset(prediction_output_path)
+    assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
+    assert np.sum(np.isnan(ds_prediction["bar"].values)) == 0
+    ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
+    assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
