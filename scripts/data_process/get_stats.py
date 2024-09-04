@@ -38,6 +38,7 @@ DIMS = {
     "FV3GFS": ["time", "grid_xt", "grid_yt"],
     "E3SMV2": ["time", "lat", "lon"],
     "ERA5": ["time", "latitude", "longitude"],
+    "CM4": ["time", "lat", "lon"],
 }
 
 
@@ -64,7 +65,7 @@ def copy(source: str, destination: str):
 @dataclasses.dataclass
 class StatsConfig:
     output_directory: str
-    data_type: Literal["FV3GFS", "E3SMV2", "ERA5"]
+    data_type: Literal["FV3GFS", "E3SMV2", "ERA5", "CM4"]
     exclude_runs: List[str] = dataclasses.field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
