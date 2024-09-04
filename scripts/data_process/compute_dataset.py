@@ -62,6 +62,10 @@ class StandardNameMapping:
     snow_mixing_ratio: str = "snow_mixing_ratio"
     northward_wind: str = "northward_wind"
     eastward_wind: str = "eastward_wind"
+    surface_evaporation_rate: str = "surface_evaporation_rate"
+    land_fraction: str = "land_fraction"
+    ocean_fraction: str = "ocean_fraction"
+    sea_ice_fraction: str = "sea_ice_fraction"
     hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
@@ -83,8 +87,10 @@ class StandardNameMapping:
         self.dropped_variables: List[str] = (
             self.water_species
             + self.vertically_resolved
-            + [self.pressure_thickness, self.vertical_dim, self.precipitable_water_path]
+            + [self.pressure_thickness, self.vertical_dim]
         )
+        if self.precipitable_water_path.lower() != "none":
+            self.dropped_variables.append(self.precipitable_water_path)
 
     @property
     def water_species(self) -> List[str]:
@@ -292,14 +298,88 @@ def get_coarse_ak_bk(
     return xr.Dataset(data)
 
 
+def compute_ocean_fraction(
+    ds: xr.Dataset,
+    output_name: str,
+    land_fraction_name: str,
+    sea_ice_fraction_name: str,
+) -> xr.Dataset:
+    """Compute latent heat flux, if needed."""
+    if output_name in ds.data_vars:
+        # if ocean_fraction is already computed, assume that NaNs have been handled
+        return ds
+    ds[sea_ice_fraction_name] = ds[sea_ice_fraction_name].fillna(0.0)
+    ocean_fraction = 1 - ds[sea_ice_fraction_name] - ds[land_fraction_name]
+    negative_ocean = xr.where(ocean_fraction < 0, ocean_fraction, 0)
+    ocean_fraction -= negative_ocean
+    ds["sea_ice_fraction"] += negative_ocean
+    ocean_fraction.attrs["units"] = "unitless"
+    ocean_fraction.attrs["long_name"] = "fraction of grid cell area occupied by ocean"
+    return ds.assign({output_name: ocean_fraction})
+
+
+def compute_latent_heat_flux(
+    ds: xr.Dataset,
+    output_name: str,
+    evaporation_name: Optional[str] = None,
+) -> xr.Dataset:
+    """Compute latent heat flux, if needed."""
+    if output_name in ds.data_vars:
+        return ds
+    assert (
+        evaporation_name is not None
+    ), f"{output_name} not found in ds, evaporation_name must be provided."
+    latent_heat_flux = ds[evaporation_name] * LATENT_HEAT_OF_VAPORIZATION
+    latent_heat_flux.attrs["units"] = "W/m^2"
+    latent_heat_flux.attrs["long_name"] = "Latent heat flux"
+    return ds.assign({output_name: latent_heat_flux}).drop(evaporation_name)
+
+
 def compute_specific_total_water(
     ds: xr.Dataset, water_condensate_names: Sequence[str], output_name: str
 ) -> xr.Dataset:
     """Compute specific total water from individual water species."""
-    specific_total_water = sum([ds[name] for name in water_condensate_names])
+    specific_total_water: xr.DataArray = sum(
+        [ds[name] for name in water_condensate_names]
+    )
     specific_total_water.attrs["units"] = "kg/kg"
     specific_total_water.attrs["long_name"] = output_name.replace("_", " ")
     return ds.assign({output_name: specific_total_water})
+
+
+def compute_pressure_thickness(
+    ds: xr.Dataset,
+    vertical_coordinate_file: str,
+    vertical_dim_name: str,
+    surface_pressure_name: str,
+    output_name: str,
+    z_dim: str = "xaxis_1",
+):
+    if output_name in ds.data_vars:
+        return ds
+
+    with fsspec.open(vertical_coordinate_file) as f:
+        vertical_coordinate = xr.open_dataset(f).load()
+    # squeeze out the singleton time dimension
+    vertical_coord = vertical_coordinate.squeeze(drop=True)
+
+    sfc_pressure = ds[surface_pressure_name].expand_dims(
+        {z_dim: vertical_coord[z_dim]}, axis=3
+    )
+    phalf = sfc_pressure * vertical_coord["bk"] + vertical_coord["ak"]
+
+    thickness = (
+        phalf.diff(dim=z_dim)
+        .rename({z_dim: vertical_dim_name})
+        .rename(output_name)
+        .assign_coords(
+            {vertical_dim_name: (vertical_dim_name, ds[vertical_dim_name].values)}
+        )
+    )
+
+    thickness.attrs["units"] = "Pa"
+    thickness.attrs["long_name"] = output_name.replace("_", " ")
+    return ds.assign({output_name: thickness})
 
 
 def compute_vertical_coarsening(
@@ -459,10 +539,28 @@ def construct_lazy_dataset(
             lon_dim=standard_names.longitude_dim,
             fraction_modes_kept=config.roundtrip_fraction_kept,
         )
+    ds = compute_ocean_fraction(
+        ds,
+        output_name=standard_names.ocean_fraction,
+        land_fraction_name=standard_names.land_fraction,
+        sea_ice_fraction_name=standard_names.sea_ice_fraction,
+    )
+    ds = compute_latent_heat_flux(
+        ds,
+        output_name=standard_names.latent_heat_flux,
+        evaporation_name=standard_names.surface_evaporation_rate,
+    )
     ds = compute_specific_total_water(
         ds,
         water_condensate_names=standard_names.water_species,
         output_name=standard_names.specific_total_water,
+    )
+    ds = compute_pressure_thickness(
+        ds,
+        vertical_coordinate_file=config.reference_vertical_coordinate_file,
+        vertical_dim_name=standard_names.vertical_dim,
+        surface_pressure_name=standard_names.surface_pressure,
+        output_name=standard_names.pressure_thickness,
     )
     ds = compute_vertical_coarsening(
         ds,
