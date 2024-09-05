@@ -1,6 +1,7 @@
 import dataclasses
 from typing import Literal, Optional, Sequence, Union
 
+import torch
 import xarray as xr
 
 from fme.core.distributed import Distributed
@@ -74,6 +75,8 @@ class XarrayDataConfig:
             the additional requirement that the data be ordered and evenly
             spaced in time. It must be set to True if n_repeats > 1 in order
             to be able to infer the full time coordinate.
+        dtype: Data type to cast the data to. If None, no casting is done. It is
+            required that 'torch.{dtype}' is a valid dtype.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -98,12 +101,22 @@ class XarrayDataConfig:
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
+    dtype: Optional[str] = "float32"
 
     def __post_init__(self):
         if self.n_repeats > 1 and not self.infer_timestep:
             raise ValueError(
                 "infer_timestep must be True if n_repeats is greater than 1"
             )
+        if self.dtype is None:
+            self.torch_dtype = None
+        else:
+            try:
+                self.torch_dtype = getattr(torch, self.dtype)
+            except AttributeError:
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
+            if not isinstance(self.torch_dtype, torch.dtype):
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
 
 
 @dataclasses.dataclass

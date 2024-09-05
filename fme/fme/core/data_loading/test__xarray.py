@@ -394,6 +394,20 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
                 xr.testing.assert_equal(times, target_times)
 
 
+def test_dataset_dtype_casting(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir, dtype="bfloat16")
+    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=2)
+    dataset = XarrayDataset(config=config, requirements=requirements)
+    assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
+    assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
+    assert dataset.sigma_coordinates.ak.dtype == torch.bfloat16
+    assert dataset.sigma_coordinates.bk.dtype == torch.bfloat16
+    data, _ = dataset[0]
+    for tensor in data.values():
+        assert tensor.dtype == torch.bfloat16
+
+
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = DataLoaderConfig(
@@ -582,3 +596,16 @@ def test_available_times(mock_monthly_netcdfs):
         ),
     )
     assert dataset.all_times.equals(xr.CFTimeIndex(mock_monthly_netcdfs.obs_times))
+
+
+@pytest.mark.parametrize(
+    "dtype,expected_torch_dtype", [("int16", torch.int16), (None, None)]
+)
+def test_dataset_config_dtype(dtype, expected_torch_dtype):
+    config = XarrayDataConfig(data_path="path/to/data", dtype=dtype)
+    assert config.torch_dtype == expected_torch_dtype
+
+
+def test_dataset_config_dtype_raises():
+    with pytest.raises(ValueError):
+        XarrayDataConfig(data_path="path/to/data", dtype="invalid_dtype")

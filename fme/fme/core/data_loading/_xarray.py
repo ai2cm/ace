@@ -61,7 +61,9 @@ def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
     return subsetted_dataset
 
 
-def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
+def get_sigma_coordinates(
+    ds: xr.Dataset, dtype: Optional[torch.dtype]
+) -> SigmaCoordinates:
     """
     Get sigma coordinates from a dataset.
 
@@ -98,8 +100,8 @@ def get_sigma_coordinates(ds: xr.Dataset) -> SigmaCoordinates:
         )
 
     return SigmaCoordinates(
-        ak=torch.as_tensor(ak_list, device=fme.get_device(), dtype=torch.float),
-        bk=torch.as_tensor(bk_list, device=fme.get_device(), dtype=torch.float),
+        ak=torch.as_tensor(ak_list, device=fme.get_device(), dtype=dtype),
+        bk=torch.as_tensor(bk_list, device=fme.get_device(), dtype=dtype),
     )
 
 
@@ -290,6 +292,8 @@ class XarrayDataset(Dataset):
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
+        self.dtype = config.torch_dtype
+        self.spatial_dimensions = config.spatial_dimensions
         self._default_file_pattern_check()
         fs = _get_fs(self.path)
         glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
@@ -309,13 +313,13 @@ class XarrayDataset(Dataset):
         (
             self._horizontal_coordinates,
             self._static_derived_data,
-        ) = self.configure_horizontal_coordinates(config, first_dataset)
+        ) = self.configure_horizontal_coordinates(first_dataset)
         (
             self.time_dependent_names,
             self.time_invariant_names,
             self.static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._sigma_coordinates = get_sigma_coordinates(first_dataset)
+        self._sigma_coordinates = get_sigma_coordinates(first_dataset, self.dtype)
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -422,37 +426,37 @@ class XarrayDataset(Dataset):
             static_derived_names,
         )
 
-    def configure_horizontal_coordinates(self, config, first_dataset):
+    def configure_horizontal_coordinates(self, first_dataset):
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
-        dims = get_horizontal_dimensions(first_dataset)
+        dims = get_horizontal_dimensions(first_dataset, self.dtype)
 
-        if config.spatial_dimensions == "latlon":
+        if self.spatial_dimensions == "latlon":
             lons = dims[0]
             lats = dims[1]
             names = infer_horizontal_dimension_names(first_dataset)
             lon_name = names[0]
             lat_name = names[1]
             horizontal_coordinates = LatLonCoordinates(
-                lon=torch.as_tensor(lons, device=fme.get_device()),
-                lat=torch.as_tensor(lats, device=fme.get_device()),
+                lon=lons.to(device=fme.get_device()),
+                lat=lats.to(device=fme.get_device()),
                 loaded_lat_name=lat_name,
                 loaded_lon_name=lon_name,
             )
             static_derived_data = StaticDerivedData(horizontal_coordinates)
-        elif config.spatial_dimensions == "healpix":
+        elif self.spatial_dimensions == "healpix":
             face = dims[0]
             height = dims[1]
             width = dims[2]
             horizontal_coordinates = HEALPixCoordinates(
-                face=torch.as_tensor(face, device=fme.get_device()),
-                height=torch.as_tensor(height, device=fme.get_device()),
-                width=torch.as_tensor(width, device=fme.get_device()),
+                face=face.to(device=fme.get_device()),
+                height=height.to(device=fme.get_device()),
+                width=width.to(device=fme.get_device()),
             )
             static_derived_data = StaticDerivedData(horizontal_coordinates)
         else:
             raise ValueError(
-                f"unexpected config.spatial_dimensions {config.spatial_dimensions},"
+                f"unexpected config.spatial_dimensions {self.spatial_dimensions},"
                 " should be one of 'latlon' or 'healpix'"
             )
         coords_sizes = {
@@ -562,6 +566,9 @@ class XarrayDataset(Dataset):
         for name in self.static_derived_names:
             tensor = self._static_derived_data[name]
             tensors[name] = tensor.repeat((total_steps, 1, 1))
+
+        # cast to desired dtype
+        tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
 
         return tensors, times
 
