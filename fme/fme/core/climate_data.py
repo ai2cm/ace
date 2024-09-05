@@ -169,11 +169,6 @@ class ClimateData:
             GRAVITY_E3SM = 9.80616
             return self._get("surface_geopotential") / GRAVITY_E3SM
 
-    def model_name(self, name: str):
-        for prefix in self._prefixes[name]:
-            if prefix in self._data.keys():
-                return prefix
-
     @property
     def surface_pressure(self) -> torch.Tensor:
         return self._get("surface_pressure")
