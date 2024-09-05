@@ -246,6 +246,7 @@ def run_inference(
         current_time = time.time()
         i_time = 0
         window_forcing: BatchData
+        diagnostic_ic: Dict[str, torch.Tensor] = {}
         for window_forcing in forcing_data.loader:
             timers["data_loading"] += time.time() - current_time
             current_time = time.time()
@@ -261,20 +262,28 @@ def run_inference(
             timers["run_on_batch"] += time.time() - current_time
 
             time_dim = 1
+            if len(diagnostic_ic) == 0:
+                diagnostic_ic = {
+                    k: torch.zeros_like(prediction[k].select(time_dim, 0))
+                    for k in stepper.diagnostic_names
+                }
+            prediction_ic = {**initial_condition, **diagnostic_ic}
             prediction_with_ic = {
                 k: torch.cat(
-                    [initial_condition[k].unsqueeze(time_dim), prediction[k]],
+                    [prediction_ic[k].unsqueeze(time_dim), prediction[k]],
                     dim=time_dim,
                 )
-                for k in stepper.prognostic_names
+                for k in prediction
             }
-            prediction_with_ic = compute_derived_quantities(
-                prediction_with_ic,
-                forcing_data.sigma_coordinates,
-                forcing_data.timestep,
-                forcing_data=window_forcing_data,
-            )
-            prediction = {k: prediction_with_ic[k][:, 1:] for k in prediction_with_ic}
+            prediction = {
+                k: v[:, 1:]
+                for k, v in compute_derived_quantities(
+                    prediction_with_ic,
+                    forcing_data.sigma_coordinates,
+                    forcing_data.timestep,
+                    forcing_data=window_forcing_data,
+                ).items()
+            }
 
             forward_times = window_forcing.times.isel(time=slice(1, None))
             writer.append_batch(prediction, i_time, forward_times)
@@ -286,6 +295,7 @@ def run_inference(
             initial_condition = {
                 k: prediction[k][:, -1] for k in stepper.prognostic_names
             }
+            diagnostic_ic = {k: prediction[k][:, -1] for k in stepper.diagnostic_names}
             i_time += forward_steps_in_memory
 
         for name, duration in timers.items():
