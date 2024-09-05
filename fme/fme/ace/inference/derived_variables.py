@@ -209,16 +209,14 @@ def _compute_derived_variable(
             "to overwrite existing variables with derived variables."
         )
     new_data = data.copy()
+    if forcing_data is not None:
+        for key, value in forcing_data.items():
+            if key not in data:
+                data[key] = value
+
     climate_data = ClimateData(data)
 
     try:
-        if forcing_data and derived_variable.required_inputs:
-            climate_forcing_data = ClimateData(forcing_data)
-            for v in derived_variable.required_inputs:
-                if not hasattr(climate_forcing_data, v):
-                    raise KeyError(v)
-                model_name = climate_forcing_data.model_name(v)
-                climate_data.data.update({model_name: climate_forcing_data[v]})
         output = derived_variable.func(climate_data, sigma_coordinates, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
