@@ -76,8 +76,10 @@ def save_stepper(
 
 def test_inference_entrypoint(tmp_path: pathlib.Path):
     forward_steps_in_memory = 2
-    in_names = ["prog", "forcing_var"]
-    out_names = ["prog", "diagnostic_var"]
+    # NOTE: number of inputs and outputs has to be the same for the PlusOne
+    # stepper module to work properly
+    in_names = ["prog", "forcing_var", "DSWRFtoa"]
+    out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
     horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
 
@@ -96,12 +98,22 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     data = FV3GFSData(
         path=tmp_path,
-        names=["forcing_var"],
+        names=["forcing_var", "DSWRFtoa"],
         dim_sizes=dim_sizes,
         timestep_days=0.25,
     )
     initial_condition = xr.Dataset(
-        {"prog": xr.DataArray(np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"])}
+        {
+            "prog": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+            "forcing": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+            "DSWRFtoa": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+        }
     )
 
     initial_condition_path = tmp_path / "init_data" / "ic.nc"
@@ -135,7 +147,15 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
     main(yaml_config=str(config_filename))
     ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    # prognostic in
     assert "prog" in ds
+    # diags in
+    assert "ULWRFtoa" in ds
+    assert "USWRFtoa" in ds
+    # derived in
+    assert "net_energy_flux_toa_into_atmosphere" in ds
+    # forcings not in
+    assert "DSWRFtoa" not in ds
     assert "forcing_var" not in ds
     assert ds["prog"].sizes == {"time": 4, "sample": 2, "lat": 16, "lon": 32}
     np.testing.assert_allclose(

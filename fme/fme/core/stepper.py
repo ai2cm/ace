@@ -173,6 +173,11 @@ class SingleModuleStepperConfig:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).intersection(self.in_names))
 
+    @property
+    def diagnostic_names(self) -> List[str]:
+        """Names of variables which both inputs and outputs."""
+        return list(set(self.out_names).difference(self.in_names))
+
     @classmethod
     def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
         _unsupported_key_defaults = {
@@ -429,6 +434,10 @@ class SingleModuleStepper:
         return sorted(
             list(set(self.out_packer.names).intersection(self.in_packer.names))
         )
+
+    @property
+    def diagnostic_names(self) -> List[str]:
+        return sorted(list(set(self.out_packer.names).difference(self.in_packer.names)))
 
     @property
     def modules(self) -> nn.ModuleList:
