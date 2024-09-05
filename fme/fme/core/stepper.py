@@ -12,7 +12,7 @@ from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
-from fme.core.device import cast_tensordict_to_device, get_device
+from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
@@ -518,7 +518,7 @@ class SingleModuleStepper:
         return output_timeseries
 
     def get_initial_condition(self, data: TensorDict) -> Tuple[TensorDict, TensorDict]:
-        ic = cast_tensordict_to_device(
+        ic = move_tensordict_to_device(
             {k: v.select(self.TIME_DIM, 0) for k, v in data.items()}
         )
         return ic, self.normalizer.normalize(ic)
@@ -544,7 +544,7 @@ class SingleModuleStepper:
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        data = cast_tensordict_to_device(data, dtype=torch.float)
+        data = move_tensordict_to_device(data)
         time_dim = self.TIME_DIM
         if self.ocean is None:
             forcing_names = self._config.forcing_names
