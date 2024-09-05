@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import torch.jit
 
-from fme.core.device import cast_tensordict_to_device
+from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict
 
 
@@ -94,8 +94,8 @@ class StandardNormalizer:
         means: TensorDict,
         stds: TensorDict,
     ):
-        self.means = cast_tensordict_to_device(means)
-        self.stds = cast_tensordict_to_device(stds)
+        self.means = move_tensordict_to_device(means)
+        self.stds = move_tensordict_to_device(stds)
 
     def normalize(self, tensors: TensorDict) -> TensorDict:
         return _normalize(tensors, means=self.means, stds=self.stds)

@@ -147,8 +147,8 @@ class LatLonCoordinates(HorizontalCoordinates):
     def coords(self) -> Mapping[str, np.ndarray]:
         # TODO: Replace with lat/lon name?
         return {
-            "lat": self.lat.cpu().numpy(),
-            "lon": self.lon.cpu().numpy(),
+            "lat": self.lat.cpu().type(torch.float32).numpy(),
+            "lon": self.lon.cpu().type(torch.float32).numpy(),
         }
 
     @property
@@ -214,9 +214,9 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
-            "face": self.face.cpu().numpy(),
-            "height": self.height.cpu().numpy(),
-            "width": self.width.cpu().numpy(),
+            "face": self.face.cpu().type(torch.float32).numpy(),
+            "height": self.height.cpu().type(torch.float32).numpy(),
+            "width": self.width.cpu().type(torch.float32).numpy(),
         }
 
     @property

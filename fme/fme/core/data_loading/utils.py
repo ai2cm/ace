@@ -4,7 +4,6 @@ import warnings
 from typing import Hashable, List, Optional, Sequence, Tuple
 
 import cftime
-import numpy as np
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
@@ -123,13 +122,15 @@ def load_series_data(
     return arrays
 
 
-def get_horizontal_dimensions(ds: xr.Dataset) -> List[np.ndarray]:
+def get_horizontal_dimensions(
+    ds: xr.Dataset, dtype: Optional[torch.dtype]
+) -> List[torch.Tensor]:
     hdims = infer_horizontal_dimension_names(ds)
 
     horizontal_values = []
     for dim in hdims:
         if dim in ds:
-            horizontal_values.append(np.array(ds[dim].values, dtype=np.float32))
+            horizontal_values.append(torch.tensor(ds[dim].values, dtype=dtype))
         else:
             raise ValueError(f"Expected {dim} in dataset: {ds}.")
 
