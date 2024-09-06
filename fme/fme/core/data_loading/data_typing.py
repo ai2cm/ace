@@ -116,6 +116,12 @@ class HorizontalCoordinates(abc.ABC):
     def gridded_operations(self) -> GriddedOperations:
         pass
 
+    @property
+    @abc.abstractmethod
+    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """meshgrids of latitudes and longitudes, respectively."""
+        pass
+
 
 @dataclasses.dataclass
 class LatLonCoordinates(HorizontalCoordinates):
@@ -194,6 +200,10 @@ class LatLonCoordinates(HorizontalCoordinates):
     def gridded_operations(self) -> LatLonOperations:
         return LatLonOperations(self.area_weights)
 
+    @property
+    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return torch.meshgrid(self.lat, self.lon)
+
 
 @dataclasses.dataclass
 class HEALPixCoordinates(HorizontalCoordinates):
@@ -269,6 +279,12 @@ class HEALPixCoordinates(HorizontalCoordinates):
     @property
     def gridded_operations(self) -> HEALPixOperations:
         return HEALPixOperations()
+
+    @property
+    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        raise NotImplementedError(
+            "meshgrid is not implemented yet for HEALPixCoordinates."
+        )
 
 
 class Dataset(torch.utils.data.Dataset, abc.ABC):
