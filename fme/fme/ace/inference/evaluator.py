@@ -20,7 +20,7 @@ from fme.ace.inference.loop import (
 )
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
+from fme.core.data_loading.data_typing import GriddedData
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -37,14 +37,10 @@ def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
 
 def load_stepper(
     checkpoint_file: str,
-    sigma_coordinates: SigmaCoordinates,
     ocean_config: Optional[OceanConfig] = None,
 ) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"],
-        sigma_coordinates=sigma_coordinates,
-    )
+    stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
     if ocean_config is not None:
         logging.info(
             "Overriding training ocean configuration with the inference ocean config."
@@ -135,21 +131,14 @@ class InferenceEvaluatorConfig:
     def configure_gcs(self):
         self.logging.configure_gcs()
 
-    def load_stepper(
-        self,
-        sigma_coordinates: SigmaCoordinates,
-    ) -> SingleModuleStepper:
+    def load_stepper(self) -> SingleModuleStepper:
         """
         Args:
             gridded_operations: The gridded operations to use for the model.
             sigma_coordinates: The sigma coordinates of the model.
         """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        stepper = load_stepper(
-            self.checkpoint_path,
-            sigma_coordinates=sigma_coordinates,
-            ocean_config=self.ocean,
-        )
+        stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
         return stepper
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
@@ -210,9 +199,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         data_requirements,
     )
 
-    stepper = config.load_stepper(
-        sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
-    )
+    stepper = config.load_stepper()
     if stepper.timestep != data.timestep:
         raise ValueError(
             f"Timestep of the loaded stepper, {stepper.timestep}, does not "
