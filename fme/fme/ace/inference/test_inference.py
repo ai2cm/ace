@@ -32,7 +32,7 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.testing import DimSizes, FV3GFSData
+from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -136,7 +136,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         logging=LoggingConfig(
             log_to_screen=True,
             log_to_file=False,
-            log_to_wandb=False,
+            log_to_wandb=True,
         ),
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
@@ -145,7 +145,23 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    main(yaml_config=str(config_filename))
+
+    with mock_wandb() as wandb:
+        inference_logs = main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    assert len(inference_logs) == config.n_forward_steps + 1
+    assert len(wandb_logs) == len(inference_logs)
+    for i, log in enumerate(inference_logs):
+        for metric, val in log.items():
+            # check that time series metrics match
+            if "inference/mean" in metric:
+                assert metric in wandb_logs[i]
+                if np.isnan(val):
+                    assert np.isnan(wandb_logs[i][metric])
+                else:
+                    assert wandb_logs[i][metric] == val
+
     ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
     # prognostic in
     assert "prog" in ds

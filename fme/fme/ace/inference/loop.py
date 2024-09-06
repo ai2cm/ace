@@ -186,7 +186,7 @@ def _inference_internal_loop(
 
 
 def _log_window_to_wandb(
-    aggregator: InferenceEvaluatorAggregator,
+    aggregator: Union[InferenceAggregator, InferenceEvaluatorAggregator],
     window_slice: slice,
     label: str,
 ):
@@ -292,6 +292,20 @@ def run_inference(
             )
             timers["writer_and_aggregator"] += time.time() - current_time
             current_time = time.time()
+            if i_time == 0:
+                _log_window_to_wandb(
+                    aggregator,
+                    window_slice=slice(0, 1),
+                    label="inference",
+                )
+            _log_window_to_wandb(
+                aggregator,
+                window_slice=slice(i_time + 1, i_time + len(forward_times["time"]) + 1),
+                label="inference",
+            )
+            timers["wandb_logging"] += time.time() - current_time
+            current_time = time.time()
+
             initial_condition = {
                 k: prediction[k][:, -1] for k in stepper.prognostic_names
             }
