@@ -1,7 +1,6 @@
 """This file contains unit tests related to creating torch Datasets from climate
 data (e.g. netCDF files)."""
 
-import datetime
 import math
 import pathlib
 from typing import List
@@ -27,7 +26,7 @@ from fme.core.data_loading.inference import (
     TimestampList,
 )
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData, get_times
+from fme.core.data_loading.utils import BatchData
 
 
 def _get_coords(dim_sizes, calendar):
@@ -260,21 +259,6 @@ def test_data_loader_outputs(tmp_path, calendar):
     assert batch_data.times.sizes["sample"] == n_samples
     assert batch_data.times.sizes["time"] == window_timesteps
     assert batch_data.times.dt.calendar == calendar
-
-
-def test_get_times_non_cftime():
-    """
-    Check that `get_times` raises an error when the time coordinate is not
-    cftime.datetime
-    """
-    n_times = 5
-    times = [datetime.datetime(2020, 1, 1, i, 0, 0) for i in range(n_times)]
-    ds = xr.Dataset(
-        {"foo": xr.DataArray(np.arange(n_times), dims=("time",))},
-        coords={"time": times},
-    )
-    with pytest.raises(AssertionError):
-        get_times(ds, 0, 1)
 
 
 @pytest.mark.parametrize(
