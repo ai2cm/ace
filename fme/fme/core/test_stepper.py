@@ -270,10 +270,7 @@ def test_reloaded_stepper_gives_same_prediction():
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
-    new_stepper = SingleModuleStepper.from_state(
-        stepper.get_state(),
-        sigma_coordinates=sigma_coordinates,
-    )
+    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.run_on_batch(
         data=data,
@@ -802,10 +799,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
-    stepper_from_state = SingleModuleStepper.from_state(
-        orig_stepper.get_state(),
-        sigma_coordinates=sigma_coordinates,
-    )
+    stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
         assert stepper.loss_normalizer.means == {

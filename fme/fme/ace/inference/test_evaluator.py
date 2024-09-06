@@ -748,9 +748,7 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         forward_steps_in_memory=4,
         ocean=ocean_override,
     )
-    stepper = config.load_stepper(
-        sigma_coordinates=SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)),
-    )
+    stepper = config.load_stepper()
     assert isinstance(stepper.ocean, Ocean)
     assert (
         stepper.ocean.surface_temperature_name

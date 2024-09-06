@@ -265,10 +265,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
-    stepper = SingleModuleStepper.from_state(
-        stepper_state,
-        sigma_coordinates=sigma_coordinates,
-    )
+    stepper = SingleModuleStepper.from_state(stepper_state)
     assert isinstance(stepper, SingleModuleStepper)
 
 

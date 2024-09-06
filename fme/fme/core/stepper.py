@@ -242,10 +242,7 @@ class ExistingStepperConfig:
     def get_stepper(self, img_shape, gridded_operations, sigma_coordinates, timestep):
         del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
-        return SingleModuleStepper.from_state(
-            self._load_checkpoint()["stepper"],
-            sigma_coordinates=sigma_coordinates,
-        )
+        return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"])
 
 
 def _combine_normalizers(
@@ -633,17 +630,12 @@ class SingleModuleStepper:
             self.module.load_state_dict(module)
 
     @classmethod
-    def from_state(
-        cls,
-        state,
-        sigma_coordinates: SigmaCoordinates,
-    ) -> "SingleModuleStepper":
+    def from_state(cls, state) -> "SingleModuleStepper":
         """
         Load the state of the stepper.
 
         Args:
             state: The state to load.
-            sigma_coordinates: The sigma coordinates.
 
         Returns:
             The stepper.
@@ -667,12 +659,18 @@ class SingleModuleStepper:
                 state["gridded_operations"]
             )
 
-        if "sigma_coordinates" in state:
-            sigma_coordinates = dacite.from_dict(
-                data_class=SigmaCoordinates,
-                data=state["sigma_coordinates"],
-                config=dacite.Config(strict=True),
-            )
+        sigma_coordinates = dacite.from_dict(
+            data_class=SigmaCoordinates,
+            data=state["sigma_coordinates"],
+            config=dacite.Config(strict=True),
+        )
+        # for backwards compatibility with original ACE checkpoint which
+        # serialized vertical coordinates as float64
+        if sigma_coordinates.ak.dtype == torch.float64:
+            sigma_coordinates.ak = sigma_coordinates.ak.to(dtype=torch.float32)
+        if sigma_coordinates.bk.dtype == torch.float64:
+            sigma_coordinates.bk = sigma_coordinates.bk.to(dtype=torch.float32)
+
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
         if "img_shape" in state:
