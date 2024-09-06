@@ -13,6 +13,8 @@ from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
     PairedNormalizationConfig,
+    _repeat_batch_by_samples,
+    _separate_interleaved_samples,
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -245,3 +247,16 @@ def test_diffusion_model_train_and_generate(predict_residual):
     assert torch.all(
         generated_outputs[0].prediction["x"] != generated_outputs[1].prediction["x"]
     )
+
+
+def test_interleaved_samples_round_trip():
+    batch_size = 2
+    n_samples = 3
+
+    batch = torch.concat([torch.ones(1, 5), torch.ones(1, 5) * 2], dim=0)
+    with_combined_samples = _repeat_batch_by_samples(batch, n_samples)
+    with_batch_sample_dims = _separate_interleaved_samples(
+        with_combined_samples, batch_size, n_samples
+    )
+    assert with_batch_sample_dims.shape == (batch_size, n_samples, 5)
+    assert torch.equal(batch, with_batch_sample_dims[:, 0])
