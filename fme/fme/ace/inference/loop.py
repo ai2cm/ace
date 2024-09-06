@@ -279,8 +279,8 @@ def run_inference(
                 k: v[:, 1:]
                 for k, v in compute_derived_quantities(
                     prediction_with_ic,
-                    forcing_data.sigma_coordinates,
-                    forcing_data.timestep,
+                    stepper.sigma_coordinates,
+                    stepper.timestep,
                     forcing_data=window_forcing_data,
                 ).items()
             }
@@ -378,8 +378,8 @@ def run_inference_evaluator(
 
             stepped = compute_stepped_derived_quantities(
                 stepped,
-                data.sigma_coordinates,
-                data.timestep,
+                stepper.sigma_coordinates,
+                stepper.timestep,
                 # forcing inputs are in target data but not gen_data
                 forcing_data=stepped.target_data,
             )
