@@ -233,21 +233,20 @@ def run_inference_from_config(config: InferenceConfig):
     initial_condition, initial_times = get_initial_condition(
         config.initial_condition.get_dataset(), stepper_config.prognostic_names
     )
+    stepper = config.load_stepper()
     logging.info("Initializing forcing data loaded")
     data = get_forcing_data(
         config.forcing_loader,
         config.forward_steps_in_memory,
         data_requirements,
         initial_times,
+        stepper.ocean,
     )
-
-    stepper = config.load_stepper()
     if stepper.timestep != data.timestep:
         raise ValueError(
             f"Timestep of the loaded stepper, {stepper.timestep}, does not "
             f"match that of the forcing data, {data.timestep}."
         )
-
     aggregator = config.aggregator.build(
         gridded_operations=data.gridded_operations,
         sigma_coordinates=data.sigma_coordinates,

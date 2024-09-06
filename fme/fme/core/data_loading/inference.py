@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
+import logging
 from math import ceil
-from typing import Sequence, Union
+from typing import Optional, Sequence, Union
 
 import cftime
 import numpy as np
@@ -10,10 +11,16 @@ import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
 from fme.core.data_loading.config import Slice, XarrayDataConfig
-from fme.core.data_loading.data_typing import HorizontalCoordinates, SigmaCoordinates
+from fme.core.data_loading.data_typing import (
+    HorizontalCoordinates,
+    LatLonCoordinates,
+    SigmaCoordinates,
+)
+from fme.core.data_loading.perturbation import SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
+from fme.core.ocean import Ocean
 
 
 @dataclasses.dataclass
@@ -110,6 +117,7 @@ class InferenceDataLoaderConfig:
             Values following the initial condition will still come from
             the full dataset.
         num_data_workers: Number of parallel workers to use for data loading.
+        perturbations: Configuration for SST perturbations.
     """
 
     dataset: XarrayDataConfig
@@ -117,6 +125,7 @@ class InferenceDataLoaderConfig:
         InferenceInitialConditionIndices, ExplicitIndices, TimestampList
     ]
     num_data_workers: int = 0
+    perturbations: Optional[SSTPerturbation] = None
 
     def __post_init__(self):
         if self.dataset.subset != Slice(None, None, None):
@@ -135,10 +144,13 @@ class ForcingDataLoaderConfig:
     Attributes:
         dataset: Configuration to define the dataset.
         num_data_workers: Number of parallel workers to use for data loading.
+        perturbations: Configuration for SST perturbations
+            used in forcing data.
     """
 
     dataset: XarrayDataConfig
     num_data_workers: int = 0
+    perturbations: Optional[SSTPerturbation] = None
 
     def __post_init__(self):
         if self.dataset.subset != Slice(None, None, None):
@@ -149,6 +161,7 @@ class ForcingDataLoaderConfig:
             dataset=self.dataset,
             num_data_workers=self.num_data_workers,
             start_indices=start_indices,
+            perturbations=self.perturbations,
         )
 
 
@@ -158,6 +171,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         forward_steps_in_memory: int,
         requirements: DataRequirements,
+        ocean: Optional[Ocean] = None,
     ):
         dataset = XarrayDataset(config.dataset, requirements=requirements)
         self._dataset = dataset
@@ -168,12 +182,29 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._forward_steps_in_memory = forward_steps_in_memory
         self._total_steps = requirements.n_timesteps - 1
         self._is_remote = dataset.is_remote
+        self._perturbations = config.perturbations
+        self._ocean = ocean
         self.n_samples = config.n_samples  # public attribute
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(dataset.all_times)
         else:
             self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()
+        if isinstance(self._horizontal_coordinates, LatLonCoordinates):
+            self._lats, self._lons = self._horizontal_coordinates.meshgrid
+            self._lats = self._lats.to("cpu")
+            self._lons = self._lons.to("cpu")
+        else:
+            if self._perturbations is not None:
+                raise ValueError(
+                    "Currently, SST perturbations are only supported \
+                    for lat/lon coordinates."
+                )
+        if self._perturbations is not None and self._ocean is None:
+            raise ValueError(
+                "No ocean configuration found, \
+                SST perturbations require an ocean configuration."
+            )
 
     def __getitem__(self, index) -> BatchData:
         dist = Distributed.get_instance()
@@ -188,9 +219,17 @@ class InferenceDataset(torch.utils.data.Dataset):
             if i_window_end > (self._total_steps + self._start_indices[i_sample]):
                 i_window_end = self._total_steps + self._start_indices[i_sample] + 1
             window_time_slice = slice(i_window_start, i_window_end)
-            sample_tuples.append(
-                self._dataset.get_sample_by_time_slice(window_time_slice)
-            )
+            tensors, times = self._dataset.get_sample_by_time_slice(window_time_slice)
+            if self._perturbations is not None:
+                logging.debug("Applying SST perturbations to forcing data")
+                for select in self._perturbations.sst:
+                    select.perturbation.apply_perturbation(
+                        tensors[self._ocean.surface_temperature_name],  # type: ignore
+                        self._lats,
+                        self._lons,
+                        tensors[self._ocean.ocean_fraction_name],  # type: ignore
+                    )
+            sample_tuples.append((tensors, times))
         result = BatchData.from_sample_tuples(sample_tuples)
         assert result.times.shape[0] == self.n_samples // dist.world_size
         return result

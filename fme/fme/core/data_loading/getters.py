@@ -1,6 +1,6 @@
 import logging
 import warnings
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 import numpy as np
 import torch.utils.data
@@ -11,6 +11,7 @@ from torch.utils.data.sampler import RandomSampler
 from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
+from fme.core.ocean import Ocean
 
 from ._xarray import XarrayDataset, as_index_slice, subset_dataset
 from .data_typing import GriddedData
@@ -146,17 +147,19 @@ def get_inference_data(
     config: InferenceDataLoaderConfig,
     forward_steps_in_memory: int,
     requirements: DataRequirements,
+    ocean: Optional[Ocean] = None,
 ) -> GriddedData:
     """
     Args:
         config: Parameters for the data loader.
         forward_steps_in_memory: Number of forward steps to keep in memory at once.
         requirements: Data requirements for the model.
+        ocean: The ocean model.
 
     Returns:
         A data loader for inference with coordinates and metadata.
     """
-    dataset = InferenceDataset(config, forward_steps_in_memory, requirements)
+    dataset = InferenceDataset(config, forward_steps_in_memory, requirements, ocean)
 
     if dataset.is_remote:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
@@ -179,7 +182,7 @@ def get_inference_data(
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
     )
-    return GriddedData(
+    gridded_data = GriddedData(
         loader=loader,
         metadata=dataset.metadata,
         sigma_coordinates=dataset.sigma_coordinates,
@@ -187,12 +190,15 @@ def get_inference_data(
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
 
+    return gridded_data
+
 
 def get_forcing_data(
     config: ForcingDataLoaderConfig,
     forward_steps_in_memory: int,
     requirements: DataRequirements,
     initial_times: xr.DataArray,
+    ocean: Optional[Ocean],
 ) -> GriddedData:
     """Return a GriddedData loader for forcing data only. This function determines the
     start indices for the forcing data based on the initial times provided.
@@ -204,6 +210,7 @@ def get_forcing_data(
         requirements: Data requirements for the forcing data.
         initial_times: Desired initial times for the forcing data. This must be a 1D
             data array, whose length determines the ensemble size.
+        ocean: The ocean model.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -215,4 +222,6 @@ def get_forcing_data(
     inference_config = config.build_inference_config(
         start_indices=ExplicitIndices(start_time_indices)
     )
-    return get_inference_data(inference_config, forward_steps_in_memory, requirements)
+    return get_inference_data(
+        inference_config, forward_steps_in_memory, requirements, ocean
+    )

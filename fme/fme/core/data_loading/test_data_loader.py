@@ -2,6 +2,7 @@
 data (e.g. netCDF files)."""
 
 import math
+import os
 import pathlib
 from typing import List
 
@@ -25,8 +26,10 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.core.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
+from fme.core.ocean import OceanConfig
 
 
 def _get_coords(dim_sizes, calendar):
@@ -47,7 +50,10 @@ def _get_coords(dim_sizes, calendar):
 def _save_netcdf(filename, dim_sizes, variable_names, calendar):
     data_vars = {}
     for name in variable_names:
-        data = np.random.randn(*list(dim_sizes.values()))
+        if name == "constant_mask":
+            data = np.ones(list(dim_sizes.values()))
+        else:
+            data = np.random.randn(*list(dim_sizes.values()))
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)  # type: ignore
         data_vars[name] = xr.DataArray(
@@ -75,7 +81,11 @@ def _create_dataset_on_disk(
     in_variable_names = ["foo", "bar", "baz"]
     out_variable_names = ["foo", "bar"]
     mask_name = "mask"
-    all_variable_names = list(set(in_variable_names + out_variable_names)) + [mask_name]
+    constant_mask_name = "constant_mask"
+    all_variable_names = list(set(in_variable_names + out_variable_names)) + [
+        mask_name,
+        constant_mask_name,
+    ]
 
     data_path = data_dir / "data.nc"
     _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar)
@@ -359,7 +369,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     ]
     initial_times = xr.DataArray(time_values, dims=["sample"])
     data = get_forcing_data(
-        config, forward_steps_in_memory, requirements, initial_times
+        config, forward_steps_in_memory, requirements, initial_times, None
     )
     assert len(data.loader.dataset) == math.ceil(
         total_forward_steps / forward_steps_in_memory
@@ -430,3 +440,39 @@ def test_TimestampList_as_indices(timestamps, expected_indices):
         np.testing.assert_equal(
             timestamp_list.as_indices(time_index), np.array(expected_indices)
         )
+
+
+def test_inference_data_with_perturbations(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+    batch_size = 1
+    step = 7
+    config = InferenceDataLoaderConfig(
+        XarrayDataConfig(
+            data_path=tmp_path,
+            n_repeats=1,
+        ),
+        start_indices=InferenceInitialConditionIndices(
+            first=0, n_initial_conditions=batch_size, interval=step
+        ),
+        perturbations=SSTPerturbation(
+            sst=[PerturbationSelector(name="constant", config={"amplitude": 2.0})]
+        ),
+    )
+    n_forward_steps_in_memory = 3
+    original_foo = xr.open_dataset(os.path.join(tmp_path, "data.nc"))["foo"].values[
+        0 : n_forward_steps_in_memory + 1, :, :
+    ]
+    requirements = DataRequirements(["foo", "constant_mask"], n_timesteps=7)
+    data_loader = get_inference_data(
+        config,
+        forward_steps_in_memory=n_forward_steps_in_memory,
+        requirements=requirements,
+        ocean=OceanConfig(
+            surface_temperature_name="foo", ocean_fraction_name="constant_mask"
+        ),
+    ).loader
+    batch_data = next(iter(data_loader))
+    np.testing.assert_allclose(
+        original_foo + 2.0,
+        batch_data.data["foo"][0, :, :, :],
+    )
