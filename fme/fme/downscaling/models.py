@@ -289,6 +289,25 @@ class DiffusionModelConfig:
         )
 
 
+def _repeat_batch_by_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tensor:
+    """
+    Repeat the batch dimension of a tensor n_samples times.  Used to parallelize
+    sample generation in the diffusion model, but done so such that the tensor still
+    only leads with a single batch dimension.  Added as a separate function for
+    round-trip testing.
+    """
+    return tensor.repeat_interleave(dim=0, repeats=n_samples)
+
+
+def _separate_interleaved_samples(
+    tensor: torch.Tensor, n_batch: int, n_samples: int
+) -> torch.Tensor:
+    """
+    Reshape an interleaved tensor to have a leading [batch, sample, ...] dimension.
+    """
+    return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
+
+
 class DiffusionModel:
     def __init__(
         self,
@@ -397,17 +416,17 @@ class DiffusionModel:
         coarse, fine = _tensor_mapping_to_device(
             batch.coarse, get_device()
         ), _tensor_mapping_to_device(batch.fine, get_device())
-        # repeat the batch dimension n times for sampling, we will reshape
-        # the data later to turn this into [batch, samples, ...] dimensions
-        # as the called modules only expect a single batch dimension
+
         coarse_norm = self.in_packer.pack(
             self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
-        ).repeat_interleave(dim=0, repeats=n_samples)
+        )
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
         )
+
         n_batch = targets_norm.shape[0]
-        targets_norm = targets_norm.repeat_interleave(dim=0, repeats=n_samples)
+        coarse_norm = _repeat_batch_by_samples(coarse_norm, n_samples)
+        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
         latents = torch.randn_like(targets_norm)
 
         logging.info("Running EDM sampler...")
@@ -431,15 +450,14 @@ class DiffusionModel:
                     axis=channel_axis,
                 ),
                 self.downscale_factor,
-            ).repeat_interleave(dim=0, repeats=n_samples)
-            samples_norm += base_prediction
+            )
+            samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
 
         loss = self.loss(targets_norm, samples_norm)
 
-        # here we reshape the data to [batch, samples, ...] dimensions as promised
-        samples_norm_reshaped = samples_norm.reshape(
-            n_samples, n_batch, *samples_norm.shape[1:]
-        ).transpose(0, 1)
+        samples_norm_reshaped = _separate_interleaved_samples(
+            samples_norm, n_batch, n_samples
+        )
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm_reshaped, axis=channel_axis)
         )
