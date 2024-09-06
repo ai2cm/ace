@@ -35,6 +35,7 @@ from fme.core.data_loading.utils import (
 
 SLICE_NONE = slice(None)
 MOCK_DATA_FREQ = "3h"
+MOCK_DATA_START_DATE = "2003-03"
 
 
 @dataclasses.dataclass
@@ -155,7 +156,7 @@ def get_mock_monthly_netcdfs(tmp_path_factory, dirname) -> MockData:
     return _get_data(
         tmp_path_factory,
         dirname,
-        start="2003-03",
+        start=MOCK_DATA_START_DATE,
         end="2003-06",
         file_freq="MS",
         step_freq=MOCK_DATA_FREQ,
@@ -587,15 +588,32 @@ def test_repeat_and_increment_times(n_repeats):
     np.testing.assert_equal(result_concatenated, expected_concatenated)
 
 
-def test_available_times(mock_monthly_netcdfs):
-    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
-    dataset = XarrayDataset(
-        config,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=10
-        ),
+@pytest.mark.parametrize("n_repeats", [1, 3])
+def test_all_times(mock_monthly_netcdfs, n_repeats):
+    n_timesteps = 2  # Arbitrary for this test
+    dataset = _get_repeat_dataset(mock_monthly_netcdfs, n_timesteps, n_repeats)
+    expected_periods = n_repeats * len(mock_monthly_netcdfs.obs_times)
+    expected = xr.cftime_range(
+        MOCK_DATA_START_DATE, periods=expected_periods, freq=MOCK_DATA_FREQ
     )
-    assert dataset.all_times.equals(xr.CFTimeIndex(mock_monthly_netcdfs.obs_times))
+    result = dataset.all_times
+    assert result.equals(expected)
+
+
+def test_get_sample_by_time_slice_times_n_repeats(mock_monthly_netcdfs: MockData):
+    n_timesteps = 2  # Arbitrary for this test
+    n_repeats = 3
+    repeated_dataset = _get_repeat_dataset(mock_monthly_netcdfs, n_timesteps, n_repeats)
+
+    # Pick a slice that is outside the range of the unrepeated data
+    unrepeated_length = len(repeated_dataset.all_times) // n_repeats
+    time_slice = slice(unrepeated_length, unrepeated_length + 3)
+
+    _, result = repeated_dataset.get_sample_by_time_slice(time_slice)
+    expected = xr.DataArray(
+        repeated_dataset.all_times[time_slice].values, dims=["time"]
+    )
+    xr.testing.assert_equal(result, expected)
 
 
 @pytest.mark.parametrize(

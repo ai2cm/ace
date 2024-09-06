@@ -29,7 +29,6 @@ from .requirements import DataRequirements
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_dimensions,
-    get_times,
     infer_horizontal_dimension_names,
     load_series_data,
 )
@@ -378,7 +377,7 @@ class XarrayDataset(Dataset):
         self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coords)[: self._n_initial_conditions]
         )
-        self._all_times = xr.CFTimeIndex(np.concatenate(raw_times))
+        self._all_times = xr.CFTimeIndex(np.concatenate(time_coords))
 
         del cum_num_timesteps, time_coords
 
@@ -522,7 +521,6 @@ class XarrayDataset(Dataset):
 
         # get the sequence of observations
         arrays: Dict[str, List[torch.Tensor]] = {}
-        times_segments: List[xr.DataArray] = []
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):
@@ -541,7 +539,6 @@ class XarrayDataset(Dataset):
             )
             for n in self.time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
-            times_segments.append(get_times(ds, start, n_steps))
             ds.close()
             del ds
 
@@ -549,7 +546,6 @@ class XarrayDataset(Dataset):
         for n, tensor_list in arrays.items():
             tensors[n] = torch.cat(tensor_list)
         del arrays
-        times: xr.DataArray = xr.concat(times_segments, dim="time")
 
         # load time-invariant variables from first dataset
         if len(self.time_invariant_names) > 0:
@@ -569,6 +565,10 @@ class XarrayDataset(Dataset):
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
+
+        # Create a DataArray of times to return corresponding to the slice that
+        # is valid even when n_repeats > 1.
+        times = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
         return tensors, times
 
