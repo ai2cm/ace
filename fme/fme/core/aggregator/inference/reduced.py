@@ -300,6 +300,7 @@ class MeanAggregator:
 
         Args:
             label: Label to prepend to all log keys.
+            step_slice: Slice of forecast steps to log.
         """
         logs = {}
         series_data: Dict[str, np.ndarray] = {
@@ -456,7 +457,7 @@ class SingleTargetMeanAggregator:
                     i_time_start=i_time_start,
                 )
 
-    def _get_series_data(self) -> List[_SeriesData]:
+    def _get_series_data(self, step_slice: Optional[slice] = None) -> List[_SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._variable_metrics is None:
             raise ValueError("No batches have been recorded.")
@@ -465,6 +466,8 @@ class SingleTargetMeanAggregator:
             sorted_keys = sorted(list(self._variable_metrics[metric].keys()))
             for key in sorted_keys:
                 arr = self._variable_metrics[metric][key].get().detach()
+                if step_slice is not None:
+                    arr = arr[step_slice]
                 datum = _SeriesData(
                     metric_name=metric,
                     var_name=key,
@@ -474,18 +477,21 @@ class SingleTargetMeanAggregator:
         return data
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str, step_slice: Optional[slice] = None):
         """
         Returns logs as can be reported to WandB.
 
         Args:
             label: Label to prepend to all log keys.
+            step_slice: Slice of forecast steps to log.
         """
         logs = {}
         series_data: Dict[str, np.ndarray] = {
-            datum.get_wandb_key(): datum.data for datum in self._get_series_data()
+            datum.get_wandb_key(): datum.data
+            for datum in self._get_series_data(step_slice)
         }
-        table = data_to_table(series_data)
+        init_step = 0 if step_slice is None else step_slice.start
+        table = data_to_table(series_data, init_step)
         logs[f"{label}/series"] = table
         return logs
 
