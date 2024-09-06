@@ -473,6 +473,7 @@ class InferenceAggregatorConfig:
     """
 
     time_mean_reference_data: Optional[str] = None
+    log_global_mean_time_series: bool = True
 
     def build(
         self,
@@ -493,6 +494,7 @@ class InferenceAggregatorConfig:
             n_timesteps=n_timesteps,
             metadata=metadata,
             time_mean_reference_data=time_means,
+            log_global_mean_time_series=self.log_global_mean_time_series,
         )
 
 
@@ -512,6 +514,7 @@ class InferenceAggregator:
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
+        log_global_mean_time_series: bool = True,
     ):
         """
         Args:
@@ -521,13 +524,15 @@ class InferenceAggregator:
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
+            log_global_mean_time_series: Whether to log global mean time series metrics.
         """
-        aggregators: Dict[str, _Aggregator] = {
-            "mean": SingleTargetMeanAggregator(
+        self.log_time_series = log_global_mean_time_series
+        aggregators: Dict[str, _Aggregator] = {}
+        if log_global_mean_time_series:
+            aggregators["mean"] = SingleTargetMeanAggregator(
                 gridded_operations,
                 n_timesteps=n_timesteps,
             )
-        }
         aggregators["time_mean"] = TimeMeanAggregator(
             gridded_operations=gridded_operations,
             metadata=metadata,
@@ -582,6 +587,24 @@ class InferenceAggregator:
         from tables into a list of dictionaries.
         """
         return to_inference_logs(self.get_logs(label=label))
+
+    @torch.no_grad()
+    def get_inference_logs_slice(self, label: str, step_slice: slice):
+        """
+        Returns a subset of the time series for applicable metrics
+        for a specific slice of as can be reported to WandB.
+
+        Args:
+            label: Label to prepend to all log keys.
+            step_slice: Timestep slice to determine the time series subset.
+
+        """
+        logs = {}
+        for name, aggregator in self._aggregators.items():
+            if isinstance(aggregator, SingleTargetMeanAggregator):
+                logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
+        logs = {f"{label}/{key}": val for key, val in logs.items()}
+        return to_inference_logs(logs)
 
     @torch.no_grad()
     def get_datasets(

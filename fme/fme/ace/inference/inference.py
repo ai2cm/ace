@@ -215,7 +215,7 @@ def main(yaml_config: str):
         os.makedirs(config.experiment_dir, exist_ok=True)
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    run_inference_from_config(config)
+    return run_inference_from_config(config)
 
 
 def run_inference_from_config(config: InferenceConfig):
@@ -287,23 +287,24 @@ def run_inference_from_config(config: InferenceConfig):
 
     duration = time.time() - start_time
     total_steps = config.n_forward_steps * data.loader.dataset.n_samples
-    total_steps_per_second = total_steps / duration
+    total_steps_per_second = total_steps / (duration - timers["wandb_logging"])
     logging.info(f"Inference duration: {duration:.2f} seconds")
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
 
     step_logs = aggregator.get_inference_logs(label="inference")
     wandb = WandB.get_instance()
     if wandb.enabled:
-        logging.info("Starting logging of metrics to wandb")
+        logging.info("Starting logging of timing and final step metrics to wandb")
         duration_logs = {
             "duration_seconds": duration,
             "total_steps_per_second": total_steps_per_second,
         }
-        wandb.log({**timers, **duration_logs}, step=0)
-        for i, log in enumerate(step_logs):
-            wandb.log(log, step=i, sleep=0.01)
+        final_step_logs = {**timers, **duration_logs, **step_logs[-1]}
+        wandb.log(final_step_logs, step=len(step_logs) - 1)
 
     config.clean_wandb()
+
+    return step_logs
 
 
 if __name__ == "__main__":
