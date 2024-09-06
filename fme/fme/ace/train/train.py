@@ -505,8 +505,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._best_inference_error = checkpoint["best_inference_error"]
     ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
     ema_stepper: SingleModuleStepper = SingleModuleStepper.from_state(
-        ema_checkpoint["stepper"],
-        sigma_coordinates=trainer.train_data.sigma_coordinates,
+        ema_checkpoint["stepper"]
     )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)
 
