@@ -3,7 +3,6 @@ import datetime
 import warnings
 from typing import Hashable, List, Optional, Sequence, Tuple
 
-import cftime
 import torch
 import xarray as xr
 from torch.utils.data import default_collate
@@ -135,23 +134,6 @@ def get_horizontal_dimensions(
             raise ValueError(f"Expected {dim} in dataset: {ds}.")
 
     return horizontal_values
-
-
-def get_times(ds: xr.Dataset, start: int, n_steps: int) -> xr.DataArray:
-    """
-    Get the time coordinate segment from the dataset, check that it's a
-    cftime.datetime object, and return it is a data array (not a coordinate),
-    so that it can be concatenated with other samples' times.
-    """
-    time_segment = ds["time"][slice(start, start + n_steps)]
-    assert isinstance(
-        time_segment[0].item(), cftime.datetime
-    ), "time must be cftime.datetime."
-    if len(time_segment) != n_steps:
-        raise ValueError(
-            f"Expected {n_steps} time steps, but got {len(time_segment)} instead."
-        )
-    return time_segment.drop_vars(["time"])
 
 
 @dataclasses.dataclass
