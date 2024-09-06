@@ -48,6 +48,7 @@ def save_plus_one_stepper(
     std: float,
     data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
+    nz_interface: int = 7,
 ):
     all_names = list(set(in_names).union(out_names))
     config = SingleModuleStepperConfig(
@@ -62,7 +63,9 @@ def save_plus_one_stepper(
         ),
     )
     area = torch.ones(data_shape[-2:], device=get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
+    )
     stepper = config.get_stepper(
         img_shape=(data_shape[-2], data_shape[-1]),
         gridded_operations=LatLonOperations(area),
@@ -637,6 +640,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         mean=0.0,
         std=1.0,
         data_shape=dim_sizes.shape_nd,
+        nz_interface=dim_sizes.nz_interface,
     )
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     data = FV3GFSData(
