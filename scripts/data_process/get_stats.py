@@ -69,6 +69,7 @@ class StatsConfig:
     exclude_runs: List[str] = dataclasses.field(default_factory=list)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    beaker_dataset: Optional[str] = None
 
 
 @dataclasses.dataclass
