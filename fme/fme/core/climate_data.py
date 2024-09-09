@@ -346,9 +346,11 @@ def _layer_thickness(
     """
     Computes vertical thickness of each layer assuming hydrostatic equilibrium.
     ACE does not currently prognose specific humidity, so here we closely
-    approximate this using specific total water."""
+    approximate this using specific total water.
+    """
     tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
-    dlogp = torch.clamp(torch.log(pressure_at_interface), min=-100.0).diff(dim=-1)
+    # Enforce min log(p) = 0 so that geopotential energy calculation is finite
+    dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
 
 
