@@ -32,6 +32,8 @@ spec:
             parameters:
             - name: python_script
               value: "{{workflow.parameters.python_script}}"
+            - name: stats_script
+              value: "{{workflow.parameters.get_stats_script}}"
             - name: config
               value: "{{workflow.parameters.config}}"
             - name: names
@@ -82,6 +84,7 @@ spec:
       inputs:
         parameters:
           - name: python_script
+          - name: stats_script
           - name: config
           - name: names
           - name: run_directories
@@ -101,6 +104,10 @@ spec:
           - |
             cat << EOF > script.py
             {{inputs.parameters.python_script}}
+            EOF
+
+            cat << EOF > get_stats.py
+            {{inputs.parameters.stats_script}}
             EOF
 
             cat << EOF > config.yaml
