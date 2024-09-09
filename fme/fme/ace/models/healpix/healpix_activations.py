@@ -200,5 +200,7 @@ class CappedGELU(nn.Module):
 
     def forward(self, inputs):
         x = self.gelu(inputs)
-        x = th.clamp(x, max=self.cap)
+        # Convert cap to a scalar value for clamping (ignores grad)
+        cap_value = self.cap.item()
+        x = th.clamp(x, max=cap_value)
         return x
