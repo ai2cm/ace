@@ -470,6 +470,7 @@ class InferenceAggregatorConfig:
 
     Attributes:
         time_mean_reference_data: Path to reference time means to compare against.
+        log_global_mean_time_series: Whether to log global mean time series metrics.
     """
 
     time_mean_reference_data: Optional[str] = None
