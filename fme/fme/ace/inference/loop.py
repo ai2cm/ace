@@ -2,7 +2,7 @@ import logging
 import time
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Union
 
 import numpy as np
 import torch
@@ -14,8 +14,7 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
 )
 from fme.core.data_loading.data_typing import GriddedData
-from fme.core.data_loading.utils import BatchData
-from fme.core.device import get_device
+from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
@@ -215,12 +214,6 @@ def _log_window_to_wandb(
         )
 
 
-def _to_device(
-    data: Mapping[str, torch.Tensor], device: torch.device
-) -> Dict[str, Any]:
-    return {key: value.to(device) for key, value in data.items()}
-
-
 def run_inference(
     stepper: SingleModuleStepper,
     initial_condition: TensorMapping,
@@ -245,7 +238,6 @@ def run_inference(
         timers: Dict[str, float] = defaultdict(float)
         current_time = time.time()
         i_time = 0
-        window_forcing: BatchData
         diagnostic_ic: Dict[str, torch.Tensor] = {}
         for window_forcing in forcing_data.loader:
             timers["data_loading"] += time.time() - current_time
@@ -255,7 +247,7 @@ def run_inference(
                 f"Inference: starting window spanning {i_time}"
                 f" to {i_time + forward_steps_in_memory} steps."
             )
-            window_forcing_data = _to_device(window_forcing.data, get_device())
+            window_forcing_data = move_tensordict_to_device(window_forcing.data)
             prediction = stepper.predict(
                 initial_condition, window_forcing_data, forward_steps_in_memory
             )
@@ -352,8 +344,7 @@ def run_inference_evaluator(
                 f" to {i_time + forward_steps_in_memory} steps, "
                 f"out of total {n_forward_steps}."
             )
-            device = get_device()
-            window_data = _to_device(window_batch_data.data, device)
+            window_data = move_tensordict_to_device(window_batch_data.data)
 
             stitcher.apply_initial_condition(window_data)
 
@@ -429,7 +420,6 @@ def run_dataset_comparison(
     n_forward_steps = target_data.loader.dataset.n_forward_steps
     stitcher = WindowStitcher(n_forward_steps, writer)
 
-    device = get_device()
     # We have data batches with long windows, where all data for a
     # given batch does not fit into memory at once, so we window it in time
     # and run the model on each window in turn.
@@ -449,8 +439,8 @@ def run_dataset_comparison(
             f" to {i_time + forward_steps_in_memory} steps,"
             f" out of total {n_forward_steps}."
         )
-        pred_window_data = _to_device(pred.data, device)
-        target_window_data = _to_device(target.data, device)
+        pred_window_data = move_tensordict_to_device(pred.data)
+        target_window_data = move_tensordict_to_device(target.data)
         stepped = SteppedData(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,
