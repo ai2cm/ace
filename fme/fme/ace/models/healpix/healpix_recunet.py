@@ -38,8 +38,8 @@ class HEALPixRecUNet(nn.Module):
         prognostic_variables: int,
         n_constants: int,
         decoder_input_channels: int,
-        input_time_dim: int,
-        output_time_dim: int,
+        input_time_size: int,
+        output_time_size: int,
         delta_time: str = "6h",
         reset_cycle: str = "24h",
         presteps: int = 1,
@@ -66,9 +66,9 @@ class HEALPixRecUNet(nn.Module):
             decoder_input_channels: int
                 Number of optional prescribed variables expected in the decoder input array
                 for both inputs and outputs. If this is zero, no decoder inputs should be provided as inputs to forward.
-            input_time_dim: int
+            input_time_size: int
                 Number of time steps in the input array.
-            output_time_dim: int
+            output_time_size: int
                 Number of time steps in the output array.
             delta_time: str, optional
                 Hours between two consecutive data points.
@@ -117,8 +117,8 @@ class HEALPixRecUNet(nn.Module):
         self.n_constants = n_constants
         self.prognostic_variables = prognostic_variables
         self.decoder_input_channels = decoder_input_channels
-        self.input_time_dim = input_time_dim
-        self.output_time_dim = output_time_dim
+        self.input_time_size = input_time_size
+        self.output_time_size = output_time_size
         self.delta_t = int(pd.Timedelta(delta_time).total_seconds() // 3600)
         self.reset_cycle = int(pd.Timedelta(reset_cycle).total_seconds() // 3600)
         self.presteps = presteps
@@ -126,11 +126,13 @@ class HEALPixRecUNet(nn.Module):
         self.enable_healpixpad = enable_healpixpad
 
         # Number of passes through the model, or a diagnostic model with only one output time
-        self.is_diagnostic = self.output_time_dim == 1 and self.input_time_dim > 1
-        if not self.is_diagnostic and (self.output_time_dim % self.input_time_dim != 0):
+        self.is_diagnostic = self.output_time_size == 1 and self.input_time_size > 1
+        if not self.is_diagnostic and (
+            self.output_time_size % self.input_time_size != 0
+        ):
             raise ValueError(
-                f"'output_time_dim' must be a multiple of 'input_time_dim' (got "
-                f"{self.output_time_dim} and {self.input_time_dim})"
+                f"'output_time_size' must be a multiple of 'input_time_size' (got "
+                f"{self.output_time_size} and {self.input_time_size})"
             )
 
         # Build the model layers
@@ -150,7 +152,7 @@ class HEALPixRecUNet(nn.Module):
     @property
     def integration_steps(self):
         """Number of integration steps"""
-        return max(self.output_time_dim // self.input_time_dim, 1)
+        return max(self.output_time_size // self.input_time_size, 1)
 
     def _compute_input_channels(self) -> int:
         """
@@ -160,7 +162,7 @@ class HEALPixRecUNet(nn.Module):
             int: The total number of input channels.
         """
         return (
-            self.input_time_dim * (self.input_channels + self.decoder_input_channels)
+            self.input_time_size * (self.input_channels + self.decoder_input_channels)
             + self.n_constants
             + self.coupled_channels
         )
@@ -190,7 +192,9 @@ class HEALPixRecUNet(nn.Module):
         Returns:
             int: The total number of output channels.
         """
-        return (1 if self.is_diagnostic else self.input_time_dim) * self.output_channels
+        return (
+            1 if self.is_diagnostic else self.input_time_size
+        ) * self.output_channels
 
     # def _reshape_inputs(self, inputs: Sequence, step: int = 0) -> th.Tensor:
     #     """
@@ -213,7 +217,7 @@ class HEALPixRecUNet(nn.Module):
     #     #         inputs[1][
     #     #             :,
     #     #             :,
-    #     #             slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
+    #     #             slice(step * self.input_time_size, (step + 1) * self.input_time_size),
     #     #             ...,
     #     #         ].flatten(
     #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
@@ -238,7 +242,7 @@ class HEALPixRecUNet(nn.Module):
     #     #             #     :,
     #     #             #     :,
     #     #             #     slice(
-    #     #             #         step * self.input_time_dim, (step + 1) * self.input_time_dim
+    #     #             #         step * self.input_time_size, (step + 1) * self.input_time_size
     #     #             #     ),
     #     #             #     ...,
     #     #             # ].flatten(
@@ -278,7 +282,7 @@ class HEALPixRecUNet(nn.Module):
     #     #         inputs[1][
     #     #             :,
     #     #             :,
-    #     #             slice(step * self.input_time_dim, (step + 1) * self.input_time_dim),
+    #     #             slice(step * self.input_time_size, (step + 1) * self.input_time_size),
     #     #             ...,
     #     #         ].flatten(
     #     #             start_dim=self.channel_dim, end_dim=self.channel_dim + 1
@@ -330,7 +334,9 @@ class HEALPixRecUNet(nn.Module):
                             inputs[0][
                                 :,
                                 :,
-                                s * self.input_time_dim : (s + 1) * self.input_time_dim,
+                                s
+                                * self.input_time_size : (s + 1)
+                                * self.input_time_size,
                             ]
                         ]
                         + list(inputs[1:3])
@@ -343,7 +349,9 @@ class HEALPixRecUNet(nn.Module):
                             inputs[0][
                                 :,
                                 :,
-                                s * self.input_time_dim : (s + 1) * self.input_time_dim,
+                                s
+                                * self.input_time_size : (s + 1)
+                                * self.input_time_size,
                             ]
                         ]
                         + list(inputs[1:]),
@@ -396,7 +404,7 @@ class HEALPixRecUNet(nn.Module):
         # Basically we assume that all the batch-wise expansion for the inputs has already been done.
 
         # (Re-)initialize recurrent hidden states
-        # if (step * (self.delta_t * self.input_time_dim)) % self.reset_cycle == 0:
+        # if (step * (self.delta_t * self.input_time_size)) % self.reset_cycle == 0:
         #     self._initialize_hidden(inputs=inputs, outputs=outputs, step=step)
         # Skipping this for now. We assume a single input time step, and resetting every step.
         # s = self.presteps
@@ -409,7 +417,7 @@ class HEALPixRecUNet(nn.Module):
         decodings = self.decoder(encodings)
 
         # Residual prediction
-        n_prognostic_channels = self.prognostic_variables * self.input_time_dim
+        n_prognostic_channels = self.prognostic_variables * self.input_time_size
         prognostic_outputs = (
             input_tensor[:, :n_prognostic_channels]
             + decodings[:, :n_prognostic_channels]
