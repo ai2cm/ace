@@ -157,8 +157,8 @@ def test_hpx_init(shape):
     prognostic_variables = min(in_channels, out_channels)
     n_constants = 1
     decoder_input_channels = 1
-    input_time_dim = 2
-    output_time_dim = 4
+    input_time_size = 2
+    output_time_size = 4
     device = get_device()
 
     conv_next_block = conv_next_block_config()
@@ -179,8 +179,8 @@ def test_hpx_init(shape):
             "prognostic_variables": prognostic_variables,
             "n_constants": n_constants,
             "decoder_input_channels": decoder_input_channels,
-            "input_time_dim": input_time_dim,
-            "output_time_dim": output_time_dim,
+            "input_time_size": input_time_size,
+            "output_time_size": output_time_size,
         },
     }
 
@@ -210,8 +210,8 @@ def test_hpx_init(shape):
 
 
 @pytest.mark.parametrize(
-    "in_channels, out_channels, n_constants, decoder_input_channels, input_time_dim, \
-    output_time_dim, couplings, expected_exception, expected_message",
+    "in_channels, out_channels, n_constants, decoder_input_channels, input_time_size, \
+    output_time_size, couplings, expected_exception, expected_message",
     [
         (7, 7, 1, 1, 2, 4, None, None, None),  # Valid case
         (
@@ -223,7 +223,7 @@ def test_hpx_init(shape):
             3,
             None,
             ValueError,
-            "'output_time_dim' must be a multiple of 'input_time_dim'",
+            "'output_time_size' must be a multiple of 'input_time_size'",
         ),  # Bad input and output time dims
         (
             7,
@@ -256,7 +256,7 @@ def test_hpx_init(shape):
             3,
             None,
             ValueError,
-            "'output_time_dim' must be a multiple of 'input_time_dim'",
+            "'output_time_size' must be a multiple of 'input_time_size'",
         ),  # No constant fields and no decoder
     ],
 )
@@ -265,8 +265,8 @@ def test_HEALPixRecUNet_initialize(
     out_channels,
     n_constants,
     decoder_input_channels,
-    input_time_dim,
-    output_time_dim,
+    input_time_size,
+    output_time_size,
     couplings,
     expected_exception,
     expected_message,
@@ -292,8 +292,8 @@ def test_HEALPixRecUNet_initialize(
                 prognostic_variables=prognostic_variables,
                 n_constants=n_constants,
                 decoder_input_channels=decoder_input_channels,
-                input_time_dim=input_time_dim,
-                output_time_dim=output_time_dim,
+                input_time_size=input_time_size,
+                output_time_size=output_time_size,
                 couplings=couplings,
             ).to(device)
     else:
@@ -305,8 +305,8 @@ def test_HEALPixRecUNet_initialize(
             prognostic_variables=prognostic_variables,
             n_constants=n_constants,
             decoder_input_channels=decoder_input_channels,
-            input_time_dim=input_time_dim,
-            output_time_dim=output_time_dim,
+            input_time_size=input_time_size,
+            output_time_size=output_time_size,
             couplings=couplings,
         ).to(device)
         assert isinstance(model, HEALPixRecUNet)
@@ -318,8 +318,8 @@ def test_HEALPixRecUNet_integration_steps():
     prognostic_variables = min(out_channels, in_channels)
     n_constants = 1
     decoder_input_channels = 0
-    input_time_dim = 2
-    output_time_dim = 4
+    input_time_size = 2
+    output_time_size = 4
     device = get_device()
 
     conv_next_block = conv_next_block_config()
@@ -339,11 +339,11 @@ def test_HEALPixRecUNet_integration_steps():
         prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
-        input_time_dim=input_time_dim,
-        output_time_dim=output_time_dim,
+        input_time_size=input_time_size,
+        output_time_size=output_time_size,
     ).to(device)
 
-    assert model.integration_steps == output_time_dim // input_time_dim
+    assert model.integration_steps == output_time_size // input_time_size
 
 
 def test_HEALPixRecUNet_reset(very_fast_only: bool):
@@ -355,8 +355,8 @@ def test_HEALPixRecUNet_reset(very_fast_only: bool):
     prognostic_variables = min(out_channels, in_channels)
     n_constants = 2
     decoder_input_channels = 1
-    input_time_dim = 2
-    output_time_dim = 4
+    input_time_size = 2
+    output_time_size = 4
     size = 16
     device = get_device()
 
@@ -370,8 +370,8 @@ def test_HEALPixRecUNet_reset(very_fast_only: bool):
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=input_time_dim, channels=in_channels, img_size=size)
-    decoder_inputs = insolation_data()(time_dim=input_time_dim, img_size=size)
+    x = test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
+    decoder_inputs = insolation_data()(time_dim=input_time_size, img_size=size)
     constants = constant_data()(channels=n_constants, img_size=size)
     batch_size = x.shape[0]
     constants = constants.unsqueeze(0).repeat(batch_size, 1, 1, 1, 1)
@@ -387,8 +387,8 @@ def test_HEALPixRecUNet_reset(very_fast_only: bool):
         prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
-        input_time_dim=input_time_dim,
-        output_time_dim=output_time_dim,
+        input_time_size=input_time_size,
+        output_time_size=output_time_size,
         enable_healpixpad=False,
         delta_time="6h",
     ).to(device)
@@ -403,7 +403,7 @@ def test_HEALPixRecUNet_reset(very_fast_only: bool):
 # [full inputs, no decoder inputs, no constant inputs]
 @pytest.mark.parametrize(
     "inputs_config, in_channels, decoder_input_channels, \
-        out_channels, input_time_dim, output_time_dim, n_constants, size",
+        out_channels, input_time_size, output_time_size, n_constants, size",
     [
         ([0, 1, 2], 3, 1, 3, 2, 4, 2, 16),  # full inputs
         ([0, 2], 3, 0, 3, 2, 4, 2, 16),  # no decoder inputs
@@ -415,8 +415,8 @@ def test_HEALPixRecUNet_forward(
     in_channels,
     decoder_input_channels,
     out_channels,
-    input_time_dim,
-    output_time_dim,
+    input_time_size,
+    output_time_size,
     n_constants,
     size,
     very_fast_only: bool,
@@ -435,11 +435,11 @@ def test_HEALPixRecUNet_forward(
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=input_time_dim, channels=in_channels, img_size=size)
+    x = test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
     batch_size = x.shape[0]
 
     if decoder_input_channels > 0:
-        decoder_inputs = insolation_data()(time_dim=input_time_dim, img_size=size)
+        decoder_inputs = insolation_data()(time_dim=input_time_size, img_size=size)
     else:
         decoder_inputs = insolation_data()(time_dim=0, img_size=size)
     constants = constant_data()(channels=n_constants, img_size=size)
@@ -456,8 +456,8 @@ def test_HEALPixRecUNet_forward(
         prognostic_variables=prognostic_variables,
         n_constants=n_constants,
         decoder_input_channels=decoder_input_channels,
-        input_time_dim=input_time_dim,
-        output_time_dim=output_time_dim,
+        input_time_size=input_time_size,
+        output_time_size=output_time_size,
         enable_healpixpad=False,
         delta_time="6h",
     ).to(device)
