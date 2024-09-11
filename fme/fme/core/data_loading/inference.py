@@ -185,6 +185,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._perturbations = config.perturbations
         self._ocean = ocean
         self.n_samples = config.n_samples  # public attribute
+
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(dataset.all_times)
         else:

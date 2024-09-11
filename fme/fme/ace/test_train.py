@@ -65,6 +65,8 @@ def _get_test_yaml_files(
     inference_forward_steps=2,
     use_healpix=False,
 ):
+    input_time_size = 1
+    output_time_size = 1
     if use_healpix:
         in_channels = len(in_variable_names)
         out_channels = len(out_variable_names)
@@ -76,8 +78,8 @@ def _get_test_yaml_files(
         # TODO: https://github.com/ai2cm/full-model/issues/1046
         n_constants = 0
         decoder_input_channels = 0  # was 1, to indicate insolation - now 0
-        input_time_dim = 1  # was 2, but this is a flattened input now
-        output_time_dim = 1  # was 4, but we are now just asking the next timestep
+        input_time_size = 1  # TODO: change to 2 (issue #1177)
+        output_time_size = 1  # TODO: change to 4 (issue #1177)
         spatial_dimensions_str = "healpix"
 
         conv_next_block = conv_next_block_config(in_channels=in_channels)
@@ -113,8 +115,8 @@ def _get_test_yaml_files(
       prognostic_variables: {prognostic_variables}
       n_constants: {n_constants}
       decoder_input_channels: {decoder_input_channels}
-      input_time_dim: {input_time_dim}
-      output_time_dim: {output_time_dim}
+      input_time_size: {input_time_size}
+      output_time_size: {output_time_size}
         """
     else:
         config_str = """
