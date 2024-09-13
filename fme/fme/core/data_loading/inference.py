@@ -20,7 +20,6 @@ from fme.core.data_loading.perturbation import SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
-from fme.core.ocean import Ocean
 
 
 @dataclasses.dataclass
@@ -171,7 +170,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         forward_steps_in_memory: int,
         requirements: DataRequirements,
-        ocean: Optional[Ocean] = None,
+        surface_temperature_name: Optional[str] = None,
+        ocean_fraction_name: Optional[str] = None,
     ):
         dataset = XarrayDataset(config.dataset, requirements=requirements)
         self._dataset = dataset
@@ -183,7 +183,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._total_steps = requirements.n_timesteps - 1
         self._is_remote = dataset.is_remote
         self._perturbations = config.perturbations
-        self._ocean = ocean
+        self._surface_temperature_name = surface_temperature_name
+        self._ocean_fraction_name = ocean_fraction_name
         self.n_samples = config.n_samples  # public attribute
 
         if isinstance(config.start_indices, TimestampList):
@@ -201,7 +202,9 @@ class InferenceDataset(torch.utils.data.Dataset):
                     "Currently, SST perturbations are only supported \
                     for lat/lon coordinates."
                 )
-        if self._perturbations is not None and self._ocean is None:
+        if self._perturbations is not None and (
+            self._surface_temperature_name is None or self._ocean_fraction_name is None
+        ):
             raise ValueError(
                 "No ocean configuration found, \
                 SST perturbations require an ocean configuration."
@@ -222,13 +225,21 @@ class InferenceDataset(torch.utils.data.Dataset):
             window_time_slice = slice(i_window_start, i_window_end)
             tensors, times = self._dataset.get_sample_by_time_slice(window_time_slice)
             if self._perturbations is not None:
+                if (
+                    self._surface_temperature_name is None
+                    or self._ocean_fraction_name is None
+                ):
+                    raise ValueError(
+                        "Surface temperature and ocean fraction names must be provided \
+                        to apply SST perturbations."
+                    )
                 logging.debug("Applying SST perturbations to forcing data")
                 for select in self._perturbations.sst:
                     select.perturbation.apply_perturbation(
-                        tensors[self._ocean.surface_temperature_name],  # type: ignore
+                        tensors[self._surface_temperature_name],
                         self._lats,
                         self._lons,
-                        tensors[self._ocean.ocean_fraction_name],  # type: ignore
+                        tensors[self._ocean_fraction_name],
                     )
             sample_tuples.append((tensors, times))
         result = BatchData.from_sample_tuples(sample_tuples)

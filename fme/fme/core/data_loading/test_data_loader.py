@@ -29,7 +29,6 @@ from fme.core.data_loading.inference import (
 from fme.core.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import BatchData
-from fme.core.ocean import OceanConfig
 
 
 def _get_coords(dim_sizes, calendar):
@@ -369,7 +368,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     ]
     initial_times = xr.DataArray(time_values, dims=["sample"])
     data = get_forcing_data(
-        config, forward_steps_in_memory, requirements, initial_times, None
+        config, forward_steps_in_memory, requirements, initial_times
     )
     assert len(data.loader.dataset) == math.ceil(
         total_forward_steps / forward_steps_in_memory
@@ -467,9 +466,8 @@ def test_inference_data_with_perturbations(tmp_path):
         config,
         forward_steps_in_memory=n_forward_steps_in_memory,
         requirements=requirements,
-        ocean=OceanConfig(
-            surface_temperature_name="foo", ocean_fraction_name="constant_mask"
-        ),
+        surface_temperature_name="foo",
+        ocean_fraction_name="constant_mask",
     ).loader
     batch_data = next(iter(data_loader))
     np.testing.assert_allclose(
