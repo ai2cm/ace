@@ -37,8 +37,8 @@ def test_sfno_init(shape):
         "normalization": dataclasses.asdict(
             FromStateNormalizer(
                 state={
-                    "means": {"x": float(np.random.randn(1))},
-                    "stds": {"x": float(np.random.randn(1))},
+                    "means": {"x": float(np.random.randn(1).item())},
+                    "stds": {"x": float(np.random.randn(1).item())},
                 }
             )
         ),

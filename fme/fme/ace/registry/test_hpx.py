@@ -113,7 +113,7 @@ def decoder_config(
     return decoder_config
 
 
-def test_data():
+def _test_data():
     # create dummy data
     def generate_test_data(batch_size=8, time_dim=1, channels=7, img_size=16):
         device = get_device()
@@ -191,8 +191,8 @@ def test_hpx_init(shape):
         "normalization": dataclasses.asdict(
             FromStateNormalizer(
                 state={
-                    "means": {"x": float(np.random.randn(1))},
-                    "stds": {"x": float(np.random.randn(1))},
+                    "means": {"x": float(np.random.randn(1).item())},
+                    "stds": {"x": float(np.random.randn(1).item())},
                 }
             )
         ),
@@ -370,7 +370,7 @@ def test_HEALPixRecUNet_reset(very_fast_only: bool):
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
+    x = _test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
     decoder_inputs = insolation_data()(time_dim=input_time_size, img_size=size)
     constants = constant_data()(channels=n_constants, img_size=size)
     batch_size = x.shape[0]
@@ -435,7 +435,7 @@ def test_HEALPixRecUNet_forward(
     )
 
     fix_random_seeds(seed=42)
-    x = test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
+    x = _test_data()(time_dim=input_time_size, channels=in_channels, img_size=size)
     batch_size = x.shape[0]
 
     if decoder_input_channels > 0:

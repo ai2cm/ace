@@ -49,7 +49,7 @@ def _get_time_array(
         hours=6 * start_n_offset
     )
     time_index = xr.cftime_range(
-        start=start_time, periods=n_timesteps, freq=f"{freq_hrs}H", calendar="julian"
+        start=start_time, periods=n_timesteps, freq=f"{freq_hrs}h", calendar="julian"
     )
     return xr.DataArray(data=time_index, dims=["time"]).drop_vars(["time"])
 

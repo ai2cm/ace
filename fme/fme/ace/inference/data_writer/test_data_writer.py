@@ -162,7 +162,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time,
             end_time=end_time,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples,
             calendar=calendar,
         )
@@ -177,7 +177,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time_2,
             end_time=end_time_2,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples,
             calendar=calendar,
         )
@@ -312,7 +312,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time,
             end_time=end_time,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples,
         )
         writer.append_batch(
@@ -381,7 +381,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time,
             end_time=end_time,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples + 1,
         )
         with pytest.raises(ValueError):
@@ -418,7 +418,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time,
             end_time=end_time,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples,
             calendar=calendar,
         )
@@ -432,7 +432,7 @@ class TestDataWriter:
         batch_times = self.get_batch_times(
             start_time=start_time_2,
             end_time=end_time_2,
-            freq="6H",
+            freq="6h",
             n_samples=n_samples,
             calendar=calendar,
         )
@@ -469,7 +469,7 @@ class TestDataWriter:
                 [
                     xr.cftime_range(
                         cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0),
-                        freq="6H",
+                        freq="6h",
                         periods=3,
                     ).values
                     for _ in range(3)
@@ -491,7 +491,7 @@ class TestDataWriter:
                 [
                     xr.cftime_range(
                         cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0),
-                        freq="6H",
+                        freq="6h",
                         periods=3,
                     )
                     for i in range(3)
@@ -513,7 +513,7 @@ class TestDataWriter:
                 [
                     xr.cftime_range(
                         cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
-                        freq="6H",
+                        freq="6h",
                         periods=3,
                     )
                     for i in range(3)
@@ -543,7 +543,7 @@ def test_get_batch_lead_times_microseconds_length_mismatch():
         [
             xr.cftime_range(
                 cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
-                freq="6H",
+                freq="6h",
                 periods=3,
             ).values
             for i in range(2)
@@ -561,12 +561,12 @@ def test_get_batch_lead_times_microseconds_inconsistent_samples():
         [
             xr.cftime_range(
                 cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0),
-                freq="6H",
+                freq="6h",
                 periods=3,
             ),
             xr.cftime_range(
                 cftime.DatetimeJulian(2020, 1, 1, 12, 0, 0),
-                freq="6H",
+                freq="6h",
                 periods=3,
             ),
         ]
