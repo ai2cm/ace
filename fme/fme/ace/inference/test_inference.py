@@ -181,6 +181,23 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
 
+    # check that inference logs match raw output
+    for i in range(1, config.n_forward_steps + 1):
+        for log_name in inference_logs[i]:
+            if "inference/mean/weighted_mean_gen" in log_name:
+                variable_name = log_name.split("/")[-1]
+                # note raw output does not include initial condition, hence
+                # i-1 below. Also assuming constant area, as in save_stepper above.
+                raw_variable = ds[variable_name].isel(time=i - 1)
+                raw_global_mean = raw_variable.mean(["lat", "lon", "sample"])
+                np.testing.assert_allclose(
+                    raw_global_mean, inference_logs[i][log_name], rtol=0.05
+                )
+                with pytest.xfail():  # remove xfail when test passes, replacing 0.05
+                    np.testing.assert_allclose(
+                        raw_global_mean, inference_logs[i][log_name], rtol=1e-6
+                    )
+
 
 def test_get_initial_condition():
     time_da = xr.DataArray([0, 5], dims=["sample"])
