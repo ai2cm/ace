@@ -202,7 +202,7 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        return torch.meshgrid(self.lat, self.lon)
+        return torch.meshgrid(self.lat, self.lon, indexing="ij")
 
 
 @dataclasses.dataclass
