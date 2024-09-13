@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core import metrics
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -430,14 +429,14 @@ class SingleTargetMeanAggregator:
                     key
                 ] = AreaWeightedSingleTargetReducedMetric(
                     device=device,
-                    compute_metric=metrics.weighted_mean,
+                    compute_metric=lambda x: self._ops.area_weighted_mean(x),
                     n_timesteps=self._n_timesteps,
                 )
                 self._variable_metrics["weighted_std_gen"][
                     key
                 ] = AreaWeightedSingleTargetReducedMetric(
                     device=device,
-                    compute_metric=metrics.weighted_std,
+                    compute_metric=lambda x: self._ops.area_weighted_std(x),
                     n_timesteps=self._n_timesteps,
                 )
 
