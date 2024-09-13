@@ -409,6 +409,18 @@ class SingleModuleStepper:
         else:
             self.loss_normalizer = self.normalizer
 
+    @property
+    def surface_temperature_name(self) -> Optional[str]:
+        if self._config.ocean is not None:
+            return self._config.ocean.surface_temperature_name
+        return None
+
+    @property
+    def ocean_fraction_name(self) -> Optional[str]:
+        if self._config.ocean is not None:
+            return self._config.ocean.ocean_fraction_name
+        return None
+
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return self._config.get_data_requirements(n_forward_steps)
 

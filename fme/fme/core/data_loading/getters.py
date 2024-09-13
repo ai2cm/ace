@@ -11,7 +11,6 @@ from torch.utils.data.sampler import RandomSampler
 from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
-from fme.core.ocean import Ocean
 
 from ._xarray import XarrayDataset, as_index_slice, subset_dataset
 from .data_typing import GriddedData
@@ -147,19 +146,29 @@ def get_inference_data(
     config: InferenceDataLoaderConfig,
     forward_steps_in_memory: int,
     requirements: DataRequirements,
-    ocean: Optional[Ocean] = None,
+    surface_temperature_name: Optional[str] = None,
+    ocean_fraction_name: Optional[str] = None,
 ) -> GriddedData:
     """
     Args:
         config: Parameters for the data loader.
         forward_steps_in_memory: Number of forward steps to keep in memory at once.
         requirements: Data requirements for the model.
-        ocean: The ocean model.
+        surface_temperature_name: Name of the surface temperature variable. Can be
+            set to None if no ocean temperature prescribing is being used.
+        ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
+            if no ocean temperature prescribing is being used.
 
     Returns:
         A data loader for inference with coordinates and metadata.
     """
-    dataset = InferenceDataset(config, forward_steps_in_memory, requirements, ocean)
+    dataset = InferenceDataset(
+        config,
+        forward_steps_in_memory,
+        requirements,
+        surface_temperature_name,
+        ocean_fraction_name,
+    )
 
     if dataset.is_remote:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
@@ -198,7 +207,8 @@ def get_forcing_data(
     forward_steps_in_memory: int,
     requirements: DataRequirements,
     initial_times: xr.DataArray,
-    ocean: Optional[Ocean],
+    surface_temperature_name: Optional[str] = None,
+    ocean_fraction_name: Optional[str] = None,
 ) -> GriddedData:
     """Return a GriddedData loader for forcing data only. This function determines the
     start indices for the forcing data based on the initial times provided.
@@ -210,7 +220,10 @@ def get_forcing_data(
         requirements: Data requirements for the forcing data.
         initial_times: Desired initial times for the forcing data. This must be a 1D
             data array, whose length determines the ensemble size.
-        ocean: The ocean model.
+        surface_temperature_name: Name of the surface temperature variable. Can be
+            set to None if no ocean temperature prescribing is being used.
+        ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
+            if no ocean temperature prescribing is being used.
 
     Returns:
         A data loader for forcing data with coordinates and metadata.
@@ -223,5 +236,9 @@ def get_forcing_data(
         start_indices=ExplicitIndices(start_time_indices)
     )
     return get_inference_data(
-        inference_config, forward_steps_in_memory, requirements, ocean
+        inference_config,
+        forward_steps_in_memory,
+        requirements,
+        surface_temperature_name,
+        ocean_fraction_name,
     )
