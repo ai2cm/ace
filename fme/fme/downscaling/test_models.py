@@ -177,7 +177,7 @@ def test_serialization(tmp_path):
     model_from_state = Model.from_state(
         model.get_state(), area_weights, fine_topography
     )
-    torch.testing.assert_allclose(
+    torch.testing.assert_close(
         expected,
         model_from_state.generate_on_batch(batch).prediction["x"],
     )
@@ -186,7 +186,7 @@ def test_serialization(tmp_path):
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt"), area_weights, fine_topography
     )
-    torch.testing.assert_allclose(
+    torch.testing.assert_close(
         expected,
         model_from_disk.generate_on_batch(batch).prediction["x"],
     )
