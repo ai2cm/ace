@@ -97,7 +97,7 @@ def main(n_times: int, input_dir: Path, output_dir: Path, repeat_variables, nc_f
     time_coord = xr.cftime_range(
         ds.time.item(0),
         periods=len(ds.time) * n_times,
-        freq=f"{dt}H",
+        freq=f"{dt}h",
         calendar=ds.time.dt.calendar,
     )
 
