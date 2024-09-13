@@ -19,12 +19,12 @@ def test_constant_perturbation_config():
     nx, ny = 5, 5
     lat = torch.arange(nx, device=fme.get_device())
     lon = torch.arange(ny, device=fme.get_device())
-    lats, lons = torch.meshgrid(lat, lon)
+    lats, lons = torch.meshgrid(lat, lon, indexing="ij")
     ocean_fraction = torch.ones(nx, ny, device=fme.get_device())
     data = torch.ones(nx, ny, device=fme.get_device())
     expected = 2.0 * torch.ones(nx, ny, device=fme.get_device())
     perturbation.apply_perturbation(data, lats, lons, ocean_fraction)
-    torch.testing.assert_allclose(data, expected)
+    torch.testing.assert_close(data, expected)
 
 
 def test_green_function_perturbation_config():
@@ -48,7 +48,7 @@ def test_green_function_perturbation_config():
     nx, ny = 5, 5
     lat = torch.arange(nx, device=fme.get_device())
     lon = torch.arange(ny, device=fme.get_device())
-    lats, lons = torch.meshgrid(lat, lon)
+    lats, lons = torch.meshgrid(lat, lon, indexing="ij")
     ocean_fraction = torch.ones(nx, ny, device=fme.get_device())
     data = torch.ones(nx, ny, device=fme.get_device())
     perturbation.apply_perturbation(data, lats, lons, ocean_fraction)
