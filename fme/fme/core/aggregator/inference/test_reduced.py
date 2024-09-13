@@ -7,6 +7,7 @@ from fme.core.aggregator.inference.reduced import (
     SingleTargetMeanAggregator,
 )
 from fme.core.device import get_device
+from fme.core.gridded_ops import LatLonOperations
 
 
 def test_area_weighted_reduced_metric_includes_later_window_starts():
@@ -48,14 +49,33 @@ def test_single_target_mean_aggregator():
     nx = 2
     ny = 2
     area_weights = torch.ones(ny).to(fme.get_device())
+    torch.manual_seed(0)
 
     agg = SingleTargetMeanAggregator(
-        area_weights,
-        n_time_per_window * n_window,
+        gridded_operations=LatLonOperations(area_weights),
+        n_timesteps=n_time_per_window * n_window,
     )
-    data = {"a": torch.randn(n_sample, n_time_per_window, nx, ny, device=get_device())}
+    data_a = torch.randn(n_sample, n_time_per_window, nx, ny, device=get_device())
     for i in range(n_window):
+        data = {"a": data_a[:, i * n_time_per_window : (i + 1) * n_time_per_window]}
         agg.record_batch(data, i_time_start=i * n_time_per_window)
 
     logs = agg.get_logs(label="test")
     assert "test/series" in logs
+    ds = agg.get_dataset()
+    for i in range(1, data_a.shape[1]):
+        raw_variable = data_a[:, i]
+        raw_global_mean = raw_variable.mean().cpu().numpy()
+        raw_global_std = (
+            raw_variable.std(dim=(1, 2), correction=0).mean().cpu().numpy()
+        )  # metrics are mean over batch
+        np.testing.assert_allclose(
+            raw_global_std,
+            ds["weighted_std_gen-a"].isel(forecast_step=i).values.item(),
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(
+            raw_global_mean,
+            ds["weighted_mean_gen-a"].isel(forecast_step=i).values.item(),
+            rtol=1e-5,
+        )
