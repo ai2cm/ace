@@ -240,7 +240,8 @@ def run_inference_from_config(config: InferenceConfig):
         config.forward_steps_in_memory,
         data_requirements,
         initial_times,
-        stepper.ocean,
+        stepper.surface_temperature_name,
+        stepper.ocean_fraction_name,
     )
     if stepper.timestep != data.timestep:
         raise ValueError(
