@@ -83,3 +83,41 @@ def test_i_time_start_gets_correct_time_longer_windows(
     np.testing.assert_allclose(
         float(logs["metrics/weighted_bias/a"]), float(target_time), rtol=1e-5
     )
+
+
+def test_loss():
+    """
+    Basic test the aggregator combines loss correctly
+    with multiple batches and no distributed training.
+    """
+    torch.manual_seed(0)
+    example_data = {
+        "a": torch.randn(1, 2, 5, 5, device=get_device()),
+    }
+    area_weights = torch.ones(1).to(get_device())
+    aggregator = MeanAggregator(LatLonOperations(area_weights))
+    aggregator.record_batch(
+        loss=1.0,
+        target_data=example_data,
+        gen_data=example_data,
+        target_data_norm=example_data,
+        gen_data_norm=example_data,
+    )
+    aggregator.record_batch(
+        loss=2.0,
+        target_data=example_data,
+        gen_data=example_data,
+        target_data_norm=example_data,
+        gen_data_norm=example_data,
+    )
+    logs = aggregator.get_logs(label="metrics")
+    assert logs["metrics/loss"] == 1.5
+    aggregator.record_batch(
+        loss=3.0,
+        target_data=example_data,
+        gen_data=example_data,
+        target_data_norm=example_data,
+        gen_data_norm=example_data,
+    )
+    logs = aggregator.get_logs(label="metrics")
+    assert logs["metrics/loss"] == 2.0

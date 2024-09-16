@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from fme.core.aggregator.one_step import OneStepAggregator
+from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -30,46 +31,6 @@ def test_labels_exist():
     assert "test/snapshot/image-error/a" in logs
 
 
-def test_loss():
-    """
-    Basic test the aggregator combines loss correctly
-    with multiple batches and no distributed training.
-    """
-    torch.manual_seed(0)
-    example_data = {
-        "a": torch.randn(1, 2, 5, 5, device=get_device()),
-    }
-    area_weights = torch.ones(1).to(get_device())
-    nz = 3
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    aggregator = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
-    aggregator.record_batch(
-        loss=1.0,
-        target_data=example_data,
-        gen_data=example_data,
-        target_data_norm=example_data,
-        gen_data_norm=example_data,
-    )
-    aggregator.record_batch(
-        loss=2.0,
-        target_data=example_data,
-        gen_data=example_data,
-        target_data_norm=example_data,
-        gen_data_norm=example_data,
-    )
-    logs = aggregator.get_logs(label="metrics")
-    assert logs["metrics/mean/loss"] == 1.5
-    aggregator.record_batch(
-        loss=3.0,
-        target_data=example_data,
-        gen_data=example_data,
-        target_data_norm=example_data,
-        gen_data_norm=example_data,
-    )
-    logs = aggregator.get_logs(label="metrics")
-    assert logs["metrics/mean/loss"] == 2.0
-
-
 def test_aggregator_raises_on_no_data():
     """
     Basic test the aggregator combines loss correctly
@@ -87,9 +48,7 @@ def test_aggregator_raises_on_no_data():
         assert "No data" in str(excinfo.value)
 
 
-def test_derived(very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
+def test_derived():
     n_sample = 5
     n_time = 3
     nx, ny, nz = 2, 4, 3
@@ -98,7 +57,7 @@ def test_derived(very_fast_only: bool):
     sigma_coordinates = SigmaCoordinates(
         torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
     )
-    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
+    agg = DerivedMetricsAggregator(LatLonOperations(area_weights), sigma_coordinates)
 
     def _make_data():
         fields = ["a", "PRESsfc"] + [f"specific_total_water_{i}" for i in range(nz)]
@@ -115,8 +74,8 @@ def test_derived(very_fast_only: bool):
     agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
 
     logs = agg.get_logs("")
-    target = logs["/derived/surface_pressure_due_to_dry_air/target"]
-    gen = logs["/derived/surface_pressure_due_to_dry_air/gen"]
+    target = logs["/surface_pressure_due_to_dry_air/target"]
+    gen = logs["/surface_pressure_due_to_dry_air/gen"]
 
     assert target.shape == ()
     assert not torch.isnan(target).any()
@@ -133,7 +92,7 @@ def test_derived_missing_surface_pressure():
     sigma_coordinates = SigmaCoordinates(
         torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
     )
-    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
+    agg = DerivedMetricsAggregator(LatLonOperations(area_weights), sigma_coordinates)
 
     def _make_data():
         fields = ["a"]  # N.B. no surface pressure or water fields.
@@ -150,8 +109,8 @@ def test_derived_missing_surface_pressure():
     agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
 
     logs = agg.get_logs("")
-    target = logs["/derived/surface_pressure_due_to_dry_air/target"]
-    gen = logs["/derived/surface_pressure_due_to_dry_air/gen"]
+    target = logs["/surface_pressure_due_to_dry_air/target"]
+    gen = logs["/surface_pressure_due_to_dry_air/gen"]
 
     assert target.shape == () and torch.isnan(target).all()
     assert gen.shape == () and torch.isnan(target).all()
