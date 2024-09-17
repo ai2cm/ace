@@ -139,7 +139,7 @@ class FV3GFSData:
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
         save_nd_netcdf(
-            self._data_filename,
+            self.data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
             timestep_days=self.timestep_days,
@@ -152,7 +152,7 @@ class FV3GFSData:
         return self.path / "data"
 
     @property
-    def _data_filename(self):
+    def data_filename(self):
         return self.data_path / "data.nc"
 
     @property

@@ -21,7 +21,11 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.core.data_loading.data_typing import DimSize, SigmaCoordinates
+from fme.core.data_loading.data_typing import (
+    DimSize,
+    LatLonCoordinates,
+    SigmaCoordinates,
+)
 from fme.core.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -180,23 +184,25 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     np.testing.assert_allclose(
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
-
+    saved_data = xr.open_dataset(data.data_filename)
+    ops = LatLonCoordinates(
+        lat=torch.as_tensor(saved_data["grid_yt"].values),
+        lon=torch.as_tensor(saved_data["grid_xt"].values),
+    ).gridded_operations
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
         for log_name in inference_logs[i]:
             if "inference/mean/weighted_mean_gen" in log_name:
                 variable_name = log_name.split("/")[-1]
                 # note raw output does not include initial condition, hence
-                # i-1 below. Also assuming constant area, as in save_stepper above.
+                # i-1 below. Code uses area from data, not stepper above.
                 raw_variable = ds[variable_name].isel(time=i - 1)
-                raw_global_mean = raw_variable.mean(["lat", "lon", "sample"])
+                raw_global_mean = ops.area_weighted_mean(
+                    torch.as_tensor(raw_variable.values)
+                ).mean()
                 np.testing.assert_allclose(
-                    raw_global_mean, inference_logs[i][log_name], rtol=0.05
+                    raw_global_mean, inference_logs[i][log_name], rtol=1e-6
                 )
-                with pytest.xfail():  # remove xfail when test passes, replacing 0.05
-                    np.testing.assert_allclose(
-                        raw_global_mean, inference_logs[i][log_name], rtol=1e-6
-                    )
 
 
 def test_get_initial_condition():
