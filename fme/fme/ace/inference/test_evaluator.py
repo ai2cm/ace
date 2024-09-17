@@ -454,7 +454,7 @@ def test_inference_writer_boundaries(
 
     prediction_ds = prediction_ds.isel(sample=0)
     target_ds = target_ds.isel(sample=0)
-    ds = xr.open_dataset(data._data_filename)
+    ds = xr.open_dataset(data.data_filename)
 
     for i in range(0, n_forward_steps):
         # metrics logs includes IC while saved data does not
