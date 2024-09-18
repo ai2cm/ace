@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
 
 import cftime
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import xarray as xr
 
@@ -129,38 +130,38 @@ class EnsoCoefficientEvaluatorAggregator:
         ), "number of index series must match number of samples"
         for i_sample, sample_index_series in enumerate(self._sample_index_series):
             if sample_index_series is not None:
-                sample_index_series_reindexed = sample_index_series.reindex(
-                    time=time.isel(sample=i_sample), method="nearest"
-                ).values
-                sample_index_series_reindexed = torch.tensor(
-                    sample_index_series_reindexed,
+                sample_index_series_window = sample_index_series.sel(
+                    time=time.isel(sample=i_sample)
+                )
+                sample_index_series_window = torch.tensor(
+                    sample_index_series_window.values,
                     device=get_device(),
                     dtype=torch.float32,
                 )
                 self._index_variance[i_sample] += (
-                    sample_index_series_reindexed**2
+                    sample_index_series_window**2
                 ).sum()
                 for name, data in target_data.items():
                     if name not in self._target_covariances[i_sample]:
                         self._target_covariances[i_sample][
                             name
                         ] = data_index_covariance(
-                            data[i_sample, :], sample_index_series_reindexed
+                            data[i_sample, :], sample_index_series_window
                         )
                     else:
                         self._target_covariances[i_sample][
                             name
                         ] += data_index_covariance(
-                            data[i_sample, :], sample_index_series_reindexed
+                            data[i_sample, :], sample_index_series_window
                         )
                 for name, data in gen_data.items():
                     if name not in self._gen_covariances[i_sample]:
                         self._gen_covariances[i_sample][name] = data_index_covariance(
-                            data[i_sample, :], sample_index_series_reindexed
+                            data[i_sample, :], sample_index_series_window
                         )
                     else:
                         self._gen_covariances[i_sample][name] += data_index_covariance(
-                            data[i_sample, :], sample_index_series_reindexed
+                            data[i_sample, :], sample_index_series_window
                         )
 
     def _compute_coefficients(
@@ -371,22 +372,37 @@ def get_sample_index_series(
             index_data.time[1].item() - index_data.time[0].item()
         ).total_seconds()
         half_index_timestep = datetime.timedelta(seconds=index_timestep_seconds / 2)
-        index_series = index_data.sel(
+        sample_index_data_selection = index_data.sel(
             time=slice(
-                initial_time - half_index_timestep,
-                end_time + half_index_timestep,
+                initial_time - half_index_timestep, end_time + half_index_timestep
             )
         )
-        if index_series.sizes["time"] == 0:
+        if sample_index_data_selection.sizes["time"] == 0:
+            # no overlap
             sample_index_series.append(None)
         else:
-            index_series_duration = (
-                index_series.time[-1].item() - index_series.time[0].item()
+            sample_times = xr.cftime_range(
+                start=initial_time.item(),
+                end=end_time.item(),
+                freq=f"{int(timestep.total_seconds())}s",
+                calendar=data_calendar,
             )
-            if index_series_duration > overlap_threshold * duration:
-                index_series = index_series - index_series.mean()
-                sample_index_series.append(index_series)
+            valid_sample_times = sample_times.where(
+                np.logical_and(
+                    sample_times >= sample_index_data_selection.time[0],
+                    sample_times <= sample_index_data_selection.time[-1],
+                ),
+            ).dropna()
+            if len(valid_sample_times) > len(sample_times) * overlap_threshold:
+                reindexed_series = sample_index_data_selection.reindex(
+                    time=sample_times, method="nearest"
+                )
+                reindexed_series_zero_mean = reindexed_series - reindexed_series.mean(
+                    "time"
+                )
+                sample_index_series.append(reindexed_series_zero_mean)
             else:
+                # insufficient overlap
                 sample_index_series.append(None)
     return sample_index_series
 
