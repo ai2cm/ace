@@ -627,3 +627,19 @@ def test_dataset_config_dtype(dtype, expected_torch_dtype):
 def test_dataset_config_dtype_raises():
     with pytest.raises(ValueError):
         XarrayDataConfig(data_path="path/to/data", dtype="invalid_dtype")
+
+
+def test_renaming(mock_monthly_netcdfs):
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir, renamed_variables={"bar": "bar_new"}
+    )
+    n_timesteps = 2
+    dataset = XarrayDataset(
+        config,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
+        ),
+    )
+    data, _ = dataset[0]
+    assert "bar_new" in data
+    assert "bar" not in data
