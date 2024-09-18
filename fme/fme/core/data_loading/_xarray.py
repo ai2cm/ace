@@ -287,7 +287,7 @@ class XarrayDataset(Dataset):
         requirements: DataRequirements,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
-        self.names = requirements.names
+        self._names = requirements.names
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -314,11 +314,12 @@ class XarrayDataset(Dataset):
             self._static_derived_data,
         ) = self.configure_horizontal_coordinates(first_dataset)
         (
-            self.time_dependent_names,
-            self.time_invariant_names,
-            self.static_derived_names,
+            self._time_dependent_names,
+            self._time_invariant_names,
+            self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
         self._sigma_coordinates = get_sigma_coordinates(first_dataset, self.dtype)
+        self.renamed_variables = config.renamed_variables or {}
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -346,7 +347,7 @@ class XarrayDataset(Dataset):
 
     def _get_metadata(self, ds):
         result = {}
-        for name in self.names:
+        for name in self._names:
             if name in StaticDerivedData.names:
                 result[name] = StaticDerivedData.metadata[name]
             elif hasattr(ds[name], "units") and hasattr(ds[name], "long_name"):
@@ -399,7 +400,7 @@ class XarrayDataset(Dataset):
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
         with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
-            for name in self.names:
+            for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
                 else:
@@ -416,7 +417,7 @@ class XarrayDataset(Dataset):
                         else:
                             time_invariant_names.append(name)
             logging.info(
-                f"The required variables have been found in the dataset: {self.names}."
+                f"The required variables have been found in the dataset: {self._names}."
             )
 
         return VariableNames(
@@ -533,11 +534,11 @@ class XarrayDataset(Dataset):
                 idx=start,
                 n_steps=n_steps,
                 ds=ds,
-                names=self.time_dependent_names,
+                names=self._time_dependent_names,
                 time_dim="time",
                 spatial_dim_names=self._horizontal_coordinates.loaded_dims,
             )
-            for n in self.time_dependent_names:
+            for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
             ds.close()
             del ds
@@ -548,23 +549,27 @@ class XarrayDataset(Dataset):
         del arrays
 
         # load time-invariant variables from first dataset
-        if len(self.time_invariant_names) > 0:
+        if len(self._time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
             dims = ["time"] + self._horizontal_coordinates.loaded_dims
             shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
-            for name in self.time_invariant_names:
+            for name in self._time_invariant_names:
                 variable = ds[name].variable
                 tensors[name] = as_broadcasted_tensor(variable, dims, shape)
             ds.close()
             del ds
 
         # load static derived variables
-        for name in self.static_derived_names:
+        for name in self._static_derived_names:
             tensor = self._static_derived_data[name]
             tensors[name] = tensor.repeat((total_steps, 1, 1))
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
+
+        # apply renaming
+        for original_name, new_name in self.renamed_variables.items():
+            tensors[new_name] = tensors.pop(original_name)
 
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
