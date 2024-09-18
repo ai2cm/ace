@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, Optional, Sequence, Union
+from typing import Literal, Mapping, Optional, Sequence, Union
 
 import torch
 import xarray as xr
@@ -77,6 +77,7 @@ class XarrayDataConfig:
             to be able to infer the full time coordinate.
         dtype: Data type to cast the data to. If None, no casting is done. It is
             required that 'torch.{dtype}' is a valid dtype.
+        renamed_variables: Optional mapping of {old_name: new_name} to rename variables
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -102,6 +103,7 @@ class XarrayDataConfig:
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
     dtype: Optional[str] = "float32"
+    renamed_variables: Optional[Mapping[str, str]] = None
 
     def __post_init__(self):
         if self.n_repeats > 1 and not self.infer_timestep:
