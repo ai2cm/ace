@@ -169,7 +169,7 @@ def test_enso_index_inference_overlap(shift):
         )
     enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
-    overlap = 1.0 - shift
+    overlap = max(1.0 - shift, 0.0)
     if overlap < OVERLAP_THRESHOLD:  # should be empty dict
         assert not target_coefficients
         assert not gen_coefficients
