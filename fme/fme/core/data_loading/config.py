@@ -5,6 +5,7 @@ import torch
 import xarray as xr
 
 from fme.core.distributed import Distributed
+from fme.core.typing_ import TensorDict
 
 
 @dataclasses.dataclass
@@ -55,6 +56,43 @@ class TimeSlice:
 
 
 @dataclasses.dataclass
+class OverwriteConfig:
+    """Configuration to overwrite field values in XarrayDataset.
+    Attributes:
+        constant: Fill field with constant value.
+        multiply_scalar: Multiply field by scalar value.
+    """
+
+    constant: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    multiply_scalar: Mapping[str, float] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        key_overlap = set(self.constant.keys()) & set(self.multiply_scalar.keys())
+        if key_overlap:
+            raise ValueError(
+                "OverwriteConfig cannot have the same variable in both constant "
+                f"and multiply_scalar: {key_overlap}"
+            )
+
+    def apply(self, tensors: TensorDict) -> TensorDict:
+        for var, fill_value in self.constant.items():
+            data = tensors[var]
+            tensors[var] = torch.ones_like(data) * torch.tensor(
+                fill_value, dtype=data.dtype, device=data.device
+            )
+        for var, multiplier in self.multiply_scalar.items():
+            data = tensors[var]
+            tensors[var] = data * torch.tensor(
+                multiplier, dtype=data.dtype, device=data.device
+            )
+        return tensors
+
+    @property
+    def variables(self):
+        return set(self.constant.keys()) | set(self.multiply_scalar.keys())
+
+
+@dataclasses.dataclass
 class XarrayDataConfig:
     """
     Attributes:
@@ -77,6 +115,8 @@ class XarrayDataConfig:
             to be able to infer the full time coordinate.
         dtype: Data type to cast the data to. If None, no casting is done. It is
             required that 'torch.{dtype}' is a valid dtype.
+        overwrite: Optional OverwriteConfig to overwrite loaded field values. If this is
+            configured for a renamed field, the key should be the final updated name.
         renamed_variables: Optional mapping of {old_name: new_name} to rename variables
 
     Examples:
@@ -103,6 +143,7 @@ class XarrayDataConfig:
     subset: Union[Slice, TimeSlice] = dataclasses.field(default_factory=Slice)
     infer_timestep: bool = True
     dtype: Optional[str] = "float32"
+    overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     renamed_variables: Optional[Mapping[str, str]] = None
 
     def __post_init__(self):
@@ -119,6 +160,16 @@ class XarrayDataConfig:
                 raise ValueError(f"Invalid dtype '{self.dtype}'")
             if not isinstance(self.torch_dtype, torch.dtype):
                 raise ValueError(f"Invalid dtype '{self.dtype}'")
+
+        # Raise error if overwrite variables are in the keys of renamed variables
+        if self.renamed_variables is not None:
+            overlap = set(self.overwrite.variables) & set(self.renamed_variables.keys())
+            if overlap:
+                raise ValueError(
+                    "Variables in overwrite should not be the original names before "
+                    f"renaming: {overlap}. "
+                    "Please use the final renamed variables in the overwrite config."
+                )
 
 
 @dataclasses.dataclass
