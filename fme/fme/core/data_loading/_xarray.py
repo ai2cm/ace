@@ -319,6 +319,7 @@ class XarrayDataset(Dataset):
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
         self._sigma_coordinates = get_sigma_coordinates(first_dataset, self.dtype)
+        self.overwrite = config.overwrite
         self.renamed_variables = config.renamed_variables or {}
 
     @property
@@ -570,6 +571,9 @@ class XarrayDataset(Dataset):
         # apply renaming
         for original_name, new_name in self.renamed_variables.items():
             tensors[new_name] = tensors.pop(original_name)
+
+        # Apply field overwrites
+        tensors = self.overwrite.apply(tensors)
 
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
