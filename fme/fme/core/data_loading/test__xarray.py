@@ -22,6 +22,7 @@ from fme.core.data_loading._xarray import (
 )
 from fme.core.data_loading.config import (
     DataLoaderConfig,
+    OverwriteConfig,
     Slice,
     TimeSlice,
     XarrayDataConfig,
@@ -643,3 +644,53 @@ def test_renaming(mock_monthly_netcdfs):
     data, _ = dataset[0]
     assert "bar_new" in data
     assert "bar" not in data
+
+
+def test_overwrite(mock_monthly_netcdfs):
+    const = -10
+    multiple = 3.5
+
+    overwrite_config = OverwriteConfig(
+        constant={"foo": const},
+        multiply_scalar={"bar": multiple},
+    )
+
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    n_timesteps = 2
+    dataset = XarrayDataset(
+        config,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
+        ),
+    )[0][0]
+
+    config_overwrite = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir, overwrite=overwrite_config
+    )
+    n_timesteps = 2
+    dataset_overwrite = XarrayDataset(
+        config_overwrite,
+        DataRequirements(
+            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
+        ),
+    )[0][0]
+
+    for v in ["foo", "bar"]:
+        assert dataset_overwrite[v].dtype == dataset[v].dtype
+        assert dataset_overwrite[v].device == dataset[v].device
+    assert torch.equal(
+        dataset_overwrite["foo"], torch.ones_like(dataset["foo"]) * const
+    )
+    assert torch.equal(dataset_overwrite["bar"], dataset["bar"] * multiple)
+
+
+def test_overwrite_raises_error_on_original_name(mock_monthly_netcdfs):
+    overwrite_config = OverwriteConfig(
+        constant={"foo": 3},
+    )
+    with pytest.raises(ValueError):
+        XarrayDataConfig(
+            data_path=mock_monthly_netcdfs.tmpdir,
+            overwrite=overwrite_config,
+            renamed_variables={"foo": "foo_new"},
+        )
