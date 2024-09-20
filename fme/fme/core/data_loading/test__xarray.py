@@ -631,15 +631,14 @@ def test_dataset_config_dtype_raises():
 
 
 def test_renaming(mock_monthly_netcdfs):
+    # stepper in/out names should be variables after renaming
+    stepper_variables = ["foo", "bar_new"]
     config = XarrayDataConfig(
         data_path=mock_monthly_netcdfs.tmpdir, renamed_variables={"bar": "bar_new"}
     )
-    n_timesteps = 2
     dataset = XarrayDataset(
         config,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
-        ),
+        DataRequirements(names=stepper_variables, n_timesteps=2),
     )
     data, _ = dataset[0]
     assert "bar_new" in data
