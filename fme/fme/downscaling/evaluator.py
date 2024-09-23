@@ -8,6 +8,7 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
+from fme.core.data_loading.data_typing import LatLonCoordinates
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
@@ -42,6 +43,10 @@ class Evaluator:
         self.n_samples = n_samples
 
     def run(self):
+        if not isinstance(self.data.horizontal_coordinates.fine, LatLonCoordinates):
+            raise NotImplementedError(
+                "Only lat-lon coordinates are supported for evaluation"
+            )
         aggregator = Aggregator(
             self.data.area_weights.fine,
             self.data.horizontal_coordinates.fine.lat.cpu(),

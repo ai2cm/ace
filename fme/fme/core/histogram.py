@@ -128,6 +128,8 @@ class DynamicHistogram:
         Double the sizes of bins, extending the histogram
         to the left (further negative).
         """
+        if self.bin_edges is None:
+            raise RuntimeError("Cannot double size of bins without bin edges")
         current_range = self.bin_edges[-1] - self.bin_edges[0]
         new_range = 2 * current_range
 
@@ -147,6 +149,8 @@ class DynamicHistogram:
         Double the sizes of bins, extending the histogram
         to the right (further positive).
         """
+        if self.bin_edges is None:
+            raise RuntimeError("Cannot double size of bins without bin edges")
         current_range = self.bin_edges[-1] - self.bin_edges[0]
         new_range = 2 * current_range
 
