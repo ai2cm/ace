@@ -198,6 +198,17 @@ era5_1deg_stats_beaker_dataset:
 era5_1deg_16layer_stats_beaker_dataset:
 	./compute_stats.sh --config configs/era5-1deg-16layer-1940-2022.yaml
 
+.PHONY: compute_cm4_trial_run_atmosphere_dataset
+compute_cm4_trial_run_atmosphere_dataset:
+	python -u compute_dataset.py \
+	--config configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml \
+	--run-directory gs://vcm-ml-raw-flexible-retention/2024-08-10-pre-industrial-CM4-simulation/regridded-zarrs/gaussian_grid_180_by_360/trial-run \
+	--output-store gs://vcm-ml-intermediate/2024-09-20-cm4-1deg-8layer-trial-run.zarr
+
+.PHONY: compute_cm4_trial_run_atmosphere_stats
+compute_cm4_trial_run_atmosphere_stats:
+	python -u get_stats.py configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml 0
+
 .PHONY: build_docker_image
 build_docker_image:
 	docker build -f beakerpy.Dockerfile -t us.gcr.io/vcm-ml/beaker-py .
