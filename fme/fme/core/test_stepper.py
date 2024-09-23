@@ -646,26 +646,26 @@ def test_step_with_prescribed_ocean():
 def test_predict():
     stepper = _get_stepper(["a", "b"], ["a", "b"])
     n_steps = 3
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
+    input_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
     forcing_data: TensorMapping = {}
     output = stepper.predict(input_data, forcing_data, n_steps)
     for variable in ["a", "b"]:
         assert output[variable].size(dim=1) == n_steps
         torch.testing.assert_close(
-            output[variable][:, -1], input_data[variable] + n_steps
+            output[variable][:, -1], input_data[variable][:, 0] + n_steps
         )
 
 
 def test_predict_with_forcing():
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
     forcing_data = {"b": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE)}
     output = stepper.predict(input_data, forcing_data, n_steps)
     assert "b" not in output
     assert output["a"].size(dim=1) == n_steps
     torch.testing.assert_close(
-        output["a"][:, 0], input_data["a"] + forcing_data["b"][:, 0]
+        output["a"][:, 0], input_data["a"][:, 0] + forcing_data["b"][:, 0]
     )
     for n in range(1, n_steps):
         expected_a_output = output["a"][:, n - 1] + forcing_data["b"][:, n]
@@ -675,7 +675,7 @@ def test_predict_with_forcing():
 def test_predict_with_ocean():
     stepper = _get_stepper(["a"], ["a"], ocean_config=OceanConfig("a", "mask"))
     n_steps = 3
-    input_data = {"a": torch.rand(3, 5, 5).to(DEVICE)}
+    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
     forcing_data = {
         x: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for x in ["a", "mask"]
     }
@@ -683,7 +683,7 @@ def test_predict_with_ocean():
     assert "mask" not in output
     assert output["a"].size(dim=1) == n_steps
     for n in range(n_steps):
-        previous_a = input_data["a"] if n == 0 else output["a"][:, n - 1]
+        previous_a = input_data["a"][:, 0] if n == 0 else output["a"][:, n - 1]
         expected_a_output = torch.where(
             torch.round(forcing_data["mask"][:, n + 1]).to(int) == 1,
             forcing_data["a"][:, n + 1],
@@ -699,7 +699,7 @@ def test_next_step_forcing_names():
         module_name="ChannelSum",
         next_step_forcing_names=["c"],
     )
-    input_data = {x: torch.rand(1, 5, 5).to(DEVICE) for x in ["a"]}
+    input_data = {x: torch.rand(1, 1, 5, 5).to(DEVICE) for x in ["a"]}
     forcing_data = {x: torch.rand(1, 2, 5, 5).to(DEVICE) for x in ["b", "c"]}
     stepper.predict(input_data, forcing_data, 1)
     torch.testing.assert_close(
@@ -722,16 +722,16 @@ def test_prepend_initial_condition():
         metrics={"loss": torch.tensor(0.0)},
     )
     ic = {
-        "a": torch.rand(3, 5).to(DEVICE),
-        "b": torch.rand(3, 5).to(DEVICE),
+        "a": torch.rand(3, 1, 5).to(DEVICE),
+        "b": torch.rand(3, 1, 5).to(DEVICE),
     }
     ic_normed = {k: (v - v.mean()) / v.std() for k, v in ic.items()}
     prepended = stepped.prepend_initial_condition(ic, ic_normed)
     for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, 0], ic[v])
-        assert torch.allclose(prepended.gen_data_norm[v][:, 0], ic_normed[v])
-        assert torch.allclose(prepended.target_data[v][:, 0], ic[v])
-        assert torch.allclose(prepended.target_data_norm[v][:, 0], ic_normed[v])
+        assert torch.allclose(prepended.gen_data[v][:, :1], ic[v])
+        assert torch.allclose(prepended.gen_data_norm[v][:, :1], ic_normed[v])
+        assert torch.allclose(prepended.target_data[v][:, :1], ic[v])
+        assert torch.allclose(prepended.target_data_norm[v][:, :1], ic_normed[v])
 
 
 def test__combine_normalizers():
