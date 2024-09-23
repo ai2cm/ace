@@ -1,4 +1,5 @@
 import dataclasses
+from typing import Set
 
 import pytest
 import torch
@@ -161,7 +162,7 @@ def test_filter_tensor_mapping():
         assert k not in result
 
     # Test with empty keys set
-    empty_keys = set()
+    empty_keys: Set[str] = set()
     result = filter_tensor_mapping(tensor_mapping, empty_keys)
     assert len(result) == 0
 

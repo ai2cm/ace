@@ -260,13 +260,13 @@ def _open_file_fh_cached(path, **kwargs):
     protocol = _get_protocol(path)
     if protocol:
         # add an LRU cache for remote zarrs
-        fn = _open_xr_dataset_lru
-    else:
-        # netcdf4 and h5engine have a filehandle LRU cache in xarray
-        # https://github.com/pydata/xarray/blob/cd3ab8d5580eeb3639d38e1e884d2d9838ef6aa1/xarray/backends/file_manager.py#L54 # noqa: E501
-        fn = _open_xr_dataset
-
-    return fn(
+        return _open_xr_dataset_lru(
+            path,
+            **kwargs,
+        )
+    # netcdf4 and h5engine have a filehandle LRU cache in xarray
+    # https://github.com/pydata/xarray/blob/cd3ab8d5580eeb3639d38e1e884d2d9838ef6aa1/xarray/backends/file_manager.py#L54 # noqa: E501
+    return _open_xr_dataset(
         path,
         **kwargs,
     )

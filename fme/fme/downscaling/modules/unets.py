@@ -16,6 +16,8 @@ https://github.com/NVlabs/edm/blob/main/training/networks.py
 """Model architectures and preconditioning schemes used in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
+from typing import List
+
 import numpy as np
 import torch
 from torch.nn.functional import silu
@@ -317,9 +319,9 @@ class SongUNet(torch.nn.Module):
                 self.dec[f'{res}x{res}_aux_norm'] = GroupNorm(num_channels=cout, eps=1e-6)
                 self.dec[f'{res}x{res}_aux_conv'] = Conv2d(in_channels=cout, out_channels=out_channels, kernel=3, **init_zero)
 
-    def forward(self, x, noise_labels, class_labels, augment_labels=None):
+    def forward(self, x: torch.Tensor, noise_labels, class_labels, augment_labels=None):
         # Mapping.
-        emb = self.map_noise(noise_labels)
+        emb = self.map_noise(noise_labels)  # type: ignore
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape) # swap sin/cos
         if self.map_label is not None:
             tmp = class_labels
@@ -332,7 +334,7 @@ class SongUNet(torch.nn.Module):
         emb = silu(self.map_layer1(emb))
 
         # Encoder.
-        skips = []
+        skips: List[torch.Tensor] = []
         aux = x
         for name, block in self.enc.items():
             if 'aux_down' in name:
