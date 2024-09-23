@@ -128,9 +128,6 @@ class InferenceEvaluatorConfig:
     def clean_wandb(self):
         self.logging.clean_wandb(self.experiment_dir)
 
-    def configure_gcs(self):
-        self.logging.configure_gcs()
-
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
