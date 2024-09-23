@@ -132,11 +132,6 @@ class InferenceEvaluatorConfig:
         self.logging.configure_gcs()
 
     def load_stepper(self) -> SingleModuleStepper:
-        """
-        Args:
-            gridded_operations: The gridded operations to use for the model.
-            sigma_coordinates: The sigma coordinates of the model.
-        """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
         return stepper
