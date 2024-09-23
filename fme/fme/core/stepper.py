@@ -258,13 +258,10 @@ def _combine_normalizers(
     return StandardNormalizer(means=means, stds=stds)
 
 
-def _prepend_timestep(
-    data: TensorDict, timestep: TensorDict, time_dim: int = 1
+def _prepend_timesteps(
+    data: TensorDict, timesteps: TensorDict, time_dim: int = 1
 ) -> TensorDict:
-    return {
-        k: torch.cat([timestep[k].unsqueeze(time_dim), v], dim=time_dim)
-        for k, v in data.items()
-    }
+    return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
 
 @dataclasses.dataclass
@@ -275,13 +272,17 @@ class SteppedData:
     gen_data_norm: TensorDict
     target_data_norm: TensorDict
 
-    def remove_initial_condition(self) -> "SteppedData":
+    def remove_initial_condition(self, n_ic_timesteps: int) -> "SteppedData":
         return SteppedData(
             metrics=self.metrics,
-            gen_data={k: v[:, 1:] for k, v in self.gen_data.items()},
-            target_data={k: v[:, 1:] for k, v in self.target_data.items()},
-            gen_data_norm={k: v[:, 1:] for k, v in self.gen_data_norm.items()},
-            target_data_norm={k: v[:, 1:] for k, v in self.target_data_norm.items()},
+            gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
+            target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
+            gen_data_norm={
+                k: v[:, n_ic_timesteps:] for k, v in self.gen_data_norm.items()
+            },
+            target_data_norm={
+                k: v[:, n_ic_timesteps:] for k, v in self.target_data_norm.items()
+            },
         )
 
     def copy(self) -> "SteppedData":
@@ -309,14 +310,14 @@ class SteppedData:
         """
         return SteppedData(
             metrics=self.metrics,
-            gen_data=_prepend_timestep(self.gen_data, initial_condition),
-            target_data=_prepend_timestep(
+            gen_data=_prepend_timesteps(self.gen_data, initial_condition),
+            target_data=_prepend_timesteps(
                 self.target_data, target_initial_condition or initial_condition
             ),
-            gen_data_norm=_prepend_timestep(
+            gen_data_norm=_prepend_timesteps(
                 self.gen_data_norm, normalized_initial_condition
             ),
-            target_data_norm=_prepend_timestep(
+            target_data_norm=_prepend_timesteps(
                 self.target_data_norm,
                 normalized_target_initial_condition or normalized_initial_condition,
             ),
@@ -449,6 +450,14 @@ class SingleModuleStepper:
         return sorted(list(set(self.out_packer.names).difference(self.in_packer.names)))
 
     @property
+    def n_ic_timesteps(self) -> int:
+        return 1
+
+    @property
+    def n_output_timesteps(self) -> int:
+        return 1
+
+    @property
     def modules(self) -> nn.ModuleList:
         """
         Returns:
@@ -498,8 +507,8 @@ class SingleModuleStepper:
 
         Args:
             initial_condition: Mapping from variable name to tensors of shape
-                [n_batch, n_lat, n_lon]. This data is assumed to contain all prognostic
-                variables and be denormalized.
+                [n_batch, self.n_ic_steps, <horizontal_dims>]. This data is assumed
+                to contain all prognostic variables and be denormalized.
             forcing_data: Mapping from variable name to tensors of shape
                 [n_batch, n_forward_steps + 1, n_lat, n_lon]. This contains the forcing
                 and ocean data for the initial condition and all subsequent timesteps.
@@ -510,7 +519,9 @@ class SingleModuleStepper:
             each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].
         """
         output_list = []
-        state = initial_condition
+        state = {
+            k: initial_condition[k].squeeze(self.TIME_DIM) for k in initial_condition
+        }
         forcing_names = self._config.forcing_names
         ocean_forcing_names = self.ocean.forcing_names if self.ocean is not None else []
         for step in range(n_forward_steps):
@@ -536,8 +547,12 @@ class SingleModuleStepper:
         return output_timeseries
 
     def get_initial_condition(self, data: TensorDict) -> Tuple[TensorDict, TensorDict]:
+        if self.TIME_DIM != 1:
+            raise NotImplementedError(
+                "get_initial_condition hard-codes time dimension at index 1"
+            )
         ic = move_tensordict_to_device(
-            {k: v.select(self.TIME_DIM, 0) for k, v in data.items()}
+            {k: v[:, : self.n_ic_timesteps, ...] for k, v in data.items()}
         )
         return ic, self.normalizer.normalize(ic)
 
@@ -552,7 +567,7 @@ class SingleModuleStepper:
 
         Args:
             data: The batch data where each tensor has shape
-                [n_sample, n_forward_steps + 1, n_lat, n_lon].
+                [n_sample, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             n_forward_steps: The number of timesteps to run the model for.
@@ -564,6 +579,7 @@ class SingleModuleStepper:
         """
         data = move_tensordict_to_device(data)
         time_dim = self.TIME_DIM
+        n_ic_timesteps = self.n_ic_timesteps
         if self.ocean is None:
             forcing_names = self._config.forcing_names
         else:
@@ -574,10 +590,10 @@ class SingleModuleStepper:
         metrics = {}
 
         input_data = {
-            k: data[k].select(time_dim, 0) for k in self._config.prognostic_names
+            k: data[k][:, :n_ic_timesteps] for k in self._config.prognostic_names
         }
         # Remove the initial condition from target data
-        data = {k: data[k][:, 1:] for k in data}
+        data = {k: data[k][:, n_ic_timesteps:] for k in data}
 
         optimization.set_mode(self.module)
         with optimization.autocast():
@@ -586,6 +602,8 @@ class SingleModuleStepper:
 
             # compute loss for each timestep
             for step in range(n_forward_steps):
+                # Note: here we examine the loss for a single timestep,
+                # not a single model call (which may contain multiple timesteps).
                 gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
                 target_step = {k: v.select(time_dim, step) for k, v in data.items()}
                 gen_norm_step = self.loss_normalizer.normalize(gen_step)
@@ -682,7 +700,6 @@ class SingleModuleStepper:
             sigma_coordinates.ak = sigma_coordinates.ak.to(dtype=torch.float32)
         if sigma_coordinates.bk.dtype == torch.float64:
             sigma_coordinates.bk = sigma_coordinates.bk.to(dtype=torch.float32)
-
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
         if "img_shape" in state:
