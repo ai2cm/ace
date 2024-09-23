@@ -73,7 +73,6 @@ from fme.core.aggregator import (
     TrainAggregator,
 )
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
-from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.optimization import NullOptimization
@@ -286,7 +285,6 @@ class Trainer:
                             for name, metric in sorted(stepped.metrics.items())
                         }
                     wandb.log(metrics, step=self.num_batches_seen)
-        batch: BatchData
         current_time = time.time()
         for batch in self.train_data.loader:
             stepped = self.stepper.run_on_batch(

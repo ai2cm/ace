@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 import torch
 import xarray as xr
@@ -98,9 +98,7 @@ class MeanAggregator:
     def _get_data(self):
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: Dict[str, Union[float, torch.Tensor]] = {
-            "loss": self._loss / self._n_batches
-        }
+        data: Dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
         for metric in self._variable_metrics:
             for key in self._variable_metrics[metric]:
                 data[f"{metric}/{key}"] = (

@@ -12,8 +12,8 @@ from fme.core.typing_ import TensorMapping
 SLICE_NONE = slice(None)
 
 
-def infer_horizontal_dimension_names(ds: xr.Dataset) -> List[Hashable]:
-    hdims: List[Hashable]
+def infer_horizontal_dimension_names(ds: xr.Dataset) -> List[str]:
+    hdims: List[str]
     if "grid_xt" in ds.variables:
         hdims = ["grid_xt", "grid_yt"]
     elif "lon" in ds.variables:
