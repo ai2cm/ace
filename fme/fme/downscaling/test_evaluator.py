@@ -154,7 +154,7 @@ def test_evaluator_runs(tmp_path, model_config, model_type, num_samples):
         )
         trainer = TrainerConfig(
             model=model_config_cls(
-                registry_selector,
+                registry_selector,  # type: ignore
                 LossConfig("NaN"),
                 ["x", "y"],
                 ["x", "y"],

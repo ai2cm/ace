@@ -27,6 +27,7 @@ from fme.core.data_loading.config import (
     TimeSlice,
     XarrayDataConfig,
 )
+from fme.core.data_loading.data_typing import LatLonCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import (
@@ -401,6 +402,7 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_data.tmpdir, dtype="bfloat16")
     requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=2)
     dataset = XarrayDataset(config=config, requirements=requirements)
+    assert isinstance(dataset.horizontal_coordinates, LatLonCoordinates)
     assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
     assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
     assert dataset.sigma_coordinates.ak.dtype == torch.bfloat16

@@ -1,5 +1,5 @@
 import os
-from typing import Literal
+from typing import List, Literal
 
 import xarray as xr
 
@@ -87,7 +87,8 @@ def main():
             "But be aware that this will incur costs."
         )
     for ic in initial_conditions:
-        for resolution in ["coarse", "fine"]:
+        resolutions: List[Literal[Literal["fine", "coarse"]]] = ["coarse", "fine"]
+        for resolution in resolutions:
             print(f"Processing {ic}, '{resolution}'")
             ds = read_dataset(resolution, ic)
             outpath = (
