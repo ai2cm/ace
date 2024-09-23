@@ -46,9 +46,9 @@ def load_stepper(
             "Overriding training ocean configuration with the inference ocean config."
         )
         new_ocean = ocean_config.build(
-            stepper.in_packer.names, stepper.out_packer.names, stepper.timestep
+            stepper.in_names, stepper.out_names, stepper.timestep
         )
-        stepper.ocean = new_ocean
+        stepper.replace_ocean(new_ocean)
     return stepper
 
 
