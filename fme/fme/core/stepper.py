@@ -409,6 +409,8 @@ class SingleModuleStepper:
             )
         else:
             self.loss_normalizer = self.normalizer
+        self.in_names = config.in_names
+        self.out_names = config.out_names
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -438,6 +440,14 @@ class SingleModuleStepper:
             k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
             for k in self._config.out_names
         }
+
+    def replace_ocean(self, ocean: Ocean):
+        """
+        Replace the ocean model with a new one.
+        Args:
+            ocean: The new ocean model.
+        """
+        self.ocean = ocean
 
     @property
     def prognostic_names(self) -> List[str]:
