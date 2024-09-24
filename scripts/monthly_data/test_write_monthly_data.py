@@ -45,7 +45,7 @@ def test_write_monthly_data(tmp_path: pathlib.Path):
         data_loader=DataLoaderConfig(
             dataset=dataset,
             batch_size=1,
-            num_data_workers=1,
+            num_data_workers=0,
         ),
         logging=LoggingConfig(
             log_to_screen=True,
