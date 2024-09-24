@@ -26,7 +26,7 @@ repos:
     - id: mypy
       additional_dependencies: ["types-PyYaml==5.4.3"]
       args: [
-          --follow-imports, silent, --ignore-missing-imports
+          --follow-imports, silent, --ignore-missing-imports, --check-untyped-defs
         ]
       exclude: |
         (?x)^(
