@@ -149,7 +149,7 @@ def test_evaluator_runs(tmp_path, model_config, model_type, num_samples):
             fine=[XarrayDataConfig(paths.fine)],
             coarse=[XarrayDataConfig(paths.coarse)],
             batch_size=2,
-            num_data_workers=1,
+            num_data_workers=0,
             strict_ensemble=False,
         )
         trainer = TrainerConfig(

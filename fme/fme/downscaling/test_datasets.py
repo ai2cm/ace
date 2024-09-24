@@ -171,7 +171,7 @@ def test_dataloader_build(tmp_path):
         fine=[XarrayDataConfig(str(fine_data.data_path))],
         coarse=[XarrayDataConfig(str(coarse_data.data_path))],
         batch_size=batch_size,
-        num_data_workers=1,
+        num_data_workers=0,
         strict_ensemble=False,
     )
 

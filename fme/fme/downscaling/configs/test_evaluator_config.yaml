@@ -18,7 +18,7 @@ data:
   coarse:
     - data_path: /will/be/overwritten
   batch_size: 2
-  num_data_workers: 2
+  num_data_workers: 0
   strict_ensemble: False
 logging:
   log_to_screen: true
