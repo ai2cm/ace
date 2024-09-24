@@ -187,6 +187,7 @@ def main(
             surface_pressure_name=dlwp_names.surface_pressure,
             total_water_path_name=dlwp_names.total_water_path,
             latitude_dim=dlwp_names.latitude_dim,
+            time_dim=dlwp_names.time_dim,
         )
         assert_global_moisture_conservation(
             ds,
@@ -196,6 +197,7 @@ def main(
             latent_heat_flux_name=dlwp_names.latent_heat_flux,
             latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
             precip_rate_name=dlwp_names.precip_rate,
+            time_dim=dlwp_names.time_dim,
         )
     drop_vars = [var for var in dlwp_names.dropped_variables if var in ds]
     ds = ds.drop(drop_vars)

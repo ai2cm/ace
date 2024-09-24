@@ -17,6 +17,7 @@
 
 import math
 from functools import partial
+from typing import Tuple
 
 # for annotation of models
 import torch
@@ -249,8 +250,8 @@ class SphericalFourierNeuralOperatorNet(nn.Module):
         sht_grid_type="legendre-gauss",
         filter_type="linear",
         operator_type="dhconv",
-        inp_shape=(721, 1440),
-        out_shape=(721, 1440),
+        inp_shape: Tuple[int, int] = (721, 1440),
+        out_shape: Tuple[int, int] = (721, 1440),
         scale_factor=8,
         inp_chans=2,
         out_chans=2,
@@ -500,10 +501,10 @@ class SphericalFourierNeuralOperatorNet(nn.Module):
             ifft_handle = InverseRealFFT2
 
             self.trans_down = fft_handle(
-                *self.inp_shape, lmax=modes_lat, mmax=modes_lon
+                self.inp_shape[0], self.inp_shape[1], lmax=modes_lat, mmax=modes_lon
             ).float()
             self.itrans_up = ifft_handle(
-                *self.out_shape, lmax=modes_lat, mmax=modes_lon
+                self.out_shape[0], self.out_shape[1], lmax=modes_lat, mmax=modes_lon
             ).float()
             self.trans = fft_handle(
                 self.h, self.w, lmax=modes_lat, mmax=modes_lon
