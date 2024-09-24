@@ -157,13 +157,13 @@ train_loader:
     - data_path: '{train_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
-  num_data_workers: 1
+  num_data_workers: 0
 validation_loader:
   dataset:
     - data_path: '{valid_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
-  num_data_workers: 1
+  num_data_workers: 0
 optimization:
   optimizer_type: "Adam"
   lr: 0.001
