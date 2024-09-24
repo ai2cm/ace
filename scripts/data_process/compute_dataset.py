@@ -645,6 +645,7 @@ def main(
             surface_pressure_name=standard_names.surface_pressure,
             total_water_path_name=standard_names.total_water_path,
             latitude_dim=standard_names.latitude_dim,
+            time_dim=standard_names.time_dim,
         )
         assert_global_moisture_conservation(
             ds,
@@ -654,6 +655,7 @@ def main(
             latent_heat_flux_name=standard_names.latent_heat_flux,
             latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
             precip_rate_name=standard_names.precip_rate,
+            time_dim=standard_names.time_dim,
         )
     ds = ds.drop(standard_names.dropped_variables)
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")
