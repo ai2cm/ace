@@ -1,7 +1,7 @@
 [![Docs](https://readthedocs.org/projects/ai2-climate-emulator/badge/?version=latest)](https://ai2-climate-emulator.readthedocs.io/en/latest/)
 
 # ACE: Ai2 Climate Emulator
-This repo contains code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)) and "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([preprint](https://doi.org/10.22541/au.170864176.62037635/v2)).
+This repo contains code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)) and "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([JGR-ML](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136)).
 
 ## Documentation
 
