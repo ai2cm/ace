@@ -1,6 +1,5 @@
 import logging
 import time
-from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Union
 
@@ -8,6 +7,7 @@ import numpy as np
 import torch
 import xarray as xr
 
+from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import (
     InferenceAggregator,
@@ -145,8 +145,8 @@ def _inference_internal_loop(
         The aggregators use the full first window including IC.
         The data writers exclude the IC from the first window.
     """
-    timers = {}
-    current_time = time.time()
+    timer = GlobalTimer.get_instance()
+    timer.start("writer_and_aggregator")
     if i_time == 0:
         i_time_aggregator = i_time
         stepped_no_ic = stepped.remove_initial_condition(n_ic_timesteps)
@@ -178,9 +178,9 @@ def _inference_internal_loop(
         gen_data_norm=stepped.gen_data_norm,
         i_time_start=i_time_aggregator,
     )
-    timers["writer_and_aggregator"] = time.time() - current_time
-    current_time = time.time()
+    timer.stop("writer_and_aggregator")
 
+    timer.start("wandb_logging")
     _log_window_to_wandb(
         aggregator,
         window_slice=slice(
@@ -188,9 +188,7 @@ def _inference_internal_loop(
         ),
         label="inference",
     )
-    timers["wandb_logging"] = time.time() - current_time
-
-    return timers
+    timer.stop("wandb_logging")
 
 
 def _log_window_to_wandb(
@@ -229,7 +227,7 @@ def run_inference(
     forcing_data: GriddedData,
     writer: DataWriter,
     aggregator: InferenceAggregator,
-) -> Dict[str, float]:
+):
     """Run extended inference loop given initial condition and forcing data.
 
     Args:
@@ -239,13 +237,10 @@ def run_inference(
         forcing_data: GriddedData object which includes a DataLoader which will provide
             windows of forcing data appropriately aligned with the initial condition.
         writer: Data writer for saving the inference results to disk.
-
-    Returns:
-        Execution time in seconds for each step of the inference loop.
     """
+    timer = GlobalTimer.get_instance()
     with torch.no_grad():
-        timers: Dict[str, float] = defaultdict(float)
-        current_time = time.time()
+        timer.start("data_loading")
         i_time = 0
         diagnostic_ic: Dict[str, torch.Tensor] = {}
         n_ic_timesteps = stepper.n_ic_timesteps
@@ -258,8 +253,9 @@ def run_inference(
             k: v.unsqueeze(time_dim) for k, v in initial_condition.items()
         }
         for window_forcing in forcing_data.loader:
-            timers["data_loading"] += time.time() - current_time
-            current_time = time.time()
+            timer.stop("data_loading")
+
+            timer.start("run_on_batch")
             forward_steps_in_memory = list(window_forcing.data.values())[0].size(1) - 1
             logging.info(
                 f"Inference: starting window spanning {i_time}"
@@ -269,7 +265,6 @@ def run_inference(
             prediction = stepper.predict(
                 initial_condition, window_forcing_data, forward_steps_in_memory
             )
-            timers["run_on_batch"] += time.time() - current_time
 
             if len(diagnostic_ic) == 0:
                 diagnostic_ic = {
@@ -293,14 +288,17 @@ def run_inference(
                     forcing_data=window_forcing_data,
                 ).items()
             }
+            timer.stop("run_on_batch")
 
+            timer.start("writer_and_aggregator")
             forward_times = window_forcing.times.isel(time=slice(1, None))
             writer.append_batch(prediction, i_time, forward_times)
             aggregator.record_batch(
                 time=forward_times, data=prediction, i_time_start=i_time + 1
             )
-            timers["writer_and_aggregator"] += time.time() - current_time
-            current_time = time.time()
+            timer.stop("writer_and_aggregator")
+
+            timer.start("wandb_logging")
             if i_time == 0:
                 _log_window_to_wandb(
                     aggregator,
@@ -312,9 +310,9 @@ def run_inference(
                 window_slice=slice(i_time + 1, i_time + len(forward_times["time"]) + 1),
                 label="inference",
             )
-            timers["wandb_logging"] += time.time() - current_time
-            current_time = time.time()
+            timer.stop("wandb_logging")
 
+            timer.start("data_loading")
             initial_condition = {
                 k: prediction[k][:, (-1 * n_ic_timesteps) :]
                 for k in stepper.prognostic_names
@@ -325,9 +323,7 @@ def run_inference(
             }
             i_time += forward_steps_in_memory
 
-        for name, duration in timers.items():
-            logging.info(f"{name} duration: {duration:.2f}s")
-    return timers
+        timer.stop("data_loading")
 
 
 def run_inference_evaluator(
@@ -335,7 +331,8 @@ def run_inference_evaluator(
     stepper: SingleModuleStepper,
     data: GriddedData,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
-) -> Dict[str, float]:
+):
+    timer = GlobalTimer.get_instance()
     if writer is None:
         writer = NullDataWriter()
     n_forward_steps = data.loader.dataset.n_forward_steps
@@ -350,15 +347,15 @@ def run_inference_evaluator(
         # final state. We then use this as the initial condition
         # for the next time window.
 
-        timers: Dict[str, float] = defaultdict(float)
-        current_time = time.time()
+        timer.start("data_loading")
         i_time = 0
         target_initial_condition, normed_target_initial_condition = None, None
         n_ic_timesteps = stepper.n_ic_timesteps
         n_output_timesteps = stepper.n_output_timesteps
         for i, window_batch_data in enumerate(data.loader):
-            timers["data_loading"] += time.time() - current_time
-            current_time = time.time()
+            timer.stop("data_loading")
+
+            timer.start("run_on_batch")
             # Assert that the time window size is correct
             forward_steps_in_memory = (
                 list(window_batch_data.data.values())[0].size(1) - n_ic_timesteps
@@ -404,20 +401,19 @@ def run_inference_evaluator(
                 # forcing inputs are in target data but not gen_data
                 forcing_data=stepped.target_data,
             )
-            timers["run_on_batch"] += time.time() - current_time
-            current_time = time.time()
+            timer.stop("run_on_batch")
 
+            timer.start("writer_and_aggregator")
             # Remove initial condition for windows >0
             if i > 0:
                 stepped = stepped.remove_initial_condition(stepper.n_ic_timesteps)
                 batch_times = window_batch_data.times.isel(time=slice(1, None))
             else:
                 batch_times = window_batch_data.times
-
-            timers["writer_and_aggregator"] += time.time() - current_time
+            timer.stop("writer_and_aggregator")
 
             snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
-            internal_timers = _inference_internal_loop(
+            _inference_internal_loop(
                 stepped,
                 i_time,
                 aggregator,
@@ -426,10 +422,8 @@ def run_inference_evaluator(
                 snapshot_dims,
                 n_ic_timesteps,
             )
-            timers["writer_and_aggregator"] += internal_timers["writer_and_aggregator"]
-            timers["wandb_logging"] += internal_timers["wandb_logging"]
 
-            current_time = time.time()
+            timer.start("data_loading")
             i_time += forward_steps_in_memory
 
             # Save last target data timestep to use as IC for calculating
@@ -444,10 +438,7 @@ def run_inference_evaluator(
                     for k, v in stepped.target_data_norm.items()
                 },
             )
-
-        for name, duration in timers.items():
-            logging.info(f"{name} duration: {duration:.2f}s")
-    return timers
+        timer.stop("data_loading")
 
 
 def run_dataset_comparison(
@@ -456,7 +447,7 @@ def run_dataset_comparison(
     prediction_data: GriddedData,
     target_data: GriddedData,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
-) -> Dict[str, float]:
+):
     if writer is None:
         writer = NullDataWriter()
     n_forward_steps = target_data.loader.dataset.n_forward_steps
@@ -469,12 +460,13 @@ def run_dataset_comparison(
     # We process each time window and keep track of the
     # final state. We then use this as the initial condition
     # for the next time window.
-    timers: Dict[str, float] = defaultdict(float)
-    current_time = time.time()
+    timer = GlobalTimer.get_instance()
+    timer.start("data_loading")
     i_time = 0
     for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
-        timers["data_loading"] += time.time() - current_time
-        current_time = time.time()
+        timer.stop("data_loading")
+
+        timer.start("run_on_batch")
         forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
             f"Inference: starting window spanning {i_time}"
@@ -493,10 +485,9 @@ def run_dataset_comparison(
         stepped = compute_stepped_derived_quantities(
             stepped, target_data.sigma_coordinates, target_data.timestep
         )
+        timer.stop("run_on_batch")
 
-        timers["run_on_batch"] += time.time() - current_time
-        current_time = time.time()
-
+        timer.start("writer_and_aggregator")
         # Windows here all include an initial condition at start.
         # Remove IC and time coord for windows >0 to be consistent with
         # run_on_batch outputs before passing to the shared _inference_internal_loop.
@@ -505,11 +496,10 @@ def run_dataset_comparison(
             target_times = target.times.isel(time=slice(1, None))
         else:
             target_times = target.times
-
-        timers["writer_and_aggregator"] += time.time() - current_time
+        timer.stop("writer_and_aggregator")
 
         snapshot_dims = ["sample"] + target_data.horizontal_coordinates.dims
-        internal_timers = _inference_internal_loop(
+        _inference_internal_loop(
             stepped,
             i_time,
             aggregator,
@@ -517,15 +507,11 @@ def run_dataset_comparison(
             target_times,
             snapshot_dims,
         )
-        timers["writer_and_aggregator"] += internal_timers["writer_and_aggregator"]
-        timers["wandb_logging"] += internal_timers["wandb_logging"]
 
-        current_time = time.time()
+        timer.start("data_loading")
         i_time += forward_steps_in_memory
 
-    for name, duration in timers.items():
-        logging.info(f"{name} duration: {duration:.2f}s")
-    return timers
+    timer.stop("data_loading")
 
 
 def write_reduced_metrics(
