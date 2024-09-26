@@ -66,6 +66,7 @@ import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference import run_inference_evaluator
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
+from fme.ace.inference.timing import GlobalTimer
 from fme.ace.train.train_config import TrainConfig
 from fme.core.aggregator import (
     InferenceEvaluatorAggregatorConfig,
@@ -398,7 +399,7 @@ class Trainer:
             n_timesteps=self.config.inference.n_forward_steps + 1,
             metadata=self.train_data.metadata,
         )
-        with torch.no_grad(), self._validation_context():
+        with torch.no_grad(), self._validation_context(), GlobalTimer():
             run_inference_evaluator(
                 aggregator=aggregator,
                 stepper=self.stepper,
