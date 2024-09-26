@@ -389,11 +389,16 @@ class LatentStepAggregator:
 
         wandb = WandB.get_instance()
         images = []
+        latent_shape = self._latent_steps[0].shape
+        output_channels = latent_shape[-3]
         for i, im in enumerate(self._latent_steps):
-            image = im[0].squeeze(0).cpu().numpy()  # select 1st example
-            fig = plot_imshow(image, use_colorbar=False)
-            images.append(wandb.Image(fig, caption=str(i)))
-            plt.close(fig)
+            for j in range(output_channels):
+                image = im[0, j].cpu().numpy()  # select 1st example
+                fig = plot_imshow(image, use_colorbar=False)
+                images.append(
+                    wandb.Image(fig, caption=f"latent step {i}, out channel {j}")
+                )
+                plt.close(fig)
         return images
 
     def get_wandb(self) -> List[Any]:
