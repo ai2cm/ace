@@ -1,6 +1,6 @@
 import logging
 import warnings
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import torch.utils.data
@@ -12,7 +12,7 @@ from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import XarrayDataset, as_index_slice, subset_dataset
+from ._xarray import XarrayDataset, as_index_selection, transfer_properties
 from .data_typing import GriddedData
 from .inference import (
     ExplicitIndices,
@@ -22,6 +22,8 @@ from .inference import (
 )
 from .requirements import DataRequirements
 from .utils import BatchData
+
+logger = logging.getLogger(__name__)
 
 
 def _all_same(iterable, cmp=lambda x, y: x == y):
@@ -39,8 +41,8 @@ def get_datasets(
     datasets = []
     for config in dataset_configs:
         dataset = XarrayDataset(config, requirements)
-        index_slice = as_index_slice(config.subset, dataset)
-        dataset = subset_dataset(dataset, index_slice)
+        index_slice = as_index_selection(config.subset, dataset)
+        dataset = dataset.subset(index_slice)
         datasets.append(dataset)
     return datasets
 
@@ -76,11 +78,20 @@ def get_dataset(
             )
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
-    ensemble.metadata = datasets[0].metadata  # type: ignore
-    ensemble.sigma_coordinates = datasets[0].sigma_coordinates  # type: ignore
-    ensemble.timestep = datasets[0].timestep  # type: ignore
-    ensemble.horizontal_coordinates = datasets[0].horizontal_coordinates  # type: ignore
-    ensemble.is_remote = any(d.is_remote for d in datasets)  # type: ignore
+    override: Dict[str, Any] = {
+        "is_remote": any(d.is_remote for d in datasets),
+    }
+
+    try:
+        timestep = datasets[0].timestep
+        override["timestep"] = timestep
+    except ValueError:
+        logger.debug(
+            "Timestep not found in dataset, skipping property inclusion for ensemble"
+        )
+        pass
+
+    transfer_properties(datasets[0], ensemble, attr_override=override)
     return ensemble
 
 
