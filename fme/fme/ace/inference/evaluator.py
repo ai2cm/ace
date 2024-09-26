@@ -2,7 +2,6 @@ import argparse
 import dataclasses
 import logging
 import os
-import time
 from typing import Optional, Sequence
 
 import dacite
@@ -18,6 +17,7 @@ from fme.ace.inference.loop import (
     run_inference_evaluator,
     write_reduced_metrics,
 )
+from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.data_typing import GriddedData
@@ -163,10 +163,12 @@ def main(yaml_config: str):
         os.makedirs(config.experiment_dir, exist_ok=True)
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    return run_evaluator_from_config(config)
+    with GlobalTimer():
+        return run_evaluator_from_config(config)
 
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
+    timer = GlobalTimer.get_instance()
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
@@ -179,7 +181,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging_utils.log_versions()
     logging.info(f"Current device is {fme.get_device()}")
 
-    start_time = time.time()
+    timer.start("inference")
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
     data_requirements = stepper_config.get_data_requirements(
@@ -222,7 +224,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             data_requirements,
         )
 
-        timers = run_dataset_comparison(
+        run_dataset_comparison(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
             prediction_data=prediction_data,
@@ -230,14 +232,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             writer=writer,
         )
     else:
-        timers = run_inference_evaluator(
+        run_inference_evaluator(
             aggregator=aggregator,
             writer=writer,
             stepper=stepper,
             data=data,
         )
 
-    final_flush_start_time = time.time()
+    timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
@@ -249,14 +251,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             "video",
         ],
     )
-    final_flush_duration = time.time() - final_flush_start_time
-    logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
-    timers["final_writer_flush"] = final_flush_duration
+    timer.stop("final_writer_flush")
 
-    duration = time.time() - start_time
+    timer.stop("inference")
     total_steps = config.n_forward_steps * config.loader.n_samples
-    total_steps_per_second = total_steps / (duration - timers["wandb_logging"])
-    logging.info(f"Inference duration: {duration:.2f} seconds")
+    inference_duration = timer.get_duration("inference")
+    wandb_logging_duration = timer.get_duration("wandb_logging")
+    total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
+    timer.log_durations()
     logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
 
     step_logs = aggregator.get_inference_logs(label="inference")
@@ -264,10 +266,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     if wandb.enabled and len(step_logs) > 0:
         logging.info("Starting logging of timing and final step metrics to wandb")
         duration_logs = {
-            "duration_seconds": duration,
             "total_steps_per_second": total_steps_per_second,
         }
-        final_step_logs = {**timers, **duration_logs, **step_logs[-1]}
+        final_step_logs = {**timer.get_durations(), **duration_logs, **step_logs[-1]}
         wandb.log(final_step_logs, step=len(step_logs) - 1)
 
     config.clean_wandb()
