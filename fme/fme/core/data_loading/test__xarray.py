@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 from collections import namedtuple
-from typing import Dict, Iterable, List, Union
+from typing import Dict, Iterable, List, Union, cast
 
 import cftime
 import numpy as np
@@ -19,6 +19,7 @@ from fme.core.data_loading._xarray import (
     get_raw_times,
     get_timestep,
     repeat_and_increment_times,
+    transfer_properties,
 )
 from fme.core.data_loading.config import (
     DataLoaderConfig,
@@ -27,7 +28,7 @@ from fme.core.data_loading.config import (
     TimeSlice,
     XarrayDataConfig,
 )
-from fme.core.data_loading.data_typing import LatLonCoordinates
+from fme.core.data_loading.data_typing import Dataset, LatLonCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import (
@@ -695,3 +696,51 @@ def test_overwrite_raises_error_on_original_name(mock_monthly_netcdfs):
             overwrite=overwrite_config,
             renamed_variables={"foo": "foo_new"},
         )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{}, {"not_property_b": "b_new"}, {"metadata": "metadata_new"}],
+    ids=["no_override", "non_default_override", "two_overrides"],
+)
+def test_transfer_properties(overrides):
+    class MockDataset:
+        BASE_PROPERTIES = Dataset.BASE_PROPERTIES
+
+        def __init__(
+            self, is_remote, metadata, horizontal_coordinates, sigma_coordinates
+        ):
+            self.is_remote = is_remote
+            self.metadata = metadata
+            self.horizontal_coordinates = horizontal_coordinates
+            self.sigma_coordinates = sigma_coordinates
+            self.not_property_a = "a"
+            self.not_property_b = "b"
+
+    dataset_source = MockDataset(
+        is_remote=True,
+        metadata="metadata",
+        horizontal_coordinates="horizontal_coordinates",
+        sigma_coordinates="sigma_coordinates",
+    )
+
+    class EmptyDataset:
+        pass
+
+    empty_dataset = cast(Dataset, EmptyDataset())
+
+    transfer_properties(
+        cast(Dataset, dataset_source), empty_dataset, attr_override=overrides
+    )
+
+    for key, value in overrides.items():
+        assert getattr(empty_dataset, key) == value
+
+    for key in dataset_source.BASE_PROPERTIES:
+        if key not in overrides:
+            assert getattr(empty_dataset, key) == getattr(dataset_source, key)
+
+    assert empty_dataset.BASE_PROPERTIES == dataset_source.BASE_PROPERTIES
+
+    with pytest.raises(AttributeError):
+        getattr(empty_dataset, "not_property_a")

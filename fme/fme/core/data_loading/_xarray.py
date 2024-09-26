@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import namedtuple
 from functools import lru_cache
-from typing import Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import fsspec
@@ -16,7 +16,7 @@ import xarray as xr
 import fme
 from fme.core.typing_ import TensorDict
 
-from .config import Slice, TimeSlice, XarrayDataConfig
+from .config import RepeatedInterval, Slice, TimeSlice, XarrayDataConfig
 from .data_typing import (
     Dataset,
     HEALPixCoordinates,
@@ -44,20 +44,6 @@ VariableNames = namedtuple(
         "static_derived_names",
     ),
 )
-
-
-def subset_dataset(dataset: Dataset, subset: slice) -> Dataset:
-    """Returns a subset of the dataset and propagates other properties."""
-    indices = range(len(dataset))[subset]
-    logging.info(f"Subsetting dataset samples according to {subset}.")
-    subsetted_dataset = torch.utils.data.Subset(dataset, indices)
-    subsetted_dataset.metadata = dataset.metadata
-    subsetted_dataset.sigma_coordinates = dataset.sigma_coordinates
-    subsetted_dataset.horizontal_coordinates = dataset.horizontal_coordinates
-    subsetted_dataset.timestep = dataset.timestep
-    subsetted_dataset.is_remote = dataset.is_remote
-    subsetted_dataset.sample_start_times = dataset.sample_start_times[subset]
-    return subsetted_dataset
 
 
 def get_sigma_coordinates(
@@ -588,17 +574,74 @@ class XarrayDataset(Dataset):
 
         return tensors, times
 
+    def subset(self, subset: Union[slice, torch.Tensor]) -> Dataset:
+        """Returns a subset of the dataset and propagates other properties."""
+        indices = range(len(self))[subset]
+        logging.info(f"Subsetting dataset samples according to {subset}.")
+        subsetted_dataset = torch.utils.data.Subset(self, indices)
+        override = {
+            "sample_start_times": self.sample_start_times[subset],
+            "all_times": self.all_times[subset],
+        }
+        if self._timestep is not None:
+            override["timestep"] = self._timestep
 
-def as_index_slice(subset: Union[Slice, TimeSlice], dataset: XarrayDataset) -> slice:
+        transfer_properties(self, subsetted_dataset, attr_override=override)
+        return subsetted_dataset
+
+
+def transfer_properties(
+    source: Dataset,
+    target: Dataset,
+    attr_override: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """
+    Transfers Dataset.BASE_PROPERTIES along with any specified
+    attribute overrides from source to target.  Useful for
+    keeping attributes after using torch dataset Subset or Concat.
+
+    Args:
+        source: The dataset to transfer properties from.
+        target: The dataset to transfer properties to.
+        attr_override: A mapping of property names to new values.
+            overrides the value of the property in source.
+    """
+
+    if attr_override is None:
+        attr_override = {}
+
+    transfer_propoerties = list(set(source.BASE_PROPERTIES).union(attr_override.keys()))
+    logger.debug(
+        f"Transferring properties to new dataset object: {transfer_properties}"
+    )
+
+    for attr_name in transfer_propoerties:
+        if attr_name in attr_override:
+            value = attr_override[attr_name]
+        else:
+            value = getattr(source, attr_name)
+        setattr(target, attr_name, value)
+
+    target.BASE_PROPERTIES = source.BASE_PROPERTIES
+
+
+def as_index_selection(
+    subset: Union[Slice, TimeSlice, RepeatedInterval], dataset: XarrayDataset
+) -> Union[slice, np.ndarray]:
     """Converts a subset defined either as a Slice or TimeSlice into an index slice
     based on time coordinate in provided dataset."""
     if isinstance(subset, Slice):
-        index_slice = subset.slice
+        index_selection = subset.slice
     elif isinstance(subset, TimeSlice):
-        index_slice = subset.slice(dataset.sample_start_times)
+        index_selection = subset.slice(dataset.sample_start_times)
+    elif isinstance(subset, RepeatedInterval):
+        try:
+            index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
+        except ValueError as e:
+            raise ValueError(f"Error when applying RepeatedInterval to dataset: {e}")
     else:
         raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
-    return index_slice
+    return index_selection
 
 
 def get_timestep(times: np.ndarray) -> datetime.timedelta:
