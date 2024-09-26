@@ -157,18 +157,22 @@ def test_performance_metrics(
     prefix, expected_prefix, n_latent_steps, percentiles=[99.999]
 ):
     downscale_factor = 2
-    shape = (2, 16, 32)
-    _, n_lat, n_lon = shape
+    n_lat, n_lon = 16, 32
+    shape = (2, n_lat, n_lon)
     area_weights = torch.ones(n_lon)
     latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
     target = {"x": torch.zeros(*shape)}
     prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
     coarse = {
-        "x": torch.ones(2, shape[1] // downscale_factor, shape[2] // downscale_factor)
+        "x": torch.ones(
+            *shape[:-2], shape[-2] // downscale_factor, shape[-1] // downscale_factor
+        )
     }
 
-    latent_steps = [torch.zeros(*shape) for _ in range(n_latent_steps)]
+    # latent steps should include an output channel dimension since latent
+    # contains stacked outputs, first dim is interleaved batch/samples
+    latent_steps = [torch.zeros(*shape).unsqueeze(dim=1) for _ in range(n_latent_steps)]
 
     with mock_wandb():
         aggregator = Aggregator(
