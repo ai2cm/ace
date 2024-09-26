@@ -3,7 +3,8 @@ import os
 import pathlib
 import subprocess
 import unittest.mock
-from typing import Dict
+from pathlib import Path
+from typing import Dict, Sequence, Tuple
 from unittest.mock import MagicMock
 
 import cftime
@@ -47,8 +48,8 @@ def test_trainer(tmp_path):
 
 
 def create_test_data_on_disk(
-    filename, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
-):
+    filename: Path, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
+) -> Path:
     data_vars = {}
     for name in variable_names:
         data = np.random.randn(*list(dim_sizes.values()))
@@ -80,7 +81,7 @@ def create_test_data_on_disk(
     return filename
 
 
-def data_paths_helper(tmp_path):
+def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
     dim_sizes = FineResCoarseResPair[Dict[str, int]](
         fine={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
         coarse={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
@@ -119,7 +120,7 @@ def validation_data_paths(tmp_path):
 
 
 @pytest.fixture
-def stats_paths(tmp_path):
+def stats_data_paths(tmp_path):
     variable_names = ["x", "y"]
     mean_path = create_test_data_on_disk(
         tmp_path / "stats-mean.nc", {}, variable_names, {}
@@ -130,8 +131,13 @@ def stats_paths(tmp_path):
     return mean_path, std_path
 
 
-@pytest.fixture
-def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_path):
+def _create_config_dict(
+    train_paths: FineResCoarseResPair[str],
+    valid_paths: FineResCoarseResPair[str],
+    stats_paths: Tuple[Path],
+    tmp_path: Path,
+):
+    # load from file containing all test default values
     file_path = (
         f"{os.path.dirname(os.path.abspath(__file__))}/configs/test_train_config.yaml"
     )
@@ -140,12 +146,10 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
 
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
-    config["train_data"]["fine"] = [{"data_path": str(train_data_paths.fine)}]
-    config["train_data"]["coarse"] = [{"data_path": str(train_data_paths.coarse)}]
-    config["validation_data"]["fine"] = [{"data_path": str(validation_data_paths.fine)}]
-    config["validation_data"]["coarse"] = [
-        {"data_path": str(validation_data_paths.coarse)}
-    ]
+    config["train_data"]["fine"] = [{"data_path": str(train_paths.fine)}]
+    config["train_data"]["coarse"] = [{"data_path": str(train_paths.coarse)}]
+    config["validation_data"]["fine"] = [{"data_path": str(valid_paths.fine)}]
+    config["validation_data"]["coarse"] = [{"data_path": str(valid_paths.coarse)}]
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -154,32 +158,117 @@ def trainer_config(train_data_paths, validation_data_paths, stats_paths, tmp_pat
         for key, path in zip(("global_means_path", "global_stds_path"), stats_paths):
             config["model"]["normalization"][res][key] = str(path)
 
-    outpath = tmp_path / "train-config.yaml"
-    with open(outpath, "w") as file:
-        yaml.dump(config, file)
-    return outpath
+    return config
 
 
-def test_train_main(trainer_config, very_fast_only: bool):
+def _update_model_type(trainer_config: Dict, module_type: str):
+    """Inplace update of trainer_config model type"""
+
+    if "diffusion" in module_type:
+        model_config_kwargs = {
+            "num_diffusion_generation_steps": 16,
+            "churn": 0.0,
+            "p_mean": -1.2,
+            "p_std": 1.2,
+            "predict_residual": True,
+            "sigma_max": 80.0,
+            "sigma_min": 0.002,
+            "use_fine_topography": False,
+        }
+        trainer_config["model"].update(model_config_kwargs)
+        trainer_config["generate_n_samples"] = 2
+
+    trainer_config["model"]["module"]["type"] = module_type
+
+    return trainer_config
+
+
+def _update_in_out_names(
+    trainer_config: Dict, in_names: Sequence[str], out_names: Sequence[str]
+):
+    """Inplace update of trainer_config input and output variables"""
+    trainer_config["model"]["in_names"] = in_names
+    trainer_config["model"]["out_names"] = out_names
+    return trainer_config
+
+
+def _store_config(
+    tmp_path: Path, trainer_config: Dict, filename: str = "train-config.yaml"
+) -> str:
+    outpath = tmp_path / filename
+    with open(outpath, "w") as f:
+        yaml.dump(trainer_config, f)
+    return str(outpath)
+
+
+@pytest.fixture
+def default_trainer_config(
+    train_data_paths, validation_data_paths, stats_data_paths, tmp_path
+):
+    """Fixture to reduce incoming parameters for tests."""
+    config = _create_config_dict(
+        train_data_paths, validation_data_paths, stats_data_paths, tmp_path
+    )
+    return config
+
+
+@pytest.mark.parametrize(
+    "module_type",
+    ["unet_regression_song", "unet_diffusion_song"],
+    ids=["Regression", "Diffusion"],
+)
+@pytest.mark.parametrize(
+    "in_names, out_names",
+    [
+        (["x"], ["x", "y"]),
+        (["x", "y"], ["y"]),
+        (["x", "y"], ["x", "y"]),
+    ],
+    ids=[
+        "single input, multiple out",
+        "multiple input, single out",
+        "multiple input, multiple out",
+    ],
+)
+def test_train_main_only(
+    module_type,
+    in_names,
+    out_names,
+    default_trainer_config,
+    tmp_path,
+    very_fast_only: bool,
+):
+    """Check that the training loop runs without errors."""
+
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    config = _update_model_type(default_trainer_config, module_type)
+    config = _update_in_out_names(config, in_names, out_names)
+    config_path = _store_config(tmp_path, config)
+
+    with mock_wandb():
+        main(config_path=config_path)
+
+
+def test_train_main_logs(default_trainer_config, tmp_path, very_fast_only: bool):
     """Check that training loop records the appropriate logs."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
     with mock_wandb() as wandb:
-        main(trainer_config)
+        train_config_path = _store_config(tmp_path, default_trainer_config)
+        main(config_path=train_config_path)
         logs = wandb.get_logs()
 
-    with open(trainer_config, "r") as f:
-        trainer_config_dict = yaml.safe_load(f)
-
     num_gradient_descent_updates_per_epoch = (
-        NUM_TIMESTEPS // trainer_config_dict["train_data"]["batch_size"]
+        NUM_TIMESTEPS // default_trainer_config["train_data"]["batch_size"]
     )
 
     assert (
         len(logs)
         == 1  # validation is run once before training
-        + trainer_config_dict["max_epochs"] * num_gradient_descent_updates_per_epoch
+        + default_trainer_config["max_epochs"] * num_gradient_descent_updates_per_epoch
     )
     for step in range(len(logs)):
         keys = set(logs[step].keys())
@@ -188,11 +277,8 @@ def test_train_main(trainer_config, very_fast_only: bool):
         assert len(keys) > 5 or keys == set(["train/batch_loss"])
 
 
-def test_restore_checkpoint(trainer_config, tmp_path):
-    with open(trainer_config, "r") as f:
-        trainer_config_dict = yaml.safe_load(f)
-
-    config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
+def test_restore_checkpoint(default_trainer_config, tmp_path):
+    config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
     trainer1 = config.build()
     trainer2 = config.build()
 
@@ -216,18 +302,15 @@ def test_restore_checkpoint(trainer_config, tmp_path):
     )
 
 
-def test_train_eval_modes(trainer_config, very_fast_only: bool):
+def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     """Checks that at training time the model is stochastic (due to dropout) but
     that at validation time, it is deterministic."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
-    with open(trainer_config, "r") as f:
-        trainer_config_dict = yaml.safe_load(f)
-        trainer_config_dict["model"]["module"] = {
-            "type": "unet_regression_song",
-            "config": {"model_channels": 4},
-        }
+    trainer_config_dict = _update_model_type(
+        default_trainer_config, "unet_regression_song"
+    )
 
     config = dacite.from_dict(data_class=TrainerConfig, data=trainer_config_dict)
     trainer = config.build()
@@ -251,34 +334,31 @@ def test_train_eval_modes(trainer_config, very_fast_only: bool):
     assert torch.all(outputs1.prediction["x"] == outputs2.prediction["x"])
 
 
-def test_resume(trainer_config, tmp_path, very_fast_only: bool):
+def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
     """Make sure the training is resumed from a checkpoint when restarted."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 
-    with open(trainer_config, "r") as f:
-        trainer_config_dict = yaml.safe_load(f)
+    trainer_config_segment_one = dict(default_trainer_config)
+    trainer_config_segment_one["max_epochs"] = 2
+    trainer_config_segment_one["segment_epochs"] = 1
 
-    trainer_config_segment_one_dict = dict(trainer_config_dict)
-    trainer_config_segment_one_dict["max_epochs"] = 2
-    trainer_config_segment_one_dict["segment_epochs"] = 1
+    trainer_config_segment_two = dict(default_trainer_config)
+    trainer_config_segment_two["max_epochs"] = 2
+    trainer_config_segment_two["segment_epochs"] = None
 
-    trainer_config_segment_two_dict = dict(trainer_config_dict)
-    trainer_config_segment_two_dict["max_epochs"] = 2
-    trainer_config_segment_two_dict["segment_epochs"] = None
+    config_segment_one_path = _store_config(
+        tmp_path, trainer_config_segment_one, "config-segment-one.yaml"
+    )
 
-    trainer_config_segment_one = tmp_path / "config-segment-one.yaml"
-    with open(trainer_config_segment_one, "w") as f:
-        yaml.dump(trainer_config_segment_one_dict, f)
-
-    trainer_config_segment_two = tmp_path / "config-segment-two.yaml"
-    with open(trainer_config_segment_two, "w") as f:
-        yaml.dump(trainer_config_segment_two_dict, f)
+    config_segment_two_path = _store_config(
+        tmp_path, trainer_config_segment_two, "config-segment-two.yaml"
+    )
 
     mock = unittest.mock.MagicMock(side_effect=restore_checkpoint)
     with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
         with mock_wandb() as wandb:
-            main(trainer_config_segment_one)
+            main(config_segment_one_path)
             assert 1 == len(
                 [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
             )
@@ -286,26 +366,23 @@ def test_resume(trainer_config, tmp_path, very_fast_only: bool):
 
     with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
         with mock_wandb() as wandb:
-            main(trainer_config_segment_two)
+            main(config_segment_two_path)
             assert 2 == len(
                 [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
             )
             mock.assert_called()
 
 
-def test_resume_two_workers(trainer_config, skip_slow: bool):
+def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
     if skip_slow:
         # script is slow as everything is re-imported when it runs
         pytest.skip("Skipping slow tests")
 
-    with open(trainer_config, "r") as f:
-        trainer_config_dict = yaml.safe_load(f)
-        trainer_config_dict["logging"]["log_to_wandb"] = False
-        trainer_config_dict["max_epochs"] = 1
-    with open(trainer_config, "w") as f:
-        yaml.dump(trainer_config_dict, f)
+    default_trainer_config["logging"]["log_to_wandb"] = False
+    default_trainer_config["max_epochs"] = 1
+    train_config_path = _store_config(tmp_path, default_trainer_config)
 
     repo_path = pathlib.PurePath(__file__).parent.parent.parent.parent
     train_script_path = repo_path / "fme" / "fme" / "downscaling" / "train.py"
@@ -313,8 +390,8 @@ def test_resume_two_workers(trainer_config, skip_slow: bool):
         "torchrun",
         "--nproc_per_node",
         "2",
-        train_script_path,
-        trainer_config,
+        str(train_script_path),
+        train_config_path,
     ]
     initial_process = subprocess.run(command)
     initial_process.check_returncode()

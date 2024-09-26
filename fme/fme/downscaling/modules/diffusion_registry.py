@@ -71,7 +71,8 @@ class UNetDiffusionSong:
             + compute_unet_padding_size(s * downscale_factor, divisor)
             for s in coarse_shape
         ]
-        n_in_channels_conditioned = 2 * n_in_channels
+        # number of input channels = latents (num desired outputs) + conditioning fields
+        n_in_channels_conditioned = n_in_channels + n_out_channels
         unet = SongUNet(
             min(target_height, target_width),
             (

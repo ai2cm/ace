@@ -379,9 +379,9 @@ class DiffusionModel:
 
         if self.config.predict_residual:
             base_prediction = interpolate(
-                self.in_packer.pack(
+                self.out_packer.pack(
                     self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in fine.keys()}
+                        {k: coarse[k] for k in self.out_packer.names}
                     ),
                     axis=channel_axis,
                 ),
@@ -443,9 +443,9 @@ class DiffusionModel:
 
         if self.config.predict_residual:
             base_prediction = interpolate(
-                self.in_packer.pack(
+                self.out_packer.pack(
                     self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in fine.keys()}
+                        {k: coarse[k] for k in self.out_packer.names}
                     ),
                     axis=channel_axis,
                 ),
@@ -461,9 +461,10 @@ class DiffusionModel:
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm_reshaped, axis=channel_axis)
         )
+        targets = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
 
         return ModelOutputs(
-            prediction=samples, target=batch.fine, loss=loss, latent_steps=latent_steps
+            prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
         )
 
     def get_state(self) -> Mapping[str, Any]:
