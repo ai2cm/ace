@@ -83,8 +83,8 @@ def create_test_data_on_disk(
 
 def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
     dim_sizes = FineResCoarseResPair[Dict[str, int]](
-        fine={"time": NUM_TIMESTEPS, "lat": 32, "lon": 32},
-        coarse={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
+        fine={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
+        coarse={"time": NUM_TIMESTEPS, "lat": 4, "lon": 4},
     )
     variable_names = ["x", "y", "HGTsfc"]
     fine_path = tmp_path / "fine"
@@ -148,8 +148,12 @@ def _create_config_dict(
     experiment_dir.mkdir()
     config["train_data"]["fine"] = [{"data_path": str(train_paths.fine)}]
     config["train_data"]["coarse"] = [{"data_path": str(train_paths.coarse)}]
-    config["validation_data"]["fine"] = [{"data_path": str(valid_paths.fine)}]
-    config["validation_data"]["coarse"] = [{"data_path": str(valid_paths.coarse)}]
+    config["validation_data"]["fine"] = [
+        {"data_path": str(valid_paths.fine), "subset": {"stop": 2}}
+    ]
+    config["validation_data"]["coarse"] = [
+        {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
+    ]
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -166,7 +170,7 @@ def _update_model_type(trainer_config: Dict, module_type: str):
 
     if "diffusion" in module_type:
         model_config_kwargs = {
-            "num_diffusion_generation_steps": 16,
+            "num_diffusion_generation_steps": 2,
             "churn": 0.0,
             "p_mean": -1.2,
             "p_std": 1.2,
@@ -245,6 +249,7 @@ def test_train_main_only(
 
     config = _update_model_type(default_trainer_config, module_type)
     config = _update_in_out_names(config, in_names, out_names)
+    config["max_epochs"] = 1
     config_path = _store_config(tmp_path, config)
 
     with mock_wandb():

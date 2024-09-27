@@ -32,6 +32,10 @@ model:
     type: unet_regression_song
     config:
       model_channels: 4
+      channel_mult: [1]
+      channel_mult_emb: 1
+      num_blocks: 1
+      attn_resolutions: []
   normalization:
     fine:
       global_means_path: /will/be/overwritten

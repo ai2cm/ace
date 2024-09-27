@@ -72,7 +72,7 @@ def get_model_type_params(
         "deterministic": (
             ModuleRegistrySelector(
                 "prebuilt",
-                {"module": LinearDownscaling(2, (32, 32), n_channels=2)},
+                {"module": LinearDownscaling(2, (8, 8), n_channels=2)},
             ),
             DownscalingModelConfig,
             {},
@@ -80,7 +80,7 @@ def get_model_type_params(
         "diffusion": (
             DiffusionModuleRegistrySelector(
                 "prebuilt",
-                {"module": LinearDownscalingDiffusion(2, (32, 32), n_channels=2)},
+                {"module": LinearDownscalingDiffusion(2, (8, 8), n_channels=2)},
             ),
             DiffusionModelConfig,
             {
