@@ -18,7 +18,7 @@ The example assumes you are running in a directory structure like:
    │   └── ic_2021.zarr
    └── inference-config.yaml
 
-that includes a model checkpoint (``ace_ckpt.tar``), forcing data (``forcing_2021.zarr``), and an initial condition (e.g., ``ic_2021-01-01.zarr``).
+that includes a model checkpoint (``ace_ckpt.tar``), forcing data (``forcing_2021.zarr``), and an initial condition (e.g., ``ic_2021-01-01.zarr``).  You can find the forcing and initial condition data in the `Zenodo repository`_.
 
 The specified initial condition file should contain a time dimension of at least length 1, but can also
 contain multiple times. If multiple times are present and ``start_indices`` is not specified in the
@@ -34,9 +34,7 @@ in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for an exam
 Example YAML Configuration
 ---------------------------
 
-.. TODO: Add updated Zenodo repository
-
-.. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
+.. _Zenodo repository: https://zenodo.org/records/13787710
 
 .. literalinclude:: inference-config.yaml
    :language: yaml
