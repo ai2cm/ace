@@ -1,0 +1,35 @@
+name: "26_to_27"
+inference_years: 500
+weights:
+  - 0.0
+  - 0.1
+  - 0.2
+  - 0.3
+  - 0.4
+  - 0.5
+  - 0.6
+  - 0.7
+  - 0.8
+  - 0.9
+  - 1.0
+beaker_datasets:
+  - "01J83D1RXX81G55TGY9WM8B6VF"
+  - "01J83D21HDBXK3BD2MF6QBBT3E"
+  - "01J83D29Y4E65Z44K527HGXDNB"
+  - "01J83D2JBC7HH1B05FZDG0G5PR"
+  - "01J83D2TR14111NWWFWDAHS5W6"
+  - "01J83D3305MTSW145EN41M1BNQ"
+  - "01J83D3B8Z74NF3ZDM074871YA"
+  - "01J83D3KQ06HK352T2QVERR1JP"
+  - "01J83D3VX4MTPP4JJ785B213S2"
+  - "01J83D446QJ5RKA5NEWMZGE5K1"
+  - "01J83D4CF00KJC49PE8WBSAEEZ"
+noise_floor_mean_dataset: "gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset-noise-floor/rmse_means.nc"
+noise_floor_std_dataset: "gs://vcm-ml-intermediate/2024-04-02-vertically-resolved-4deg-c96-shield-fme-dataset-noise-floor/rmse_stdevs.nc"
+target_index: 0
+plot_variables:
+  - name: surface_temperature
+    bias_vmax: 0.4
+  - name: PRATEsfc
+    scale: 86400
+    bias_vmax: 0.5
