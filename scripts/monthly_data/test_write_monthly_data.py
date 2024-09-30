@@ -1,6 +1,7 @@
 import pathlib
 from typing import List
 
+import pytest
 import xarray as xr
 from write_monthly_data import Config, run
 
@@ -26,7 +27,9 @@ def write_ensemble_dataset(
         )
 
 
-def test_write_monthly_data(tmp_path: pathlib.Path):
+def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     all_names = ["a", "b"]
     horizontal = [DimSize("grid_yt", 8), DimSize("grid_xt", 4)]
     dim_sizes = DimSizes(
