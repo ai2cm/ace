@@ -47,7 +47,7 @@ def enforce_timeout(skip_slow, very_fast_only, pdb_enabled):
         yield  # Do not enforce timeout if we are debugging
         return
     if very_fast_only:
-        timeout_seconds = 5
+        timeout_seconds = 3
     elif skip_slow:
         timeout_seconds = 30
     else:
