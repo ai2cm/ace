@@ -581,7 +581,6 @@ class SingleModuleStepper:
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             n_forward_steps: The number of timesteps to run the model for.
-            aggregator: The data aggregator.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
