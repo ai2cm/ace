@@ -33,4 +33,4 @@ create_environment:
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e fme[dev]
 
 test:
-	pytest --durations 20 .
+	pytest --durations 40 .
