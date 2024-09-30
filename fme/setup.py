@@ -15,20 +15,22 @@ def read_requirements(filename: str):
 setup(
     name="fme",
     version="0.2.0",
-    description="",
+    description=(
+        "Train and evaluate weather/climate model emulators"
+    ),
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     classifiers=[
         "Intended Audience :: Science/Research",
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 3 - Beta",
         "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python :: 3",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    keywords="",
+    keywords=["weather", "climate", "machine learning", "emulation"],
     url="https://github.com/ai2cm/ace",
     author="Allen Institute for Artificial Intelligence",
-    author_email="oliverwm@allenai.org",
+    author_email="climate-public-maintainer@allenai.org",
     license="Apache",
     packages=find_packages(
         exclude=["*.tests", "*.tests.*", "tests.*", "tests"],
