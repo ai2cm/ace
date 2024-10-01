@@ -22,9 +22,12 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
-from fme.ace.train.train import _restore_checkpoint, count_parameters
+from fme.ace.train.train import (
+    _restore_checkpoint,
+    count_parameters,
+    epoch_checkpoint_enabled,
+)
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import epoch_checkpoint_enabled
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
     HEALPixCoordinates,
