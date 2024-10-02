@@ -1,4 +1,4 @@
-import argparse
+import copy
 import dataclasses
 import logging
 import os
@@ -193,7 +193,7 @@ class InferenceConfig:
         )
 
 
-def main(yaml_config: str):
+def main(yaml_config: str, segments: Optional[int] = None):
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
     config = dacite.from_dict(
@@ -206,7 +206,10 @@ def main(yaml_config: str):
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
     with GlobalTimer():
-        return run_inference_from_config(config)
+        if segments is None:
+            return run_inference_from_config(config)
+        else:
+            run_segmented_inference(config, segments)
 
 
 def run_inference_from_config(config: InferenceConfig):
@@ -296,8 +299,39 @@ def run_inference_from_config(config: InferenceConfig):
     return step_logs
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("yaml_config", type=str)
-    args = parser.parse_args()
-    main(yaml_config=args.yaml_config)
+def run_segmented_inference(config: InferenceConfig, segments: int):
+    """Run inference in multiple segments.
+
+    Args:
+        config: inference configuration to be used for each individual segment. The
+            provided initial condition configuration will only be used for the first
+            segment.
+        segments: total number of segments desired. Only missing segments will be run.
+
+    Note:
+        This is useful when running very long simulations or when saving a large
+        amount of output data to disk. The simulation outputs will be split across
+        multiple folders, each corresponding to one of the segments and labeled by
+        the segment number.
+    """
+    logging.info(
+        f"Starting segmented inference with {segments} segments. "
+        f"Saving to {config.experiment_dir}."
+    )
+    config_copy = copy.deepcopy(config)
+    original_wandb_name = os.environ.get("WANDB_NAME")
+    for segment in range(segments):
+        segment_label = f"segment_{segment:04d}"
+        segment_dir = os.path.join(config.experiment_dir, segment_label)
+        restart_path = os.path.join(segment_dir, "restart.nc")
+        if os.path.exists(restart_path):
+            logging.info(f"Skipping segment {segment} because it has already been run.")
+        else:
+            logging.info(f"Running segment {segment}.")
+            config_copy.experiment_dir = segment_dir
+            if original_wandb_name is not None:
+                os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
+            run_inference_from_config(config_copy)
+        config_copy.initial_condition = InitialConditionConfig(
+            path=restart_path, engine="netcdf4"
+        )
