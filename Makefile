@@ -1,6 +1,7 @@
 VERSION ?= $(shell git rev-parse --short HEAD)
 IMAGE ?= fme
 ENVIRONMENT_NAME ?= fme
+DEPLOY_TARGET ?= pypi
 
 build_docker_image:
 	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
@@ -16,3 +17,13 @@ create_environment:
 
 test:
 	pytest --durations 20 .
+
+# For maintainer use only
+# requires fme[deploy] to be installed
+deploy_pypi:
+	rm -rf dist/*
+	python -m build
+	twine upload --repository $(DEPLOY_TARGET) dist/*
+
+deploy_test_pypi: DEPLOY_TARGET = testpypi
+deploy_test_pypi: deploy_pypi

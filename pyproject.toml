@@ -29,6 +29,7 @@ Documentation = "https://ai2-climate-emulator.readthedocs.io/"
 dependencies = { file = "fme/requirements.txt" }
 optional-dependencies.dev = { file = "fme/dev-requirements.txt" }
 optional-dependencies.docs = { file = "fme/docs/requirements.txt" }
+optional-dependencies.deploy = { file = "fme/deploy-requirements.txt" }
 
 [tool.setuptools.packages.find]
 where = ["fme"]
