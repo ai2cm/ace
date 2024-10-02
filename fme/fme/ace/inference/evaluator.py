@@ -30,9 +30,17 @@ from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.wandb import WandB
 
 
-def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
+def load_stepper_config(
+    checkpoint_file: str, ocean_config: Optional[OceanConfig]
+) -> SingleModuleStepperConfig:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    return SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+    config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+    if ocean_config is not None:
+        logging.info(
+            "Overriding training ocean configuration with the inference ocean config."
+        )
+        config.ocean = ocean_config
+    return config
 
 
 def load_stepper(
@@ -135,7 +143,7 @@ class InferenceEvaluatorConfig:
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
     def get_data_writer(
         self, data: GriddedData, prognostic_names: Sequence[str]
