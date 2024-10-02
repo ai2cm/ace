@@ -775,6 +775,9 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
     )
     assert stepper.ocean.ocean_fraction_name == ocean_override.ocean_fraction_name
 
+    stepper_config = config.load_stepper_config()
+    assert stepper_config.ocean == ocean_override
+
 
 def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     """Test that inference with a model trained with a different timestep than
