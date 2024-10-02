@@ -177,7 +177,7 @@ class InferenceConfig:
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
     def get_data_writer(
         self, data: GriddedData, prognostic_names: Sequence[str]
