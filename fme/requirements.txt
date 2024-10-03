@@ -6,10 +6,10 @@ numpy<2
 wandb
 tensorly
 tensorly-torch
-xarray
+xarray>=2023.2.0
 dacite
 torch
-torch-harmonics
+torch-harmonics==0.6.2
 zarr
 gcsfs
 s3fs
