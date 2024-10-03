@@ -388,5 +388,7 @@ def get_days_since_reference(
             freq="MS",
             calendar=calendar,
         )
-        days_since_reference[i, :] = (dates_sample - reference_date).days
+        days_since_reference[i, :] = (
+            dates_sample.values - reference_date
+        ) // datetime.timedelta(days=1)
     return days_since_reference
