@@ -93,21 +93,46 @@ def test_months_for_timesteps(n_timesteps: int, min_expected: int):
     assert months_for_timesteps(n_timesteps, TIMESTEP) >= min_expected
 
 
-def test_get_days_since_reference():
-    years = np.array([2020, 2021])
-    months = np.array([0, 1])  # expects zero-indexed months
-    reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
+@pytest.mark.parametrize("num_years", [2, 500])
+@pytest.mark.parametrize("calendar", ["proleptic_gregorian", "noleap"])
+def test_get_days_since_reference(num_years, calendar):
+    first_year = 2020
+    final_year = first_year + num_years - 1
+    years = np.array([i for i in range(first_year, final_year + 1)])
+    months = np.zeros((num_years,), dtype=int)
+    # For last year set month to 1
+    months[-1] = 1
+    if calendar == "proleptic_gregorian":
+        reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
+    else:
+        reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
     n_months = 3
-    calendar = "proleptic_gregorian"
     days = get_days_since_reference(years, months, reference_date, n_months, calendar)
-    assert days.shape == (2, 3)
-    assert days[0, 0] == 0
-    assert days[0, 1] == 31
-    assert days[0, 2] == 31 + 29
-    # 2020 is a leap year
-    assert days[1, 0] == 366 + 31
-    assert days[1, 1] == 366 + 31 + 28
-    assert days[1, 2] == 366 + 31 + 28 + 31
+    assert days.shape == (num_years, 3)
+    # 2020 is a leap year in proleptic_gregorian
+    if calendar == "proleptic_gregorian":
+        assert days[0, 0] == 0
+        assert days[0, 1] == 31
+        assert days[0, 2] == 31 + 29
+        if num_years == 2:
+            assert days[1, 0] == 366 + 31
+            assert days[1, 1] == 366 + 31 + 28
+            assert days[1, 2] == 366 + 31 + 28 + 31
+        if num_years == 500:
+            # 121 is number of leap days
+            assert days[499, 0] == 182135 + 121 + 31
+            assert days[499, 1] == 182135 + 121 + 31 + 28
+    if calendar == "noleap":
+        assert days[0, 0] == 0
+        assert days[0, 1] == 31
+        assert days[0, 2] == 31 + 28
+        if num_years == 2:
+            assert days[1, 0] == 365 + 31
+            assert days[1, 1] == 365 + 31 + 28
+            assert days[1, 2] == 365 + 31 + 28 + 31
+        if num_years == 500:
+            assert days[499, 0] == 182135 + 31
+            assert days[499, 1] == 182135 + 31 + 28
 
 
 @pytest.mark.parametrize(
