@@ -32,7 +32,7 @@ optional-dependencies.docs = { file = "fme/docs/requirements.txt" }
 optional-dependencies.deploy = { file = "fme/deploy-requirements.txt" }
 
 [tool.setuptools.packages.find]
-where = ["."]
+where = ["fme"]
 
 [tool.setuptools.exclude-package-data]
 fme = ["*.tests", "*.tests.*", "tests.*", "tests"]
