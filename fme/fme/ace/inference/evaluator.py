@@ -177,6 +177,9 @@ def main(yaml_config: str):
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
+    timer.start("inference")
+    timer.start("initialization")
+
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
@@ -189,7 +192,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging_utils.log_versions()
     logging.info(f"Current device is {fme.get_device()}")
 
-    timer.start("inference")
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
     data_requirements = stepper_config.get_data_requirements(
@@ -224,6 +226,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
 
+    timer.stop("initialization")
     logging.info("Starting inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
@@ -267,7 +270,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     wandb_logging_duration = timer.get_duration("wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
     timer.log_durations()
-    logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
+    logging.info(
+        "Total steps per second (ignoring wandb logging): "
+        f"{total_steps_per_second:.2f} steps/second"
+    )
 
     step_logs = aggregator.get_inference_logs(label="inference")
     wandb = WandB.get_instance()
