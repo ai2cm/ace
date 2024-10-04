@@ -229,13 +229,10 @@ def compute_derived_quantities(
     data: Dict[str, torch.Tensor],
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
-    registry: MutableMapping[
-        str, DerivedVariableRegistryEntry
-    ] = _DERIVED_VARIABLE_REGISTRY,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Computes all derived quantities from the given data."""
-    for label, derived_variable in registry.items():
+    for label, derived_variable in _DERIVED_VARIABLE_REGISTRY.items():
         data = _compute_derived_variable(
             data,
             sigma_coordinates,
@@ -251,19 +248,15 @@ def compute_stepped_derived_quantities(
     stepped: SteppedData,
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
-    registry: MutableMapping[
-        str, DerivedVariableRegistryEntry
-    ] = _DERIVED_VARIABLE_REGISTRY,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> SteppedData:
     stepped.gen_data = compute_derived_quantities(
-        stepped.gen_data, sigma_coordinates, timestep, registry, forcing_data
+        stepped.gen_data, sigma_coordinates, timestep, forcing_data
     )
     stepped.target_data = compute_derived_quantities(
         stepped.target_data,
         sigma_coordinates,
         timestep,
-        registry,
         forcing_data,
     )
     return stepped
