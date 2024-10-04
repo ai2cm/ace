@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fme"
-version = "2024.10.4"
+version = "2024.10.5"
 description = "Train and evaluate weather/climate model emulators"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -34,3 +34,6 @@ optional-dependencies.deploy = { file = "fme/deploy-requirements.txt" }
 [tool.setuptools.packages.find]
 where = ["fme"]
 include = ["fme"]
+
+[tool.setuptools.exclude-package-data]
+fme = ["scripts", "fme/docs"]
