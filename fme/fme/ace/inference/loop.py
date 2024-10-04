@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Optional, Union
+from typing import Iterable, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -14,11 +14,11 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
 )
 from fme.core.data_loading.data_typing import GriddedData
+from fme.core.data_loading.utils import BatchData
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import StandardNormalizer
-from fme.core.optimization import NullOptimization
 from fme.core.stepper import SteppedData
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
@@ -28,167 +28,101 @@ from .derived_variables import (
 )
 
 
-class WindowStitcher:
-    """
-    Handles stitching together the windows of data from the inference loop.
+def _prepend_timesteps(
+    data: TensorDict, timesteps: TensorDict, time_dim: int = 1
+) -> TensorDict:
+    return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
-    For example, handles passing in windows to data writers which combine
-    them together into a continuous series, and handles storing prognostic
-    variables from the end of a window to use as the initial condition for
-    the next window.
+
+class Looper:
+    """
+    Class for stepping a model forward arbitarily many times.
     """
 
     def __init__(
         self,
-        n_forward_steps: int,
-        writer: Union[PairedDataWriter, NullDataWriter],
+        stepper: SingleModuleStepper,
+        initial_condition: TensorDict,
+        initial_times: xr.DataArray,
+        loader: torch.utils.data.DataLoader,
+        compute_derived_for_loaded_data: bool = False,
     ):
-        self.i_time = 0
-        self.n_forward_steps = n_forward_steps
-        self.writer = writer
-        # tensors have shape [n_sample, n_lat, n_lon] with no time axis
-        self._initial_condition: Optional[Mapping[str, torch.Tensor]] = None
-
-    def append(
-        self,
-        data: Dict[str, torch.tensor],
-        gen_data: Dict[str, torch.tensor],
-        batch_times: xr.DataArray,
-        n_ic_timesteps: int = 1,
-    ) -> None:
         """
-        Appends a time segment of data to the ensemble batch.
-
         Args:
-            data: The reference data for the current time segment, tensors
-                should have shape [n_sample, n_time, n_lat, n_lon]
-            gen_data: The generated data for the current time segment, tensors
-                should have shape [n_sample, n_time, n_lat, n_lon]
-            batch_times: Time coordinates for each sample in the batch.
-            n_ic_timesteps: The number of timesteps in the initial condition.
+            stepper: The stepper to use.
+            initial_condition: The initial condition data.
+            initial_times: The initial times.
+            loader: The loader for the forcing, and possibly target, data.
+            derived_variables_callable: A callable that computes and inserts derived
+                variables into the prediction data.
+            compute_derived_for_loaded_data: Whether to compute derived variables for
+                the data returned by the loader.
         """
-        tensor_shape = next(data.values().__iter__()).shape
-        self.writer.append_batch(
-            target=data,
-            prediction=gen_data,
-            start_timestep=self.i_time,
-            batch_times=batch_times,
-        )
-        self.i_time += tensor_shape[1]
-        self._initial_condition = {
-            key: value[:, (-1 * n_ic_timesteps) :] for key, value in data.items()
-        }
-        for key, value in gen_data.items():
-            self._initial_condition[key] = value[:, (-1 * n_ic_timesteps) :]
-        for key, value in self._initial_condition.items():
-            self._initial_condition[key] = value.detach().cpu()
-
-    def apply_initial_condition(self, data: Mapping[str, torch.Tensor]):
-        """
-        Applies the last recorded state of the batch as the initial condition for
-        the next segment of the timeseries.
-
-        Args:
-            data: The data to apply the initial condition to, tensors should have
-                shape [n_sample, n_time, n_lat, n_lon] and the first value along
-                the time axis will be replaced with the last value from the
-                previous segment.
-        """
-        if self.i_time > self.n_forward_steps:
-            raise ValueError(
-                "Cannot apply initial condition after "
-                "the last segment has been appended, currently at "
-                f"time index {self.i_time} "
-                f"with {self.n_forward_steps} max forward steps."
+        self._stepper = stepper
+        self._n_ic_timesteps = stepper.n_ic_timesteps
+        assert set(stepper.prognostic_names).issubset(set(initial_condition))
+        self._prognostic_state = move_tensordict_to_device(initial_condition)
+        # Insert fill values for diagnostic variables. This is required only because
+        # we will later prepend the initial condition to the prediction data to allow
+        # for computing tendencies.
+        for name in stepper.diagnostic_names:
+            self._prognostic_state[name] = torch.full_like(
+                self._prognostic_state[stepper.prognostic_names[0]],
+                fill_value=torch.nan,
             )
-        if self._initial_condition is not None:
-            for key, value in data.items():
-                n_ic_timesteps = self._initial_condition[key].shape[1]
-                value[:, :n_ic_timesteps] = self._initial_condition[key].to(
-                    value.device
-                )
-
-    def save_initial_condition(
-        self,
-        ic_data: Dict[str, torch.Tensor],
-        ic_time: xr.DataArray,
-        snapshot_dims: List[str],
-    ):
-        self.writer.save_initial_condition(ic_data, ic_time, snapshot_dims)
-
-
-def _inference_internal_loop(
-    stepped: SteppedData,
-    i_time: int,
-    aggregator: InferenceEvaluatorAggregator,
-    stitcher: WindowStitcher,
-    batch_times: xr.DataArray,
-    snapshot_dims: List[str],
-    n_ic_timesteps: int = 1,
-):
-    """Do operations that need to be done on each time step of the inference loop.
-
-    This function exists to de-duplicate code between run_inference_evaluator and
-    run_dataset_comparison.
-
-    Args:
-        stepped: windowed data, which has dim (batch, time, <snapshot_dims>)
-        aggregator: the aggregator object
-        stitcher: stitches together windows of data from the inference loop.
-        batch_times: the times represented in this batch.
-        snapshot_dims: represent the dimensions of the time snapshot.
-            (B, <spatial dimensions>)
-        n_ic_timesteps: The number of timesteps in the initial condition.
-
-    Note:
-        The first data window includes the IC, while subsequent windows don't.
-        The aggregators use the full first window including IC.
-        The data writers exclude the IC from the first window.
-    """
-    timer = GlobalTimer.get_instance()
-    timer.start("writer_and_aggregator")
-    if i_time == 0:
-        i_time_aggregator = i_time
-        stepped_no_ic = stepped.remove_initial_condition(n_ic_timesteps)
-        stitcher.save_initial_condition(
-            ic_data={k: v[:, 0] for k, v in stepped.target_data.items()},
-            ic_time=batch_times.isel(time=0),
-            snapshot_dims=snapshot_dims,
+        self._loader = iter(loader)
+        self._current_time = initial_times
+        self._compute_derived = lambda data, forcing: compute_derived_quantities(
+            data, stepper.sigma_coordinates, stepper.timestep, forcing
         )
-        batch_times_no_ic = batch_times.isel(time=slice(1, None))
-    else:
-        i_time_aggregator = i_time + 1
-        stepped_no_ic = stepped
-        batch_times_no_ic = batch_times
+        self._compute_derived_for_loaded_data = compute_derived_for_loaded_data
 
-    # record raw data for the batch, and store the final state
-    # for the next segment
-    # Do not include the initial condition in the data writers
-    stitcher.append(
-        stepped_no_ic.target_data, stepped_no_ic.gen_data, batch_times_no_ic
-    )
+    def __iter__(self):
+        return self
 
-    # record metrics, includes the initial condition
-    aggregator.record_batch(
-        loss=float(stepped.metrics["loss"]),
-        time=batch_times,
-        target_data=stepped.target_data,
-        gen_data=stepped.gen_data,
-        target_data_norm=stepped.target_data_norm,
-        gen_data_norm=stepped.gen_data_norm,
-        i_time_start=i_time_aggregator,
-    )
-    timer.stop("writer_and_aggregator")
+    def __next__(self) -> Tuple[BatchData, BatchData]:
+        """Return predictions for the time period corresponding to the next batch
+        of forcing data."""
+        timer = GlobalTimer.get_instance()
+        try:
+            timer.start("data_loading")
+            batch_data = next(self._loader)
+        except StopIteration:
+            timer.stop("data_loading")
+            raise StopIteration
+        forcing_data = move_tensordict_to_device(batch_data.data)
+        times = batch_data.times
+        n_forward_steps = times.sizes["time"] - self._n_ic_timesteps
+        timer.stop("data_loading")
+        timer.start("run_on_batch")
+        prediction = self._stepper.predict(
+            self._prognostic_state, forcing_data, n_forward_steps
+        )
+        prediction_with_ic = _prepend_timesteps(prediction, self._prognostic_state)
+        prediction_and_derived = self._compute_derived(prediction_with_ic, forcing_data)
+        if self._compute_derived_for_loaded_data:
+            forcing_data = self._compute_derived(forcing_data, forcing_data)
 
-    timer.start("wandb_logging")
-    _log_window_to_wandb(
-        aggregator,
-        window_slice=slice(
-            i_time_aggregator, i_time_aggregator + len(batch_times["time"])
-        ),
-        label="inference",
-    )
-    timer.stop("wandb_logging")
+        # save prognostic state for next iteration
+        self._prognostic_state = {
+            k: v[:, -self._n_ic_timesteps :] for k, v in prediction.items()
+        }
+        self._current_time = times.isel(time=slice(-self._n_ic_timesteps, None))
+
+        # drop initial condition time steps
+        forward_forcing_data = {
+            k: v[:, self._n_ic_timesteps :] for k, v in forcing_data.items()
+        }
+        forward_prediction_and_derived = {
+            k: v[:, self._n_ic_timesteps :] for k, v in prediction_and_derived.items()
+        }
+        forward_times = times.isel(time=slice(self._n_ic_timesteps, None))
+        timer.stop("run_on_batch")
+
+        return (
+            BatchData(data=forward_prediction_and_derived, times=forward_times),
+            BatchData(data=forward_forcing_data, times=forward_times),
+        )
 
 
 def _log_window_to_wandb(
@@ -223,7 +157,8 @@ def _log_window_to_wandb(
 
 def run_inference(
     stepper: SingleModuleStepper,
-    initial_condition: TensorMapping,
+    initial_condition: TensorDict,
+    initial_times: xr.DataArray,
     forcing_data: GriddedData,
     writer: DataWriter,
     aggregator: InferenceAggregator,
@@ -234,15 +169,14 @@ def run_inference(
         stepper: The model to run inference with.
         initial_condition: Mapping of prognostic names to initial condition tensors of
             shape (n_sample, <horizontal dims>).
+        initial_times: Time coordinates for the initial condition.
         forcing_data: GriddedData object which includes a DataLoader which will provide
             windows of forcing data appropriately aligned with the initial condition.
         writer: Data writer for saving the inference results to disk.
+        aggregator: Aggregator for collecting and reducing metrics.
     """
     timer = GlobalTimer.get_instance()
     with torch.no_grad():
-        timer.start("data_loading")
-        i_time = 0
-        diagnostic_ic: Dict[str, torch.Tensor] = {}
         n_ic_timesteps = stepper.n_ic_timesteps
         if n_ic_timesteps != 1:
             raise NotImplementedError(
@@ -252,78 +186,39 @@ def run_inference(
         initial_condition = {
             k: v.unsqueeze(time_dim) for k, v in initial_condition.items()
         }
-        for window_forcing in forcing_data.loader:
-            timer.stop("data_loading")
-
-            timer.start("run_on_batch")
-            forward_steps_in_memory = list(window_forcing.data.values())[0].size(1) - 1
-            logging.info(
-                f"Inference: starting window spanning {i_time}"
-                f" to {i_time + forward_steps_in_memory} steps."
-            )
-            window_forcing_data = move_tensordict_to_device(window_forcing.data)
-            prediction = stepper.predict(
-                initial_condition, window_forcing_data, forward_steps_in_memory
-            )
-
-            if len(diagnostic_ic) == 0:
-                diagnostic_ic = {
-                    k: torch.zeros_like(prediction[k][:, :n_ic_timesteps])
-                    for k in stepper.diagnostic_names
-                }
-            prediction_ic = {**initial_condition, **diagnostic_ic}
-            prediction_with_ic = {
-                k: torch.cat(
-                    [prediction_ic[k], prediction[k]],
-                    dim=time_dim,
-                )
-                for k in prediction
-            }
-            prediction = {
-                k: v[:, n_ic_timesteps:]
-                for k, v in compute_derived_quantities(
-                    prediction_with_ic,
-                    stepper.sigma_coordinates,
-                    stepper.timestep,
-                    forcing_data=window_forcing_data,
-                ).items()
-            }
-            timer.stop("run_on_batch")
-
+        looper = Looper(stepper, initial_condition, initial_times, forcing_data.loader)
+        i_time = 0
+        for prediction_batch, _ in looper:
             timer.start("writer_and_aggregator")
-            forward_times = window_forcing.times.isel(time=slice(1, None))
-            writer.append_batch(prediction, i_time, forward_times)
-            aggregator.record_batch(
-                time=forward_times, data=prediction, i_time_start=i_time + 1
-            )
+            prediction = prediction_batch.data
+            times = prediction_batch.times
+            forward_steps_in_memory = times.sizes["time"]
+            writer.append_batch(prediction, i_time, times)
+            if i_time == 0:
+                example_tensor = list(initial_condition.values())[0]
+                ic_filled = {}
+                for name in prediction:
+                    if name in initial_condition:
+                        ic_filled[name] = initial_condition[name]
+                    else:
+                        ic_filled[name] = torch.full_like(
+                            example_tensor, fill_value=torch.nan
+                        )
+                aggregator.record_batch(initial_times, ic_filled, i_time)
+            aggregator.record_batch(times, prediction, i_time + 1)
             timer.stop("writer_and_aggregator")
-
             timer.start("wandb_logging")
             if i_time == 0:
                 _log_window_to_wandb(
-                    aggregator,
-                    window_slice=slice(0, 1),
-                    label="inference",
+                    aggregator, window_slice=slice(0, 1), label="inference"
                 )
             _log_window_to_wandb(
                 aggregator,
-                window_slice=slice(i_time + 1, i_time + len(forward_times["time"]) + 1),
+                window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
                 label="inference",
             )
             timer.stop("wandb_logging")
-
-            timer.start("data_loading")
-            initial_condition = {
-                k: prediction[k][:, (-1 * n_ic_timesteps) :]
-                for k in stepper.prognostic_names
-            }
-            diagnostic_ic = {
-                k: prediction[k][:, (-1 * n_ic_timesteps) :]
-                for k in stepper.diagnostic_names
-            }
             i_time += forward_steps_in_memory
-
-        timer.stop("data_loading")
 
 
 def run_inference_evaluator(
@@ -335,110 +230,86 @@ def run_inference_evaluator(
     timer = GlobalTimer.get_instance()
     if writer is None:
         writer = NullDataWriter()
-    n_forward_steps = data.loader.dataset.n_forward_steps
-    stitcher = WindowStitcher(n_forward_steps, writer)
 
     with torch.no_grad():
-        # We have data batches with long windows, where all data for a
-        # given batch does not fit into memory at once, so we window it in time
-        # and run the model on each window in turn.
-        #
-        # We process each time window and keep track of the
-        # final state. We then use this as the initial condition
-        # for the next time window.
-
-        timer.start("data_loading")
-        i_time = 0
-        target_initial_condition, normed_target_initial_condition = None, None
         n_ic_timesteps = stepper.n_ic_timesteps
-        n_output_timesteps = stepper.n_output_timesteps
-        for i, window_batch_data in enumerate(data.loader):
-            timer.stop("data_loading")
-
-            timer.start("run_on_batch")
-            # Assert that the time window size is correct
-            forward_steps_in_memory = (
-                list(window_batch_data.data.values())[0].size(1) - n_ic_timesteps
-            )
-            if forward_steps_in_memory % n_output_timesteps != 0:
-                raise ValueError(
-                    f"Num forward steps should be a multiple \
-                                 of n_output_timesteps: got {forward_steps_in_memory} \
-                                 and {n_output_timesteps}."
-                )
-            logging.info(
-                f"Inference: starting window spanning {i_time}"
-                f" to {i_time + forward_steps_in_memory} steps, "
-                f"out of total {n_forward_steps}."
-            )
-            window_data = move_tensordict_to_device(window_batch_data.data)
-
-            stitcher.apply_initial_condition(window_data)
-
-            stepped = stepper.run_on_batch(
-                window_data,
-                NullOptimization(),
-                n_forward_steps=forward_steps_in_memory,
-            )
-
-            # Prepend initial generated (pre-first-timestep) output for all windows
-            # to calculate derived quantities
-            (
-                initial_condition,
-                normed_initial_condition,
-            ) = stepper.get_initial_condition(window_data)
-            stepped = stepped.prepend_initial_condition(
-                initial_condition,
-                normed_initial_condition,
-                target_initial_condition,
-                normed_target_initial_condition,
-            )
-
-            stepped = compute_stepped_derived_quantities(
-                stepped,
-                stepper.sigma_coordinates,
-                stepper.timestep,
-                # forcing inputs are in target data but not gen_data
-                forcing_data=stepped.target_data,
-            )
-            timer.stop("run_on_batch")
-
+        for batch in data.loader:
+            initial_condition = {
+                k: v[:, 0:n_ic_timesteps] for k, v in batch.data.items()
+            }
+            initial_times = batch.times.isel(time=slice(0, n_ic_timesteps))
+            break
+        initial_condition = move_tensordict_to_device(initial_condition)
+        looper = Looper(
+            stepper,
+            initial_condition,
+            initial_times,
+            data.loader,
+            compute_derived_for_loaded_data=True,
+        )
+        snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
+        writer.save_initial_condition(
+            {k: v[:, 0] for k, v in initial_condition.items()},
+            initial_times.isel(time=0),
+            snapshot_dims,
+        )
+        i_time = 0
+        for prediction_batch, target_batch in looper:
             timer.start("writer_and_aggregator")
-            # Remove initial condition for windows >0
-            if i > 0:
-                stepped = stepped.remove_initial_condition(stepper.n_ic_timesteps)
-                batch_times = window_batch_data.times.isel(time=slice(1, None))
-            else:
-                batch_times = window_batch_data.times
+            times = prediction_batch.times
+            prediction = prediction_batch.data
+            target_data = target_batch.data
+            forward_steps_in_memory = times.sizes["time"]
+            logging.info(
+                f"Inference: processing window spanning {i_time}"
+                f" to {i_time + forward_steps_in_memory} steps."
+            )
+            writer.append_batch(
+                target=target_data,
+                prediction=prediction,
+                start_timestep=i_time,
+                batch_times=times,
+            )
+            # filter forcing variables out of the target data
+            target_data = {k: v for k, v in target_data.items() if k in prediction}
+            if i_time == 0:
+                ic_filled = {}
+                for name in target_data:
+                    if name in initial_condition:
+                        ic_filled[name] = initial_condition[name]
+                    else:
+                        ic_filled[name] = target_data[name][:, 0:1]
+                aggregator.record_batch(
+                    loss=np.nan,
+                    time=initial_times,
+                    target_data=ic_filled,
+                    gen_data=ic_filled,
+                    target_data_norm=stepper.normalizer.normalize(ic_filled),
+                    gen_data_norm=stepper.normalizer.normalize(ic_filled),
+                    i_time_start=i_time,
+                )
+            aggregator.record_batch(
+                loss=np.nan,
+                time=times,
+                target_data=target_data,
+                gen_data=prediction,
+                target_data_norm=stepper.normalizer.normalize(target_data),
+                gen_data_norm=stepper.normalizer.normalize(prediction),
+                i_time_start=i_time + 1,
+            )
             timer.stop("writer_and_aggregator")
-
-            snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
-            _inference_internal_loop(
-                stepped,
-                i_time,
+            timer.start("wandb_logging")
+            if i_time == 0:
+                _log_window_to_wandb(
+                    aggregator, window_slice=slice(0, 1), label="inference"
+                )
+            _log_window_to_wandb(
                 aggregator,
-                stitcher,
-                batch_times,
-                snapshot_dims,
-                n_ic_timesteps,
+                window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
+                label="inference",
             )
-
-            timer.start("data_loading")
             i_time += forward_steps_in_memory
-
-            # Save last target data timestep to use as IC for calculating
-            # tendencies in next window
-            target_initial_condition, normed_target_initial_condition = (
-                {
-                    k: v[:, (-1 * n_ic_timesteps) :]
-                    for k, v in stepped.target_data.items()
-                },
-                {
-                    k: v[:, (-1 * n_ic_timesteps) :]
-                    for k, v in stepped.target_data_norm.items()
-                },
-            )
-        timer.stop("data_loading")
+            timer.stop("wandb_logging")
 
 
 def run_dataset_comparison(
@@ -451,19 +322,11 @@ def run_dataset_comparison(
     if writer is None:
         writer = NullDataWriter()
     n_forward_steps = target_data.loader.dataset.n_forward_steps
-    stitcher = WindowStitcher(n_forward_steps, writer)
 
-    # We have data batches with long windows, where all data for a
-    # given batch does not fit into memory at once, so we window it in time
-    # and run the model on each window in turn.
-    #
-    # We process each time window and keep track of the
-    # final state. We then use this as the initial condition
-    # for the next time window.
     timer = GlobalTimer.get_instance()
     timer.start("data_loading")
     i_time = 0
-    for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
+    for pred, target in zip(prediction_data.loader, target_data.loader):
         timer.stop("data_loading")
 
         timer.start("run_on_batch")
@@ -485,28 +348,50 @@ def run_dataset_comparison(
         stepped = compute_stepped_derived_quantities(
             stepped, target_data.sigma_coordinates, target_data.timestep
         )
+        target_times = target.times
         timer.stop("run_on_batch")
 
         timer.start("writer_and_aggregator")
-        # Windows here all include an initial condition at start.
-        # Remove IC and time coord for windows >0 to be consistent with
-        # run_on_batch outputs before passing to the shared _inference_internal_loop.
-        if i > 0:
-            stepped = stepped.remove_initial_condition(1)
-            target_times = target.times.isel(time=slice(1, None))
+        stepped_without_ic = stepped.remove_initial_condition(1)
+        target_times_without_ic = target_times.isel(time=slice(1, None))
+        if i_time == 0:
+            i_time_aggregator = i_time
+            stepped_for_agg = stepped
+            target_times_for_agg = target_times
         else:
-            target_times = target.times
+            i_time_aggregator = i_time + 1
+            stepped_for_agg = stepped_without_ic
+            target_times_for_agg = target_times_without_ic
+
+        # Do not include the initial condition in the data writers
+        writer.append_batch(
+            target=stepped_without_ic.target_data,
+            prediction=stepped_without_ic.gen_data,
+            start_timestep=i_time,
+            batch_times=target_times_without_ic,
+        )
+
+        # record metrics, includes the initial condition
+        aggregator.record_batch(
+            loss=float(stepped_for_agg.metrics["loss"]),
+            time=target_times_for_agg,
+            target_data=stepped_for_agg.target_data,
+            gen_data=stepped_for_agg.gen_data,
+            target_data_norm=stepped_for_agg.target_data_norm,
+            gen_data_norm=stepped_for_agg.gen_data_norm,
+            i_time_start=i_time_aggregator,
+        )
         timer.stop("writer_and_aggregator")
 
-        snapshot_dims = ["sample"] + target_data.horizontal_coordinates.dims
-        _inference_internal_loop(
-            stepped,
-            i_time,
+        timer.start("wandb_logging")
+        _log_window_to_wandb(
             aggregator,
-            stitcher,
-            target_times,
-            snapshot_dims,
+            window_slice=slice(
+                i_time_aggregator, i_time_aggregator + len(target_times["time"])
+            ),
+            label="inference",
         )
+        timer.stop("wandb_logging")
 
         timer.start("data_loading")
         i_time += forward_steps_in_memory
