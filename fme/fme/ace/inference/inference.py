@@ -28,7 +28,7 @@ from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
 from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
@@ -78,7 +78,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset, prognostic_names: Sequence[str]
-) -> Tuple[TensorMapping, xr.DataArray]:
+) -> Tuple[TensorDict, xr.DataArray]:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
@@ -267,6 +267,7 @@ def run_inference_from_config(config: InferenceConfig):
     run_inference(
         stepper=stepper,
         initial_condition=initial_condition,
+        initial_times=initial_times,
         forcing_data=data,
         writer=writer,
         aggregator=aggregator,
