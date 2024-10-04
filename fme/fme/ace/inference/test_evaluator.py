@@ -257,13 +257,14 @@ def inference_helper(
 
     var = list(set(in_names).difference(forcing_names))[0]
 
-    initial_condition_ds = xr.open_dataset(
-        tmp_path / "initial_condition.nc", decode_timedelta=False
-    )
-    for dim_name in ["lat", "lon"]:
-        assert dim_name in initial_condition_ds.dims
-        assert dim_name in initial_condition_ds.data_vars[var].dims
-        assert dim_name in initial_condition_ds.coords
+    if not use_prediction_data:
+        initial_condition_ds = xr.open_dataset(
+            tmp_path / "initial_condition.nc", decode_timedelta=False
+        )
+        for dim_name in ["lat", "lon"]:
+            assert dim_name in initial_condition_ds.dims
+            assert dim_name in initial_condition_ds.data_vars[var].dims
+            assert dim_name in initial_condition_ds.coords
 
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc",
@@ -289,10 +290,13 @@ def inference_helper(
         restart_ds[var].values,
     )
 
-    ic_ds = xr.open_dataset(
-        tmp_path / "initial_condition.nc", decode_timedelta=False, decode_times=False
-    )
-    np.testing.assert_allclose(ic_ds[var].values, 0.0)
+    if not use_prediction_data:
+        ic_ds = xr.open_dataset(
+            tmp_path / "initial_condition.nc",
+            decode_timedelta=False,
+            decode_times=False,
+        )
+        np.testing.assert_allclose(ic_ds[var].values, 0.0)
 
     metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
     assert var in metric_ds.data_vars
