@@ -131,7 +131,7 @@ class InferenceDataLoaderConfig:
             raise ValueError("Inference data may not be subset.")
 
     @property
-    def n_samples(self) -> int:
+    def n_initial_conditions(self) -> int:
         return self.start_indices.n_initial_conditions
 
 
@@ -185,7 +185,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
-        self.n_samples = config.n_samples  # public attribute
+        self._n_initial_conditions = config.n_initial_conditions
 
         if isinstance(config.start_indices, TimestampList):
             self._start_indices = config.start_indices.as_indices(dataset.all_times)
@@ -214,14 +214,14 @@ class InferenceDataset(torch.utils.data.Dataset):
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []
-        for i_sample in range(self.n_samples):
+        for i_member in range(self._n_initial_conditions):
             # check if sample is one this local rank should process
-            if i_sample % dist.world_size != dist.rank:
+            if i_member % dist.world_size != dist.rank:
                 continue
-            i_window_start = i_start + self._start_indices[i_sample]
+            i_window_start = i_start + self._start_indices[i_member]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
-            if i_window_end > (self._total_steps + self._start_indices[i_sample]):
-                i_window_end = self._total_steps + self._start_indices[i_sample] + 1
+            if i_window_end > (self._total_steps + self._start_indices[i_member]):
+                i_window_end = self._total_steps + self._start_indices[i_member] + 1
             window_time_slice = slice(i_window_start, i_window_end)
             tensors, times = self._dataset.get_sample_by_time_slice(window_time_slice)
             if self._perturbations is not None:
@@ -243,7 +243,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                     )
             sample_tuples.append((tensors, times))
         result = BatchData.from_sample_tuples(sample_tuples)
-        assert result.times.shape[0] == self.n_samples // dist.world_size
+        assert result.times.shape[0] == self._n_initial_conditions // dist.world_size
         return result
 
     def __len__(self) -> int:

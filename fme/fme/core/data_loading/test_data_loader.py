@@ -116,7 +116,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
     samples_per_member = n_timesteps - window_timesteps + 1
 
     data = get_data_loader(config, True, requirements)
-    assert len(data.loader) == samples_per_member * num_ensemble_members
+    assert data.n_batches == samples_per_member * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
@@ -147,7 +147,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
     requirements = DataRequirements(["foo"], window_timesteps)
 
     data = get_data_loader(config, True, requirements)
-    assert len(data.loader) == n_samples * num_ensemble_members
+    assert data.n_batches == n_samples * num_ensemble_members
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
 
 
@@ -215,11 +215,12 @@ def test_inference_data_loader(tmp_path):
     )
     n_forward_steps_in_memory = 3
     requirements = DataRequirements(["foo"], n_timesteps=7)
-    data_loader = get_inference_data(
+    data = get_inference_data(
         config,
         forward_steps_in_memory=n_forward_steps_in_memory,
         requirements=requirements,
-    ).loader
+    )
+    data_loader = data.loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
@@ -232,7 +233,7 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.times.sizes["sample"] == batch_size
     assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.times.dt.calendar == "proleptic_gregorian"
-    assert len(data_loader) == 2
+    assert data.n_batches == 2
 
 
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
@@ -370,9 +371,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     data = get_forcing_data(
         config, forward_steps_in_memory, requirements, initial_times
     )
-    assert len(data.loader.dataset) == math.ceil(
-        total_forward_steps / forward_steps_in_memory
-    )
+    assert data.n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)

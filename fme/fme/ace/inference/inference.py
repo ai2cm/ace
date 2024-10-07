@@ -184,7 +184,8 @@ class InferenceConfig:
     ) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
-            n_samples=data.loader.dataset.n_samples,
+            # each batch contains all samples, for different times
+            n_initial_conditions=data.batch_size,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
@@ -281,7 +282,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.stop("final_writer_flush")
 
     timer.stop("inference")
-    total_steps = config.n_forward_steps * data.loader.dataset.n_samples
+    total_steps = config.n_forward_steps * data.batch_size
     inference_duration = timer.get_duration("inference")
     wandb_logging_duration = timer.get_duration("wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)

@@ -13,7 +13,7 @@ from fme.core.aggregator.inference.main import (
     InferenceAggregator,
     InferenceEvaluatorAggregator,
 )
-from fme.core.data_loading.data_typing import GriddedData
+from fme.core.data_loading.data_typing import GriddedData, GriddedDataABC
 from fme.core.data_loading.utils import BatchData
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import StandardNormalizer
@@ -44,7 +44,7 @@ class Looper:
         stepper: SingleModuleStepper,
         initial_condition: TensorDict,
         initial_times: xr.DataArray,
-        loader: torch.utils.data.DataLoader,
+        loader: Iterable[BatchData],
         compute_derived_for_loaded_data: bool = False,
     ):
         """
@@ -224,7 +224,7 @@ def run_inference(
 def run_inference_evaluator(
     aggregator: InferenceEvaluatorAggregator,
     stepper: SingleModuleStepper,
-    data: GriddedData,
+    data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ):
     timer = GlobalTimer.get_instance()
@@ -321,7 +321,7 @@ def run_dataset_comparison(
 ):
     if writer is None:
         writer = NullDataWriter()
-    n_forward_steps = target_data.loader.dataset.n_forward_steps
+    n_forward_steps = target_data.n_forward_steps
 
     timer = GlobalTimer.get_instance()
     timer.start("data_loading")
@@ -336,8 +336,8 @@ def run_dataset_comparison(
             f" to {i_time + forward_steps_in_memory} steps,"
             f" out of total {n_forward_steps}."
         )
-        pred_window_data = move_tensordict_to_device(pred.data)
-        target_window_data = move_tensordict_to_device(target.data)
+        pred_window_data = dict(pred.device_data)
+        target_window_data = dict(target.device_data)
         stepped = SteppedData(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,

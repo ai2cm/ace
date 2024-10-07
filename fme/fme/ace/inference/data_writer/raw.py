@@ -18,7 +18,7 @@ from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "microseconds"
-SAMPLE_DIM = "sample"
+IC_DIM = "sample"
 INIT_TIME = "init_time"
 INIT_TIME_UNITS = "microseconds since 1970-01-01 00:00:00"
 VALID_TIME = "valid_time"
@@ -34,7 +34,7 @@ class PairedRawDataWriter:
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        n_initial_conditions: int,
         save_names: Optional[Sequence[str]],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -42,7 +42,7 @@ class PairedRawDataWriter:
         self._target_writer = RawDataWriter(
             path=path,
             label="autoregressive_target.nc",
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             metadata=metadata,
             coords=coords,
@@ -50,7 +50,7 @@ class PairedRawDataWriter:
         self._prediction_writer = RawDataWriter(
             path=path,
             label="autoregressive_predictions.nc",
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             save_names=save_names,
             metadata=metadata,
             coords=coords,
@@ -88,7 +88,7 @@ class RawDataWriter:
         self,
         path: str,
         label: str,
-        n_samples: int,
+        n_initial_conditions: int,
         save_names: Optional[Sequence[str]],
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -96,8 +96,8 @@ class RawDataWriter:
         """
         Args:
             filename: Path to write netCDF file(s).
-            n_samples: Number of samples to write to the file. This might correspond
-                to a number of initial conditions, or some other grouping of samples.
+            n_initial_conditions: Number of initial conditions / timeseries
+                to write to the file.
             save_names: Names of variables to save in the output file.
                 If None, all provided variables will be saved.
             metadata: Metadata for each variable to be written to the file.
@@ -111,10 +111,10 @@ class RawDataWriter:
         self.dataset.createDimension(LEAD_TIME_DIM, None)  # unlimited dimension
         self.dataset.createVariable(LEAD_TIME_DIM, "i8", (LEAD_TIME_DIM,))
         self.dataset.variables[LEAD_TIME_DIM].units = LEAD_TIME_UNITS
-        self.dataset.createDimension(SAMPLE_DIM, n_samples)
-        self.dataset.createVariable(INIT_TIME, "i8", (SAMPLE_DIM,))
+        self.dataset.createDimension(IC_DIM, n_initial_conditions)
+        self.dataset.createVariable(INIT_TIME, "i8", (IC_DIM,))
         self.dataset.variables[INIT_TIME].units = INIT_TIME_UNITS
-        self.dataset.createVariable(VALID_TIME, "i8", (SAMPLE_DIM, LEAD_TIME_DIM))
+        self.dataset.createVariable(VALID_TIME, "i8", (IC_DIM, LEAD_TIME_DIM))
         self.dataset.variables[VALID_TIME].units = INIT_TIME_UNITS
         self._dataset_dims_created = False
 
@@ -164,7 +164,7 @@ class RawDataWriter:
                     self.dataset.createVariable(dim.name, "f4", (dim.name,))
                     self.dataset.variables[dim.name][:] = self.coords[dim.name]
                 _ordered_names.append(dim.name)
-            dims = (SAMPLE_DIM, LEAD_TIME_DIM, *_ordered_names)
+            dims = (IC_DIM, LEAD_TIME_DIM, *_ordered_names)
             self._dataset_dims_created = True
 
         save_names = self._get_variable_names_to_save(data.keys())

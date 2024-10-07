@@ -2,7 +2,18 @@ import abc
 import dataclasses
 import datetime
 from collections import namedtuple
-from typing import List, Literal, Mapping, Optional, Tuple
+from typing import (
+    Any,
+    Generic,
+    Iterator,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    TypeVar,
+)
 
 import numpy as np
 import torch
@@ -10,6 +21,7 @@ import xarray as xr
 from astropy_healpix import HEALPix
 
 from fme.core import metrics
+from fme.core.data_loading.utils import BatchData
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
@@ -335,40 +347,150 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
         ...
 
 
-@dataclasses.dataclass
-class GriddedData:
+T = TypeVar("T", covariant=True)
+
+
+class DataLoader(Protocol, Generic[T]):
+    def __iter__(self) -> Iterator[T]:
+        ...
+
+
+class GriddedDataABC(abc.ABC, Generic[T]):
+    @property
+    @abc.abstractmethod
+    def loader(self) -> DataLoader[T]:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def metadata(self) -> Mapping[str, VariableMetadata]:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def timestep(self) -> datetime.timedelta:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def coords(self) -> Mapping[str, np.ndarray]:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def gridded_operations(self) -> GriddedOperations:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def n_samples(self) -> int:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def n_batches(self) -> int:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def first_time(self) -> Any:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def last_time(self) -> Any:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def batch_size(self) -> int:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def n_forward_steps(self) -> int:
+        ...
+
+    @abc.abstractmethod
+    def set_epoch(self, epoch: int):
+        ...
+
+
+class GriddedData(GriddedDataABC[BatchData]):
     """
     Data as required for pytorch training.
 
     The data is assumed to be gridded, and attributes are included for
     performing operations on gridded data.
-
-    Attributes:
-        loader: torch DataLoader, which returns batches of type
-            TensorMapping where keys indicate variable name.
-            Each tensor has shape
-            [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
-        metadata: Metadata for each variable.
-        area_weights: Weights for each grid cell, used for computing area-weighted
-            averages. Has shape [n_x_coord, n_y_coord].
-        sigma_coordinates: Sigma coordinates for each grid cell, used for computing
-            pressure levels.
-        horizontal_coordinates: horizontal coordinates for the data.
-        timestep: Timestep of the model.
-        sampler: Optional sampler for the data loader. Provided to allow support for
-            distributed training.
     """
 
-    loader: torch.utils.data.DataLoader
-    metadata: Mapping[str, VariableMetadata]
-    sigma_coordinates: SigmaCoordinates
-    horizontal_coordinates: HorizontalCoordinates
-    timestep: datetime.timedelta
-    sampler: Optional[torch.utils.data.Sampler] = None
+    def __init__(
+        self,
+        loader: torch.utils.data.DataLoader,
+        metadata: Mapping[str, VariableMetadata],
+        sigma_coordinates: SigmaCoordinates,
+        horizontal_coordinates: HorizontalCoordinates,
+        timestep: datetime.timedelta,
+        sampler: Optional[torch.utils.data.Sampler] = None,
+    ):
+        """
+        Args:
+            loader: torch DataLoader, which returns batches of type
+                TensorMapping where keys indicate variable name.
+                Each tensor has shape
+                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            metadata: Metadata for each variable.
+            area_weights: Weights for each grid cell, used for computing area-weighted
+                averages. Has shape [n_x_coord, n_y_coord].
+            sigma_coordinates: Sigma coordinates for each grid cell, used for computing
+                pressure levels.
+            horizontal_coordinates: horizontal coordinates for the data.
+            timestep: Timestep of the model.
+            sampler: Optional sampler for the data loader. Provided to allow support for
+                distributed training.
+        """
+        self._loader = loader
+        self._metadata = metadata
+        self._sigma_coordinates = sigma_coordinates
+        self._horizontal_coordinates = horizontal_coordinates
+        self._timestep = timestep
+        self._sampler = sampler
+        self._batch_size: Optional[int] = None
 
     @property
-    def dataset(self) -> Dataset:
-        return self.loader.dataset
+    def loader(self) -> DataLoader[BatchData]:
+        return self._loader
+
+    @property
+    def metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._metadata
+
+    @property
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        return self._sigma_coordinates
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._horizontal_coordinates
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self._timestep
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
@@ -384,3 +506,40 @@ class GriddedData:
     @property
     def gridded_operations(self) -> GriddedOperations:
         return self.horizontal_coordinates.gridded_operations
+
+    @property
+    def n_samples(self) -> int:
+        return len(self._loader.dataset)
+
+    @property
+    def n_batches(self) -> int:
+        return len(self._loader)
+
+    @property
+    def first_time(self) -> Any:
+        return self._loader.dataset[0][1].values[0]
+
+    @property
+    def last_time(self) -> Any:
+        return self._loader.dataset[-1][1].values[0]
+
+    @property
+    def batch_size(self) -> int:
+        if self._batch_size is None:
+            example_data = next(iter(self.loader)).data
+            example_tensor = next(iter(example_data.values()))
+            self._batch_size = example_tensor.shape[0]
+        return self._batch_size
+
+    @property
+    def n_forward_steps(self) -> int:
+        return self._loader.dataset.n_forward_steps
+
+    def set_epoch(self, epoch: int):
+        """
+        Set the epoch for the data loader sampler, if it is a distributed sampler.
+        """
+        if self._sampler is not None and isinstance(
+            self._sampler, torch.utils.data.DistributedSampler
+        ):
+            self._sampler.set_epoch(epoch)
