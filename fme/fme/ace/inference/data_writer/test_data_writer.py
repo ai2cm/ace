@@ -61,7 +61,9 @@ class TestDataWriter:
         """
         return request.param
 
-    def get_batch_times(self, start_time, end_time, freq, n_samples, calendar="julian"):
+    def get_batch_times(
+        self, start_time, end_time, freq, n_initial_conditions, calendar="julian"
+    ):
         datetime_class = CALENDAR_CFTIME[calendar]
         start_time = datetime_class(*start_time)
         end_time = datetime_class(*end_time)
@@ -74,7 +76,9 @@ class TestDataWriter:
             ).values,
             dims="time",
         )
-        return xr.concat([batch_times for _ in range(n_samples)], dim="sample")
+        return xr.concat(
+            [batch_times for _ in range(n_initial_conditions)], dim="sample"
+        )
 
     @pytest.fixture
     def sample_metadata(self):
@@ -141,11 +145,11 @@ class TestDataWriter:
         calendar,
         coords,
     ):
-        n_samples = 2
+        n_initial_conditions = 2
         n_timesteps = 6
         writer = PairedDataWriter(
             str(tmp_path),
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
             timestep=TIMESTEP,
             metadata=sample_metadata,
@@ -163,7 +167,7 @@ class TestDataWriter:
             start_time=start_time,
             end_time=end_time,
             freq="6h",
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             calendar=calendar,
         )
         writer.append_batch(
@@ -178,7 +182,7 @@ class TestDataWriter:
             start_time=start_time_2,
             end_time=end_time_2,
             freq="6h",
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             calendar=calendar,
         )
         writer.append_batch(
@@ -197,7 +201,11 @@ class TestDataWriter:
         horizontal_shape = (4, 5) if "lat" in coords else (6, 4, 5)
         for var_name in set(sample_prediction_data.keys()):
             var_data = dataset.variables[var_name][:]
-            assert var_data.shape == (n_samples, n_timesteps, *horizontal_shape)
+            assert var_data.shape == (
+                n_initial_conditions,
+                n_timesteps,
+                *horizontal_shape,
+            )
             assert not np.isnan(var_data).any(), "unexpected NaNs in prediction data"
             if var_name in sample_metadata:
                 assert (
@@ -241,7 +249,10 @@ class TestDataWriter:
             )
             xr.testing.assert_equal(ds["time"], expected_lead_times)
             expected_init_times = xr.DataArray(
-                [CALENDAR_CFTIME[calendar](*start_time) for _ in range(n_samples)],
+                [
+                    CALENDAR_CFTIME[calendar](*start_time)
+                    for _ in range(n_initial_conditions)
+                ],
                 dims=["sample"],
             )
             expected_init_times = expected_init_times.assign_coords(
@@ -264,7 +275,7 @@ class TestDataWriter:
             assert same_count_each_timestep
 
         with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
-            assert ds.counts.sum() == n_samples * n_timesteps
+            assert ds.counts.sum() == n_initial_conditions * n_timesteps
             assert np.sum(np.isnan(ds["precipitation"])) == 0
             assert np.sum(np.isnan(ds["temp"])) == 0
             assert np.sum(np.isnan(ds["pressure"])) == 0
@@ -295,7 +306,7 @@ class TestDataWriter:
         n_samples = 2
         writer = PairedDataWriter(
             str(tmp_path),
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
             n_timesteps=4,  # unused
             timestep=TIMESTEP,
             metadata=sample_metadata,
@@ -313,7 +324,7 @@ class TestDataWriter:
             start_time=start_time,
             end_time=end_time,
             freq="6h",
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
         )
         writer.append_batch(
             sample_target_data,
@@ -364,7 +375,7 @@ class TestDataWriter:
         n_samples = 2
         writer = PairedDataWriter(
             str(tmp_path),
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
             n_timesteps=3,
             timestep=TIMESTEP,
             metadata=sample_metadata,
@@ -382,7 +393,7 @@ class TestDataWriter:
             start_time=start_time,
             end_time=end_time,
             freq="6h",
-            n_samples=n_samples + 1,
+            n_initial_conditions=n_samples + 1,
         )
         with pytest.raises(ValueError):
             writer.append_batch(
@@ -402,7 +413,7 @@ class TestDataWriter:
         }
         writer = DataWriter(
             str(tmp_path),
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
             n_timesteps=n_timesteps,
             metadata=sample_metadata,
             coords={"lat": np.arange(4), "lon": np.arange(5)},
@@ -419,7 +430,7 @@ class TestDataWriter:
             start_time=start_time,
             end_time=end_time,
             freq="6h",
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
             calendar=calendar,
         )
         writer.append_batch(
@@ -433,7 +444,7 @@ class TestDataWriter:
             start_time=start_time_2,
             end_time=end_time_2,
             freq="6h",
-            n_samples=n_samples,
+            n_initial_conditions=n_samples,
             calendar=calendar,
         )
         writer.append_batch(

@@ -150,7 +150,7 @@ class InferenceEvaluatorConfig:
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_samples=self.loader.n_samples,
+            n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
@@ -265,7 +265,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer.stop("final_writer_flush")
 
     timer.stop("inference")
-    total_steps = config.n_forward_steps * config.loader.n_samples
+    total_steps = config.n_forward_steps * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
     wandb_logging_duration = timer.get_duration("wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
