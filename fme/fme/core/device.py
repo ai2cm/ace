@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from .typing_ import TensorDict
+from .typing_ import TensorDict, TensorMapping
 
 
 def using_gpu() -> bool:
@@ -22,6 +22,6 @@ def get_device() -> torch.device:
             return torch.device("cpu")
 
 
-def move_tensordict_to_device(data: TensorDict) -> TensorDict:
+def move_tensordict_to_device(data: TensorMapping) -> TensorDict:
     device = get_device()
     return {name: value.to(device) for name, value in data.items()}

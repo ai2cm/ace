@@ -32,6 +32,7 @@ from fme.core.data_loading.data_typing import Dataset, LatLonCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import (
+    BatchData,
     as_broadcasted_tensor,
     infer_horizontal_dimension_names,
 )
@@ -422,9 +423,9 @@ def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     )
     requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=15)
     data = get_data_loader(config=config, train=False, requirements=requirements)
-    batch, _ = data.loader.dataset[0]
-    assert batch["constant_var"].shape[0] == 15
-    assert batch["constant_scalar_var"].shape == (15, 4, 8)
+    batch: BatchData = next(iter(data.loader))
+    assert batch.data["constant_var"].shape[1] == 15
+    assert batch.data["constant_scalar_var"].shape == (1, 15, 4, 8)
 
 
 def _get_repeat_dataset(

@@ -123,9 +123,10 @@ def get_data_loader(
         mp_context = None
         persistent_workers = False
 
+    batch_size = dist.local_batch_size(int(config.batch_size))
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=dist.local_batch_size(int(config.batch_size)),
+        batch_size=batch_size,
         num_workers=config.num_data_workers,
         sampler=sampler,
         drop_last=True,
