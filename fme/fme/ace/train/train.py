@@ -77,7 +77,7 @@ from fme.ace.train.train_config import (
 )
 from fme.core.aggregator import OneStepAggregator, TrainAggregator
 from fme.core.data_loading.config import Slice
-from fme.core.data_loading.data_typing import GriddedData
+from fme.core.data_loading.data_typing import GriddedDataABC
 from fme.core.data_loading.utils import BatchData
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -166,9 +166,9 @@ class CheckpointPaths:
 class Trainer:
     def __init__(
         self,
-        train_data: GriddedData,
-        validation_data: GriddedData,
-        inference_data: GriddedData,
+        train_data: GriddedDataABC[BatchData],
+        validation_data: GriddedDataABC[BatchData],
+        inference_data: GriddedDataABC[BatchData],
         stepper: SingleModuleStepper,
         optimization: Optimization,
         ema: EMATracker,
@@ -192,13 +192,16 @@ class Trainer:
         for gridded_data, name in zip(
             (self.train_data, self.valid_data), ("train", "valid")
         ):
-            n_samples = len(gridded_data.loader.dataset)
-            n_batches = len(gridded_data.loader)
-            logging.info(f"{name} data: {n_samples} samples, {n_batches} batches")
-            first_time = gridded_data.loader.dataset[0][1].values[0]
-            last_time = gridded_data.loader.dataset[-1][1].values[0]
-            logging.info(f"{name} data: first sample's initial time: {first_time}")
-            logging.info(f"{name} data: last sample's initial time: {last_time}")
+            logging.info(
+                f"{name} data: {gridded_data.n_samples} samples, "
+                f"{gridded_data.n_batches} batches"
+            )
+            logging.info(
+                f"{name} data: first sample's initial time: {gridded_data.first_time}"
+            )
+            logging.info(
+                f"{name} data: last sample's initial time: {gridded_data.last_time}"
+            )
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -254,8 +257,7 @@ class Trainer:
             # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
             gc.collect()
             logging.info(f"Epoch: {epoch+1}")
-            if isinstance(self.train_data.sampler, torch.utils.data.DistributedSampler):
-                self.train_data.sampler.set_epoch(epoch)
+            self.train_data.set_epoch(epoch)
 
             start_time = time.time()
             logging.info(f"Starting training step on epoch {epoch + 1}")
@@ -322,7 +324,7 @@ class Trainer:
             with torch.no_grad():
                 batch = next(iter(self.train_data.loader))
                 stepped = self.stepper.run_on_batch(
-                    dict(batch.data),
+                    batch,
                     optimization=self._no_optimization,
                     n_forward_steps=self.config.n_forward_steps,
                 )
@@ -337,7 +339,7 @@ class Trainer:
         current_time = time.time()
         for batch in self.train_data.loader:
             stepped = self.stepper.run_on_batch(
-                dict(batch.data),
+                batch,
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
             )
@@ -357,8 +359,7 @@ class Trainer:
                 duration = time.time() - current_time
                 current_time = time.time()
                 n_samples = (
-                    self.train_data.loader.batch_size
-                    * self.config.log_train_every_n_batches
+                    self.train_data.batch_size * self.config.log_train_every_n_batches
                 )
                 samples_per_second = n_samples / duration
                 metrics["training_samples_per_second"] = samples_per_second
@@ -403,13 +404,13 @@ class Trainer:
         with torch.no_grad(), self._validation_context():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.run_on_batch(
-                    batch.data,
+                    batch,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
                 )
                 # Prepend initial condition back to start of windows
                 # as it's used to compute differenced quantities
-                ic, normed_ic = self.stepper.get_initial_condition(batch.data)
+                ic, normed_ic = self.stepper.get_initial_condition(batch)
                 stepped = stepped.prepend_initial_condition(ic, normed_ic)
 
                 stepped = compute_stepped_derived_quantities(

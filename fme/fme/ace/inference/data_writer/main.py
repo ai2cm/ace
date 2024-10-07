@@ -73,7 +73,7 @@ class DataWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
@@ -82,7 +82,7 @@ class DataWriterConfig:
     ) -> "PairedDataWriter":
         return PairedDataWriter(
             path=experiment_dir,
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
             timestep=timestep,
             metadata=metadata,
@@ -99,7 +99,7 @@ class DataWriterConfig:
     def build(
         self,
         experiment_dir: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
@@ -118,7 +118,7 @@ class DataWriterConfig:
             )
         return DataWriter(
             path=experiment_dir,
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
             metadata=metadata,
             coords=coords,
@@ -135,7 +135,7 @@ class PairedDataWriter:
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -151,7 +151,7 @@ class PairedDataWriter:
         """
         Args:
             path: Path to write netCDF file(s).
-            n_samples: Number of samples to write to the file.
+            n_initial_conditions: Number of ICs/ensemble members to write to the file.
             n_timesteps: Number of timesteps to write to the file.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -187,7 +187,7 @@ class PairedDataWriter:
                 _time_coarsen_builder(
                     PairedRawDataWriter(
                         path=path,
-                        n_samples=n_samples,
+                        n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
                         metadata=metadata,
                         coords=coords,
@@ -198,7 +198,7 @@ class PairedDataWriter:
             self._writers.append(
                 PairedMonthlyDataWriter(
                     path=path,
-                    n_samples=n_samples,
+                    n_samples=n_initial_conditions,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=save_names,
@@ -297,7 +297,7 @@ class DataWriter:
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
@@ -311,7 +311,8 @@ class DataWriter:
         """
         Args:
             path: Directory within which to write netCDF file(s).
-            n_samples: Number of samples to write to the file.
+            n_initial_conditions: Number of initial conditions / timeseries
+                to write to the file.
             n_timesteps: Number of timesteps to write to the file.
             metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
@@ -340,7 +341,7 @@ class DataWriter:
                     RawDataWriter(
                         path=path,
                         label="autoregressive_predictions.nc",
-                        n_samples=n_samples,
+                        n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
                         metadata=metadata,
                         coords=coords,
@@ -353,7 +354,7 @@ class DataWriter:
                 MonthlyDataWriter(
                     path=path,
                     label="predictions",
-                    n_samples=n_samples,
+                    n_samples=n_initial_conditions,
                     n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
                     metadata=metadata,

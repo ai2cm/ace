@@ -7,6 +7,7 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
+from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorMapping
 
 SLICE_NONE = slice(None)
@@ -152,6 +153,15 @@ class BatchData:
 
     data: TensorMapping
     times: xr.DataArray
+
+    def __post_init__(self):
+        self._device_data: Optional[TensorMapping] = None
+
+    @property
+    def device_data(self) -> TensorMapping:
+        if self._device_data is None:
+            self._device_data = move_tensordict_to_device(self.data)
+        return self._device_data
 
     @classmethod
     def from_sample_tuples(

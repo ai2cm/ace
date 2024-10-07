@@ -6,11 +6,13 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 import fme
 from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.utils import BatchData
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
@@ -33,15 +35,21 @@ DEVICE = fme.get_device()
 
 
 def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
-    data = {}
+    data_dict = {}
     n_lat, n_lon, nz = 5, 5, 7
 
     lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
     for name in names:
-        data[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
+        data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
     ak, bk = torch.arange(nz), torch.arange(nz)
     sigma_coords = SigmaCoordinates(ak, bk)
+    data = BatchData(
+        data=data_dict,
+        times=xr.DataArray(
+            np.arange(n_time),
+        ),
+    )
     return SphericalData(data, area_weights, sigma_coords)
 
 
@@ -150,7 +158,7 @@ def test_run_on_batch_addition_series():
             return x + 1
 
     n_steps = 4
-    data_with_ic = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
@@ -172,7 +180,7 @@ def test_run_on_batch_addition_series():
     )
     # output of run_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, n_steps, 5, 5)
-    data = {k: data_with_ic[k][:, 1:] for k in data_with_ic}
+    data = {k: data_with_ic.data[k][:, 1:] for k in data_with_ic.data}
 
     for i in range(n_steps - 1):
         assert torch.allclose(
@@ -199,9 +207,9 @@ def test_run_on_batch_with_prescribed_ocean():
             return x + 1
 
     n_steps = 3
-    data = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1).data
-    data["mask"] = torch.zeros_like(data["mask"], dtype=torch.int)
-    data["mask"][:, :, :, 0] = 1
+    data: BatchData = get_data(["a", "b", "mask"], n_samples=5, n_time=n_steps + 1).data
+    data.data["mask"][:] = 0
+    data.data["mask"][:, :, :, 0] = 1
     stds = {
         "a": np.array([2.0], dtype=np.float32),
         "b": np.array([3.0], dtype=np.float32),
@@ -483,10 +491,16 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
+    batch_data = BatchData(
+        data=data,
+        times=xr.DataArray(
+            np.arange(n_forward_steps + 1),
+        ),
+    )
     # run the stepper on the data
     with torch.no_grad():
         stepped = stepper.run_on_batch(
-            data=data,
+            data=batch_data,
             optimization=NullOptimization(),
             n_forward_steps=n_forward_steps,
         )
