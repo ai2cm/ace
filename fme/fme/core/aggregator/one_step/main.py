@@ -1,12 +1,15 @@
 from typing import Dict, Mapping, Optional, Protocol
 
+import numpy as np
 import torch
 
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.stepper import SteppedData
 from fme.core.typing_ import TensorMapping
 
+from ..types import AggregatorABC
 from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
@@ -27,7 +30,7 @@ class _Aggregator(Protocol):
         ...
 
 
-class OneStepAggregator:
+class OneStepAggregator(AggregatorABC[SteppedData]):
     """
     Aggregates statistics for the first timestep.
 
@@ -64,24 +67,20 @@ class OneStepAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
+        batch: SteppedData,
     ):
-        if len(target_data) == 0:
+        if len(batch.target_data) == 0:
             raise ValueError("No data in target_data")
-        if len(gen_data) == 0:
+        if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
 
         for agg in self._aggregators.values():
             agg.record_batch(
-                loss=loss,
-                target_data=target_data,
-                gen_data=gen_data,
-                target_data_norm=target_data_norm,
-                gen_data_norm=gen_data_norm,
+                loss=batch.metrics.get("loss", np.nan),
+                target_data=batch.target_data,
+                gen_data=batch.gen_data,
+                target_data_norm=batch.target_data_norm,
+                gen_data_norm=batch.gen_data_norm,
             )
 
     @torch.no_grad()

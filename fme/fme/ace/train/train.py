@@ -342,7 +342,7 @@ class Trainer:
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
             )
-            aggregator.record_batch(stepped.get_metrics()["loss"])
+            aggregator.record_batch(stepped)
             self._end_of_batch_ops()
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
@@ -416,13 +416,7 @@ class Trainer:
                     self.valid_data.sigma_coordinates,
                     self.valid_data.timestep,
                 )
-                aggregator.record_batch(
-                    loss=stepped.get_metrics()["loss"],
-                    target_data=stepped.target_data,
-                    gen_data=stepped.gen_data,
-                    target_data_norm=stepped.target_data_norm,
-                    gen_data_norm=stepped.gen_data_norm,
-                )
+                aggregator.record_batch(stepped)
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
