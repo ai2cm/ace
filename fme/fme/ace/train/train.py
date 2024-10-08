@@ -66,7 +66,6 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference import run_inference_evaluator
-from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.inference.timing import GlobalTimer
 from fme.ace.train.train_config import (
     EndOfBatchCallback,
@@ -333,7 +332,7 @@ class Trainer:
                     with torch.no_grad():
                         metrics = {
                             f"batch_{name}": self.dist.reduce_mean(metric)
-                            for name, metric in sorted(stepped.metrics.items())
+                            for name, metric in sorted(stepped.get_metrics().items())
                         }
                     wandb.log(metrics, step=self.num_batches_seen)
         current_time = time.time()
@@ -343,7 +342,7 @@ class Trainer:
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
             )
-            aggregator.record_batch(stepped.metrics["loss"])
+            aggregator.record_batch(stepped.get_metrics()["loss"])
             self._end_of_batch_ops()
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
@@ -354,7 +353,7 @@ class Trainer:
                 with torch.no_grad():
                     metrics = {
                         f"batch_{name}": self.dist.reduce_mean(metric)
-                        for name, metric in sorted(stepped.metrics.items())
+                        for name, metric in sorted(stepped.get_metrics().items())
                     }
                 duration = time.time() - current_time
                 current_time = time.time()
@@ -413,14 +412,12 @@ class Trainer:
                 ic, normed_ic = self.stepper.get_initial_condition(batch)
                 stepped = stepped.prepend_initial_condition(ic, normed_ic)
 
-                stepped = compute_stepped_derived_quantities(
-                    stepped,
+                stepped = stepped.compute_derived_quantities(
                     self.valid_data.sigma_coordinates,
                     self.valid_data.timestep,
-                    forcing_data=stepped.target_data,
                 )
                 aggregator.record_batch(
-                    loss=stepped.metrics["loss"],
+                    loss=stepped.get_metrics()["loss"],
                     target_data=stepped.target_data,
                     gen_data=stepped.gen_data,
                     target_data_norm=stepped.target_data_norm,

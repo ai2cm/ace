@@ -9,7 +9,6 @@ from fme.core import metrics
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.stepper import SteppedData
 
 
 @dataclasses.dataclass
@@ -242,21 +241,3 @@ def compute_derived_quantities(
             forcing_data=forcing_data,
         )
     return data
-
-
-def compute_stepped_derived_quantities(
-    stepped: SteppedData,
-    sigma_coordinates: SigmaCoordinates,
-    timestep: datetime.timedelta,
-    forcing_data: Optional[Dict[str, torch.Tensor]] = None,
-) -> SteppedData:
-    stepped.gen_data = compute_derived_quantities(
-        stepped.gen_data, sigma_coordinates, timestep, forcing_data
-    )
-    stepped.target_data = compute_derived_quantities(
-        stepped.target_data,
-        sigma_coordinates,
-        timestep,
-        forcing_data,
-    )
-    return stepped

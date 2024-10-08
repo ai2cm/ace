@@ -9,7 +9,6 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.utils import BatchData
@@ -505,8 +504,8 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
             n_forward_steps=n_forward_steps,
         )
 
-    stepped = compute_stepped_derived_quantities(
-        stepped, sigma_coordinates=sigma_coordinates, timestep=TIMESTEP
+    stepped = stepped.compute_derived_quantities(
+        sigma_coordinates=sigma_coordinates, timestep=TIMESTEP
     )
 
     # check that the budget residual is zero
