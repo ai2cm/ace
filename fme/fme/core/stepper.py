@@ -1,13 +1,17 @@
+import abc
 import dataclasses
 import datetime
 import logging
 from copy import copy
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple, TypeVar, Union
 
 import dacite
 import torch
 from torch import nn
 
+from fme.ace.inference.derived_variables import (
+    compute_derived_quantities,  # TODO: move to core or move stepper to ace
+)
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
@@ -264,8 +268,31 @@ def _prepend_timesteps(
     return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
 
+SD = TypeVar("SD", bound="SteppedDataABC")  # stepped data
+
+
+class SteppedDataABC(abc.ABC):
+    @abc.abstractmethod
+    def remove_initial_condition(self: SD, n_ic_timesteps: int) -> SD:
+        pass
+
+    @abc.abstractmethod
+    def copy(self: SD) -> SD:
+        pass
+
+    @abc.abstractmethod
+    def compute_derived_quantities(
+        self: SD, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+    ) -> SD:
+        ...
+
+    @abc.abstractmethod
+    def get_metrics(self) -> Dict[str, float]:
+        pass
+
+
 @dataclasses.dataclass
-class SteppedData:
+class SteppedData(SteppedDataABC):
     metrics: TensorDict
     gen_data: TensorDict
     target_data: TensorDict
@@ -322,6 +349,19 @@ class SteppedData:
                 normalized_target_initial_condition or normalized_initial_condition,
             ),
         )
+
+    def compute_derived_quantities(
+        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+    ) -> "SteppedData":
+        return compute_stepped_derived_quantities(
+            self,
+            sigma_coordinates,
+            timestep,
+            forcing_data=self.target_data,
+        )
+
+    def get_metrics(self) -> Dict[str, torch.Tensor]:
+        return self.metrics
 
 
 class HasDeviceData(Protocol):
@@ -600,7 +640,7 @@ class SingleModuleStepper:
         forcing_data = {k: data_[k] for k in forcing_names}
 
         loss = torch.tensor(0.0, device=get_device())
-        metrics = {}
+        metrics: Dict[str, float] = {}
 
         input_data = {
             k: data_[k][:, :n_ic_timesteps] for k in self._config.prognostic_names
@@ -733,3 +773,21 @@ class SingleModuleStepper:
         )
         stepper.load_state(state)
         return stepper
+
+
+def compute_stepped_derived_quantities(
+    stepped: SteppedData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
+    forcing_data: Optional[Dict[str, torch.Tensor]] = None,
+) -> SteppedData:
+    stepped.gen_data = compute_derived_quantities(
+        stepped.gen_data, sigma_coordinates, timestep, forcing_data
+    )
+    stepped.target_data = compute_derived_quantities(
+        stepped.target_data,
+        sigma_coordinates,
+        timestep,
+        forcing_data,
+    )
+    return stepped

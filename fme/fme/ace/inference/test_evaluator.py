@@ -12,7 +12,6 @@ import yaml
 
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.derived_variables import compute_stepped_derived_quantities
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
 from fme.ace.registry import ModuleSelector
 from fme.core import metrics
@@ -28,7 +27,11 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import FromStateNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.stepper import SingleModuleStepperConfig, SteppedData
+from fme.core.stepper import (
+    SingleModuleStepperConfig,
+    SteppedData,
+    compute_stepped_derived_quantities,
+)
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 
 DIR = pathlib.Path(__file__).parent

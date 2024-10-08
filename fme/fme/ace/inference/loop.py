@@ -22,10 +22,7 @@ from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
-from .derived_variables import (
-    compute_derived_quantities,
-    compute_stepped_derived_quantities,
-)
+from .derived_variables import compute_derived_quantities
 
 
 def _prepend_timesteps(
@@ -345,8 +342,8 @@ def run_dataset_comparison(
             normalizer.normalize(pred_window_data),
             normalizer.normalize(target_window_data),
         )
-        stepped = compute_stepped_derived_quantities(
-            stepped, target_data.sigma_coordinates, target_data.timestep
+        stepped = stepped.compute_derived_quantities(
+            target_data.sigma_coordinates, target_data.timestep
         )
         target_times = target.times
         timer.stop("run_on_batch")
