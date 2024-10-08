@@ -9,7 +9,7 @@ and "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model
 
 ## Installation
 
-The package can be installed vi PyPI using:
+The package can be installed via PyPI using:
 
 ```
 pip install fme
