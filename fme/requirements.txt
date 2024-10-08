@@ -9,7 +9,7 @@ tensorly-torch
 xarray
 dacite
 torch
-torch-harmonics@git+https://github.com/NVIDIA/torch-harmonics.git@8826246cacf6c37b600cdd63fde210815ba238fd
+torch-harmonics==0.6.2
 zarr
 gcsfs
 s3fs
