@@ -5,13 +5,9 @@ import torch
 
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.stepper import SteppedData
+from fme.core.stepper import SteppedData, compute_stepped_derived_quantities
 
-from .derived_variables import (
-    DerivedVariableRegistryEntry,
-    _compute_derived_variable,
-    compute_stepped_derived_quantities,
-)
+from .derived_variables import DerivedVariableRegistryEntry, _compute_derived_variable
 
 TIMESTEP = datetime.timedelta(hours=6)
 

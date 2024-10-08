@@ -1,3 +1,5 @@
+from typing import Dict
+
 import torch
 
 from fme.core.device import get_device
@@ -22,7 +24,7 @@ class TrainAggregator:
         self._n_batches += 1
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def get_logs(self, label: str) -> Dict[str, torch.Tensor]:
         """
         Returns logs as can be reported to WandB.
 
