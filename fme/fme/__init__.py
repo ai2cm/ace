@@ -1,4 +1,4 @@
-__version__ = "2024.10.7"
+__version__ = "2023.12.0"
 
 import torch_harmonics
 
