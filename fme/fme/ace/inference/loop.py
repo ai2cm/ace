@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import Iterable, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Tuple, Union
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ from fme.core.aggregator.inference.main import (
     InferenceAggregator,
     InferenceEvaluatorAggregator,
 )
+from fme.core.aggregator.types import InferenceAggregatorABC
 from fme.core.data_loading.data_typing import GriddedData, GriddedDataABC
 from fme.core.data_loading.utils import BatchData
 from fme.core.device import move_tensordict_to_device
@@ -87,7 +88,7 @@ class Looper:
         except StopIteration:
             timer.stop("data_loading")
             raise StopIteration
-        forcing_data = move_tensordict_to_device(batch_data.data)
+        forcing_data = move_tensordict_to_device(dict(batch_data.data))
         times = batch_data.times
         n_forward_steps = times.sizes["time"] - self._n_ic_timesteps
         timer.stop("data_loading")
@@ -122,8 +123,19 @@ class Looper:
         )
 
 
+class HasWandBInferenceLogData(Protocol):
+    def get_inference_logs_slice(
+        self, label: str, step_slice: slice
+    ) -> List[Dict[str, Any]]:
+        ...
+
+    @property
+    def log_time_series(self) -> bool:
+        ...
+
+
 def _log_window_to_wandb(
-    aggregator: Union[InferenceAggregator, InferenceEvaluatorAggregator],
+    aggregator: HasWandBInferenceLogData,
     window_slice: slice,
     label: str,
 ):
@@ -219,7 +231,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceEvaluatorAggregator,
+    aggregator: InferenceAggregatorABC[SteppedData],
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -277,21 +289,25 @@ def run_inference_evaluator(
                     else:
                         ic_filled[name] = target_data[name][:, 0:1]
                 aggregator.record_batch(
-                    loss=np.nan,
+                    batch=SteppedData(
+                        metrics={"loss": np.nan},
+                        target_data=ic_filled,
+                        gen_data=ic_filled,
+                        target_data_norm=stepper.normalizer.normalize(ic_filled),
+                        gen_data_norm=stepper.normalizer.normalize(ic_filled),
+                    ),
                     time=initial_times,
-                    target_data=ic_filled,
-                    gen_data=ic_filled,
-                    target_data_norm=stepper.normalizer.normalize(ic_filled),
-                    gen_data_norm=stepper.normalizer.normalize(ic_filled),
                     i_time_start=i_time,
                 )
             aggregator.record_batch(
-                loss=np.nan,
+                batch=SteppedData(
+                    metrics={"loss": np.nan},
+                    target_data=target_data,
+                    gen_data=prediction,
+                    target_data_norm=stepper.normalizer.normalize(target_data),
+                    gen_data_norm=stepper.normalizer.normalize(prediction),
+                ),
                 time=times,
-                target_data=target_data,
-                gen_data=prediction,
-                target_data_norm=stepper.normalizer.normalize(target_data),
-                gen_data_norm=stepper.normalizer.normalize(prediction),
                 i_time_start=i_time + 1,
             )
             timer.stop("writer_and_aggregator")
@@ -310,7 +326,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceEvaluatorAggregator,
+    aggregator: InferenceAggregatorABC[SteppedData],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
@@ -370,12 +386,8 @@ def run_dataset_comparison(
 
         # record metrics, includes the initial condition
         aggregator.record_batch(
-            loss=float(stepped_for_agg.metrics["loss"]),
+            batch=stepped_for_agg,
             time=target_times_for_agg,
-            target_data=stepped_for_agg.target_data,
-            gen_data=stepped_for_agg.gen_data,
-            target_data_norm=stepped_for_agg.target_data_norm,
-            gen_data_norm=stepped_for_agg.gen_data_norm,
             i_time_start=i_time_aggregator,
         )
         timer.stop("writer_and_aggregator")
