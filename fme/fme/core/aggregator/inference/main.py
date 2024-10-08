@@ -6,12 +6,14 @@ from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
 import torch
 import xarray as xr
 
+from fme.core.aggregator.types import InferenceAggregatorABC
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     LatLonCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
+from fme.core.stepper import SteppedData
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -189,7 +191,7 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
-class InferenceEvaluatorAggregator:
+class InferenceEvaluatorAggregator(InferenceAggregatorABC[SteppedData]):
     """
     Aggregates statistics for inference comparing a generated and target series.
 
@@ -245,7 +247,7 @@ class InferenceEvaluatorAggregator:
             str, _TimeDependentEvaluatorAggregator
         ] = {}
         ops = horizontal_coordinates.gridded_operations
-        self.log_time_series = (
+        self._log_time_series = (
             log_global_mean_time_series or log_global_mean_norm_time_series
         )
         if log_global_mean_time_series:
@@ -322,37 +324,42 @@ class InferenceEvaluatorAggregator:
                 metadata=metadata,
             )
 
+    @property
+    def log_time_series(self) -> bool:
+        return self._log_time_series
+
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
+        batch: SteppedData,
         time: xr.DataArray,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-        i_time_start: int = 0,
+        i_time_start: int,
     ):
-        if len(target_data) == 0:
+        if len(batch.target_data) == 0:
             raise ValueError("No data in target_data")
-        if len(gen_data) == 0:
+        if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
-        target_data = {k: v for k, v in target_data.items() if k in gen_data}
-        target_data_norm = {k: v for k, v in target_data_norm.items() if k in gen_data}
+        target_data = {
+            k: v for k, v in batch.target_data.items() if k in batch.gen_data
+        }
+        target_data_norm = {
+            k: v for k, v in batch.target_data_norm.items() if k in batch.gen_data
+        }
+        loss = float(batch.metrics["loss"])
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 loss=loss,
                 target_data=target_data,
-                gen_data=gen_data,
+                gen_data=batch.gen_data,
                 target_data_norm=target_data_norm,
-                gen_data_norm=gen_data_norm,
+                gen_data_norm=batch.gen_data_norm,
                 i_time_start=i_time_start,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
                 time=time,
                 target_data=target_data,
-                gen_data=gen_data,
+                gen_data=batch.gen_data,
             )
 
     @torch.no_grad()
@@ -527,7 +534,7 @@ class InferenceAggregator:
             time_mean_reference_data: Reference time means for computing bias stats.
             log_global_mean_time_series: Whether to log global mean time series metrics.
         """
-        self.log_time_series = log_global_mean_time_series
+        self._log_time_series = log_global_mean_time_series
         aggregators: Dict[str, _Aggregator] = {}
         if log_global_mean_time_series:
             aggregators["mean"] = SingleTargetMeanAggregator(
@@ -541,6 +548,10 @@ class InferenceAggregator:
         )
         self._aggregators = aggregators
         self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
+
+    @property
+    def log_time_series(self) -> bool:
+        return self._log_time_series
 
     @torch.no_grad()
     def record_batch(

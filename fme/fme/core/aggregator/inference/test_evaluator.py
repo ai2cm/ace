@@ -8,6 +8,7 @@ import xarray as xr
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
 from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.stepper import SteppedData
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -47,7 +48,14 @@ def test_logs_labels_exist():
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(loss, time, target_data, gen_data, target_data_norm, gen_data_norm)
+    data = SteppedData(
+        metrics={"loss": loss},
+        target_data=target_data,
+        gen_data=gen_data,
+        target_data_norm=target_data_norm,
+        gen_data_norm=gen_data_norm,
+    )
+    agg.record_batch(data, time=time, i_time_start=0)
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
     assert "test/mean_norm/series" in logs
@@ -102,7 +110,14 @@ def test_inference_logs_labels_exist():
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(loss, time, target_data, gen_data, target_data_norm, gen_data_norm)
+    data = SteppedData(
+        metrics={"loss": loss},
+        target_data=target_data,
+        gen_data=gen_data,
+        target_data_norm=target_data_norm,
+        gen_data_norm=gen_data_norm,
+    )
+    agg.record_batch(data, time=time, i_time_start=0)
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
     assert len(logs) == n_time
@@ -157,13 +172,16 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        agg.record_batch(
-            1.0,
-            time=time,
+        data = SteppedData(
+            metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,
             gen_data_norm=sample_data,
+        )
+        agg.record_batch(
+            batch=data,
+            time=time,
             i_time_start=i_start,
         )
         i_start += window_len - overlap  # subtract 1 for overlapping windows
@@ -213,13 +231,16 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        agg.record_batch(
-            1.0,
-            time=time,
+        data = SteppedData(
+            metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,
             gen_data_norm=sample_data,
+        )
+        agg.record_batch(
+            batch=data,
+            time=time,
             i_time_start=i_start,
         )
         i_start += window_len - overlap  # subtract 1 for overlapping windows

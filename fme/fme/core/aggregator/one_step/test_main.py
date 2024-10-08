@@ -6,6 +6,7 @@ from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.stepper import SteppedData
 
 
 def test_labels_exist():
@@ -20,7 +21,15 @@ def test_labels_exist():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
+    agg.record_batch(
+        batch=SteppedData(
+            metrics={"loss": loss},
+            target_data=target_data,
+            gen_data=gen_data,
+            target_data_norm=target_data_norm,
+            gen_data_norm=gen_data_norm,
+        ),
+    )
     logs = agg.get_logs(label="test")
     assert "test/mean/loss" in logs
     assert "test/mean/weighted_rmse/a" in logs
@@ -42,7 +51,13 @@ def test_aggregator_raises_on_no_data():
     agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
-            loss=1.0, target_data={}, gen_data={}, target_data_norm={}, gen_data_norm={}
+            batch=SteppedData(
+                metrics={"loss": 1.0},
+                target_data={},
+                gen_data={},
+                target_data_norm={},
+                gen_data_norm={},
+            ),
         )
         # check that the raised exception contains the right substring
         assert "No data" in str(excinfo.value)
