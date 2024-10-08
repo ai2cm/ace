@@ -6,7 +6,7 @@ numpy<2
 wandb
 tensorly
 tensorly-torch
-xarray>=2023.2.0
+xarray
 dacite
 torch
 torch-harmonics==0.6.2

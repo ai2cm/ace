@@ -22,11 +22,11 @@ test:
 # requires fme[deploy] to be installed
 
 build_pypi:
-	rm -rf dist
-	python -m build
+	rm -rf fme/dist
+	cd fme && python -m build
 
 deploy_pypi: build_pypi
-	twine upload --repository $(DEPLOY_TARGET) dist/*
+	cd fme && twine upload --repository $(DEPLOY_TARGET) dist/*
 
 deploy_test_pypi: DEPLOY_TARGET = testpypi
 deploy_test_pypi: deploy_pypi
