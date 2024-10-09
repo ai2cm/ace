@@ -363,11 +363,6 @@ class GriddedDataABC(abc.ABC, Generic[T]):
 
     @property
     @abc.abstractmethod
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        ...
-
-    @property
-    @abc.abstractmethod
     def sigma_coordinates(self) -> SigmaCoordinates:
         ...
 
@@ -379,16 +374,6 @@ class GriddedDataABC(abc.ABC, Generic[T]):
     @property
     @abc.abstractmethod
     def timestep(self) -> datetime.timedelta:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def coords(self) -> Mapping[str, np.ndarray]:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
         ...
 
     @property
