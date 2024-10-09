@@ -1,8 +1,8 @@
 runs:
   2024-07-10-e3smv2-1deg-testing: ""
-data_output_directory: $SCRATCH/fme-preprocess/zarr/
+data_output_directory: /global/cfs/cdirs/m4492/fme-preprocess/zarr/
 stats:
-  output_directory: $SCRATCH/fme-preprocess/2024-07-10-e3smv2-1deg-testing
+  output_directory: /global/cfs/cdirs/m4492/fme-preprocess/2024-07-10-e3smv2-1deg-testing
   start_date: "1970-01-01"
   end_date: "1970-12-31"
   data_type: E3SMV2

@@ -187,8 +187,8 @@ e3smv2_1deg_climSST_dataset:
 	sbatch -J 2024-07-10-e3smv2-1deg-testing generate_datasets_e3smv2.sh \
 	--input-dir /global/cfs/cdirs/m4492/rebassoo/e3sm_test/post/atm/180x360_gaussian/ts \
 	--config configs/e3sm-1deg-8layer.yaml \
-	--zarr ${SCRATCH}/fme-preprocess/zarr/2024-07-10-e3smv2-1deg-testing.zarr \
-	--output-dir ${SCRATCH}/fme-preprocess/2024-07-10-e3smv2-1deg-testing
+	--zarr /global/cfs/cdirs/m4492/fme-preprocess/zarr/2024-07-10-e3smv2-1deg-testing.zarr \
+	--output-dir /global/cfs/cdirs/m4492/fme-preprocess/2024-07-10-e3smv2-1deg-testing
 
 .PHONY: era5_1deg_stats_beaker_dataset
 era5_1deg_stats_beaker_dataset:
