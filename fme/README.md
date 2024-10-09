@@ -1,4 +1,5 @@
 [![Docs](https://readthedocs.org/projects/ai2-climate-emulator/badge/?version=latest)](https://ai2-climate-emulator.readthedocs.io/en/latest/)
+[![PyPI](https://img.shields.io/pypi/v/fme.svg)](https://pypi.org/project/fme/)
 
 # FME: Weather/Climate Model Emulation
 This package contains code to train and evaluate weather/climate model emulators as seen in
