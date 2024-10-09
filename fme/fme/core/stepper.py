@@ -474,7 +474,7 @@ class SingleModuleStepper:
         return self._config.get_data_requirements(n_forward_steps)
 
     @property
-    def effective_loss_scaling(self) -> TensorMapping:
+    def effective_loss_scaling(self) -> TensorDict:
         """
         Effective loss scalings used to normalize outputs before computing loss.
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i

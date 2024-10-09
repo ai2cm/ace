@@ -48,6 +48,7 @@
 # Karthik Kashinath - NVIDIA Corporation
 # Animashree Anandkumar - California Institute of Technology, NVIDIA Corporation
 
+import abc
 import contextlib
 import dataclasses
 import gc
@@ -56,11 +57,13 @@ import logging
 import os
 import time
 import uuid
-from typing import Optional
+from datetime import timedelta
+from typing import Dict, Generic, Mapping, Optional, TypeVar
 
 import dacite
 import dask
 import torch
+import xarray as xr
 import yaml
 
 import fme
@@ -75,14 +78,25 @@ from fme.ace.train.train_config import (
     TrainConfigProtocol,
 )
 from fme.core.aggregator import OneStepAggregator, TrainAggregator
+from fme.core.aggregator.inference.main import (
+    InferenceEvaluatorAggregator,
+    InferenceEvaluatorAggregatorConfig,
+)
+from fme.core.aggregator.types import AggregatorABC, InferenceAggregatorABC
 from fme.core.data_loading.config import Slice
-from fme.core.data_loading.data_typing import GriddedDataABC
+from fme.core.data_loading.data_typing import (
+    GriddedDataABC,
+    HorizontalCoordinates,
+    SigmaCoordinates,
+    VariableMetadata,
+)
 from fme.core.data_loading.utils import BatchData
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
-from fme.core.stepper import SingleModuleStepper
+from fme.core.stepper import SingleModuleStepper, SteppedData
 from fme.core.wandb import WandB
 
 # dask used on individual workers to load batches
@@ -123,6 +137,22 @@ def build_trainer(builder: TrainBuildersABC, config: TrainConfigProtocol) -> "Tr
     )
     ema = builder.get_ema(stepper.modules)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+
+    for batch in inference_data.loader:
+        initial_inference_times = batch.times.isel(time=0)
+        break
+    aggregator_builder = AggregatorBuilder(
+        inference_config=config.inference_aggregator,
+        gridded_operations=train_data.gridded_operations,
+        sigma_coordinates=train_data.sigma_coordinates,
+        horizontal_coordinates=train_data.horizontal_coordinates,
+        timestep=train_data.timestep,
+        initial_inference_times=initial_inference_times,
+        record_step_20=config.inference_n_forward_steps >= 20,
+        n_timesteps=config.inference_n_forward_steps + 1,
+        metadata=train_data.metadata,
+        loss_scaling=stepper.effective_loss_scaling,
+    )
     return Trainer(
         train_data=train_data,
         validation_data=validation_data,
@@ -131,6 +161,7 @@ def build_trainer(builder: TrainBuildersABC, config: TrainConfigProtocol) -> "Tr
         optimization=optimization,
         ema=ema,
         config=config,
+        aggregator_builder=aggregator_builder,
         end_of_batch_callback=end_of_batch_ops,
     )
 
@@ -162,6 +193,73 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
 
 
+T = TypeVar("T")
+
+
+class AggregatorBuilderABC(abc.ABC, Generic[T]):
+    @abc.abstractmethod
+    def get_train_aggregator(self) -> AggregatorABC[T]:
+        pass
+
+    @abc.abstractmethod
+    def get_validation_aggregator(self) -> AggregatorABC[T]:
+        pass
+
+    @abc.abstractmethod
+    def get_inference_aggregator(self) -> InferenceAggregatorABC[T]:
+        pass
+
+
+class AggregatorBuilder(AggregatorBuilderABC[SteppedData]):
+    def __init__(
+        self,
+        inference_config: InferenceEvaluatorAggregatorConfig,
+        gridded_operations: GriddedOperations,
+        sigma_coordinates: SigmaCoordinates,
+        horizontal_coordinates: HorizontalCoordinates,
+        timestep: timedelta,
+        initial_inference_times: xr.DataArray,
+        record_step_20: bool,
+        n_timesteps: int,
+        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
+    ):
+        self.inference_config = inference_config
+        self.gridded_operations = gridded_operations
+        self.sigma_coordinates = sigma_coordinates
+        self.horizontal_coordinates = horizontal_coordinates
+        self.timestep = timestep
+        self.initial_inference_times = initial_inference_times
+        self.record_step_20 = record_step_20
+        self.n_timesteps = n_timesteps
+        self.metadata = metadata
+        self.loss_scaling = loss_scaling
+
+    def get_train_aggregator(self) -> TrainAggregator:
+        return TrainAggregator()
+
+    def get_validation_aggregator(self) -> OneStepAggregator:
+        return OneStepAggregator(
+            gridded_operations=self.gridded_operations,
+            sigma_coordinates=self.sigma_coordinates,
+            metadata=self.metadata,
+            loss_scaling=self.loss_scaling,
+        )
+
+    def get_inference_aggregator(
+        self,
+    ) -> InferenceEvaluatorAggregator:
+        return self.inference_config.build(
+            sigma_coordinates=self.sigma_coordinates,
+            horizontal_coordinates=self.horizontal_coordinates,
+            timestep=self.timestep,
+            initial_times=self.initial_inference_times,
+            record_step_20=self.record_step_20,
+            n_timesteps=self.n_timesteps,
+            metadata=self.metadata,
+        )
+
+
 class Trainer:
     def __init__(
         self,
@@ -172,6 +270,7 @@ class Trainer:
         optimization: Optimization,
         ema: EMATracker,
         config: TrainConfigProtocol,
+        aggregator_builder: AggregatorBuilderABC[SteppedData],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
     ):
         logging.info(f"Current device is {fme.get_device()}")
@@ -213,6 +312,7 @@ class Trainer:
         self.optimization = optimization
         self._end_of_batch_ops = end_of_batch_callback
         self._no_optimization = NullOptimization()
+        self._aggregator_builder = aggregator_builder
 
         resuming = os.path.isfile(self.paths.latest_checkpoint_path)
         if resuming:
@@ -316,7 +416,7 @@ class Trainer:
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
         wandb = WandB.get_instance()
-        aggregator = TrainAggregator()
+        aggregator = self._aggregator_builder.get_train_aggregator()
         batch: BatchData
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
@@ -394,12 +494,7 @@ class Trainer:
             self._ema.restore(parameters=self.stepper.modules.parameters())
 
     def validate_one_epoch(self):
-        aggregator = OneStepAggregator(
-            gridded_operations=self.train_data.gridded_operations,
-            sigma_coordinates=self.train_data.sigma_coordinates,
-            metadata=self.train_data.metadata,
-            loss_scaling=self.stepper.effective_loss_scaling,
-        )
+        aggregator = self._aggregator_builder.get_validation_aggregator()
         with torch.no_grad(), self._validation_context():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.run_on_batch(
@@ -420,21 +515,7 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        record_step_20 = self.config.inference_n_forward_steps >= 20
-        aggregator_config = self.config.inference_aggregator
-        batch: BatchData
-        for batch in self._inference_data.loader:
-            initial_times = batch.times.isel(time=0)
-            break
-        aggregator = aggregator_config.build(
-            sigma_coordinates=self.train_data.sigma_coordinates,
-            horizontal_coordinates=self.train_data.horizontal_coordinates,
-            timestep=self.train_data.timestep,
-            initial_times=initial_times,
-            record_step_20=record_step_20,
-            n_timesteps=self.config.inference_n_forward_steps + 1,
-            metadata=self.train_data.metadata,
-        )
+        aggregator = self._aggregator_builder.get_inference_aggregator()
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             run_inference_evaluator(
                 aggregator=aggregator,
