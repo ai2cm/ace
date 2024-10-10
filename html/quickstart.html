@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quickstart &mdash; ACE 2024.9.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="_static/jquery.js"></script>
+        <script src="_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/sphinx_highlight.js"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Training Config" href="training_config.html" />
+    <link rel="prev" title="Installation" href="installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                2024.9.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Quickstart</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#install">Install</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#wandb-integration">Wandb Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#commands">Commands</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#running-a-checkpoint">Running a Checkpoint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#evaluating-a-checkpoint">Evaluating a Checkpoint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#training-a-model">Training a Model</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Quickstart</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/quickstart.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="quickstart">
+<h1>Quickstart<a class="headerlink" href="#quickstart" title="Permalink to this heading"></a></h1>
+<section id="install">
+<h2>Install<a class="headerlink" href="#install" title="Permalink to this heading"></a></h2>
+<p>Clone this repository. Then assuming <a class="reference external" href="https://docs.conda.io/en/latest/">conda</a> is available, run:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="n">create_environment</span>
+</pre></div>
+</div>
+<p>to create a conda environment called <code class="docutils literal notranslate"><span class="pre">fme</span></code> with dependencies and source code installed. Alternatively, a Docker image can be built with <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">build_docker_image</span></code>. You may verify installation by running <code class="docutils literal notranslate"><span class="pre">pytest</span> <span class="pre">fme/</span></code>.</p>
+</section>
+<section id="wandb-integration">
+<h2>Wandb Integration<a class="headerlink" href="#wandb-integration" title="Permalink to this heading"></a></h2>
+<p>For the optional Weights and Biases (wandb) integration, you will need to set the API key:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">export</span> <span class="n">WANDB_API_KEY</span><span class="o">=</span><span class="n">wandb</span><span class="o">-</span><span class="n">api</span><span class="o">-</span><span class="n">key</span>
+</pre></div>
+</div>
+<p>where <cite>wandb-api-key</cite> is created and retrieved from the “API Keys” section of the <a class="reference external" href="https://wandb.ai/settings">Wandb</a> settings page.</p>
+</section>
+<section id="commands">
+<h2>Commands<a class="headerlink" href="#commands" title="Permalink to this heading"></a></h2>
+<p>The following commands are available, and can be run with <code class="docutils literal notranslate"><span class="pre">--help</span></code> for more information:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">fme.ace.validate_config</span></code> - Validate a configuration file</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">fme.ace.train</span></code> - Train a model</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">fme.ace.inference</span></code> - Run a saved model checkpoint</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">fme.ace.evaluator</span></code> - Run a saved model checkpoint and compare to target data</p></li>
+</ul>
+</section>
+<section id="running-a-checkpoint">
+<h2>Running a Checkpoint<a class="headerlink" href="#running-a-checkpoint" title="Permalink to this heading"></a></h2>
+<p>To run a model checkpoint, you need an initial conditions file containing all model inputs, and a forcing dataset containing all input-only variables.
+The files may include more variables, as in the example datasets below, but only the required variables will be used.
+The code will run an ensemble of predictions starting from each time specified in the initial conditions file.
+The forcing dataset must contain data for the times specified in the initial conditions file, as well as all timesteps required for the prediction period.</p>
+<p>An initial condition file is available via a public <a class="reference external" href="https://cloud.google.com/storage/docs/requester-pays">requester pays</a> Google Cloud Storage bucket.</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>gsutil<span class="w"> </span>-u<span class="w"> </span>YOUR_GCP_PROJECT<span class="w"> </span>cp<span class="w"> </span>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/initial_condition/ic_0011_2021010100.nc<span class="w"> </span>initial_condition.nc
+</pre></div>
+</div>
+<p>The checkpoint and a 1-year subsample of the validation data are available at this <a class="reference external" href="https://zenodo.org/doi/10.5281/zenodo.10791086">Zenodo repository</a>.
+This validation data can be used as forcing data for the checkpoint.</p>
+<p>Alternatively, if interested in the complete dataset, this is available via a public <a class="reference external" href="https://cloud.google.com/storage/docs/requester-pays">requester pays</a> Google Cloud Storage bucket.
+For example, the 10-year validation data (approx. 190GB) can be downloaded with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>gsutil<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>YOUR_GCP_PROJECT<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation<span class="w"> </span>.
+</pre></div>
+</div>
+<p>It is possible to download a portion of the dataset only, but it is necessary to have enough data to span the desired prediction period. The checkpoint is also available on GCS at <cite>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar</cite>.</p>
+<p>Save a <code class="docutils literal notranslate"><span class="pre">inference-config.yaml</span></code> file based on the <a class="reference internal" href="inference_config.html#inference-config"><span class="std std-ref">example config</span></a> with updated paths for the downloaded data.
+Then in the <code class="docutils literal notranslate"><span class="pre">fme</span></code> conda environment, run inference with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>fme.ace.inference<span class="w"> </span>config-inference.yaml
+</pre></div>
+</div>
+<p>See the <a class="reference internal" href="inference_config.html#inference-config"><span class="std std-ref">Inference Config</span></a> section for more information on the configuration.</p>
+<p>If you run into configuration issues, you can validate your configuration with</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>fme.ace.validate_config<span class="w"> </span>config-evaluator.yaml<span class="w"> </span>--config_type<span class="w"> </span>inference
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>While inference can be performed without a GPU, it may be very slow. If running on a Mac, set the environmental variable
+<code class="docutils literal notranslate"><span class="pre">export</span> <span class="pre">FME_USE_MPS=1</span></code> to enable using the <a class="reference external" href="https://developer.apple.com/metal/pytorch/">Metal Performance Shaders</a> framework for GPU acceleration. Note this backend is
+not fully featured and it may not work with all inference features or for training.</p>
+</div>
+</section>
+<section id="evaluating-a-checkpoint">
+<h2>Evaluating a Checkpoint<a class="headerlink" href="#evaluating-a-checkpoint" title="Permalink to this heading"></a></h2>
+<p>When target data is available, it is possible to evaluate the model using the <code class="docutils literal notranslate"><span class="pre">fme.ace.evaluator</span></code> module.
+This requires a dataset including all input and output variables for the prediction period.
+The checkpoint and a 1-year subsample of the validation data are available at this <a class="reference external" href="https://zenodo.org/doi/10.5281/zenodo.10791086">Zenodo repository</a>.
+Download these to your local filesystem.</p>
+<p>Alternatively, if interested in the complete dataset, this is available via a public <a class="reference external" href="https://cloud.google.com/storage/docs/requester-pays">requester pays</a> Google Cloud Storage bucket.
+For example, the 10-year validation data (approx. 190GB) can be downloaded with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>gsutil<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>YOUR_GCP_PROJECT<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation<span class="w"> </span>.
+</pre></div>
+</div>
+<p>Save a <code class="docutils literal notranslate"><span class="pre">config-evaluator.yaml</span></code> file based on the <a class="reference internal" href="evaluator_config.html#evaluator-config"><span class="std std-ref">example config</span></a> with updated paths for the downloaded data.
+Then in the <code class="docutils literal notranslate"><span class="pre">fme</span></code> conda environment, run evaluation with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>fme.ace.evaluator<span class="w"> </span>config-evaluator.yaml
+</pre></div>
+</div>
+<p>If you run into configuration issues, you can validate your configuration with</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>fme.ace.validate_config<span class="w"> </span>config-evaluator.yaml<span class="w"> </span>--config_type<span class="w"> </span>evaluator
+</pre></div>
+</div>
+</section>
+<section id="training-a-model">
+<h2>Training a Model<a class="headerlink" href="#training-a-model" title="Permalink to this heading"></a></h2>
+<p>Like inference, training a model requires datasets with all input and output variables.</p>
+<p>The complete training dataset is available via a public <a class="reference external" href="https://cloud.google.com/storage/docs/requester-pays">requester pays</a> Google Cloud Storage bucket.
+Note the dataset is large, meaning it may take a long time to download and may result in significant transfer costs.
+The 100-year training data (approx. 1.9 TB) can be downloaded with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>gsutil<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>YOUR_GCP_PROJECT<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/train<span class="w"> </span>.
+</pre></div>
+</div>
+<p>It is advisable to use a separate datset for validation.
+The 10-year validation data (approx. 190GB) can be downloaded with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>gsutil<span class="w"> </span>-m<span class="w"> </span>-u<span class="w"> </span>YOUR_GCP_PROJECT<span class="w"> </span>cp<span class="w"> </span>-r<span class="w"> </span>gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation<span class="w"> </span>.
+</pre></div>
+</div>
+<p>You will also require scaling files (<code class="docutils literal notranslate"><span class="pre">centering.nc</span></code> and <code class="docutils literal notranslate"><span class="pre">scaling.nc</span></code> in the example training config) containing scalar values for the mean and standard deviation of each input and output variable.
+These are generated using the script located at <code class="docutils literal notranslate"><span class="pre">scripts/data_process/get_stats.py</span></code>.</p>
+<p>Save a <code class="docutils literal notranslate"><span class="pre">config-train.yaml</span></code> file based on the <a class="reference internal" href="training_config.html#train-config"><span class="std std-ref">example config</span></a> with updated paths for the downloaded data.
+Then in the <code class="docutils literal notranslate"><span class="pre">fme</span></code> conda environment, run evaluation with:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>torchrun<span class="w"> </span>--nproc_per_node<span class="w"> </span>RANK_COUNT<span class="w"> </span>-m<span class="w"> </span>fme.ace.train<span class="w"> </span>config-train.yaml
+</pre></div>
+</div>
+<p>where RANK_COUNT is how many processors you want to run on.
+This will typically be the number of GPUs you have available.
+If running on a single GPU, you can omit the <cite>torchrun</cite> command and use <code class="docutils literal notranslate"><span class="pre">python</span> <span class="pre">-m</span></code> instead.</p>
+<p>If you run into configuration issues, you can validate your configuration with</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>python<span class="w"> </span>-m<span class="w"> </span>fme.ace.validate_config<span class="w"> </span>config-train.yaml<span class="w"> </span>--config_type<span class="w"> </span>train
+</pre></div>
+</div>
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="installation.html" class="btn btn-neutral float-left" title="Installation" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="training_config.html" class="btn btn-neutral float-right" title="Training Config" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
