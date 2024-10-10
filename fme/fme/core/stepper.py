@@ -3,7 +3,18 @@ import dataclasses
 import datetime
 import logging
 from copy import copy
-from typing import Any, Dict, List, Mapping, Optional, Protocol, Tuple, TypeVar, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import dacite
 import torch
@@ -296,20 +307,18 @@ class SteppedData(SteppedDataABC):
     metrics: TensorDict
     gen_data: TensorDict
     target_data: TensorDict
-    gen_data_norm: TensorDict
-    target_data_norm: TensorDict
+    normalize: Callable[[TensorDict], TensorDict]
+
+    def __post_init__(self):
+        self._gen_data_norm: Optional[TensorDict] = None
+        self._target_data_norm: Optional[TensorDict] = None
 
     def remove_initial_condition(self, n_ic_timesteps: int) -> "SteppedData":
         return SteppedData(
             metrics=self.metrics,
             gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
             target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
-            gen_data_norm={
-                k: v[:, n_ic_timesteps:] for k, v in self.gen_data_norm.items()
-            },
-            target_data_norm={
-                k: v[:, n_ic_timesteps:] for k, v in self.target_data_norm.items()
-            },
+            normalize=self.normalize,
         )
 
     def copy(self) -> "SteppedData":
@@ -318,16 +327,13 @@ class SteppedData(SteppedDataABC):
             metrics=self.metrics,
             gen_data={k: v for k, v in self.gen_data.items()},
             target_data={k: v for k, v in self.target_data.items()},
-            gen_data_norm={k: v for k, v in self.gen_data_norm.items()},
-            target_data_norm={k: v for k, v in self.target_data_norm.items()},
+            normalize=self.normalize,
         )
 
     def prepend_initial_condition(
         self,
         initial_condition: TensorDict,
-        normalized_initial_condition: TensorDict,
         target_initial_condition: Optional[TensorDict] = None,
-        normalized_target_initial_condition: Optional[TensorDict] = None,
     ) -> "SteppedData":
         """
         Prepends an initial condition to the existing stepped data.
@@ -341,13 +347,7 @@ class SteppedData(SteppedDataABC):
             target_data=_prepend_timesteps(
                 self.target_data, target_initial_condition or initial_condition
             ),
-            gen_data_norm=_prepend_timesteps(
-                self.gen_data_norm, normalized_initial_condition
-            ),
-            target_data_norm=_prepend_timesteps(
-                self.target_data_norm,
-                normalized_target_initial_condition or normalized_initial_condition,
-            ),
+            normalize=self.normalize,
         )
 
     def compute_derived_quantities(
@@ -671,15 +671,11 @@ class SingleModuleStepper:
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)
 
-        gen_data_norm = self.normalizer.normalize(gen_data)
-        full_data_norm = self.normalizer.normalize(data_)
-
         return SteppedData(
             metrics=metrics,
             gen_data=gen_data,
             target_data=data_,
-            gen_data_norm=gen_data_norm,
-            target_data_norm=full_data_norm,
+            normalize=self.normalizer.normalize,
         )
 
     def get_state(self):

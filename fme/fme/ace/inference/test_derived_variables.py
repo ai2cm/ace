@@ -88,8 +88,7 @@ def test_compute_derived_quantities(dataset: str):
         metrics={"loss": torch.tensor(0.0)},
         gen_data=gen_data,
         target_data=fake_data,
-        gen_data_norm=gen_data,
-        target_data_norm=fake_data,
+        normalize=lambda x: x,
     )
     sigma_coordinates = SigmaCoordinates(
         ak=torch.tensor([0.0, 0.5, 0.0]),

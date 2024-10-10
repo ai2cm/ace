@@ -595,16 +595,12 @@ def test_compute_derived_quantities(has_required_fields):
         }
 
     metrics = {"loss": 42.0}
-    fake_data = {
-        k: _make_data()
-        for k in ("gen_data", "target_data", "gen_data_norm", "target_data_norm")
-    }
+    fake_data = {k: _make_data() for k in ("gen_data", "target_data")}
     stepped = SteppedData(
         metrics,
         fake_data["gen_data"],
         fake_data["target_data"],
-        fake_data["gen_data_norm"],
-        fake_data["target_data_norm"],
+        normalize=lambda x: x,
     )
 
     sigma_coords = SigmaCoordinates(

@@ -19,15 +19,12 @@ def test_labels_exist():
     agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     agg.record_batch(
         batch=SteppedData(
             metrics={"loss": loss},
             target_data=target_data,
             gen_data=gen_data,
-            target_data_norm=target_data_norm,
-            gen_data_norm=gen_data_norm,
+            normalize=lambda x: x,
         ),
     )
     logs = agg.get_logs(label="test")
@@ -55,8 +52,7 @@ def test_aggregator_raises_on_no_data():
                 metrics={"loss": 1.0},
                 target_data={},
                 gen_data={},
-                target_data_norm={},
-                gen_data_norm={},
+                normalize=lambda x: x,
             ),
         )
         # check that the raised exception contains the right substring
