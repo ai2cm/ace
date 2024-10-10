@@ -74,13 +74,15 @@ class OneStepAggregator(AggregatorABC[SteppedData]):
         if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
 
+        gen_data_norm = batch.normalize(batch.gen_data)
+        target_data_norm = batch.normalize(batch.target_data)
         for agg in self._aggregators.values():
             agg.record_batch(
                 loss=batch.metrics.get("loss", np.nan),
                 target_data=batch.target_data,
                 gen_data=batch.gen_data,
-                target_data_norm=batch.target_data_norm,
-                gen_data_norm=batch.gen_data_norm,
+                target_data_norm=target_data_norm,
+                gen_data_norm=gen_data_norm,
             )
 
     @torch.no_grad()
