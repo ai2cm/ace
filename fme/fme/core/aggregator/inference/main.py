@@ -343,16 +343,19 @@ class InferenceEvaluatorAggregator(InferenceAggregatorABC[SteppedData]):
             k: v for k, v in batch.target_data.items() if k in batch.gen_data
         }
         target_data_norm = {
-            k: v for k, v in batch.target_data_norm.items() if k in batch.gen_data
+            k: v
+            for k, v in batch.normalize(batch.target_data).items()
+            if k in batch.gen_data
         }
         loss = float(batch.metrics["loss"])
+        gen_data_norm = batch.normalize(batch.gen_data)
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 loss=loss,
                 target_data=target_data,
                 gen_data=batch.gen_data,
                 target_data_norm=target_data_norm,
-                gen_data_norm=batch.gen_data_norm,
+                gen_data_norm=gen_data_norm,
                 i_time_start=i_time_start,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
