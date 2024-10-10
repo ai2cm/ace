@@ -293,8 +293,7 @@ def run_inference_evaluator(
                         metrics={"loss": np.nan},
                         target_data=ic_filled,
                         gen_data=ic_filled,
-                        target_data_norm=stepper.normalizer.normalize(ic_filled),
-                        gen_data_norm=stepper.normalizer.normalize(ic_filled),
+                        normalize=stepper.normalizer.normalize,
                     ),
                     time=initial_times,
                     i_time_start=i_time,
@@ -304,8 +303,7 @@ def run_inference_evaluator(
                     metrics={"loss": np.nan},
                     target_data=target_data,
                     gen_data=prediction,
-                    target_data_norm=stepper.normalizer.normalize(target_data),
-                    gen_data_norm=stepper.normalizer.normalize(prediction),
+                    normalize=stepper.normalizer.normalize,
                 ),
                 time=times,
                 i_time_start=i_time + 1,
@@ -355,8 +353,7 @@ def run_dataset_comparison(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,
             target_window_data,
-            normalizer.normalize(pred_window_data),
-            normalizer.normalize(target_window_data),
+            normalize=normalizer.normalize,
         )
         stepped = stepped.compute_derived_quantities(
             target_data.sigma_coordinates, target_data.timestep

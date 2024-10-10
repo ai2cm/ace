@@ -45,15 +45,12 @@ def test_logs_labels_exist():
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     data = SteppedData(
         metrics={"loss": loss},
         target_data=target_data,
         gen_data=gen_data,
-        target_data_norm=target_data_norm,
-        gen_data_norm=gen_data_norm,
+        normalize=lambda x: x,
     )
     agg.record_batch(data, time=time, i_time_start=0)
     logs = agg.get_logs(label="test")
@@ -107,15 +104,12 @@ def test_inference_logs_labels_exist():
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    target_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data_norm = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     data = SteppedData(
         metrics={"loss": loss},
         target_data=target_data,
         gen_data=gen_data,
-        target_data_norm=target_data_norm,
-        gen_data_norm=gen_data_norm,
+        normalize=lambda x: x,
     )
     agg.record_batch(data, time=time, i_time_start=0)
     logs = agg.get_inference_logs(label="test")
@@ -176,8 +170,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
             metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,
-            target_data_norm=target_data,
-            gen_data_norm=sample_data,
+            normalize=lambda x: x,
         )
         agg.record_batch(
             batch=data,
@@ -235,8 +228,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
             metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,
-            target_data_norm=target_data,
-            gen_data_norm=sample_data,
+            normalize=lambda x: x,
         )
         agg.record_batch(
             batch=data,

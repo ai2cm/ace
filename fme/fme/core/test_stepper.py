@@ -121,7 +121,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     )
     stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
-        stepped.gen_data["a"], stepped.gen_data_norm["a"]
+        stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
     )  # as std=1, mean=0, no change
     normalization_config.stds = get_scalar_data(["a", "b"], 2.0)
     config.normalization = normalization_config
@@ -137,11 +137,13 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
     )
     assert torch.allclose(
-        stepped.gen_data["a"], 2.0 * stepped_double_std.gen_data_norm["a"], rtol=1e-4
+        stepped.gen_data["a"],
+        2.0 * stepped_double_std.normalize(stepped_double_std.gen_data)["a"],
+        rtol=1e-4,
     )
     assert torch.allclose(
         stepped.target_data["a"],
-        2.0 * stepped_double_std.target_data_norm["a"],
+        2.0 * stepped_double_std.normalize(stepped_double_std.target_data)["a"],
         rtol=1e-4,
     )
     assert torch.allclose(
@@ -183,10 +185,12 @@ def test_run_on_batch_addition_series():
 
     for i in range(n_steps - 1):
         assert torch.allclose(
-            stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
+            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
         )
         assert torch.allclose(
-            stepped.gen_data_norm["b"][:, i] + 1, stepped.gen_data_norm["b"][:, i + 1]
+            stepped.normalize(stepped.gen_data)["b"][:, i] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, i + 1],
         )
         assert torch.allclose(
             stepped.gen_data["a"][:, i] + 1, stepped.gen_data["a"][:, i + 1]
@@ -194,8 +198,8 @@ def test_run_on_batch_addition_series():
         assert torch.allclose(
             stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
         )
-    assert torch.allclose(stepped.target_data_norm["a"], data["a"])
-    assert torch.allclose(stepped.target_data_norm["b"], data["b"])
+    assert torch.allclose(stepped.normalize(stepped.target_data)["a"], data["a"])
+    assert torch.allclose(stepped.normalize(stepped.target_data)["b"], data["b"])
 
 
 def test_run_on_batch_with_prescribed_ocean():
@@ -236,18 +240,19 @@ def test_run_on_batch_with_prescribed_ocean():
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
-            stepped.gen_data_norm["a"][:, i] + 1, stepped.gen_data_norm["a"][:, i + 1]
+            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
         )
         # "b" should be increasing by 1 where the mask says don't prescribe
         # note the 1: selection for the last dimension in following two assertions
         torch.testing.assert_close(
-            stepped.gen_data_norm["b"][:, i, :, 1:] + 1,
-            stepped.gen_data_norm["b"][:, i + 1, :, 1:],
+            stepped.normalize(stepped.gen_data)["b"][:, i, :, 1:] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, i + 1, :, 1:],
         )
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
-            stepped.gen_data_norm["b"][:, i, :, 0],
-            stepped.target_data_norm["b"][:, i, :, 0],
+            stepped.normalize(stepped.gen_data)["b"][:, i, :, 0],
+            stepped.normalize(stepped.target_data)["b"][:, i, :, 0],
         )
 
 
@@ -292,18 +297,6 @@ def test_reloaded_stepper_gives_same_prediction():
     assert torch.allclose(first_result.metrics["loss"], second_result.metrics["loss"])
     assert torch.allclose(first_result.gen_data["a"], second_result.gen_data["a"])
     assert torch.allclose(first_result.gen_data["b"], second_result.gen_data["b"])
-    assert torch.allclose(
-        first_result.gen_data_norm["a"], second_result.gen_data_norm["a"]
-    )
-    assert torch.allclose(
-        first_result.gen_data_norm["b"], second_result.gen_data_norm["b"]
-    )
-    assert torch.allclose(
-        first_result.target_data_norm["a"], second_result.target_data_norm["a"]
-    )
-    assert torch.allclose(
-        first_result.target_data_norm["b"], second_result.target_data_norm["b"]
-    )
     assert torch.allclose(first_result.target_data["a"], second_result.target_data["a"])
     assert torch.allclose(first_result.target_data["b"], second_result.target_data["b"])
 
@@ -726,25 +719,25 @@ def test_next_step_forcing_names():
 def test_prepend_initial_condition():
     nt = 3
     x = torch.rand(3, nt, 5).to(DEVICE)
-    x_normed = (x - x.mean()) / x.std()
+
+    def normalize(x):
+        result = {k: (v - 1) / 2 for k, v in x.items()}
+        return result
+
     stepped = SteppedData(
         gen_data={"a": x, "b": x + 1},
-        gen_data_norm={"a": x_normed, "b": x_normed + 1},
-        target_data={"a": x, "b": x + 1},
-        target_data_norm={"a": x_normed, "b": x_normed + 1},
+        target_data={"a": x + 2, "b": x + 3},
         metrics={"loss": torch.tensor(0.0)},
+        normalize=normalize,
     )
     ic = {
         "a": torch.rand(3, 1, 5).to(DEVICE),
         "b": torch.rand(3, 1, 5).to(DEVICE),
     }
-    ic_normed = {k: (v - v.mean()) / v.std() for k, v in ic.items()}
-    prepended = stepped.prepend_initial_condition(ic, ic_normed)
+    prepended = stepped.prepend_initial_condition(ic, ic)
     for v in ["a", "b"]:
         assert torch.allclose(prepended.gen_data[v][:, :1], ic[v])
-        assert torch.allclose(prepended.gen_data_norm[v][:, :1], ic_normed[v])
         assert torch.allclose(prepended.target_data[v][:, :1], ic[v])
-        assert torch.allclose(prepended.target_data_norm[v][:, :1], ic_normed[v])
 
 
 def test__combine_normalizers():
