@@ -22,8 +22,8 @@ class TrainAggregator(AggregatorABC[SteppedData]):
         self._loss = torch.tensor(0.0, device=get_device())
 
     @torch.no_grad()
-    def record_batch(self, data: SteppedData):
-        self._loss += data.metrics["loss"]
+    def record_batch(self, batch: SteppedData):
+        self._loss += batch.metrics["loss"]
         self._n_batches += 1
 
     @torch.no_grad()
