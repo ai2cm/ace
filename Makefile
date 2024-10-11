@@ -3,6 +3,7 @@ IMAGE ?= fme
 REGISTRY ?= registry.nersc.gov/m4492/ai2cm
 ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
+DEPLOY_TARGET ?= pypi
 
 build_docker_image:
 	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
@@ -40,3 +41,17 @@ test_fast:
 
 test_very_fast:
 	pytest --durations 40 --very-fast .
+
+
+# For maintainer use only
+# requires fme[deploy] to be installed
+
+build_pypi:
+	rm -rf fme/dist
+	cd fme && python -m build
+
+deploy_pypi: build_pypi
+	cd fme && twine upload --repository $(DEPLOY_TARGET) dist/*
+
+deploy_test_pypi: DEPLOY_TARGET = testpypi
+deploy_test_pypi: deploy_pypi
