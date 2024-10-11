@@ -347,7 +347,7 @@ class InferenceEvaluatorAggregator(InferenceAggregatorABC[SteppedData]):
             for k, v in batch.normalize(batch.target_data).items()
             if k in batch.gen_data
         }
-        loss = float(batch.metrics["loss"])
+        loss = float(batch.get_metrics()["loss"])
         gen_data_norm = batch.normalize(batch.gen_data)
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
