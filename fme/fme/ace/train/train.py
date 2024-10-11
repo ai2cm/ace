@@ -85,18 +85,18 @@ from fme.core.aggregator.inference.main import (
 from fme.core.aggregator.types import AggregatorABC, InferenceAggregatorABC
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
+    GriddedData,
     GriddedDataABC,
     HorizontalCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
-from fme.core.data_loading.utils import BatchData
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
-from fme.core.stepper import SingleModuleStepper, SteppedData
+from fme.core.stepper import BD, SD, SingleModuleStepper, SteppedData, StepperABC
 from fme.core.wandb import WandB
 
 # dask used on individual workers to load batches
@@ -260,17 +260,17 @@ class AggregatorBuilder(AggregatorBuilderABC[SteppedData]):
         )
 
 
-class Trainer:
+class Trainer(Generic[BD, SD]):
     def __init__(
         self,
-        train_data: GriddedDataABC[BatchData],
-        validation_data: GriddedDataABC[BatchData],
-        inference_data: GriddedDataABC[BatchData],
-        stepper: SingleModuleStepper,
+        train_data: GriddedDataABC[BD],
+        validation_data: GriddedDataABC[BD],
+        inference_data: GriddedDataABC[BD],
+        stepper: StepperABC[BD, SD],
         optimization: Optimization,
         ema: EMATracker,
         config: TrainConfigProtocol,
-        aggregator_builder: AggregatorBuilderABC[SteppedData],
+        aggregator_builder: AggregatorBuilderABC[SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
     ):
         logging.info(f"Current device is {fme.get_device()}")
@@ -290,16 +290,7 @@ class Trainer:
         for gridded_data, name in zip(
             (self.train_data, self.valid_data), ("train", "valid")
         ):
-            logging.info(
-                f"{name} data: {gridded_data.n_samples} samples, "
-                f"{gridded_data.n_batches} batches"
-            )
-            logging.info(
-                f"{name} data: first sample's initial time: {gridded_data.first_time}"
-            )
-            logging.info(
-                f"{name} data: last sample's initial time: {gridded_data.last_time}"
-            )
+            gridded_data.log_info(name)
 
         self.num_batches_seen = 0
         self._start_epoch = 0
@@ -417,7 +408,6 @@ class Trainer:
         """Train for one epoch and return logs from TrainAggregator."""
         wandb = WandB.get_instance()
         aggregator = self._aggregator_builder.get_train_aggregator()
-        batch: BatchData
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
             with torch.no_grad():
@@ -501,27 +491,36 @@ class Trainer:
                     batch,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,
+                    keep_initial_condition=True,
                 )
-                # Prepend initial condition back to start of windows
-                # as it's used to compute differenced quantities
-                ic, normed_ic = self.stepper.get_initial_condition(batch)
-                stepped = stepped.prepend_initial_condition(ic, normed_ic)
 
                 stepped = stepped.compute_derived_quantities(
                     self.valid_data.sigma_coordinates,
                     self.valid_data.timestep,
                 )
-                aggregator.record_batch(stepped)
+                aggregator.record_batch(
+                    batch=stepped,
+                )
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
         aggregator = self._aggregator_builder.get_inference_aggregator()
         with torch.no_grad(), self._validation_context(), GlobalTimer():
-            run_inference_evaluator(
-                aggregator=aggregator,
-                stepper=self.stepper,
-                data=self._inference_data,
-            )
+            if (
+                isinstance(aggregator, InferenceEvaluatorAggregator)
+                and isinstance(
+                    self.stepper,
+                    SingleModuleStepper,
+                )
+                and isinstance(self._inference_data, GriddedData)
+            ):
+                # TODO: update inference to be generic, then remove this
+                # if-block and this comment
+                run_inference_evaluator(
+                    aggregator=aggregator,
+                    stepper=self.stepper,
+                    data=self._inference_data,
+                )
         logs = aggregator.get_logs(label="inference")
         if "inference/mean/series" in logs:
             # Tables don't work well when reported every epoch, this is a quick

@@ -7,6 +7,7 @@ from typing import (
     Any,
     Callable,
     Dict,
+    Generic,
     List,
     Mapping,
     Optional,
@@ -26,7 +27,7 @@ from fme.ace.inference.derived_variables import (
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData, decode_timestep, encode_timestep
+from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
@@ -340,12 +341,19 @@ class SteppedData(SteppedDataABC):
         Assumes data are on the same device.
         For data windows > 0, the target IC is different from the generated IC
             and may be provided for correct calculation of tendencies.
+
+        Args:
+            initial_condition: Initial condition data.
+            target_initial_condition: Optional data for the target initial condition.
+                If not provided, the initial condition is used for both target and
+                generated data.
         """
         return SteppedData(
             metrics=self.metrics,
             gen_data=_prepend_timesteps(self.gen_data, initial_condition),
             target_data=_prepend_timesteps(
-                self.target_data, target_initial_condition or initial_condition
+                self.target_data,
+                target_initial_condition or initial_condition,
             ),
             normalize=self.normalize,
         )
@@ -364,13 +372,66 @@ class SteppedData(SteppedDataABC):
         return self.metrics
 
 
+BD = TypeVar("BD")  # batch data
+
+
+class StepperABC(abc.ABC, Generic[BD, SD]):
+    @abc.abstractmethod
+    def run_on_batch(
+        self,
+        data: BD,
+        optimization: Union[Optimization, NullOptimization],
+        n_forward_steps: int,
+        keep_initial_condition: bool = False,
+    ) -> SD:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def modules(self) -> nn.ModuleList:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def effective_loss_scaling(self) -> TensorMapping:
+        pass
+
+    @abc.abstractmethod
+    def get_state(self) -> Dict[str, Any]:
+        pass
+
+    @abc.abstractmethod
+    def load_state(cls, state: Dict[str, Any]) -> "StepperABC":
+        pass
+
+    @property
+    @abc.abstractmethod
+    def n_ic_timesteps(self) -> int:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def n_output_timesteps(self) -> int:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def timestep(self) -> datetime.timedelta:
+        pass
+
+
 class HasDeviceData(Protocol):
     @property
     def device_data(self) -> TensorMapping:
         ...
 
 
-class SingleModuleStepper:
+class SingleModuleStepper(StepperABC[HasDeviceData, SteppedData]):
     """
     Stepper class for a single pytorch module.
     """
@@ -428,8 +489,8 @@ class SingleModuleStepper:
         self._is_distributed = dist.is_distributed()
         self.module = dist.wrap_module(self.module)
 
-        self.sigma_coordinates = sigma_coordinates.to(get_device())
-        self.timestep = timestep
+        self._sigma_coordinates = sigma_coordinates.to(get_device())
+        self._timestep = timestep
 
         self.loss_obj = config.loss.build(
             gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
@@ -457,6 +518,14 @@ class SingleModuleStepper:
             self.loss_normalizer = self.normalizer
         self.in_names = config.in_names
         self.out_names = config.out_names
+
+    @property
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        return self._sigma_coordinates
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self._timestep
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -602,19 +671,20 @@ class SingleModuleStepper:
             )
         return output_timeseries
 
-    def get_initial_condition(self, data: BatchData) -> Tuple[TensorDict, TensorDict]:
+    def get_initial_condition(self, data: HasDeviceData) -> TensorDict:
         if self.TIME_DIM != 1:
             raise NotImplementedError(
                 "get_initial_condition hard-codes time dimension at index 1"
             )
         ic = {k: v[:, : self.n_ic_timesteps, ...] for k, v in data.device_data.items()}
-        return ic, self.normalizer.normalize(ic)
+        return ic
 
     def run_on_batch(
         self,
         data: HasDeviceData,
         optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
+        keep_initial_condition: bool = False,
     ) -> SteppedData:
         """
         Step the model forward multiple steps on a batch of data.
@@ -625,6 +695,8 @@ class SingleModuleStepper:
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             n_forward_steps: The number of timesteps to run the model for.
+            keep_initial_condition: Whether to keep the initial condition in the output.
+                By default the returned SteppedData only includes output steps.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -671,12 +743,17 @@ class SingleModuleStepper:
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)
 
-        return SteppedData(
+        stepped = SteppedData(
             metrics=metrics,
             gen_data=gen_data,
             target_data=data_,
             normalize=self.normalizer.normalize,
         )
+        if keep_initial_condition:
+            ic = self.get_initial_condition(data)
+            # prepend target/initial input data to both prediction and target data
+            return stepped.prepend_initial_condition(ic, ic)
+        return stepped
 
     def get_state(self):
         """

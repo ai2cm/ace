@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import datetime
+import logging
 from collections import namedtuple
 from typing import (
     Any,
@@ -393,16 +394,6 @@ class GriddedDataABC(abc.ABC, Generic[T]):
 
     @property
     @abc.abstractmethod
-    def first_time(self) -> Any:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def last_time(self) -> Any:
-        ...
-
-    @property
-    @abc.abstractmethod
     def batch_size(self) -> int:
         ...
 
@@ -413,6 +404,13 @@ class GriddedDataABC(abc.ABC, Generic[T]):
 
     @abc.abstractmethod
     def set_epoch(self, epoch: int):
+        ...
+
+    @abc.abstractmethod
+    def log_info(self, name: str):
+        """
+        Report information about the data using logging.info.
+        """
         ...
 
 
@@ -501,11 +499,11 @@ class GriddedData(GriddedDataABC[BatchData]):
         return len(self._loader)
 
     @property
-    def first_time(self) -> Any:
+    def _first_time(self) -> Any:
         return self._loader.dataset[0][1].values[0]
 
     @property
-    def last_time(self) -> Any:
+    def _last_time(self) -> Any:
         return self._loader.dataset[-1][1].values[0]
 
     @property
@@ -519,6 +517,13 @@ class GriddedData(GriddedDataABC[BatchData]):
     @property
     def n_forward_steps(self) -> int:
         return self._loader.dataset.n_forward_steps
+
+    def log_info(self, name: str):
+        logging.info(
+            f"{name} data: {self.n_samples} samples, " f"{self.n_batches} batches"
+        )
+        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
+        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
     def set_epoch(self, epoch: int):
         """
