@@ -51,8 +51,6 @@ class Looper:
             initial_condition: The initial condition data.
             initial_times: The initial times.
             loader: The loader for the forcing, and possibly target, data.
-            derived_variables_callable: A callable that computes and inserts derived
-                variables into the prediction data.
             compute_derived_for_loaded_data: Whether to compute derived variables for
                 the data returned by the loader.
         """
@@ -80,7 +78,7 @@ class Looper:
 
     def __next__(self) -> Tuple[BatchData, BatchData]:
         """Return predictions for the time period corresponding to the next batch
-        of forcing data."""
+        of forcing data. Also returns the forcing data."""
         timer = GlobalTimer.get_instance()
         try:
             timer.start("data_loading")
@@ -92,10 +90,12 @@ class Looper:
         times = batch_data.times
         n_forward_steps = times.sizes["time"] - self._n_ic_timesteps
         timer.stop("data_loading")
-        timer.start("run_on_batch")
+        timer.start("forward_prediction")
         prediction = self._stepper.predict(
             self._prognostic_state, forcing_data, n_forward_steps
         )
+        timer.stop("forward_prediction")
+        timer.start("compute_derived_variables")
         prediction_with_ic = _prepend_timesteps(prediction, self._prognostic_state)
         prediction_and_derived = self._compute_derived(prediction_with_ic, forcing_data)
         if self._compute_derived_for_loaded_data:
@@ -115,7 +115,7 @@ class Looper:
             k: v[:, self._n_ic_timesteps :] for k, v in prediction_and_derived.items()
         }
         forward_times = times.isel(time=slice(self._n_ic_timesteps, None))
-        timer.stop("run_on_batch")
+        timer.stop("compute_derived_variables")
 
         return (
             BatchData(data=forward_prediction_and_derived, times=forward_times),
@@ -198,11 +198,17 @@ def run_inference(
         looper = Looper(stepper, initial_condition, initial_times, forcing_data.loader)
         i_time = 0
         for prediction_batch, _ in looper:
-            timer.start("writer_and_aggregator")
+            timer.start("data_writer")
             prediction = prediction_batch.data
             times = prediction_batch.times
             forward_steps_in_memory = times.sizes["time"]
+            logging.info(
+                f"Inference: processing window spanning {i_time}"
+                f" to {i_time + forward_steps_in_memory} steps."
+            )
             writer.append_batch(prediction, i_time, times)
+            timer.stop("data_writer")
+            timer.start("aggregator")
             if i_time == 0:
                 example_tensor = list(initial_condition.values())[0]
                 ic_filled = {}
@@ -215,7 +221,7 @@ def run_inference(
                         )
                 aggregator.record_batch(initial_times, ic_filled, i_time)
             aggregator.record_batch(times, prediction, i_time + 1)
-            timer.stop("writer_and_aggregator")
+            timer.stop("aggregator")
             timer.start("wandb_logging")
             if i_time == 0:
                 _log_window_to_wandb(
@@ -264,7 +270,7 @@ def run_inference_evaluator(
         )
         i_time = 0
         for prediction_batch, target_batch in looper:
-            timer.start("writer_and_aggregator")
+            timer.start("data_writer")
             times = prediction_batch.times
             prediction = prediction_batch.data
             target_data = target_batch.data
@@ -279,6 +285,8 @@ def run_inference_evaluator(
                 start_timestep=i_time,
                 batch_times=times,
             )
+            timer.stop("data_writer")
+            timer.start("aggregator")
             # filter forcing variables out of the target data
             target_data = {k: v for k, v in target_data.items() if k in prediction}
             if i_time == 0:
@@ -308,7 +316,7 @@ def run_inference_evaluator(
                 time=times,
                 i_time_start=i_time + 1,
             )
-            timer.stop("writer_and_aggregator")
+            timer.stop("aggregator")
             timer.start("wandb_logging")
             if i_time == 0:
                 _log_window_to_wandb(
@@ -340,7 +348,7 @@ def run_dataset_comparison(
     for pred, target in zip(prediction_data.loader, target_data.loader):
         timer.stop("data_loading")
 
-        timer.start("run_on_batch")
+        timer.start("forward_prediction")
         forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
             f"Inference: starting window spanning {i_time}"
@@ -355,13 +363,15 @@ def run_dataset_comparison(
             target_window_data,
             normalize=normalizer.normalize,
         )
+        timer.stop("forward_prediction")
+        timer.start("compute_derived_variables")
         stepped = stepped.compute_derived_quantities(
             target_data.sigma_coordinates, target_data.timestep
         )
         target_times = target.times
-        timer.stop("run_on_batch")
+        timer.stop("compute_derived_variables")
 
-        timer.start("writer_and_aggregator")
+        timer.start("data_writer")
         stepped_without_ic = stepped.remove_initial_condition(1)
         target_times_without_ic = target_times.isel(time=slice(1, None))
         if i_time == 0:
@@ -380,14 +390,15 @@ def run_dataset_comparison(
             start_timestep=i_time,
             batch_times=target_times_without_ic,
         )
-
+        timer.stop("data_writer")
+        timer.start("aggregator")
         # record metrics, includes the initial condition
         aggregator.record_batch(
             batch=stepped_for_agg,
             time=target_times_for_agg,
             i_time_start=i_time_aggregator,
         )
-        timer.stop("writer_and_aggregator")
+        timer.stop("aggregator")
 
         timer.start("wandb_logging")
         _log_window_to_wandb(
