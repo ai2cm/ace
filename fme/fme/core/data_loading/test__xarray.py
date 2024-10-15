@@ -21,6 +21,7 @@ from fme.core.data_loading._xarray import (
     repeat_and_increment_times,
     transfer_properties,
 )
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import (
     DataLoaderConfig,
     OverwriteConfig,
@@ -32,7 +33,6 @@ from fme.core.data_loading.data_typing import Dataset, LatLonCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_dataset
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import (
-    BatchData,
     as_broadcasted_tensor,
     infer_horizontal_dimension_names,
 )

@@ -83,10 +83,9 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.core.aggregator.types import AggregatorABC, InferenceAggregatorABC
+from fme.core.data_loading.batch_data import GriddedData, GriddedDataABC
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
-    GriddedData,
-    GriddedDataABC,
     HorizontalCoordinates,
     SigmaCoordinates,
     VariableMetadata,
