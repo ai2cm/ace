@@ -8,8 +8,9 @@ from typing import Any, ClassVar, Dict, List, Optional, Protocol, Tuple, Union
 import torch
 
 from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.core.data_loading.batch_data import GriddedData
 from fme.core.data_loading.config import DataLoaderConfig, Slice
-from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.data_loading.requirements import DataRequirements

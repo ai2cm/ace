@@ -10,6 +10,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -18,7 +19,6 @@ from fme.core.data_loading.data_typing import (
 )
 from fme.core.data_loading.perturbation import SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData
 from fme.core.distributed import Distributed
 
 

@@ -14,8 +14,7 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
 )
 from fme.core.aggregator.types import InferenceAggregatorABC
-from fme.core.data_loading.data_typing import GriddedData, GriddedDataABC
-from fme.core.data_loading.utils import BatchData
+from fme.core.data_loading.batch_data import BatchData, GriddedData, GriddedDataABC
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import SteppedData

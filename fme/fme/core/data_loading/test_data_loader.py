@@ -12,6 +12,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import (
@@ -28,7 +29,6 @@ from fme.core.data_loading.inference import (
 )
 from fme.core.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData
 
 
 def _get_coords(dim_sizes, calendar):

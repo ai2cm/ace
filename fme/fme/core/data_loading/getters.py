@@ -13,7 +13,7 @@ from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset, as_index_selection, transfer_properties
-from .data_typing import GriddedData
+from .batch_data import BatchData, GriddedData
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -21,7 +21,6 @@ from .inference import (
     InferenceDataset,
 )
 from .requirements import DataRequirements
-from .utils import BatchData
 
 logger = logging.getLogger(__name__)
 
