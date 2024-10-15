@@ -9,8 +9,8 @@ import xarray as xr
 
 import fme
 from fme.ace.inference.loop import Looper
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
-from fme.core.data_loading.utils import BatchData
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry import ModuleSelector

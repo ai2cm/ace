@@ -10,8 +10,8 @@ import xarray as xr
 
 import fme
 from fme.core import ClimateData, metrics
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.utils import BatchData
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
