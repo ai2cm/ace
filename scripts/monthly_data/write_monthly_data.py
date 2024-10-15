@@ -16,11 +16,11 @@ from fme.ace.inference.data_writer.monthly import (
     months_for_timesteps,
 )
 from fme.ace.inference.derived_variables import compute_derived_quantities
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import DataLoaderConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_datasets
 from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.utils import BatchData
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
@@ -140,7 +140,10 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
             k: torch.concat([d[k] for d in tensors]) for k in tensors[0].keys()
         }
         times = xr.concat(times, dim="sample")
-        yield BatchData(data=window_batch_data, times=times)
+        yield BatchData(
+            data=window_batch_data,
+            times=times,
+        )
 
 
 def run(config: Config):

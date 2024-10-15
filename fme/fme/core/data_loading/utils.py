@@ -1,14 +1,9 @@
-import dataclasses
 import datetime
 import warnings
 from typing import Hashable, List, Optional, Sequence, Tuple
 
 import torch
 import xarray as xr
-from torch.utils.data import default_collate
-
-from fme.core.device import move_tensordict_to_device
-from fme.core.typing_ import TensorMapping
 
 SLICE_NONE = slice(None)
 
@@ -135,49 +130,6 @@ def get_horizontal_dimensions(
             raise ValueError(f"Expected {dim} in dataset: {ds}.")
 
     return horizontal_values
-
-
-@dataclasses.dataclass
-class BatchData:
-    """A container for the data and time coordinates of a batch.
-
-    Attributes:
-        data: Data for each variable in each sample, concatenated along samples
-            to make a batch. To be used directly in training, validation, and
-            inference.
-        times: An array of times for each sample in the batch, concatenated along
-            samples to make a batch. To be used in writing out inference
-            predictions with time coordinates, not directly in ML.
-
-    """
-
-    data: TensorMapping
-    times: xr.DataArray
-
-    def __post_init__(self):
-        self._device_data: Optional[TensorMapping] = None
-
-    @property
-    def device_data(self) -> TensorMapping:
-        if self._device_data is None:
-            self._device_data = move_tensordict_to_device(self.data)
-        return self._device_data
-
-    @classmethod
-    def from_sample_tuples(
-        cls,
-        samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
-        sample_dim_name: str = "sample",
-    ) -> "BatchData":
-        """
-        Collate function for use with PyTorch DataLoader. Needed since samples contain
-        both tensor mapping and xarray time coordinates, the latter of which we do
-        not want to convert to tensors.
-        """
-        sample_data, sample_times = zip(*samples)
-        batch_data = default_collate(sample_data)
-        batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        return cls(batch_data, batch_times)
 
 
 def decode_timestep(microseconds: int) -> datetime.timedelta:
