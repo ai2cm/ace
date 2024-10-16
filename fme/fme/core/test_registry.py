@@ -22,8 +22,8 @@ class MockModuleBuilder(registry.ModuleConfig):
         return MockModule(self.param_shapes)
 
     @classmethod
-    def from_state(self, state):
-        return MockModuleBuilder(state["param_shapes"])
+    def from_state(cls, state):
+        return cls(state["param_shapes"])
 
     def get_state(self):
         return {
