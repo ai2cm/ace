@@ -294,7 +294,7 @@ class DataLoaderConfig:
 
     dataset: Sequence[XarrayDataConfig]
     batch_size: int
-    num_data_workers: int
+    num_data_workers: int = 0
     prefetch_factor: Optional[int] = None
     strict_ensemble: bool = True
 
