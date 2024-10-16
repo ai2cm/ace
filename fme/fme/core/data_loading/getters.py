@@ -14,6 +14,7 @@ from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset, as_index_selection, transfer_properties
 from .batch_data import BatchData, GriddedData
+from .data_typing import Dataset
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -34,25 +35,27 @@ def _all_same(iterable, cmp=lambda x, y: x == y):
     return all(cmp(first, rest) for rest in it)
 
 
+def get_xarray_dataset(
+    config: XarrayDataConfig, requirements: DataRequirements
+) -> XarrayDataset:
+    dataset = XarrayDataset(config, requirements)
+    index_slice = as_index_selection(config.subset, dataset)
+    dataset = dataset.subset(index_slice)
+    dataset.n_steps = dataset.dataset.n_steps
+    return dataset
+
+
 def get_datasets(
     dataset_configs: Sequence[XarrayDataConfig], requirements: DataRequirements
 ) -> List[XarrayDataset]:
     datasets = []
     for config in dataset_configs:
-        dataset = XarrayDataset(config, requirements)
-        index_slice = as_index_selection(config.subset, dataset)
-        dataset = dataset.subset(index_slice)
+        dataset = get_xarray_dataset(config, requirements)
         datasets.append(dataset)
     return datasets
 
 
-def get_dataset(
-    dataset_configs: Sequence[XarrayDataConfig],
-    requirements: DataRequirements,
-    strict: bool = True,
-) -> torch.utils.data.ConcatDataset[XarrayDataset]:
-    datasets = get_datasets(dataset_configs, requirements)
-
+def validate_ensemble(datasets: List[Dataset], strict: bool = True):
     if not _all_same([d.metadata for d in datasets]):
         if strict:
             raise ValueError("Metadata for each ensemble member should be the same.")
@@ -75,6 +78,15 @@ def get_dataset(
                 "Vertical coordinates for each ensemble member are not the same. You "
                 "may be concatenating incompatible datasets."
             )
+
+
+def get_dataset(
+    dataset_configs: Sequence[XarrayDataConfig],
+    requirements: DataRequirements,
+    strict: bool = True,
+) -> torch.utils.data.ConcatDataset[XarrayDataset]:
+    datasets = get_datasets(dataset_configs, requirements)
+    validate_ensemble(datasets, strict=strict)
 
     ensemble = torch.utils.data.ConcatDataset(datasets)
     override: Dict[str, Any] = {
