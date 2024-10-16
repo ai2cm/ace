@@ -155,5 +155,5 @@ class ModuleSelector:
         needed to build a ModuleConfig.
         """
         return dacite.from_dict(
-            data_class=ModuleSelector, data=state, config=dacite.Config(strict=True)
+            data_class=cls, data=state, config=dacite.Config(strict=True)
         )
