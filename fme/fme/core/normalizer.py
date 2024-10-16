@@ -113,7 +113,7 @@ class StandardNormalizer:
         }
 
     @classmethod
-    def from_state(self, state) -> "StandardNormalizer":
+    def from_state(cls, state) -> "StandardNormalizer":
         """
         Loads state from a serializable data structure.
         """
@@ -121,7 +121,7 @@ class StandardNormalizer:
             k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
         }
         stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
-        return StandardNormalizer(means=means, stds=stds)
+        return cls(means=means, stds=stds)
 
 
 @torch.jit.script
