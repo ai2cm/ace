@@ -21,7 +21,7 @@ import dacite
 import fsspec
 import numpy as np
 import xarray as xr
-import xpartition  # noqa: 401
+import xpartition  # noqa: F401
 import xtorch_harmonics
 import yaml
 from dask.diagnostics import ProgressBar

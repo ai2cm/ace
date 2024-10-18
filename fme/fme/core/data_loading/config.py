@@ -47,8 +47,8 @@ class TimeSlice:
         step: Step of the slice.
 
     .. _Xarray docs:
-       https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range  # noqa
-    """
+       https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range
+    """  # noqa: E501
 
     start_time: Optional[str] = None
     stop_time: Optional[str] = None
@@ -227,7 +227,7 @@ class XarrayDataConfig:
         If data is stored in a directory with multiple netCDF files which can be
         concatenated along the time dimension, use:
 
-        >>> fme.ace.XarrayDataConfig(data_path="/some/directory", file_pattern="*.nc") # doctest: +IGNORE_OUTPUT  # noqa: E501
+        >>> fme.ace.XarrayDataConfig(data_path="/some/directory", file_pattern="*.nc") # doctest: +IGNORE_OUTPUT
 
         If data is stored in a single zarr store at ``/some/directory/dataset.zarr``,
         use:
@@ -237,7 +237,7 @@ class XarrayDataConfig:
         ...     file_pattern="dataset.zarr",
         ...     engine="zarr"
         ... ) # doctest: +IGNORE_OUTPUT
-    """
+    """  # noqa: E501
 
     data_path: str
     file_pattern: str = "*.nc"
