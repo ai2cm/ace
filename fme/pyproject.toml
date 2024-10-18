@@ -33,3 +33,10 @@ optional-dependencies.deploy = { file = "deploy-requirements.txt" }
 
 [tool.setuptools.packages]
 find = {}
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E203", "W293", "F541", "E402"]
+
+[tool.ruff.lint.per-file-ignores]
+"*/__init__.py" = ["F401"]
