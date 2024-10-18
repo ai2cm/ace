@@ -114,10 +114,10 @@ def compute_crps(
         prediction: The prediction tensor with a sample dimension
         sample_dim: The dimension of `prediction` corresponding to sample.
 
-    .. [1] https://github.com/properscoring/properscoring/blob/master/properscoring/_crps.py  # noqa: E501
+    .. [1] https://github.com/properscoring/properscoring/blob/master/properscoring/_crps.py
     .. [2] https://en.wikipedia.org/wiki/Scoring_rule
-    .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf  # noqa: E501
-    """
+    .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
+    """  # noqa: E501
     sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
     truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
         axis=sample_dim

@@ -18,7 +18,7 @@ from typing import Callable, List, MutableMapping, Optional, Sequence, Tuple
 import click
 import numpy as np
 import xarray as xr
-import xpartition  # noqa: 401
+import xpartition  # noqa: F401
 from compute_dataset import (
     DatasetComputationConfig,
     DatasetConfig,
@@ -36,8 +36,8 @@ from dask.distributed import Client
 from xtorch_harmonics import roundtrip_filter
 
 # default paths for input/output; can be changed when calling this script
-INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: 501
-OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: 501
+INPUT_DIR = "/global/cfs/cdirs/e3sm/golaz/E3SM/fme/20230614.v2.LR.F2010/post/atm/180x360_gaussian/ts"  # noqa: E501
+OUTPUT_URL = "/pscratch/sd/j/jpduncan/ai2/zarr/2023-11-22-e3smv2-vertically-resolved-1deg-fme-dataset.zarr"  # noqa: E501
 
 REFERENCE_PRESSURE = 1e5  # Pa
 LIQUID_PRECIP_DENSITY = 1e3  # kg/m**3

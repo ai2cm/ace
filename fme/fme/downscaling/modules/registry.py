@@ -105,7 +105,7 @@ class UNetRegressionModule(torch.nn.Module):
     of [2]), (2) padding with zeros to match the usual assumption that the
     shapes of the inputs contain many 2's in the prime factorization.
 
-    [1] https://github.com/NVIDIA/modulus/blob/main/examples/generative/corrdiff/datasets/cwb.py#L491  # noqa: E501
+    [1] https://github.com/NVIDIA/modulus/blob/main/examples/generative/corrdiff/datasets/cwb.py#L491
     [2] https://arxiv.org/abs/2309.15214
 
     Args:
@@ -116,7 +116,7 @@ class UNetRegressionModule(torch.nn.Module):
             the target output.
         fine_topography: Optional fine topography to condition the latent
             variables on.
-    """
+    """  # noqa: E501
 
     def __init__(
         self,
