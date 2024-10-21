@@ -210,6 +210,7 @@ def main(yaml_config: str, segments: Optional[int] = None):
         if segments is None:
             return run_inference_from_config(config)
         else:
+            config.configure_logging(log_filename="inference_out.log")
             run_segmented_inference(config, segments)
 
 
