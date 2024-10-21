@@ -2,6 +2,7 @@ import os
 from typing import Callable, List, Optional, Union
 
 import torch.distributed
+from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
@@ -212,7 +213,7 @@ class Distributed:
                 device_ids = None
                 output_device = None
             return DistributedDataParallel(
-                module,
+                SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=device_ids,
                 output_device=output_device,
             )
