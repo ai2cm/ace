@@ -6,7 +6,7 @@ import torch
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates, VariableMetadata
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorMapping
 
 from ..types import AggregatorABC
@@ -30,7 +30,7 @@ class _Aggregator(Protocol):
         ...
 
 
-class OneStepAggregator(AggregatorABC[SteppedData]):
+class OneStepAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
 
@@ -67,7 +67,7 @@ class OneStepAggregator(AggregatorABC[SteppedData]):
     @torch.no_grad()
     def record_batch(
         self,
-        batch: SteppedData,
+        batch: TrainOutput,
     ):
         if len(batch.target_data) == 0:
             raise ValueError("No data in target_data")

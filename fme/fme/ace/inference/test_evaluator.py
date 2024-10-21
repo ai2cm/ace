@@ -29,7 +29,7 @@ from fme.core.normalizer import FromStateNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.stepper import (
     SingleModuleStepperConfig,
-    SteppedData,
+    TrainOutput,
     compute_stepped_derived_quantities,
 )
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
@@ -596,7 +596,7 @@ def test_compute_derived_quantities(has_required_fields):
 
     metrics = {"loss": 42.0}
     fake_data = {k: _make_data() for k in ("gen_data", "target_data")}
-    stepped = SteppedData(
+    stepped = TrainOutput(
         metrics,
         fake_data["gen_data"],
         fake_data["target_data"],
