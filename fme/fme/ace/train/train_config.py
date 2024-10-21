@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import datetime
-import logging
 import os
 from typing import Any, ClassVar, Dict, List, Optional, Protocol, Tuple, Union
 
@@ -64,11 +63,8 @@ class InlineInferenceConfig:
             self.aggregator.log_global_mean_time_series
             or self.aggregator.log_global_mean_norm_time_series
         ):
-            logging.warning(
-                "Both of log_global_mean_time_series and "
-                "log_global_mean_norm_time_series must be False for inline inference. "
-                "Setting them to False."
-            )
+            # Both of log_global_mean_time_series and
+            # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
 
