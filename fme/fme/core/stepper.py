@@ -310,10 +310,6 @@ class TrainOutput(TrainOutputABC):
     target_data: TensorDict
     normalize: Callable[[TensorDict], TensorDict]
 
-    def __post_init__(self):
-        self._gen_data_norm: Optional[TensorDict] = None
-        self._target_data_norm: Optional[TensorDict] = None
-
     def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
         return TrainOutput(
             metrics=self.metrics,
