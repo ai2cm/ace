@@ -13,7 +13,7 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -191,7 +191,7 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
-class InferenceEvaluatorAggregator(InferenceAggregatorABC[SteppedData]):
+class InferenceEvaluatorAggregator(InferenceAggregatorABC[TrainOutput]):
     """
     Aggregates statistics for inference comparing a generated and target series.
 
@@ -331,7 +331,7 @@ class InferenceEvaluatorAggregator(InferenceAggregatorABC[SteppedData]):
     @torch.no_grad()
     def record_batch(
         self,
-        batch: SteppedData,
+        batch: TrainOutput,
         time: xr.DataArray,
         i_time_start: int,
     ):
