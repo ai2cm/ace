@@ -4,12 +4,12 @@ import torch
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 
 from .types import AggregatorABC
 
 
-class TrainAggregator(AggregatorABC[SteppedData]):
+class TrainAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
 
@@ -22,7 +22,7 @@ class TrainAggregator(AggregatorABC[SteppedData]):
         self._loss = torch.tensor(0.0, device=get_device())
 
     @torch.no_grad()
-    def record_batch(self, batch: SteppedData):
+    def record_batch(self, batch: TrainOutput):
         self._loss += batch.metrics["loss"]
         self._n_batches += 1
 

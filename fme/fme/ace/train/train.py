@@ -95,7 +95,7 @@ from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
-from fme.core.stepper import BD, SD, SingleModuleStepper, SteppedData, StepperABC
+from fme.core.stepper import BD, SD, SingleModuleStepper, StepperABC, TrainOutput
 from fme.core.wandb import WandB
 
 # dask used on individual workers to load batches
@@ -209,7 +209,7 @@ class AggregatorBuilderABC(abc.ABC, Generic[T]):
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[SteppedData]):
+class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
@@ -411,7 +411,7 @@ class Trainer(Generic[BD, SD]):
             # Before training, log the loss on the first batch.
             with torch.no_grad():
                 batch = next(iter(self.train_data.loader))
-                stepped = self.stepper.run_on_batch(
+                stepped = self.stepper.train_on_batch(
                     batch,
                     optimization=self._no_optimization,
                     n_forward_steps=self.config.n_forward_steps,
@@ -426,7 +426,7 @@ class Trainer(Generic[BD, SD]):
                     wandb.log(metrics, step=self.num_batches_seen)
         current_time = time.time()
         for batch in self.train_data.loader:
-            stepped = self.stepper.run_on_batch(
+            stepped = self.stepper.train_on_batch(
                 batch,
                 self.optimization,
                 n_forward_steps=self.config.n_forward_steps,
@@ -486,7 +486,7 @@ class Trainer(Generic[BD, SD]):
         aggregator = self._aggregator_builder.get_validation_aggregator()
         with torch.no_grad(), self._validation_context():
             for batch in self.valid_data.loader:
-                stepped = self.stepper.run_on_batch(
+                stepped = self.stepper.train_on_batch(
                     batch,
                     optimization=NullOptimization(),
                     n_forward_steps=self.config.n_forward_steps,

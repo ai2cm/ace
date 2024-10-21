@@ -280,10 +280,10 @@ def _prepend_timesteps(
     return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
 
-SD = TypeVar("SD", bound="SteppedDataABC")  # stepped data
+SD = TypeVar("SD", bound="TrainOutputABC")  # stepped data
 
 
-class SteppedDataABC(abc.ABC):
+class TrainOutputABC(abc.ABC):
     @abc.abstractmethod
     def remove_initial_condition(self: SD, n_ic_timesteps: int) -> SD:
         pass
@@ -304,7 +304,7 @@ class SteppedDataABC(abc.ABC):
 
 
 @dataclasses.dataclass
-class SteppedData(SteppedDataABC):
+class TrainOutput(TrainOutputABC):
     metrics: TensorDict
     gen_data: TensorDict
     target_data: TensorDict
@@ -314,17 +314,17 @@ class SteppedData(SteppedDataABC):
         self._gen_data_norm: Optional[TensorDict] = None
         self._target_data_norm: Optional[TensorDict] = None
 
-    def remove_initial_condition(self, n_ic_timesteps: int) -> "SteppedData":
-        return SteppedData(
+    def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
+        return TrainOutput(
             metrics=self.metrics,
             gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
             target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
             normalize=self.normalize,
         )
 
-    def copy(self) -> "SteppedData":
+    def copy(self) -> "TrainOutput":
         """Creates new dictionaries for the data but with the same tensors."""
-        return SteppedData(
+        return TrainOutput(
             metrics=self.metrics,
             gen_data={k: v for k, v in self.gen_data.items()},
             target_data={k: v for k, v in self.target_data.items()},
@@ -335,7 +335,7 @@ class SteppedData(SteppedDataABC):
         self,
         initial_condition: TensorDict,
         target_initial_condition: Optional[TensorDict] = None,
-    ) -> "SteppedData":
+    ) -> "TrainOutput":
         """
         Prepends an initial condition to the existing stepped data.
         Assumes data are on the same device.
@@ -348,7 +348,7 @@ class SteppedData(SteppedDataABC):
                 If not provided, the initial condition is used for both target and
                 generated data.
         """
-        return SteppedData(
+        return TrainOutput(
             metrics=self.metrics,
             gen_data=_prepend_timesteps(self.gen_data, initial_condition),
             target_data=_prepend_timesteps(
@@ -360,7 +360,7 @@ class SteppedData(SteppedDataABC):
 
     def compute_derived_quantities(
         self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
-    ) -> "SteppedData":
+    ) -> "TrainOutput":
         return compute_stepped_derived_quantities(
             self,
             sigma_coordinates,
@@ -377,7 +377,7 @@ BD = TypeVar("BD")  # batch data
 
 class StepperABC(abc.ABC, Generic[BD, SD]):
     @abc.abstractmethod
-    def run_on_batch(
+    def train_on_batch(
         self,
         data: BD,
         optimization: Union[Optimization, NullOptimization],
@@ -431,7 +431,7 @@ class HasDeviceData(Protocol):
         ...
 
 
-class SingleModuleStepper(StepperABC[HasDeviceData, SteppedData]):
+class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
     """
     Stepper class for a single pytorch module.
     """
@@ -679,13 +679,13 @@ class SingleModuleStepper(StepperABC[HasDeviceData, SteppedData]):
         ic = {k: v[:, : self.n_ic_timesteps, ...] for k, v in data.device_data.items()}
         return ic
 
-    def run_on_batch(
+    def train_on_batch(
         self,
         data: HasDeviceData,
         optimization: Union[Optimization, NullOptimization],
         n_forward_steps: int = 1,
         keep_initial_condition: bool = False,
-    ) -> SteppedData:
+    ) -> TrainOutput:
         """
         Step the model forward multiple steps on a batch of data.
 
@@ -743,7 +743,7 @@ class SingleModuleStepper(StepperABC[HasDeviceData, SteppedData]):
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)
 
-        stepped = SteppedData(
+        stepped = TrainOutput(
             metrics=metrics,
             gen_data=gen_data,
             target_data=data_,
@@ -849,11 +849,11 @@ class SingleModuleStepper(StepperABC[HasDeviceData, SteppedData]):
 
 
 def compute_stepped_derived_quantities(
-    stepped: SteppedData,
+    stepped: TrainOutput,
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
-) -> SteppedData:
+) -> TrainOutput:
     stepped.gen_data = compute_derived_quantities(
         stepped.gen_data, sigma_coordinates, timestep, forcing_data
     )

@@ -5,7 +5,7 @@ import torch
 
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.stepper import SteppedData, compute_stepped_derived_quantities
+from fme.core.stepper import TrainOutput, compute_stepped_derived_quantities
 
 from .derived_variables import DerivedVariableRegistryEntry, _compute_derived_variable
 
@@ -84,7 +84,7 @@ def test_compute_derived_quantities(dataset: str):
             "SOLIN": torch.rand(2, 3, 4, 8),
         }
 
-    data = SteppedData(
+    data = TrainOutput(
         metrics={"loss": torch.tensor(0.0)},
         gen_data=gen_data,
         target_data=fake_data,
