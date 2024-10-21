@@ -8,7 +8,7 @@ import xarray as xr
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
 from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -46,7 +46,7 @@ def test_logs_labels_exist():
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    data = SteppedData(
+    data = TrainOutput(
         metrics={"loss": loss},
         target_data=target_data,
         gen_data=gen_data,
@@ -105,7 +105,7 @@ def test_inference_logs_labels_exist():
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    data = SteppedData(
+    data = TrainOutput(
         metrics={"loss": loss},
         target_data=target_data,
         gen_data=gen_data,
@@ -166,7 +166,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        data = SteppedData(
+        data = TrainOutput(
             metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,
@@ -224,7 +224,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        data = SteppedData(
+        data = TrainOutput(
             metrics={"loss": 1.0},
             target_data=target_data,
             gen_data=sample_data,

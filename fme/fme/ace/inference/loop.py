@@ -17,7 +17,7 @@ from fme.core.aggregator.types import InferenceAggregatorABC
 from fme.core.data_loading.batch_data import BatchData, GriddedData, GriddedDataABC
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import StandardNormalizer
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
@@ -236,7 +236,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceAggregatorABC[SteppedData],
+    aggregator: InferenceAggregatorABC[TrainOutput],
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -296,7 +296,7 @@ def run_inference_evaluator(
                     else:
                         ic_filled[name] = target_data[name][:, 0:1]
                 aggregator.record_batch(
-                    batch=SteppedData(
+                    batch=TrainOutput(
                         metrics={"loss": np.nan},
                         target_data=ic_filled,
                         gen_data=ic_filled,
@@ -306,7 +306,7 @@ def run_inference_evaluator(
                     i_time_start=i_time,
                 )
             aggregator.record_batch(
-                batch=SteppedData(
+                batch=TrainOutput(
                     metrics={"loss": np.nan},
                     target_data=target_data,
                     gen_data=prediction,
@@ -331,7 +331,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceAggregatorABC[SteppedData],
+    aggregator: InferenceAggregatorABC[TrainOutput],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
@@ -356,7 +356,7 @@ def run_dataset_comparison(
         )
         pred_window_data = dict(pred.device_data)
         target_window_data = dict(target.device_data)
-        stepped = SteppedData(
+        stepped = TrainOutput(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,
             target_window_data,

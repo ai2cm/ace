@@ -6,7 +6,7 @@ from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.stepper import SteppedData
+from fme.core.stepper import TrainOutput
 
 
 def test_labels_exist():
@@ -20,7 +20,7 @@ def test_labels_exist():
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     agg.record_batch(
-        batch=SteppedData(
+        batch=TrainOutput(
             metrics={"loss": loss},
             target_data=target_data,
             gen_data=gen_data,
@@ -48,7 +48,7 @@ def test_aggregator_raises_on_no_data():
     agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
-            batch=SteppedData(
+            batch=TrainOutput(
                 metrics={"loss": 1.0},
                 target_data={},
                 gen_data={},

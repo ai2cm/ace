@@ -23,7 +23,7 @@ from fme.core.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
-    SteppedData,
+    TrainOutput,
     _combine_normalizers,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -119,7 +119,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped = stepper.run_on_batch(data=data, optimization=MagicMock())
+    stepped = stepper.train_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
     )  # as std=1, mean=0, no change
@@ -132,7 +132,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped_double_std = stepper.run_on_batch(data=data, optimization=MagicMock())
+    stepped_double_std = stepper.train_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
     )
@@ -176,7 +176,7 @@ def test_run_on_batch_addition_series():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped = stepper.run_on_batch(
+    stepped = stepper.train_on_batch(
         data=data_with_ic, optimization=MagicMock(), n_forward_steps=n_steps
     )
     # output of run_on_batch does not include the initial condition
@@ -234,7 +234,7 @@ def test_run_on_batch_with_prescribed_ocean():
     stepper = config.get_stepper(
         area.shape, gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped = stepper.run_on_batch(
+    stepped = stepper.train_on_batch(
         data, optimization=MagicMock(), n_forward_steps=n_steps
     )
     for i in range(n_steps - 1):
@@ -284,12 +284,12 @@ def test_reloaded_stepper_gives_same_prediction():
     area = torch.ones((5, 5), device=DEVICE)
     new_stepper = SingleModuleStepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    first_result = stepper.run_on_batch(
+    first_result = stepper.train_on_batch(
         data=data,
         optimization=NullOptimization(),
         n_forward_steps=1,
     )
-    second_result = new_stepper.run_on_batch(
+    second_result = new_stepper.train_on_batch(
         data=data,
         optimization=NullOptimization(),
         n_forward_steps=1,
@@ -356,7 +356,7 @@ def _setup_and_run_on_batch(
     stepper = config.get_stepper(
         area.shape, LatLonOperations(area), sigma_coordinates, TIMESTEP
     )
-    return stepper.run_on_batch(
+    return stepper.train_on_batch(
         data, optimization=optimization, n_forward_steps=n_forward_steps
     )
 
@@ -491,7 +491,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     )
     # run the stepper on the data
     with torch.no_grad():
-        stepped = stepper.run_on_batch(
+        stepped = stepper.train_on_batch(
             data=batch_data,
             optimization=NullOptimization(),
             n_forward_steps=n_forward_steps,
@@ -724,7 +724,7 @@ def test_prepend_initial_condition():
         result = {k: (v - 1) / 2 for k, v in x.items()}
         return result
 
-    stepped = SteppedData(
+    stepped = TrainOutput(
         gen_data={"a": x, "b": x + 1},
         target_data={"a": x + 2, "b": x + 3},
         metrics={"loss": torch.tensor(0.0)},
