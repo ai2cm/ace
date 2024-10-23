@@ -206,12 +206,12 @@ def main(yaml_config: str, segments: Optional[int] = None):
         os.makedirs(config.experiment_dir, exist_ok=True)
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    with GlobalTimer():
-        if segments is None:
+    if segments is None:
+        with GlobalTimer():
             return run_inference_from_config(config)
-        else:
-            config.configure_logging(log_filename="inference_out.log")
-            run_segmented_inference(config, segments)
+    else:
+        config.configure_logging(log_filename="inference_out.log")
+        run_segmented_inference(config, segments)
 
 
 def run_inference_from_config(config: InferenceConfig):
@@ -340,7 +340,8 @@ def run_segmented_inference(config: InferenceConfig, segments: int):
             config_copy.experiment_dir = segment_dir
             if original_wandb_name is not None:
                 os.environ["WANDB_NAME"] = f"{original_wandb_name}-{segment_label}"
-            run_inference_from_config(config_copy)
+            with GlobalTimer():
+                run_inference_from_config(config_copy)
         config_copy.initial_condition = InitialConditionConfig(
             path=restart_path, engine="netcdf4"
         )
