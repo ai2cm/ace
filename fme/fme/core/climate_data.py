@@ -93,7 +93,7 @@ class ClimateData:
                 pass
         raise KeyError(name)
 
-    def _extract_prefix_levels(self, prefix: str) -> torch.Tensor:
+    def _natural_sort_names(self, prefix: str) -> List[str]:
         names = [
             field_name for field_name in self._data if field_name.startswith(prefix)
         ]
@@ -115,7 +115,11 @@ class ClimateData:
         if len(names) == 0:
             raise KeyError(prefix)
 
-        names = natural_sort(names)
+        return natural_sort(names)
+
+    def _extract_prefix_levels(self, prefix: str) -> torch.Tensor:
+        names = self._natural_sort_names(prefix)
+
         return torch.stack([self._data[name] for name in names], dim=-1)
 
     def _get(self, name):
@@ -139,6 +143,30 @@ class ClimateData:
 
     def _set_prefix(self, prefix, value):
         self._data[prefix] = value
+
+    def get_all_level_names(self, standard_name: str) -> List[str]:
+        """Get the names of all variables in the data that match one of the
+        prefixes associated with the given standard name. If the prefix
+        corresponds to a 3D variable, returns all vertical level names in their
+        natural order.
+        """
+        if standard_name not in self.standard_names:
+            raise ValueError(f"{standard_name} is not a standard name.")
+        prefixes = self._prefixes[standard_name]
+        for prefix in prefixes:
+            if prefix in self._data:
+                return [prefix]
+            try:
+                return self._natural_sort_names(prefix)
+            except KeyError:
+                pass
+        raise KeyError(
+            f"No prefix associated with {standard_name} was found in data keys."
+        )
+
+    @property
+    def standard_names(self) -> List[str]:
+        return list(self._prefixes.keys())
 
     @property
     def data(self) -> TensorDict:
