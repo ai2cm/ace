@@ -58,7 +58,7 @@ def test_single_target_mean_aggregator():
     data_a = torch.randn(n_sample, n_time_per_window, nx, ny, device=get_device())
     for i in range(n_window):
         data = {"a": data_a[:, i * n_time_per_window : (i + 1) * n_time_per_window]}
-        agg.record_batch(data, i_time_start=i * n_time_per_window)
+        agg.record_batch(data=data, i_time_start=i * n_time_per_window)
 
     logs = agg.get_logs(label="test")
     assert "test/series" in logs

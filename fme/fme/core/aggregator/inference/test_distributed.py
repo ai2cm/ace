@@ -20,7 +20,7 @@ def test_mean_metrics_call_distributed():
             LatLonOperations(area_weights), target="denorm", n_timesteps=3
         )
         sample_data = {"a": data_a}
-        agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
+        agg.record_batch(sample_data, sample_data, sample_data, sample_data)
         logs = agg.get_logs(label="metrics")
         table = logs["metrics/series"]
         # assert all data past the first column in the WandB table is -1
@@ -42,7 +42,6 @@ def test_time_mean_metrics_call_distributed():
         target_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
         gen_data = {"a": torch.randn([2, 3, 4, 4], device=get_device())}
         agg.record_batch(
-            loss=1.0,
             target_data=target_data,
             gen_data=gen_data,
             target_data_norm=target_data,

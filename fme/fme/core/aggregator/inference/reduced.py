@@ -134,15 +134,19 @@ class AreaWeightedReducedMetric:
             i_time_start: The index of the first timestep in the batch.
         """
         time_dim = 1
-        if target.shape[time_dim] >= gen.shape[time_dim]:
-            new_value = self._compute_metric(truth=target, predicted=gen).mean(dim=0)
-            if self._total is None:
-                self._total = torch.zeros(
-                    [self._n_timesteps], dtype=new_value.dtype, device=self._device
-                )
-            time_slice = slice(i_time_start, i_time_start + gen.shape[time_dim])
-            self._total[time_slice] += new_value
-            self._n_batches[time_slice] += 1
+        if target.shape != gen.shape:
+            raise RuntimeError(
+                "target and gen must have the same shape, got "
+                f"{target.shape} and {gen.shape}"
+            )
+        new_value = self._compute_metric(truth=target, predicted=gen).mean(dim=0)
+        if self._total is None:
+            self._total = torch.zeros(
+                [self._n_timesteps], dtype=new_value.dtype, device=self._device
+            )
+        time_slice = slice(i_time_start, i_time_start + gen.shape[time_dim])
+        self._total[time_slice] += new_value
+        self._n_batches[time_slice] += 1
 
     def get(self) -> torch.Tensor:
         """Returns the mean metric across recorded batches."""
@@ -254,7 +258,6 @@ class MeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
         target_data: TensorMapping,
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,

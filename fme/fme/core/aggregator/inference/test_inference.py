@@ -6,7 +6,7 @@ import xarray as xr
 
 import fme
 from fme.core.aggregator.inference import InferenceAggregator
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 
@@ -22,18 +22,21 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    nz = 3
     area_weights = torch.ones(ny).to(fme.get_device())
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
         LatLonOperations(area_weights),
-        sigma_coordinates,
-        TIMESTEP,
         n_timesteps=n_time,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(time, data=gen_data, i_time_start=0)
+    agg.record_batch(
+        BatchData(
+            data=gen_data,
+            times=time,
+        ),
+        normalize=None,
+        i_time_start=0,
+    )
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
     assert "test/time_mean/gen_map/a" in logs
@@ -47,9 +50,7 @@ def test_logs_labels_exist_with_reference_time_means():
     n_time = 22
     nx = 2
     ny = 2
-    nz = 3
     area_weights = torch.ones(ny).to(fme.get_device())
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     reference_time_means = xr.Dataset(
         {
             "a": xr.DataArray(
@@ -60,14 +61,19 @@ def test_logs_labels_exist_with_reference_time_means():
     )
     agg = InferenceAggregator(
         LatLonOperations(area_weights),
-        sigma_coordinates,
-        TIMESTEP,
         n_timesteps=n_time,
         time_mean_reference_data=reference_time_means,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(time, data=gen_data, i_time_start=0)
+    agg.record_batch(
+        BatchData(
+            data=gen_data,
+            times=time,
+        ),
+        normalize=None,
+        i_time_start=0,
+    )
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
     assert "test/time_mean/gen_map/a" in logs
@@ -81,18 +87,21 @@ def test_inference_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    nz = 3
     area_weights = torch.ones(ny).to(fme.get_device())
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     agg = InferenceAggregator(
         LatLonOperations(area_weights),
-        sigma_coordinates,
-        TIMESTEP,
         n_timesteps=n_time,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(time, data=gen_data, i_time_start=0)
+    agg.record_batch(
+        BatchData(
+            data=gen_data,
+            times=time,
+        ),
+        normalize=None,
+        i_time_start=0,
+    )
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
     assert len(logs) == n_time
