@@ -30,6 +30,7 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
@@ -41,7 +42,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.packer import Packer
 from fme.core.registry import ModuleSelector
 
-from .optimization import NullOptimization, Optimization
+from .optimization import NullOptimization
 from .parameter_init import ParameterInitializationConfig
 from .typing_ import TensorDict, TensorMapping
 
@@ -376,7 +377,7 @@ class StepperABC(abc.ABC, Generic[BD, SD]):
     def train_on_batch(
         self,
         data: BD,
-        optimization: Union[Optimization, NullOptimization],
+        optimization: OptimizationABC,
         n_forward_steps: int,
         keep_initial_condition: bool = False,
     ) -> SD:
@@ -678,7 +679,7 @@ class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
     def train_on_batch(
         self,
         data: HasDeviceData,
-        optimization: Union[Optimization, NullOptimization],
+        optimization: OptimizationABC,
         n_forward_steps: int = 1,
         keep_initial_condition: bool = False,
     ) -> TrainOutput:
