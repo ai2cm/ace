@@ -34,6 +34,6 @@ def test_paired_spherical_power_spectrum_aggregator():
     nlon = 16
     agg = PairedSphericalPowerSpectrumAggregator(nlat, nlon)
     data = {"a": torch.randn(2, 3, nlat, nlon, device=fme.get_device())}
-    agg.record_batch(0.0, data, data, None, None)
+    agg.record_batch(data, data, None, None)
     result = agg.get_logs("spectrum")
     assert isinstance(result["spectrum/a"], plt.Figure)

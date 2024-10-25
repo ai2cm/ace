@@ -272,7 +272,6 @@ class TimeMeanEvaluatorAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
         target_data: TensorMapping,
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,

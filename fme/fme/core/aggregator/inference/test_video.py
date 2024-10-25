@@ -82,7 +82,7 @@ def test_video_data(offsets: np.ndarray):
         i_end = i_start + n_window_in_memory
         target_window, gen_window = time_select(i_start, i_end, gen, target)
         aggregator.record_batch(
-            loss=0, target_data=target_window, gen_data=gen_window, i_time_start=i_start
+            target_data=target_window, gen_data=gen_window, i_time_start=i_start
         )
     data = aggregator._get_data()
     assert data["bias/a"].target is None
@@ -122,7 +122,7 @@ def test_video_data_without_extended_videos(offsets: np.ndarray):
         i_end = i_start + n_window_in_memory
         target_window, gen_window = time_select(i_start, i_end, gen, target)
         aggregator.record_batch(
-            loss=0, target_data=target_window, gen_data=gen_window, i_time_start=i_start
+            target_data=target_window, gen_data=gen_window, i_time_start=i_start
         )
     data = aggregator._get_data()
     assert len(data) == 1
@@ -160,7 +160,6 @@ def test_video_data_values_on_random_inputs(n_batches: int):
         target_window, gen_window = time_select(i_start, i_end, gen, target)
         for nb in range(n_batches):  # shouldn't affect results to duplicate batches
             aggregator.record_batch(
-                loss=0,
                 target_data=slice_samples(
                     target_window,
                     i_start=nb * samples_per_batch,

@@ -13,9 +13,12 @@ from fme.core.aggregator.inference.main import (
     InferenceAggregator,
     InferenceEvaluatorAggregator,
 )
-from fme.core.aggregator.types import InferenceAggregatorABC
 from fme.core.data_loading.batch_data import BatchData, GriddedData, GriddedDataABC
 from fme.core.device import move_tensordict_to_device
+from fme.core.generics.aggregator import (
+    InferenceAggregatorABC,
+    InferenceEvaluatorAggregatorABC,
+)
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorDict
@@ -169,7 +172,7 @@ def run_inference(
     initial_times: xr.DataArray,
     forcing_data: GriddedData,
     writer: DataWriter,
-    aggregator: InferenceAggregator,
+    aggregator: InferenceAggregatorABC[BatchData],
 ):
     """Run extended inference loop given initial condition and forcing data.
 
@@ -218,8 +221,16 @@ def run_inference(
                         ic_filled[name] = torch.full_like(
                             example_tensor, fill_value=torch.nan
                         )
-                aggregator.record_batch(initial_times, ic_filled, i_time)
-            aggregator.record_batch(times, prediction, i_time + 1)
+                aggregator.record_batch(
+                    prediction=BatchData(data=ic_filled, times=initial_times),
+                    normalize=stepper.normalizer.normalize,
+                    i_time_start=i_time,
+                )
+            aggregator.record_batch(
+                prediction=BatchData(data=prediction, times=times),
+                normalize=stepper.normalizer.normalize,
+                i_time_start=i_time + 1,
+            )
             timer.stop("aggregator")
             timer.start("wandb_logging")
             if i_time == 0:
@@ -236,7 +247,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceAggregatorABC[TrainOutput],
+    aggregator: InferenceEvaluatorAggregatorABC[BatchData],
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -296,23 +307,15 @@ def run_inference_evaluator(
                     else:
                         ic_filled[name] = target_data[name][:, 0:1]
                 aggregator.record_batch(
-                    batch=TrainOutput(
-                        metrics={"loss": np.nan},
-                        target_data=ic_filled,
-                        gen_data=ic_filled,
-                        normalize=stepper.normalizer.normalize,
-                    ),
-                    time=initial_times,
+                    prediction=BatchData(data=ic_filled, times=initial_times),
+                    target=BatchData(data=ic_filled, times=initial_times),
+                    normalize=stepper.normalizer.normalize,
                     i_time_start=i_time,
                 )
             aggregator.record_batch(
-                batch=TrainOutput(
-                    metrics={"loss": np.nan},
-                    target_data=target_data,
-                    gen_data=prediction,
-                    normalize=stepper.normalizer.normalize,
-                ),
-                time=times,
+                prediction=BatchData(data=prediction, times=times),
+                target=BatchData(data=target_data, times=times),
+                normalize=stepper.normalizer.normalize,
                 i_time_start=i_time + 1,
             )
             timer.stop("aggregator")
@@ -331,7 +334,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceAggregatorABC[TrainOutput],
+    aggregator: InferenceEvaluatorAggregatorABC[BatchData],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
@@ -393,8 +396,13 @@ def run_dataset_comparison(
         timer.start("aggregator")
         # record metrics, includes the initial condition
         aggregator.record_batch(
-            batch=stepped_for_agg,
-            time=target_times_for_agg,
+            prediction=BatchData(
+                data=stepped_for_agg.gen_data, times=target_times_for_agg
+            ),
+            target=BatchData(
+                data=stepped_for_agg.target_data, times=target_times_for_agg
+            ),
+            normalize=normalizer.normalize,
             i_time_start=i_time_aggregator,
         )
         timer.stop("aggregator")

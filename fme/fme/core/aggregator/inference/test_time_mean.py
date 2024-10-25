@@ -26,7 +26,6 @@ def test_rmse_of_time_mean_all_channels():
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
     }
     agg.record_batch(
-        loss=1.0,
         target_data=target_data_norm,
         gen_data=gen_data_norm,
         target_data_norm=target_data_norm,
@@ -54,7 +53,6 @@ def test_mean_all_channels_not_in_denorm():
         "b": torch.ones([2, 3, 4, 4], device=get_device()) * 5,
     }
     agg.record_batch(
-        loss=1.0,
         target_data=target_data,
         gen_data=gen_data,
         target_data_norm=target_data,
@@ -82,7 +80,6 @@ def test_bias_values():
         "a": (torch.rand(1) * torch.ones(size=[2, 3, 4, 5])).to(device=get_device()),
     }
     agg.record_batch(
-        loss=1.0,
         target_data=target_data,
         gen_data=gen_data,
         target_data_norm=target_data,
