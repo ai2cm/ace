@@ -6,7 +6,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.stepper import TrainOutput
 
-from .types import AggregatorABC
+from ..generics.aggregator import AggregatorABC
 
 
 class TrainAggregator(AggregatorABC[TrainOutput]):

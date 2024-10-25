@@ -1,5 +1,6 @@
 from typing import Dict, Optional
 
+import numpy as np
 import torch
 import xarray as xr
 
@@ -71,11 +72,11 @@ class MeanAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
         target_data: TensorMapping,
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
+        loss: torch.Tensor = torch.tensor(np.nan),
         i_time_start: int = 0,
     ):
         self._loss += loss

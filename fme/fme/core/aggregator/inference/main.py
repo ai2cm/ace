@@ -1,20 +1,23 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Dict, Iterable, List, Mapping, Optional, Protocol, Union
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Union
 
 import torch
 import xarray as xr
 
-from fme.core.aggregator.types import InferenceAggregatorABC
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     LatLonCoordinates,
     SigmaCoordinates,
     VariableMetadata,
 )
-from fme.core.stepper import TrainOutput
-from fme.core.typing_ import TensorMapping
+from fme.core.generics.aggregator import (
+    InferenceAggregatorABC,
+    InferenceEvaluatorAggregatorABC,
+)
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
 from ...gridded_ops import GriddedOperations
@@ -55,7 +58,6 @@ class _EvaluatorAggregator(Protocol):
     @torch.no_grad()
     def record_batch(
         self,
-        loss: float,
         target_data: TensorMapping,
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,
@@ -191,7 +193,7 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
-class InferenceEvaluatorAggregator(InferenceAggregatorABC[TrainOutput]):
+class InferenceEvaluatorAggregator(InferenceEvaluatorAggregatorABC[BatchData]):
     """
     Aggregates statistics for inference comparing a generated and target series.
 
@@ -331,38 +333,33 @@ class InferenceEvaluatorAggregator(InferenceAggregatorABC[TrainOutput]):
     @torch.no_grad()
     def record_batch(
         self,
-        batch: TrainOutput,
-        time: xr.DataArray,
+        prediction: BatchData,
+        target: BatchData,
+        normalize: Callable[[TensorMapping], TensorDict],
         i_time_start: int,
     ):
-        if len(batch.target_data) == 0:
-            raise ValueError("No data in target_data")
-        if len(batch.gen_data) == 0:
-            raise ValueError("No data in gen_data")
-        target_data = {
-            k: v for k, v in batch.target_data.items() if k in batch.gen_data
-        }
+        if len(prediction.data) == 0:
+            raise ValueError("No data in batch.data")
+        if len(target.data) == 0:
+            raise ValueError("No data in target.data")
+        target_data = {k: v for k, v in target.data.items() if k in prediction.data}
         target_data_norm = {
-            k: v
-            for k, v in batch.normalize(batch.target_data).items()
-            if k in batch.gen_data
+            k: v for k, v in normalize(target.data).items() if k in prediction.data
         }
-        loss = float(batch.get_metrics()["loss"])
-        gen_data_norm = batch.normalize(batch.gen_data)
+        gen_data_norm = normalize(prediction.data)
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
-                loss=loss,
                 target_data=target_data,
-                gen_data=batch.gen_data,
+                gen_data=prediction.data,
                 target_data_norm=target_data_norm,
                 gen_data_norm=gen_data_norm,
                 i_time_start=i_time_start,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
-                time=time,
+                time=prediction.times,
                 target_data=target_data,
-                gen_data=batch.gen_data,
+                gen_data=prediction.data,
             )
 
     @torch.no_grad()
@@ -489,8 +486,6 @@ class InferenceAggregatorConfig:
     def build(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
-        timestep: datetime.timedelta,
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
@@ -500,8 +495,6 @@ class InferenceAggregatorConfig:
             time_means = None
         return InferenceAggregator(
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
-            timestep=timestep,
             n_timesteps=n_timesteps,
             metadata=metadata,
             time_mean_reference_data=time_means,
@@ -509,7 +502,7 @@ class InferenceAggregatorConfig:
         )
 
 
-class InferenceAggregator:
+class InferenceAggregator(InferenceAggregatorABC[BatchData]):
     """
     Aggregates statistics on a single timeseries of data.
 
@@ -520,8 +513,6 @@ class InferenceAggregator:
     def __init__(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
-        timestep: datetime.timedelta,
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
@@ -559,21 +550,29 @@ class InferenceAggregator:
     @torch.no_grad()
     def record_batch(
         self,
-        time: xr.DataArray,
-        data: TensorMapping,
+        prediction: BatchData,
         i_time_start: int,
+        normalize: Optional[Callable[[TensorMapping], TensorDict]] = None,
     ):
-        if len(data) == 0:
+        """
+        Record a batch of data.
+
+        Args:
+            prediction: Batch of data to record.
+            i_time_start: Start time index.
+            normalize: Ignored, kept for API compatibility.
+        """
+        if len(prediction.data) == 0:
             raise ValueError("data is empty")
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
-                data=data,
+                data=prediction.data,
                 i_time_start=i_time_start,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
-                time=time,
-                data=data,
+                time=prediction.times,
+                data=prediction.data,
             )
 
     @torch.no_grad()

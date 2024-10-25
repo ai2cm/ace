@@ -86,7 +86,6 @@ class ZonalMeanAggregator:
 
     def record_batch(
         self,
-        loss: float,
         target_data: TensorMapping,
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,
@@ -107,9 +106,11 @@ class ZonalMeanAggregator:
         time_slice = slice(i_time_start, i_time_start + window_steps)
         # we can average along longitude without area weighting
         for name, tensor in target_data.items():
-            self._target_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+            if name in self._target_data:
+                self._target_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
         for name, tensor in gen_data.items():
-            self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
+            if name in self._gen_data:
+                self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
         self._n_batches[:, time_slice, :] += 1
 
     def _get_data(self) -> Dict[str, _RawData]:
