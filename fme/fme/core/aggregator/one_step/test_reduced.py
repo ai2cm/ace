@@ -18,7 +18,13 @@ def test_mean_metrics_call_distributed():
         area_weights = torch.ones([4]).to(get_device())
         agg = MeanAggregator(LatLonOperations(area_weights))
         sample_data = {"a": torch.ones([2, 3, 4, 4], device=get_device())}
-        agg.record_batch(1.0, sample_data, sample_data, sample_data, sample_data)
+        agg.record_batch(
+            loss=1.0,
+            target_data=sample_data,
+            gen_data=sample_data,
+            target_data_norm=sample_data,
+            gen_data_norm=sample_data,
+        )
         logs = agg.get_logs(label="metrics")
         assert logs["metrics/loss"] == -1.0
         assert logs["metrics/weighted_rmse/a"] == -1.0
@@ -38,7 +44,7 @@ def test_i_time_start_gets_correct_time_one_step_windows():
             "a": torch.full([2, 1, 4, 4], fill_value=float(i), device=get_device())
         }
         agg.record_batch(
-            1.0,
+            loss=1.0,
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,
@@ -71,7 +77,7 @@ def test_i_time_start_gets_correct_time_longer_windows(
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
         agg.record_batch(
-            1.0,
+            loss=1.0,
             target_data=target_data,
             gen_data=sample_data,
             target_data_norm=target_data,

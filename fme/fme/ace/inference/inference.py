@@ -256,8 +256,6 @@ def run_inference_from_config(config: InferenceConfig):
         )
     aggregator = config.aggregator.build(
         gridded_operations=data.gridded_operations,
-        sigma_coordinates=data.sigma_coordinates,
-        timestep=data.timestep,
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
     )

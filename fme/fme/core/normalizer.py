@@ -7,7 +7,7 @@ import torch
 import torch.jit
 
 from fme.core.device import move_tensordict_to_device
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -97,11 +97,11 @@ class StandardNormalizer:
         self.means = move_tensordict_to_device(means)
         self.stds = move_tensordict_to_device(stds)
 
-    def normalize(self, tensors: TensorDict) -> TensorDict:
-        return _normalize(tensors, means=self.means, stds=self.stds)
+    def normalize(self, tensors: TensorMapping) -> TensorDict:
+        return _normalize(dict(tensors), means=self.means, stds=self.stds)
 
-    def denormalize(self, tensors: TensorDict) -> TensorDict:
-        return _denormalize(tensors, means=self.means, stds=self.stds)
+    def denormalize(self, tensors: TensorMapping) -> TensorDict:
+        return _denormalize(dict(tensors), means=self.means, stds=self.stds)
 
     def get_state(self):
         """

@@ -82,8 +82,7 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
-from fme.core.aggregator.types import AggregatorABC, InferenceAggregatorABC
-from fme.core.data_loading.batch_data import GriddedData, GriddedDataABC
+from fme.core.data_loading.batch_data import BatchData, GriddedData, GriddedDataABC
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -93,9 +92,15 @@ from fme.core.data_loading.data_typing import (
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
+from fme.core.generics.aggregator import AggregatorABC, InferenceEvaluatorAggregatorABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
-from fme.core.stepper import BD, SD, SingleModuleStepper, StepperABC, TrainOutput
+from fme.core.stepper import (
+    SingleModuleStepper,
+    StepperABC,
+    TrainOutput,
+    TrainOutputABC,
+)
 from fme.core.wandb import WandB
 
 # dask used on individual workers to load batches
@@ -192,24 +197,25 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
 
 
-T = TypeVar("T")
+TO = TypeVar("TO", bound="TrainOutputABC")  # train output
+BD = TypeVar("BD")  # batch data
 
 
-class AggregatorBuilderABC(abc.ABC, Generic[T]):
+class AggregatorBuilderABC(abc.ABC, Generic[BD, TO]):
     @abc.abstractmethod
-    def get_train_aggregator(self) -> AggregatorABC[T]:
+    def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
 
     @abc.abstractmethod
-    def get_validation_aggregator(self) -> AggregatorABC[T]:
+    def get_validation_aggregator(self) -> AggregatorABC[TO]:
         pass
 
     @abc.abstractmethod
-    def get_inference_aggregator(self) -> InferenceAggregatorABC[T]:
+    def get_inference_aggregator(self) -> InferenceEvaluatorAggregatorABC[BD]:
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
+class AggregatorBuilder(AggregatorBuilderABC[BatchData, TrainOutput]):
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
@@ -259,17 +265,17 @@ class AggregatorBuilder(AggregatorBuilderABC[TrainOutput]):
         )
 
 
-class Trainer(Generic[BD, SD]):
+class Trainer(Generic[BD, TO]):
     def __init__(
         self,
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
         inference_data: GriddedDataABC[BD],
-        stepper: StepperABC[BD, SD],
+        stepper: StepperABC[BD, TO],
         optimization: Optimization,
         ema: EMATracker,
         config: TrainConfigProtocol,
-        aggregator_builder: AggregatorBuilderABC[SD],
+        aggregator_builder: AggregatorBuilderABC[BD, TO],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
     ):
         logging.info(f"Current device is {fme.get_device()}")

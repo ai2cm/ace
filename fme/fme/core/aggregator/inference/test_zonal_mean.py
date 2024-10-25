@@ -4,14 +4,13 @@ from fme.core import get_device
 from fme.core.aggregator.inference.zonal_mean import ZonalMeanAggregator
 
 n_sample, n_time, ny, nx = 3, 6, 10, 20
-loss = 1.0
 
 
 def test_zonal_mean_dims():
     agg = ZonalMeanAggregator(n_timesteps=n_time)
     target_data = {"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, ny, nx, device=get_device())}
-    agg.record_batch(loss, target_data, gen_data, target_data, gen_data, i_time_start=0)
+    agg.record_batch(target_data, gen_data, target_data, gen_data, i_time_start=0)
     for data in (agg._target_data, agg._gen_data):
         assert data is not None
         assert data["a"].size() == (
@@ -25,9 +24,7 @@ def test_zonal_mean_lat_varying():
     agg = ZonalMeanAggregator(n_timesteps=n_time)
     arr = torch.arange(ny, dtype=torch.float32, device=get_device())
     arr = arr[None, None, :, None].expand(n_sample, n_time, -1, nx)
-    agg.record_batch(
-        loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
-    )
+    agg.record_batch({"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0)
     for data in (agg._target_data, agg._gen_data):
         assert data is not None
         torch.testing.assert_close(
@@ -40,9 +37,7 @@ def test_zonal_mean_zonally_varying():
     agg = ZonalMeanAggregator(n_timesteps=n_time)
     arr = torch.arange(nx, dtype=torch.float32, device=get_device())
     arr = arr[None, None, None, :].expand(n_sample, n_time, ny, -1)
-    agg.record_batch(
-        loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
-    )
+    agg.record_batch({"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0)
     for data in (agg._target_data, agg._gen_data):
         assert data is not None
         torch.testing.assert_close(
@@ -56,9 +51,7 @@ def test_zonal_mean_batch_varying():
     for i in range(n_sample):  # assume one sample per batch
         arr = torch.tensor(i, dtype=torch.float32, device=get_device())
         arr = arr[None, None, None, None].expand(-1, n_time, ny, nx)
-        agg.record_batch(
-            loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0
-        )
+        agg.record_batch({"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=0)
     for data in (agg._target_data, agg._gen_data):
         assert data is not None
         torch.testing.assert_close(
@@ -76,7 +69,7 @@ def test_zonal_mean_mulitple_time_slices():
         arr = torch.arange(ny, dtype=torch.float32, device=get_device())
         arr = arr[None, None, :, None].expand(n_sample, n_time_in_memory, ny, nx)
         agg.record_batch(
-            loss, {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=i_time
+            {"a": arr}, {"a": arr}, {"a": arr}, {"a": arr}, i_time_start=i_time
         )
     for data in (agg._target_data, agg._gen_data):
         assert data is not None

@@ -56,7 +56,6 @@ class PairedVideoDataWriter:
             batch_times: Time coordinates for each sample in the batch. Unused.
         """
         self._video.record_batch(
-            loss=np.nan,
             target_data=target,
             gen_data=prediction,
             i_time_start=start_timestep,

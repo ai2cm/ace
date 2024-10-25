@@ -6,9 +6,9 @@ import torch
 import xarray as xr
 
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.stepper import TrainOutput
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -23,7 +23,6 @@ def test_logs_labels_exist():
     nx = 2
     ny = 2
     nz = 3
-    loss = 1.0
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
@@ -43,16 +42,19 @@ def test_logs_labels_exist():
         log_video=True,
         log_zonal_mean_images=True,
     )
-    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    data = TrainOutput(
-        metrics={"loss": loss},
-        target_data=target_data,
-        gen_data=gen_data,
-        normalize=lambda x: x,
+    times = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+    target_data = BatchData(
+        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+        times=times,
     )
-    agg.record_batch(data, time=time, i_time_start=0)
+    gen_data = BatchData(
+        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+        times=times,
+    )
+
+    agg.record_batch(
+        prediction=gen_data, target=target_data, normalize=lambda x: x, i_time_start=0
+    )
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
     assert "test/mean_norm/series" in logs
@@ -84,7 +86,6 @@ def test_inference_logs_labels_exist():
     nx = 2
     ny = 2
     nz = 3
-    loss = 1.0
     sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
@@ -102,16 +103,17 @@ def test_inference_logs_labels_exist():
         record_step_20=True,
         log_video=True,
     )
-    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    data = TrainOutput(
-        metrics={"loss": loss},
-        target_data=target_data,
-        gen_data=gen_data,
-        normalize=lambda x: x,
+    target_data = BatchData(
+        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
     )
-    agg.record_batch(data, time=time, i_time_start=0)
+    gen_data = BatchData(
+        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+    )
+    agg.record_batch(
+        prediction=gen_data, target=target_data, normalize=lambda x: x, i_time_start=0
+    )
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
     assert len(logs) == n_time
@@ -159,22 +161,23 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         (window_len - overlap) * n_windows + 1,
         initial_times,
     )
-    target_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
-    time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
+    target_data = BatchData(
+        data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
+        times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+    )
     i_start = 0
     for i in range(n_windows):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        data = TrainOutput(
-            metrics={"loss": 1.0},
-            target_data=target_data,
-            gen_data=sample_data,
-            normalize=lambda x: x,
+        predicted = BatchData(
+            data=sample_data,
+            times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
         agg.record_batch(
-            batch=data,
-            time=time,
+            prediction=predicted,
+            target=target_data,
+            normalize=lambda x: x,
             i_time_start=i_start,
         )
         i_start += window_len - overlap  # subtract 1 for overlapping windows
@@ -217,22 +220,23 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         (window_len - overlap) * n_windows + overlap,
         initial_times,
     )
-    target_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
-    time = get_zero_time(shape=[2, window_len], dims=["sample", "time"])
+    target_data = BatchData(
+        data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
+        times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+    )
     i_start = 0
     for i in range(n_windows):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        data = TrainOutput(
-            metrics={"loss": 1.0},
-            target_data=target_data,
-            gen_data=sample_data,
-            normalize=lambda x: x,
+        predicted = BatchData(
+            data=sample_data,
+            times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
         agg.record_batch(
-            batch=data,
-            time=time,
+            prediction=predicted,
+            target=target_data,
+            normalize=lambda x: x,
             i_time_start=i_start,
         )
         i_start += window_len - overlap  # subtract 1 for overlapping windows

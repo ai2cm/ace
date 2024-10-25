@@ -9,7 +9,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorMapping
 
-from ..types import AggregatorABC
+from ...generics.aggregator import AggregatorABC
 from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
