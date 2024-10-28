@@ -152,3 +152,21 @@ def test_GlobalTimer_inactive_then_active():
 
     with GlobalTimer():
         exercise_active_timer()
+
+
+def test_GlobalTimer_context():
+    with GlobalTimer():
+        timer = GlobalTimer.get_instance()
+        with timer.context("foo"):
+            time.sleep(0.01)
+    assert timer.get_duration("foo") > 0.01
+
+
+def test_GlobalTimer_context_with_exception():
+    with pytest.raises(ValueError):
+        with GlobalTimer():
+            timer = GlobalTimer.get_instance()
+            with timer.context("foo"):
+                time.sleep(0.01)
+                raise ValueError()
+    assert timer.get_duration("foo") > 0.01
