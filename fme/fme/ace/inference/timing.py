@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import time
 import warnings
@@ -74,6 +75,17 @@ class GlobalTimer:
     def __init__(self):
         self._timers = {}
         self._active = False
+
+    def context(self, category: str) -> contextlib.AbstractContextManager:
+        @contextlib.contextmanager
+        def timer_context():
+            try:
+                self.start(category)
+                yield
+            finally:
+                self.stop(category)
+
+        return timer_context()
 
     def start(self, category: str):
         if self._active:
