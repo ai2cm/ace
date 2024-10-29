@@ -3,6 +3,7 @@ from collections import namedtuple
 from typing import Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock
 
+import cftime
 import numpy as np
 import pytest
 import torch
@@ -10,7 +11,7 @@ import xarray as xr
 
 import fme
 from fme.core import ClimateData, metrics
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, get_atmospheric_batch_data
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -46,7 +47,8 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     data = BatchData(
         data=data_dict,
         times=xr.DataArray(
-            np.arange(n_time),
+            np.zeros((n_samples, n_time)),
+            dims=["sample", "time"],
         ),
     )
     return SphericalData(data, area_weights, sigma_coords)
@@ -483,11 +485,22 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
     )
-    batch_data = BatchData(
+    times = xr.DataArray(
+        [
+            [
+                cftime.DatetimeProlepticGregorian(
+                    2000, 1, int(i * 6 // 24) + 1, i * 6 % 24
+                )
+                for i in range(n_forward_steps + 1)
+            ]
+            for _ in range(3)
+        ],
+        dims=["sample", "time"],
+    )
+    batch_data = get_atmospheric_batch_data(
         data=data,
-        times=xr.DataArray(
-            np.arange(n_forward_steps + 1),
-        ),
+        times=times,
+        sigma_coordinates=sigma_coordinates,
     )
     # run the stepper on the data
     with torch.no_grad():
@@ -497,9 +510,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
             n_forward_steps=n_forward_steps,
         )
 
-    stepped = stepped.compute_derived_quantities(
-        sigma_coordinates=sigma_coordinates, timestep=TIMESTEP
-    )
+    stepped = stepped.compute_derived_variables()
 
     # check that the budget residual is zero
     budget_residual = stepped.gen_data["total_water_path_budget_residual"]

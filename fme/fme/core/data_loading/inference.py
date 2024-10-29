@@ -242,7 +242,10 @@ class InferenceDataset(torch.utils.data.Dataset):
                         tensors[self._ocean_fraction_name],
                     )
             sample_tuples.append((tensors, times))
-        result = BatchData.from_sample_tuples(sample_tuples)
+        result = BatchData.atmospheric_from_sample_tuples(
+            sample_tuples,
+            sigma_coordinates=self._sigma_coordinates,
+        )
         assert result.times.shape[0] == self._n_initial_conditions // dist.world_size
         return result
 
