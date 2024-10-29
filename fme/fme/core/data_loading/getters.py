@@ -134,6 +134,12 @@ def get_data_loader(
         mp_context = None
         persistent_workers = False
 
+    def collate_fn(samples):
+        return BatchData.atmospheric_from_sample_tuples(
+            samples,
+            sigma_coordinates=dataset.sigma_coordinates,
+        )
+
     batch_size = dist.local_batch_size(int(config.batch_size))
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -142,7 +148,7 @@ def get_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=BatchData.from_sample_tuples,
+        collate_fn=collate_fn,
         prefetch_factor=config.prefetch_factor,
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,

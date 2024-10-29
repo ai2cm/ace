@@ -4,6 +4,7 @@ import datetime
 import logging
 from typing import (
     Any,
+    Callable,
     Generic,
     Iterator,
     Literal,
@@ -20,6 +21,9 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
+from fme.ace.inference.derived_variables import (
+    compute_derived_quantities,  # TODO: move to core or move stepper to ace
+)
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     SigmaCoordinates,
@@ -27,7 +31,50 @@ from fme.core.data_loading.data_typing import (
 )
 from fme.core.device import move_tensordict_to_device
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
+
+
+def get_atmospheric_batch_data(
+    data: TensorMapping,
+    times: xr.DataArray,
+    sigma_coordinates: SigmaCoordinates,
+) -> "BatchData":
+    """
+    Get atmospheric batch data.
+
+    Args:
+        data: Data for each variable in each sample of shape (sample, time, ...),
+            concatenated along samples to make a batch.
+        times: An array of times of shape (sample, time) for each sample in the batch,
+            concatenated along samples to make a batch.
+        sigma_coordinates: Sigma coordinates for the data.
+
+    Returns:
+        BatchData: The batch data.
+    """
+    if times.shape[1] < 2:
+        raise ValueError(
+            "Times must have at least two timesteps to compute derived variables. "
+            "If you don't need to compute derived variables, initialize BatchData "
+            "directly."
+        )
+    timestep = times.values[0, 1] - times.values[0, 0]
+
+    def _derive_func(
+        batch_data: TensorMapping, forcing_data: TensorMapping
+    ) -> TensorDict:
+        return compute_derived_quantities(
+            dict(batch_data),
+            sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
+            forcing_data=dict(forcing_data),
+        )
+
+    return BatchData(
+        data=data,
+        times=times,
+        derive_func=_derive_func,
+    )
 
 
 @dataclasses.dataclass
@@ -35,20 +82,28 @@ class BatchData:
     """A container for the data and time coordinates of a batch.
 
     Attributes:
-        data: Data for each variable in each sample, concatenated along samples
-            to make a batch. To be used directly in training, validation, and
-            inference.
-        times: An array of times for each sample in the batch, concatenated along
-            samples to make a batch. To be used in writing out inference
-            predictions with time coordinates, not directly in ML.
-
+        data: Data for each variable in each sample of shape (sample, time, ...),
+            concatenated along samples to make a batch.
+        times: An array of times of shape (sample, time) for each sample in the batch,
+            concatenated along samples to make a batch. To be used in writing out
+            inference predictions with time coordinates, not directly in ML.
+        derive_func: A function that takes a batch of data and a batch of forcing data
+            and returns a batch of derived data. If not given, no derived variables
+            are computed.
     """
 
     data: TensorMapping
     times: xr.DataArray
+    derive_func: Callable[
+        [TensorMapping, TensorMapping], TensorDict
+    ] = lambda x, _: dict(x)
 
     def __post_init__(self):
         self._device_data: Optional[TensorMapping] = None
+        if len(self.times.shape) != 2:
+            raise ValueError(
+                "Expected times to have 2 dimensions, got " f"{len(self.times.shape)}."
+            )
 
     @property
     def device_data(self) -> TensorMapping:
@@ -61,6 +116,25 @@ class BatchData:
         cls,
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
+        derive_func: Callable[
+            [TensorMapping, TensorMapping], TensorDict
+        ] = lambda x, _: dict(x),
+    ) -> "BatchData":
+        sample_data, sample_times = zip(*samples)
+        batch_data = default_collate(sample_data)
+        batch_times = xr.concat(sample_times, dim=sample_dim_name)
+        return cls(
+            data=batch_data,
+            times=batch_times,
+            derive_func=derive_func,
+        )
+
+    @classmethod
+    def atmospheric_from_sample_tuples(
+        cls,
+        samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
+        sigma_coordinates: SigmaCoordinates,
+        sample_dim_name: str = "sample",
     ) -> "BatchData":
         """
         Collate function for use with PyTorch DataLoader. Needed since samples contain
@@ -70,7 +144,19 @@ class BatchData:
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        return cls(batch_data, batch_times)
+        return get_atmospheric_batch_data(
+            data=batch_data, times=batch_times, sigma_coordinates=sigma_coordinates
+        )
+
+    def compute_derived_variables(self, forcing_data: "BatchData") -> "BatchData":
+        if not np.all(forcing_data.times.values == self.times.values):
+            raise ValueError("Forcing data must have the same times as the batch data.")
+        derived_data = self.derive_func(self.data, forcing_data.data)
+        return BatchData(
+            data={**self.data, **derived_data},
+            times=self.times,
+            derive_func=self.derive_func,
+        )
 
 
 T = TypeVar("T", covariant=True)

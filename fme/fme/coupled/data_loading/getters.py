@@ -10,7 +10,7 @@ from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledGriddedData
 from fme.coupled.data_loading.config import CoupledDataConfig, CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import CoupledDataset
+from fme.coupled.data_loading.data_typing import CoupledDataset, CoupledDatasetItem
 from fme.coupled.data_loading.requirements import CoupledDataRequirements
 
 
@@ -65,6 +65,12 @@ def get_coupled_data_loader(
         mp_context = None
         persistent_workers = False
 
+    def collate_fn(samples: List[CoupledDatasetItem]):
+        return CoupledBatchData.collate_fn(
+            samples,
+            sigma_coordinates=datasets[0].sigma_coordinates,
+        )
+
     batch_size = dist.local_batch_size(int(config.batch_size))
     dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -73,7 +79,7 @@ def get_coupled_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CoupledBatchData.collate_fn,
+        collate_fn=collate_fn,
         prefetch_factor=config.prefetch_factor,
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
