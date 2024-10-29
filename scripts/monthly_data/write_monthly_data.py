@@ -3,7 +3,7 @@ import dataclasses
 import datetime
 import logging
 import os
-from typing import List
+from typing import List, Sequence, Tuple
 
 import dacite
 import torch.utils.data
@@ -24,6 +24,7 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def get_data_loaders(
@@ -37,6 +38,24 @@ def get_data_loaders(
         )
 
     datasets = get_datasets(config.dataset, requirements)
+    sigma_coordinates = datasets[0].sigma_coordinates
+    timestep = datasets[0].timestep
+
+    def _derive_func(
+        batch_data: TensorMapping, forcing_data: TensorMapping
+    ) -> TensorDict:
+        return compute_derived_quantities(
+            dict(batch_data),
+            sigma_coordinates=sigma_coordinates,
+            timestep=timestep,
+            forcing_data=dict(forcing_data),
+        )
+
+    def collate_fn(batch: Sequence[Tuple[TensorMapping, xr.DataArray]]):
+        return BatchData.from_sample_tuples(
+            batch,
+            derive_func=_derive_func,
+        )
 
     data_loaders = []
     for dataset in datasets:
@@ -48,7 +67,7 @@ def get_data_loaders(
             sampler=None,
             drop_last=True,
             pin_memory=using_gpu(),
-            collate_fn=BatchData.from_sample_tuples,
+            collate_fn=collate_fn,
         )
         data_loaders.append(dataloader)
     return data_loaders
@@ -159,9 +178,7 @@ def run(config: Config):
         # we set n_timesteps to 1 in the DataRequirements
         assert list(window_batch_data.data.values())[0].shape[1] == 1
 
-        window_batch_data.data = compute_derived_quantities(
-            window_batch_data.data, data.sigma_coordinates, data.timestep
-        )
+        window_batch_data.compute_derived_variables(window_batch_data)
         writer.append_batch(
             data=window_batch_data.data,
             start_timestep=-1,  # ignored
