@@ -616,6 +616,7 @@ def test_compute_derived_quantities(has_required_fields):
         metrics,
         fake_data["gen_data"],
         fake_data["target_data"],
+        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )

@@ -27,7 +27,7 @@ from fme.core.stepper import (
     TrainOutput,
     _combine_normalizers,
 )
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorDict
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 TIMESTEP = datetime.timedelta(hours=6)
@@ -178,9 +178,7 @@ def test_run_on_batch_addition_series():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped = stepper.train_on_batch(
-        data=data_with_ic, optimization=MagicMock(), n_forward_steps=n_steps
-    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=MagicMock())
     # output of run_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, n_steps, 5, 5)
     data = {k: data_with_ic.data[k][:, 1:] for k in data_with_ic.data}
@@ -236,9 +234,7 @@ def test_run_on_batch_with_prescribed_ocean():
     stepper = config.get_stepper(
         area.shape, gridded_operations, sigma_coordinates, TIMESTEP
     )
-    stepped = stepper.train_on_batch(
-        data, optimization=MagicMock(), n_forward_steps=n_steps
-    )
+    stepped = stepper.train_on_batch(data, optimization=MagicMock())
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
@@ -272,8 +268,8 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
     )
     shapes = {
-        "a": (1, 1, 5, 5),
-        "b": (1, 1, 5, 5),
+        "a": (1, 2, 5, 5),
+        "b": (1, 2, 5, 5),
     }
     area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
@@ -289,12 +285,10 @@ def test_reloaded_stepper_gives_same_prediction():
     first_result = stepper.train_on_batch(
         data=data,
         optimization=NullOptimization(),
-        n_forward_steps=1,
     )
     second_result = new_stepper.train_on_batch(
         data=data,
         optimization=NullOptimization(),
-        n_forward_steps=1,
     )
     assert torch.allclose(first_result.metrics["loss"], second_result.metrics["loss"])
     assert torch.allclose(first_result.gen_data["a"], second_result.gen_data["a"])
@@ -332,7 +326,6 @@ def _setup_and_run_on_batch(
     in_names,
     out_names,
     ocean_config: Optional[OceanConfig],
-    n_forward_steps,
     optimization_config: Optional[OptimizationConfig],
 ):
     """Sets up the requisite classes to run run_on_batch."""
@@ -358,9 +351,7 @@ def _setup_and_run_on_batch(
     stepper = config.get_stepper(
         area.shape, LatLonOperations(area), sigma_coordinates, TIMESTEP
     )
-    return stepper.train_on_batch(
-        data, optimization=optimization, n_forward_steps=n_forward_steps
-    )
+    return stepper.train_on_batch(data, optimization=optimization)
 
 
 @pytest.mark.parametrize(
@@ -396,9 +387,7 @@ def test_run_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescri
     else:
         optimization = None
 
-    _setup_and_run_on_batch(
-        data, in_names, out_names, ocean_config, n_forward_steps, optimization
-    )
+    _setup_and_run_on_batch(data, in_names, out_names, ocean_config, optimization)
 
 
 class Multiply(torch.nn.Module):
@@ -507,7 +496,6 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         stepped = stepper.train_on_batch(
             data=batch_data,
             optimization=NullOptimization(),
-            n_forward_steps=n_forward_steps,
         )
 
     stepped = stepped.compute_derived_variables()
@@ -660,53 +648,68 @@ def test_step_with_prescribed_ocean():
     assert set(output) == {"a", "b"}
 
 
+def get_data_for_predict(
+    n_steps, forcing_names: List[str]
+) -> Tuple[TensorDict, BatchData]:
+    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
+    forcing_data = BatchData(
+        data={
+            name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
+        },
+        times=xr.DataArray(
+            np.random.randn(3, n_steps + 1),
+        ),
+    )
+    return input_data, forcing_data
+
+
 def test_predict():
-    stepper = _get_stepper(["a", "b"], ["a", "b"])
+    stepper = _get_stepper(["a"], ["a"])
     n_steps = 3
-    input_data = {x: torch.rand(3, 1, 5, 5).to(DEVICE) for x in ["a", "b"]}
-    forcing_data: TensorMapping = {}
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
     output = stepper.predict(input_data, forcing_data, n_steps)
-    for variable in ["a", "b"]:
-        assert output[variable].size(dim=1) == n_steps
-        torch.testing.assert_close(
-            output[variable][:, -1], input_data[variable][:, 0] + n_steps
-        )
+    variable = "a"
+    assert output.data[variable].size(dim=1) == n_steps
+    torch.testing.assert_close(
+        output.data[variable][:, -1], input_data[variable][:, 0] + n_steps
+    )
+    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
 
 
 def test_predict_with_forcing():
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
-    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
-    forcing_data = {"b": torch.rand(3, n_steps + 1, 5, 5).to(DEVICE)}
+    input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
     output = stepper.predict(input_data, forcing_data, n_steps)
-    assert "b" not in output
-    assert output["a"].size(dim=1) == n_steps
+    assert "b" not in output.data
+    assert output.data["a"].size(dim=1) == n_steps
     torch.testing.assert_close(
-        output["a"][:, 0], input_data["a"][:, 0] + forcing_data["b"][:, 0]
+        output.data["a"][:, 0], input_data["a"][:, 0] + forcing_data.data["b"][:, 0]
     )
     for n in range(1, n_steps):
-        expected_a_output = output["a"][:, n - 1] + forcing_data["b"][:, n]
-        torch.testing.assert_close(output["a"][:, n], expected_a_output)
+        expected_a_output = output.data["a"][:, n - 1] + forcing_data.data["b"][:, n]
+        torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
+    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
 
 
 def test_predict_with_ocean():
     stepper = _get_stepper(["a"], ["a"], ocean_config=OceanConfig("a", "mask"))
     n_steps = 3
-    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
-    forcing_data = {
-        x: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for x in ["a", "mask"]
-    }
+    input_data, forcing_data = get_data_for_predict(
+        n_steps, forcing_names=["a", "mask"]
+    )
     output = stepper.predict(input_data, forcing_data, n_steps)
-    assert "mask" not in output
-    assert output["a"].size(dim=1) == n_steps
+    assert "mask" not in output.data
+    assert output.data["a"].size(dim=1) == n_steps
     for n in range(n_steps):
-        previous_a = input_data["a"][:, 0] if n == 0 else output["a"][:, n - 1]
+        previous_a = input_data["a"][:, 0] if n == 0 else output.data["a"][:, n - 1]
         expected_a_output = torch.where(
-            torch.round(forcing_data["mask"][:, n + 1]).to(int) == 1,
-            forcing_data["a"][:, n + 1],
+            torch.round(forcing_data.data["mask"][:, n + 1]).to(int) == 1,
+            forcing_data.data["a"][:, n + 1],
             previous_a + 1,
         )
-        torch.testing.assert_close(output["a"][:, n], expected_a_output)
+        torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
+    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
 
 
 def test_next_step_forcing_names():
@@ -716,14 +719,13 @@ def test_next_step_forcing_names():
         module_name="ChannelSum",
         next_step_forcing_names=["c"],
     )
-    input_data = {x: torch.rand(1, 1, 5, 5).to(DEVICE) for x in ["a"]}
-    forcing_data = {x: torch.rand(1, 2, 5, 5).to(DEVICE) for x in ["b", "c"]}
+    input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=["b", "c"])
     stepper.predict(input_data, forcing_data, 1)
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 1, :], forcing_data["b"][:, 0]
+        stepper.module.module.last_input[:, 1, :], forcing_data.data["b"][:, 0]
     )
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 2, :], forcing_data["c"][:, 1]
+        stepper.module.module.last_input[:, 2, :], forcing_data.data["c"][:, 1]
     )
 
 
@@ -738,17 +740,21 @@ def test_prepend_initial_condition():
     stepped = TrainOutput(
         gen_data={"a": x, "b": x + 1},
         target_data={"a": x + 2, "b": x + 3},
+        times=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
         metrics={"loss": torch.tensor(0.0)},
         normalize=normalize,
     )
-    ic = {
-        "a": torch.rand(3, 1, 5).to(DEVICE),
-        "b": torch.rand(3, 1, 5).to(DEVICE),
-    }
-    prepended = stepped.prepend_initial_condition(ic, ic)
+    ic = BatchData(
+        data={
+            "a": torch.rand(3, 1, 5).to(DEVICE),
+            "b": torch.rand(3, 1, 5).to(DEVICE),
+        },
+        times=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+    )
+    prepended = stepped.prepend_initial_condition(ic)
     for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, :1], ic[v])
-        assert torch.allclose(prepended.target_data[v][:, :1], ic[v])
+        assert torch.allclose(prepended.gen_data[v][:, :1], ic.data[v])
+        assert torch.allclose(prepended.target_data[v][:, :1], ic.data[v])
 
 
 def test__combine_normalizers():

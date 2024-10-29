@@ -1,7 +1,9 @@
 import datetime
 
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -101,6 +103,7 @@ def test_compute_derived_quantities(dataset: str):
         metrics={"loss": torch.tensor(0.0)},
         gen_data=gen_data,
         target_data=fake_data,
+        times=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )
