@@ -43,7 +43,7 @@ class PairedNormalizationConfig:
         self, in_names: List[str], out_names: List[str]
     ) -> FineResCoarseResPair[StandardNormalizer]:
         return FineResCoarseResPair[StandardNormalizer](
-            coarse=self.coarse.build(in_names),
+            coarse=self.coarse.build(list(set(in_names).union(out_names))),
             fine=self.fine.build(out_names),
         )
 
@@ -94,7 +94,8 @@ class DownscalingModelConfig:
     @property
     def data_requirements(self) -> DataRequirements:
         return DataRequirements(
-            names=list(set(self.in_names).union(self.out_names)),
+            fine_names=self.out_names,
+            coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
             use_fine_topography=self.use_fine_topography,
         )
@@ -159,9 +160,10 @@ class Model:
         optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         channel_axis = -3
-        coarse, fine = _tensor_mapping_to_device(
-            batch.coarse, get_device()
-        ), _tensor_mapping_to_device(batch.fine, get_device())
+        coarse, fine = (
+            _tensor_mapping_to_device(batch.coarse, get_device()),
+            _tensor_mapping_to_device(batch.fine, get_device()),
+        )
         inputs_norm = self.in_packer.pack(
             self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
         )
@@ -283,7 +285,8 @@ class DiffusionModelConfig:
     @property
     def data_requirements(self) -> DataRequirements:
         return DataRequirements(
-            names=list(set(self.in_names).union(self.out_names)),
+            fine_names=self.out_names,
+            coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
             use_fine_topography=self.use_fine_topography,
         )
@@ -357,11 +360,13 @@ class DiffusionModel:
         """Performs a denoising training step on a batch of data."""
 
         channel_axis = -3
-        coarse, fine = _tensor_mapping_to_device(
-            batch.coarse, get_device()
-        ), _tensor_mapping_to_device(batch.fine, get_device())
+        coarse, fine = (
+            _tensor_mapping_to_device(batch.coarse, get_device()),
+            _tensor_mapping_to_device(batch.fine, get_device()),
+        )
+        coarse_input = {k: v for k, v in coarse.items() if k in self.in_packer.names}
         coarse_norm = self.in_packer.pack(
-            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
+            self.normalizer.coarse.normalize(coarse_input), axis=channel_axis
         )
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
@@ -413,9 +418,10 @@ class DiffusionModel:
         n_samples: int = 1,
     ) -> ModelOutputs:
         channel_axis = -3
-        coarse, fine = _tensor_mapping_to_device(
-            batch.coarse, get_device()
-        ), _tensor_mapping_to_device(batch.fine, get_device())
+        coarse, fine = (
+            _tensor_mapping_to_device(batch.coarse, get_device()),
+            _tensor_mapping_to_device(batch.fine, get_device()),
+        )
 
         coarse_norm = self.in_packer.pack(
             self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis

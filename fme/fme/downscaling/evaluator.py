@@ -122,7 +122,8 @@ class InterpolateModelConfig:
     @property
     def data_requirements(self) -> DataRequirements:
         return DataRequirements(
-            names=list(set(self.in_names).union(self.out_names)),
+            fine_names=self.out_names,
+            coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
             use_fine_topography=False,  # topography is irrelevant for interpolation
         )
@@ -199,7 +200,8 @@ class CheckpointModelConfig:
         in_names = self.checkpoint_dict["model"]["config"]["in_names"]
         out_names = self.checkpoint_dict["model"]["config"]["out_names"]
         return DataRequirements(
-            names=list(set(in_names).union(out_names)),
+            fine_names=out_names,
+            coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
             use_fine_topography=self.checkpoint_dict.get("use_fine_topography", False),
         )

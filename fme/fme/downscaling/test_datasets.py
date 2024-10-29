@@ -70,8 +70,7 @@ def test_downscaling_dataset(n_examples, index):
     ),
     [
         pytest.param(1, ["x"], 0, 2, ["x"], 0, id="num_samples"),
-        pytest.param(1, ["x"], 0, 1, ["x", "y"], 0, id="var_names"),
-        pytest.param(1, ["x"], 0, 1, ["x"], 1, id="var_names"),
+        pytest.param(1, ["x"], 0, 1, ["x"], 1, id="times"),
     ],
 )
 def test_downscaling_dataset_validate(
@@ -148,14 +147,15 @@ def test_dataloader_build(tmp_path):
     fine_path.mkdir()
     coarse_path.mkdir()
 
-    all_names = ["x", "y", "HGTsfc"]
+    coarse_names = ["x", "y", "coarse_only_input"]
+    fine_names = ["x", "y"]
     num_timesteps = 10
     fine_shape, coarse_shape = (64, 32), (32, 16)
     num_vertical_levels = 1
     fine_data, coarse_data = [
         FV3GFSData(
             path=path,
-            names=all_names,
+            names=names,
             dim_sizes=DimSizes(
                 num_timesteps,
                 [DimSize("grid_yt", h), DimSize("grid_xt", w)],
@@ -164,7 +164,10 @@ def test_dataloader_build(tmp_path):
             time_varying_values=[float(i) for i in range(num_timesteps)],
             timestep_days=0.25,
         )
-        for (path, (h, w)) in [(fine_path, fine_shape), (coarse_path, coarse_shape)]
+        for (path, (h, w), names) in [
+            (fine_path, fine_shape, fine_names),
+            (coarse_path, coarse_shape, coarse_names),
+        ]
     ]
     batch_size = 2
     config = DataLoaderConfig(
@@ -176,13 +179,17 @@ def test_dataloader_build(tmp_path):
     )
 
     loader = config.build(
-        True, DataRequirements(all_names, 1, use_fine_topography=False), None
+        True,
+        DataRequirements(fine_names, coarse_names, 1, use_fine_topography=False),
+        None,
     )
     assert len(loader.loader) == num_timesteps // batch_size
     assert len(loader.loader.dataset) == num_timesteps  # type: ignore
     assert loader.downscale_factor == 2
     batch = next(iter(loader.loader))
-    for var_name in all_names:
+    for var_name in fine_names:
         assert batch.fine[var_name].shape == (batch_size, *fine_shape)
+        assert batch.times.shape == (batch_size,)
+    for var_name in coarse_names:
         assert batch.coarse[var_name].shape == (batch_size, *coarse_shape)
         assert batch.times.shape == (batch_size,)
