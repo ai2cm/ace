@@ -123,7 +123,10 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     initial_condition_path = tmp_path / "init_data" / "ic.nc"
     initial_condition_path.parent.mkdir()
     initial_condition["time"] = xr.DataArray(
-        [cftime.datetime(2000, 1, 1, 6), cftime.datetime(2000, 1, 1, 18)],
+        [
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 6),
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 18),
+        ],
         dims=["sample"],
     )
     initial_condition.to_netcdf(initial_condition_path, mode="w")

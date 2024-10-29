@@ -11,7 +11,6 @@ from typing import (
     List,
     Mapping,
     Optional,
-    Protocol,
     Tuple,
     TypeVar,
     Union,
@@ -21,10 +20,8 @@ import dacite
 import torch
 from torch import nn
 
-from fme.ace.inference.derived_variables import (
-    compute_derived_quantities,  # TODO: move to core or move stepper to ace
-)
 from fme.core.corrector import CorrectorConfig
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
@@ -294,9 +291,7 @@ class TrainOutputABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def compute_derived_quantities(
-        self: SD, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
-    ) -> SD:
+    def compute_derived_variables(self: SD) -> SD:
         ...
 
     @abc.abstractmethod
@@ -310,6 +305,9 @@ class TrainOutput(TrainOutputABC):
     gen_data: TensorDict
     target_data: TensorDict
     normalize: Callable[[TensorDict], TensorDict]
+    derive_func: Callable[
+        [TensorMapping, TensorMapping], TensorDict
+    ] = lambda x, _: dict(x)
 
     def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
         return TrainOutput(
@@ -355,14 +353,17 @@ class TrainOutput(TrainOutputABC):
             normalize=self.normalize,
         )
 
-    def compute_derived_quantities(
-        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+    def compute_derived_variables(
+        self,
     ) -> "TrainOutput":
-        return compute_stepped_derived_quantities(
-            self,
-            sigma_coordinates,
-            timestep,
-            forcing_data=self.target_data,
+        gen_data = self.derive_func(self.gen_data, self.target_data)
+        target_data = self.derive_func(self.target_data, self.target_data)
+        return TrainOutput(
+            metrics=self.metrics,
+            gen_data=gen_data,
+            target_data=target_data,
+            normalize=self.normalize,
+            derive_func=self.derive_func,
         )
 
     def get_metrics(self) -> Dict[str, torch.Tensor]:
@@ -422,13 +423,7 @@ class StepperABC(abc.ABC, Generic[BD, SD]):
         pass
 
 
-class HasDeviceData(Protocol):
-    @property
-    def device_data(self) -> TensorMapping:
-        ...
-
-
-class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
+class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
     """
     Stepper class for a single pytorch module.
     """
@@ -668,7 +663,7 @@ class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
             )
         return output_timeseries
 
-    def get_initial_condition(self, data: HasDeviceData) -> TensorDict:
+    def get_initial_condition(self, data: BatchData) -> TensorDict:
         if self.TIME_DIM != 1:
             raise NotImplementedError(
                 "get_initial_condition hard-codes time dimension at index 1"
@@ -678,7 +673,7 @@ class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
 
     def train_on_batch(
         self,
-        data: HasDeviceData,
+        data: BatchData,
         optimization: OptimizationABC,
         n_forward_steps: int = 1,
         keep_initial_condition: bool = False,
@@ -745,6 +740,7 @@ class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
             gen_data=gen_data,
             target_data=data_,
             normalize=self.normalizer.normalize,
+            derive_func=data.derive_func,
         )
         if keep_initial_condition:
             ic = self.get_initial_condition(data)
@@ -843,21 +839,3 @@ class SingleModuleStepper(StepperABC[HasDeviceData, TrainOutput]):
         )
         stepper.load_state(state)
         return stepper
-
-
-def compute_stepped_derived_quantities(
-    stepped: TrainOutput,
-    sigma_coordinates: SigmaCoordinates,
-    timestep: datetime.timedelta,
-    forcing_data: Optional[Dict[str, torch.Tensor]] = None,
-) -> TrainOutput:
-    stepped.gen_data = compute_derived_quantities(
-        stepped.gen_data, sigma_coordinates, timestep, forcing_data
-    )
-    stepped.target_data = compute_derived_quantities(
-        stepped.target_data,
-        sigma_coordinates,
-        timestep,
-        forcing_data,
-    )
-    return stepped

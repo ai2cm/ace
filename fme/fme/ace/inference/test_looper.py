@@ -43,7 +43,7 @@ def get_scalar_data(names, value):
 class MockLoader(torch.utils.data.DataLoader):
     def __init__(self, shape: tuple, names: Iterable[str], n_windows: int):
         self._data = {n: torch.rand(*shape) for n in names}
-        self._time = xr.DataArray(np.arange(shape[1]), dims=["time"])
+        self._time = xr.DataArray(np.zeros(shape[:2]), dims=["sample", "time"])
         self._n_windows = n_windows
         self._current_window = 0
 

@@ -5,9 +5,14 @@ import torch
 
 from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.stepper import TrainOutput, compute_stepped_derived_quantities
+from fme.core.stepper import TrainOutput
+from fme.core.typing_ import TensorDict, TensorMapping
 
-from .derived_variables import DerivedVariableRegistryEntry, _compute_derived_variable
+from .derived_variables import (
+    DerivedVariableRegistryEntry,
+    _compute_derived_variable,
+    compute_derived_quantities,
+)
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -62,9 +67,6 @@ def test_compute_derived_quantities(dataset: str):
         }
         gen_data = fake_data.copy()
         del gen_data["DSWRFtoa"]
-        forcing_data = {
-            "DSWRFtoa": torch.rand(2, 3, 4, 8),
-        }
 
     if dataset == "e3sm":
         fake_data = {
@@ -80,23 +82,29 @@ def test_compute_derived_quantities(dataset: str):
         }
         gen_data = fake_data.copy()
         del gen_data["SOLIN"]
-        forcing_data = {
-            "SOLIN": torch.rand(2, 3, 4, 8),
-        }
+
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.tensor([0.0, 0.5, 0.0]),
+        bk=torch.tensor([0.0, 0.5, 1.0]),
+    )
+
+    def derive_func(data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        updated = compute_derived_quantities(
+            dict(data),
+            sigma_coordinates=sigma_coordinates,
+            timestep=TIMESTEP,
+            forcing_data=dict(forcing_data),
+        )
+        return updated
 
     data = TrainOutput(
         metrics={"loss": torch.tensor(0.0)},
         gen_data=gen_data,
         target_data=fake_data,
         normalize=lambda x: x,
+        derive_func=derive_func,
     )
-    sigma_coordinates = SigmaCoordinates(
-        ak=torch.tensor([0.0, 0.5, 0.0]),
-        bk=torch.tensor([0.0, 0.5, 1.0]),
-    )
-    out_data = compute_stepped_derived_quantities(
-        data, sigma_coordinates, TIMESTEP, forcing_data=forcing_data
-    )
+    out_data = data.compute_derived_variables()
     for name in (
         "total_water_path_budget_residual",
         "total_water_path",

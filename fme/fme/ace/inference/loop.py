@@ -222,7 +222,9 @@ def run_inference(
                             example_tensor, fill_value=torch.nan
                         )
                 aggregator.record_batch(
-                    prediction=BatchData(data=ic_filled, times=initial_times),
+                    prediction=BatchData(
+                        data=ic_filled, times=initial_times.expand_dims("time", axis=1)
+                    ),
                     normalize=stepper.normalizer.normalize,
                     i_time_start=i_time,
                 )
@@ -367,9 +369,7 @@ def run_dataset_comparison(
         )
         timer.stop("forward_prediction")
         timer.start("compute_derived_variables")
-        stepped = stepped.compute_derived_quantities(
-            target_data.sigma_coordinates, target_data.timestep
-        )
+        stepped = stepped.compute_derived_variables()
         target_times = target.times
         timer.stop("compute_derived_variables")
 

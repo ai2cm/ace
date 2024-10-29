@@ -499,10 +499,7 @@ class Trainer(Generic[BD, TO]):
                     keep_initial_condition=True,
                 )
 
-                stepped = stepped.compute_derived_quantities(
-                    self.valid_data.sigma_coordinates,
-                    self.valid_data.timestep,
-                )
+                stepped = stepped.compute_derived_variables()
                 aggregator.record_batch(
                     batch=stepped,
                 )

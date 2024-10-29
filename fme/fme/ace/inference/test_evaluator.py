@@ -30,9 +30,11 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.stepper import (
     SingleModuleStepperConfig,
     TrainOutput,
-    compute_stepped_derived_quantities,
 )
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
+from fme.core.typing_ import TensorDict, TensorMapping
+
+from .derived_variables import compute_derived_quantities
 
 DIR = pathlib.Path(__file__).parent
 TIMESTEP = datetime.timedelta(hours=6)
@@ -594,6 +596,20 @@ def test_compute_derived_quantities(has_required_fields):
             for var in vars
         }
 
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.linspace(0, 1, nz + 1, device=get_device()),
+        bk=torch.linspace(0, 1, nz + 1, device=get_device()),
+    )
+
+    def derive_func(data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        updated = compute_derived_quantities(
+            dict(data),
+            sigma_coordinates=sigma_coordinates,
+            timestep=TIMESTEP,
+            forcing_data=dict(forcing_data),
+        )
+        return updated
+
     metrics = {"loss": 42.0}
     fake_data = {k: _make_data() for k in ("gen_data", "target_data")}
     stepped = TrainOutput(
@@ -601,15 +617,10 @@ def test_compute_derived_quantities(has_required_fields):
         fake_data["gen_data"],
         fake_data["target_data"],
         normalize=lambda x: x,
+        derive_func=derive_func,
     )
 
-    sigma_coords = SigmaCoordinates(
-        ak=torch.linspace(0, 1, nz + 1, device=get_device()),
-        bk=torch.linspace(0, 1, nz + 1, device=get_device()),
-    )
-    derived_stepped = compute_stepped_derived_quantities(
-        stepped, sigma_coords, TIMESTEP
-    )
+    derived_stepped = stepped.compute_derived_variables()
 
     dry_air_name = "surface_pressure_due_to_dry_air"
     water_path_name = "total_water_path"
