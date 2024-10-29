@@ -1,5 +1,7 @@
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 from fme.core.aggregator.one_step import OneStepAggregator
 from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
@@ -24,6 +26,7 @@ def test_labels_exist():
             metrics={"loss": loss},
             target_data=target_data,
             gen_data=gen_data,
+            times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
         ),
     )
@@ -52,6 +55,7 @@ def test_aggregator_raises_on_no_data():
                 metrics={"loss": 1.0},
                 target_data={},
                 gen_data={},
+                times=xr.DataArray(np.zeros((0, 0)), dims=["sample", "time"]),
                 normalize=lambda x: x,
             ),
         )

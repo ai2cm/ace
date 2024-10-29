@@ -420,7 +420,6 @@ class Trainer(Generic[BD, TO]):
                 stepped = self.stepper.train_on_batch(
                     batch,
                     optimization=self._no_optimization,
-                    n_forward_steps=self.config.n_forward_steps,
                 )
 
                 if self.config.log_train_every_n_batches > 0:
@@ -435,7 +434,6 @@ class Trainer(Generic[BD, TO]):
             stepped = self.stepper.train_on_batch(
                 batch,
                 self.optimization,
-                n_forward_steps=self.config.n_forward_steps,
             )
             aggregator.record_batch(stepped)
             self._end_of_batch_ops()
@@ -495,7 +493,6 @@ class Trainer(Generic[BD, TO]):
                 stepped = self.stepper.train_on_batch(
                     batch,
                     optimization=NullOptimization(),
-                    n_forward_steps=self.config.n_forward_steps,
                     keep_initial_condition=True,
                 )
 
