@@ -21,7 +21,7 @@ from fme.core.generics.aggregator import (
 )
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import TrainOutput
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
@@ -29,7 +29,7 @@ from .derived_variables import compute_derived_quantities
 
 
 def _prepend_timesteps(
-    data: TensorDict, timesteps: TensorDict, time_dim: int = 1
+    data: TensorMapping, timesteps: TensorMapping, time_dim: int = 1
 ) -> TensorDict:
     return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
@@ -94,18 +94,18 @@ class Looper:
         timer.stop("data_loading")
         timer.start("forward_prediction")
         prediction = self._stepper.predict(
-            self._prognostic_state, forcing_data, n_forward_steps
+            self._prognostic_state, batch_data, n_forward_steps
         )
         timer.stop("forward_prediction")
         timer.start("compute_derived_variables")
-        prediction_with_ic = _prepend_timesteps(prediction, self._prognostic_state)
+        prediction_with_ic = _prepend_timesteps(prediction.data, self._prognostic_state)
         prediction_and_derived = self._compute_derived(prediction_with_ic, forcing_data)
         if self._compute_derived_for_loaded_data:
             forcing_data = self._compute_derived(forcing_data, forcing_data)
 
         # save prognostic state for next iteration
         self._prognostic_state = {
-            k: v[:, -self._n_ic_timesteps :] for k, v in prediction.items()
+            k: v[:, -self._n_ic_timesteps :] for k, v in prediction.data.items()
         }
         self._current_time = times.isel(time=slice(-self._n_ic_timesteps, None))
 
@@ -365,6 +365,7 @@ def run_dataset_comparison(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,
             target_window_data,
+            times=pred.times,
             normalize=normalizer.normalize,
         )
         timer.stop("forward_prediction")

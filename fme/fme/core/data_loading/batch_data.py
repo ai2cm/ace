@@ -102,7 +102,8 @@ class BatchData:
         self._device_data: Optional[TensorMapping] = None
         if len(self.times.shape) != 2:
             raise ValueError(
-                "Expected times to have 2 dimensions, got " f"{len(self.times.shape)}."
+                "Expected times to have shape (n_samples, n_times), got shape "
+                f"{self.times.shape}."
             )
 
     @property
@@ -156,6 +157,20 @@ class BatchData:
             data={**self.data, **derived_data},
             times=self.times,
             derive_func=self.derive_func,
+        )
+
+    def remove_initial_condition(self, n_ic_timesteps: int) -> "BatchData":
+        if n_ic_timesteps == 0:
+            raise RuntimeError("No initial condition timesteps to remove.")
+        return BatchData(
+            {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
+            times=self.times[:, n_ic_timesteps:],
+        )
+
+    def subset_names(self, names: Sequence[str]) -> "BatchData":
+        return BatchData(
+            {k: v for k, v in self.data.items() if k in names},
+            times=self.times,
         )
 
 
