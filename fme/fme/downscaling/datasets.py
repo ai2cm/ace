@@ -95,8 +95,6 @@ class PairedDataset(torch.utils.data.Dataset):
 
         batch1, times1 = self.dataset1[0]
         batch2, times2 = self.dataset2[0]
-        # TODO(gideond) Note that this check may not hold as we focus on precip outputs
-        assert batch1.keys() == batch2.keys(), "Examples must have the same variables."
         assert all(times1 == times2), "Times must match."
 
     def __len__(self):
@@ -247,7 +245,7 @@ class GriddedData:
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
     metadata: Mapping[str, VariableMetadata]
-    fine_topography: torch.Tensor
+    fine_topography: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         assert (
@@ -283,14 +281,16 @@ class DataLoaderConfig:
         if dist is None:
             dist = Distributed.get_instance()
 
-        dataset_fine, dataset_coarse = [
-            get_dataset(
-                dataset_configs,
-                CoreDataRequirements(requirements.names, requirements.n_timesteps),
-                strict=self.strict_ensemble,
-            )
-            for dataset_configs in [self.fine, self.coarse]
-        ]
+        dataset_fine = get_dataset(
+            self.fine,
+            CoreDataRequirements(requirements.fine_names, requirements.n_timesteps),
+            strict=self.strict_ensemble,
+        )
+        dataset_coarse = get_dataset(
+            self.coarse,
+            CoreDataRequirements(requirements.coarse_names, requirements.n_timesteps),
+            strict=self.strict_ensemble,
+        )
 
         dataset_fine_subset = HorizontalSubsetDataset(
             dataset_fine, self.lat_interval, self.lon_interval
@@ -345,18 +345,25 @@ class DataLoaderConfig:
             fine_width % coarse_width == 0
         ), "Fine resolution width must be divisible by coarse resolution width"
 
-        assert (
-            dataset_fine_subset.metadata == dataset_coarse_subset.metadata
-        ), "Metadata must match."
-        metadata = dataset_fine_subset.metadata
-
-        fine_topography = get_topography(
-            CoreDataLoaderConfig(
-                dataset=self.fine,
-                batch_size=self.batch_size,
-                num_data_workers=self.num_data_workers,
-            )
+        common_metadata_keys = set(dataset_fine_subset.metadata).intersection(
+            dataset_coarse_subset.metadata
         )
+        assert all(
+            dataset_fine_subset.metadata[key] == dataset_coarse_subset.metadata[key]
+            for key in common_metadata_keys
+        ), "Metadata for variables common to coarse and fine datasets must match."
+        metadata = {**dataset_fine_subset.metadata, **dataset_coarse_subset.metadata}
+
+        if requirements.use_fine_topography:
+            fine_topography = get_topography(
+                CoreDataLoaderConfig(
+                    dataset=self.fine,
+                    batch_size=self.batch_size,
+                    num_data_workers=self.num_data_workers,
+                )
+            )
+        else:
+            fine_topography = None
 
         return GriddedData(
             dataloader,
