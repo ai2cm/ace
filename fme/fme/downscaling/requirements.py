@@ -4,6 +4,7 @@ from typing import List
 
 @dataclasses.dataclass
 class DataRequirements:
-    names: List[str]
+    fine_names: List[str]
+    coarse_names: List[str]
     n_timesteps: int
     use_fine_topography: bool
