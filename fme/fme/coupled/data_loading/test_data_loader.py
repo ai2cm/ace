@@ -18,7 +18,7 @@ from .requirements import CoupledDataRequirements
 
 
 @dataclasses.dataclass
-class _MockCoupledData:
+class MockCoupledData:
     ocean: xr.Dataset
     atmosphere: xr.Dataset
     ocean_dir: str
@@ -37,13 +37,13 @@ class _MockCoupledData:
         )
 
 
-def _create_coupled_data_on_disk(
+def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
     n_forward_times_ocean: int,
     n_forward_times_atmosphere: int,
     ocean_names: List[str],
     atmosphere_names: List[str],
-) -> _MockCoupledData:
+) -> MockCoupledData:
     np.random.seed(0)
 
     ocean_dir = data_dir / "ocean"
@@ -76,7 +76,7 @@ def _create_coupled_data_on_disk(
         timestep_size=1,
     )
 
-    return _MockCoupledData(
+    return MockCoupledData(
         ocean=ocean_ds,
         atmosphere=atmos_ds,
         ocean_dir=str(ocean_dir),
@@ -97,7 +97,7 @@ def test_coupled_data_loader(tmp_path):
         # create dataset with 2 samples
         ic_path = tmp_path / f"ic{i}"
         ic_path.mkdir()
-        ic = _create_coupled_data_on_disk(
+        ic = create_coupled_data_on_disk(
             ic_path,
             n_forward_times_ocean=2,
             n_forward_times_atmosphere=4,

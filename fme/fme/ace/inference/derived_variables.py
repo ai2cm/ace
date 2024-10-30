@@ -197,7 +197,7 @@ def _compute_derived_variable(
             variable will not be computed.
 
     Returns:
-        A new SteppedData instance with the derived variable added.
+        A new TrainOutput instance with the derived variable added.
 
     Note:
         Derived variables are only computed for the denormalized data in stepped.
