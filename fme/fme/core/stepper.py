@@ -296,7 +296,7 @@ class TrainOutputABC(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def get_metrics(self) -> Dict[str, float]:
+    def get_metrics(self) -> TensorDict:
         pass
 
 
@@ -368,7 +368,7 @@ class TrainOutput(TrainOutputABC):
             derive_func=self.derive_func,
         )
 
-    def get_metrics(self) -> Dict[str, torch.Tensor]:
+    def get_metrics(self) -> TensorDict:
         return self.metrics
 
 
@@ -390,27 +390,17 @@ class StepperABC(abc.ABC, Generic[BD, SD]):
     def modules(self) -> nn.ModuleList:
         pass
 
-    @property
-    @abc.abstractmethod
-    def effective_loss_scaling(self) -> TensorMapping:
-        pass
-
     @abc.abstractmethod
     def get_state(self) -> Dict[str, Any]:
         pass
 
     @abc.abstractmethod
-    def load_state(cls, state: Dict[str, Any]) -> "StepperABC":
+    def load_state(self, state: Dict[str, Any]) -> None:
         pass
 
     @property
     @abc.abstractmethod
     def n_ic_timesteps(self) -> int:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def n_output_timesteps(self) -> int:
         pass
 
     @property
@@ -558,6 +548,11 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
         self.ocean = ocean
 
     @property
+    def forcing_names(self) -> List[str]:
+        """Names of variables which are inputs only."""
+        return self._config.forcing_names
+
+    @property
     def prognostic_names(self) -> List[str]:
         return sorted(
             list(set(self.out_packer.names).intersection(self.in_packer.names))
@@ -569,10 +564,6 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
 
     @property
     def n_ic_timesteps(self) -> int:
-        return 1
-
-    @property
-    def n_output_timesteps(self) -> int:
         return 1
 
     @property
@@ -689,7 +680,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
             keep_initial_condition: Whether to keep the initial condition in the output.
-                By default the returned SteppedData only includes output steps.
+                By default the returned TrainOutput only includes output steps.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -704,7 +695,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
         forcing_data = data.subset_names(forcing_names)
 
         loss = torch.tensor(0.0, device=get_device())
-        metrics: Dict[str, float] = {}
+        metrics: TensorDict = {}
 
         input_data = {
             k: data.device_data[k][:, :n_ic_timesteps]
@@ -775,7 +766,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             "loss_normalizer": self.loss_normalizer.get_state(),
         }
 
-    def load_state(self, state):
+    def load_state(self, state: Dict[str, Any]) -> None:
         """
         Load the state of the stepper.
 

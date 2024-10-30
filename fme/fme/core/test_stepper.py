@@ -835,21 +835,3 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
-
-
-def test_stepper_effective_loss_scaling():
-    custom_loss_weights = {"b": 2.0}
-    loss_norm_means = {"a": 0.0, "b": 0.0}
-    loss_norm_stds = {"a": 4.0, "b": 0.5}
-    stepper = _get_stepper(
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        loss=WeightedMappingLossConfig(weights=custom_loss_weights),
-        loss_normalization=NormalizationConfig(
-            means=loss_norm_means, stds=loss_norm_stds
-        ),
-    )
-    assert stepper.effective_loss_scaling == {
-        "a": torch.tensor(4.0),
-        "b": torch.tensor(0.25),
-    }

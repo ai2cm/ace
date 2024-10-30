@@ -7,23 +7,6 @@ from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.requirements import DataRequirements
 
 from .data_typing import CoupledDataset
-from .test_data_loader import _create_coupled_data_on_disk, _MockCoupledData
-
-
-@pytest.fixture(scope="session")
-def mock_coupled_data(tmp_path_factory) -> _MockCoupledData:
-    data_dir = tmp_path_factory.mktemp("coupled_data")
-    ocean_names = ["c", "d"]
-    atmos_names = ["a", "b", "f"]
-    n_forward_times_ocean = 2
-    n_forward_times_atmos = 4
-    return _create_coupled_data_on_disk(
-        data_dir,
-        n_forward_times_ocean=n_forward_times_ocean,
-        n_forward_times_atmosphere=n_forward_times_atmos,
-        ocean_names=ocean_names,
-        atmosphere_names=atmos_names,
-    )
 
 
 def test_infer_timestep_error(mock_coupled_data):
