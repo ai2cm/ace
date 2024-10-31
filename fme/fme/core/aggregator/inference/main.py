@@ -1,7 +1,17 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Protocol, Union
+from typing import (
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Sequence,
+    Union,
+)
 
 import torch
 import xarray as xr
@@ -151,6 +161,7 @@ class InferenceEvaluatorAggregatorConfig:
         initial_times: xr.DataArray,
         record_step_20: bool = False,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        channel_mean_names: Optional[Sequence[str]] = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
@@ -190,6 +201,7 @@ class InferenceEvaluatorAggregatorConfig:
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
             metadata=metadata,
+            channel_mean_names=channel_mean_names,
         )
 
 
@@ -219,6 +231,7 @@ class InferenceEvaluatorAggregator(InferenceEvaluatorAggregatorABC[BatchData]):
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
         time_mean_reference_data: Optional[xr.Dataset] = None,
+        channel_mean_names: Optional[Sequence[str]] = None,
     ):
         """
         Args:
@@ -243,7 +256,10 @@ class InferenceEvaluatorAggregator(InferenceEvaluatorAggregatorABC[BatchData]):
             log_histograms: Whether to aggregate histograms.
             data_grid: The grid type of the data, used for spherical power spectrum.
             time_mean_reference_data: Reference time means for computing bias stats.
+            channel_mean_names: Names over which to compute channel means. If not
+                provided, all available variables will be used.
         """
+        self._channel_mean_names = channel_mean_names
         self._aggregators: Dict[str, _EvaluatorAggregator] = {}
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
@@ -343,9 +359,7 @@ class InferenceEvaluatorAggregator(InferenceEvaluatorAggregatorABC[BatchData]):
         if len(target.data) == 0:
             raise ValueError("No data in target.data")
         target_data = {k: v for k, v in target.data.items() if k in prediction.data}
-        target_data_norm = {
-            k: v for k, v in normalize(target.data).items() if k in prediction.data
-        }
+        target_data_norm = normalize(target_data)
         gen_data_norm = normalize(prediction.data)
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
