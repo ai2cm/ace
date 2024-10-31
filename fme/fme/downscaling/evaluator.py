@@ -139,14 +139,12 @@ def clean_checkpoint_dict(checkpoint: Mapping[str, Any]) -> Mapping[str, Any]:
             "fine": {
                 "global_means_path": "/fine_statsdata/centering.nc",
                 "global_stds_path": "/fine_statsdata/scaling-full-field.nc",
-                "exclude_names": None,
                 "means": {},
                 "stds": {},
             },
             "coarse": {
                 "global_means_path": "/coarse_statsdata/centering.nc",
                 "global_stds_path": "/coarse_statsdata/scaling-full-field.nc",
-                "exclude_names": None,
                 "means": {},
                 "stds": {},
             },

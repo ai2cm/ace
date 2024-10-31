@@ -222,6 +222,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         n_timesteps=config.n_forward_steps + 1,
         metadata=data.metadata,
         initial_times=initial_times,
+        channel_mean_names=stepper.out_names,
     )
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
