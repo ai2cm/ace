@@ -13,7 +13,6 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
-    Union,
 )
 
 import dacite
@@ -32,7 +31,6 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
-    FromStateNormalizer,
     NormalizationConfig,
     StandardNormalizer,
 )
@@ -71,7 +69,7 @@ class SingleModuleStepperConfig:
     builder: ModuleSelector
     in_names: List[str]
     out_names: List[str]
-    normalization: Union[NormalizationConfig, FromStateNormalizer]
+    normalization: NormalizationConfig
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
@@ -83,10 +81,8 @@ class SingleModuleStepperConfig:
         default_factory=lambda: CorrectorConfig()
     )
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
-    loss_normalization: Optional[Union[NormalizationConfig, FromStateNormalizer]] = None
-    residual_normalization: Optional[
-        Union[NormalizationConfig, FromStateNormalizer]
-    ] = None
+    loss_normalization: Optional[NormalizationConfig] = None
+    residual_normalization: Optional[NormalizationConfig] = None
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -212,6 +208,15 @@ class SingleModuleStepperConfig:
                         "SingleModuleStepper being loaded from state cannot be run by "
                         "this version of the code."
                     )
+        if "normalization" in state_copy:
+            if "exclude_names" in state_copy["normalization"]:
+                if state_copy["normalization"]["exclude_names"] is not None:
+                    raise ValueError(
+                        "The exclude_names option in normalization config is no longer "
+                        "supported."
+                    )
+                else:
+                    del state_copy["normalization"]["exclude_names"]
         if "prescriber" in state_copy:
             # want to maintain backwards compatibility for this particular feature
             if state_copy["prescriber"] is not None:
@@ -792,12 +797,13 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             The stepper.
         """
         config = {**state["config"]}  # make a copy to avoid mutating input
-        config["normalization"] = FromStateNormalizer(state["normalizer"])
+        config["normalization"] = state["normalizer"]
 
         # for backwards compatibility with previous steppers created w/o
         # loss_normalization or residual_normalization
         loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
-        config["loss_normalization"] = FromStateNormalizer(loss_normalizer_state)
+        config["loss_normalization"] = loss_normalizer_state
+
         # Overwrite the residual_normalization key if it exists, since the combined
         # loss scalings are saved in initial training as the loss_normalization
         config["residual_normalization"] = None

@@ -13,7 +13,6 @@ from fme.core import parameter_init
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.normalizer import FromStateNormalizer
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
@@ -33,12 +32,10 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "builder": sfno_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
@@ -65,12 +62,10 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
@@ -204,12 +199,10 @@ def get_config(
         "builder": sfno_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
@@ -239,12 +232,10 @@ def get_config(
         "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     return with_builder_stepper_config_data, area, sigma_coordinates, stepper
 
