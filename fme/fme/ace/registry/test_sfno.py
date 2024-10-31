@@ -8,7 +8,7 @@ import torch
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.normalizer import FromStateNormalizer
+from fme.core.normalizer import NormalizationConfig
 from fme.core.stepper import SingleModuleStepperConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -35,11 +35,9 @@ def test_sfno_init(shape):
         "in_names": ["x"],
         "out_names": ["x"],
         "normalization": dataclasses.asdict(
-            FromStateNormalizer(
-                state={
-                    "means": {"x": float(np.random.randn(1).item())},
-                    "stds": {"x": float(np.random.randn(1).item())},
-                }
+            NormalizationConfig(
+                means={"x": float(np.random.randn(1).item())},
+                stds={"x": float(np.random.randn(1).item())},
             )
         ),
     }

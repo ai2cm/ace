@@ -34,7 +34,7 @@ from fme.core.data_loading.inference import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import FromStateNormalizer
+from fme.core.normalizer import NormalizationConfig
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
 
@@ -60,11 +60,9 @@ def save_stepper(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
         in_names=in_names,
         out_names=out_names,
-        normalization=FromStateNormalizer(
-            state={
-                "means": {name: mean for name in all_names},
-                "stds": {name: std for name in all_names},
-            }
+        normalization=NormalizationConfig(
+            means={name: mean for name in all_names},
+            stds={name: std for name in all_names},
         ),
     )
     area = torch.ones(data_shape[-2:], device=fme.get_device())

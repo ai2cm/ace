@@ -42,7 +42,7 @@ from fme.core.data_loading.perturbation import (
 )
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import FromStateNormalizer, NormalizationConfig
+from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
