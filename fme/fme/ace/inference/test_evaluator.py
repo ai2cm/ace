@@ -699,9 +699,11 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as _:
-        _ = main(
-            yaml_config=str(config_filename),
-        )
+        inference_logs = main(yaml_config=str(config_filename))
+
+    # derived variables should not have normalized metrics reported
+    assert "inference/mean_norm/weighted_rmse/total_water_path" not in inference_logs[0]
+    assert "inference/time_mean_norm/rmse/total_water_path" not in inference_logs[-1]
 
 
 @pytest.mark.parametrize(

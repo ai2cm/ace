@@ -58,7 +58,7 @@ import os
 import time
 import uuid
 from datetime import timedelta
-from typing import Dict, Generic, Mapping, Optional, TypeVar
+from typing import Dict, Generic, Mapping, Optional, Sequence, TypeVar
 
 import dacite
 import dask
@@ -156,6 +156,7 @@ def build_trainer(builder: TrainBuildersABC, config: TrainConfigProtocol) -> "Tr
         n_timesteps=config.inference_n_forward_steps + 1,
         metadata=train_data.metadata,
         loss_scaling=stepper.effective_loss_scaling,
+        channel_mean_names=stepper.out_names,
     )
     return Trainer(
         train_data=train_data,
@@ -228,6 +229,7 @@ class AggregatorBuilder(AggregatorBuilderABC[BatchData, TrainOutput]):
         n_timesteps: int,
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
+        channel_mean_names: Optional[Sequence[str]] = None,
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
@@ -239,6 +241,7 @@ class AggregatorBuilder(AggregatorBuilderABC[BatchData, TrainOutput]):
         self.n_timesteps = n_timesteps
         self.metadata = metadata
         self.loss_scaling = loss_scaling
+        self.channel_mean_names = channel_mean_names
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
@@ -262,6 +265,7 @@ class AggregatorBuilder(AggregatorBuilderABC[BatchData, TrainOutput]):
             record_step_20=self.record_step_20,
             n_timesteps=self.n_timesteps,
             metadata=self.metadata,
+            channel_mean_names=self.channel_mean_names,
         )
 
 

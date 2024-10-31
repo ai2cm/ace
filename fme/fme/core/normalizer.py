@@ -21,14 +21,12 @@ class NormalizationConfig:
     Attributes:
         global_means_path: Path to a netCDF file containing global means.
         global_stds_path: Path to a netCDF file containing global stds.
-        exclude_names: Names to exclude from normalization.
         means: Mapping from variable names to means.
         stds: Mapping from variable names to stds.
     """
 
     global_means_path: Optional[str] = None
     global_stds_path: Optional[str] = None
-    exclude_names: Optional[List[str]] = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
 
@@ -49,8 +47,6 @@ class NormalizationConfig:
             )
 
     def build(self, names: List[str]):
-        if self.exclude_names is not None:
-            names = list(set(names) - set(self.exclude_names))
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -96,12 +92,15 @@ class StandardNormalizer:
     ):
         self.means = move_tensordict_to_device(means)
         self.stds = move_tensordict_to_device(stds)
+        self._names = set(means).intersection(stds)
 
     def normalize(self, tensors: TensorMapping) -> TensorDict:
-        return _normalize(dict(tensors), means=self.means, stds=self.stds)
+        filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
+        return _normalize(filtered_tensors, means=self.means, stds=self.stds)
 
     def denormalize(self, tensors: TensorMapping) -> TensorDict:
-        return _denormalize(dict(tensors), means=self.means, stds=self.stds)
+        filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
+        return _denormalize(filtered_tensors, means=self.means, stds=self.stds)
 
     def get_state(self):
         """
@@ -130,10 +129,7 @@ def _normalize(
     means: TensorDict,
     stds: TensorDict,
 ) -> TensorDict:
-    return {
-        k: (t - means[k]) / stds[k] if k in means.keys() else t
-        for k, t in tensors.items()
-    }
+    return {k: (t - means[k]) / stds[k] for k, t in tensors.items()}
 
 
 @torch.jit.script
@@ -142,10 +138,7 @@ def _denormalize(
     means: TensorDict,
     stds: TensorDict,
 ) -> TensorDict:
-    return {
-        k: t * stds[k] + means[k] if k in means.keys() else t
-        for k, t in tensors.items()
-    }
+    return {k: t * stds[k] + means[k] for k, t in tensors.items()}
 
 
 def get_normalizer(
