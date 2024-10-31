@@ -15,6 +15,7 @@ from fme.ace.inference.data_writer.main import (
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.core.data_loading.batch_data import BatchData, PairedData
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
@@ -171,10 +172,12 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
+            batch=PairedData(
+                prediction=sample_prediction_data,
+                target=sample_target_data,
+                times=batch_times,
+            ),
             start_timestep=0,
-            batch_times=batch_times,
         )
         start_time_2 = (2020, 1, 1, 18, 0, 0)
         end_time_2 = (2020, 1, 2, 6, 0, 0)
@@ -186,10 +189,12 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
+            batch=PairedData(
+                prediction=sample_prediction_data,
+                target=sample_target_data,
+                times=batch_times,
+            ),
             start_timestep=3,
-            batch_times=batch_times,
         )
         writer.flush()
 
@@ -327,10 +332,12 @@ class TestDataWriter:
             n_initial_conditions=n_samples,
         )
         writer.append_batch(
-            sample_target_data,
-            sample_prediction_data,
+            batch=PairedData(
+                prediction=sample_prediction_data,
+                target=sample_target_data,
+                times=batch_times,
+            ),
             start_timestep=0,
-            batch_times=batch_times,
         )
         writer.flush()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -397,10 +404,12 @@ class TestDataWriter:
         )
         with pytest.raises(ValueError):
             writer.append_batch(
-                sample_target_data,
-                sample_prediction_data,
+                batch=PairedData(
+                    prediction=sample_prediction_data,
+                    target=sample_target_data,
+                    times=batch_times,
+                ),
                 start_timestep=0,
-                batch_times=batch_times,
             )
 
     def test_prediction_only_append_batch(self, sample_metadata, tmp_path, calendar):
@@ -434,9 +443,11 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            prediction_data,
+            batch=BatchData(
+                data=prediction_data,
+                times=batch_times,
+            ),
             start_timestep=0,
-            batch_times=batch_times,
         )
         start_time_2 = (2020, 1, 2, 0, 0, 0)
         end_time_2 = (2020, 1, 2, 18, 0, 0)
@@ -448,9 +459,11 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            prediction_data,
+            batch=BatchData(
+                data=prediction_data,
+                times=batch_times,
+            ),
             start_timestep=4,
-            batch_times=batch_times,
         )
         writer.flush()
 

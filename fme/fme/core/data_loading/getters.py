@@ -138,9 +138,11 @@ def get_data_loader(
         return BatchData.atmospheric_from_sample_tuples(
             samples,
             sigma_coordinates=dataset.sigma_coordinates,
+            horizontal_dims=list(dataset.horizontal_coordinates.dims),
         )
 
     batch_size = dist.local_batch_size(int(config.batch_size))
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
