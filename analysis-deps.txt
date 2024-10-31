@@ -1,0 +1,12 @@
+# these are some packages which are convenient to have installed for ad-hoc analysis
+# but which are not requirements of the "fme" package. We do not relist the fme
+# dependencies here.
+beaker-py
+Bottleneck
+cartopy>=0.22.0
+dask[distributed]
+ipywidgets
+nc-time-axis
+jupyterlab
+pyproj<3.7
+seaborn
