@@ -62,24 +62,6 @@ class NormalizationConfig:
             return StandardNormalizer(means=means, stds=stds)
 
 
-@dataclasses.dataclass
-class FromStateNormalizer:
-    """
-    An alternative to NormalizationConfig which provides a normalizer
-    initialized from a serializable state. This is not a public configuration
-    class, but instead allows for loading trained models that have been
-    serialized to disk, using the pre-existing normalization state.
-
-    Attributes:
-        state: State dict of a normalizer.
-    """
-
-    state: Dict[str, Dict[str, float]]
-
-    def build(self, names: List[str]):
-        return StandardNormalizer.from_state(self.state)
-
-
 class StandardNormalizer:
     """
     Responsible for normalizing tensors.
