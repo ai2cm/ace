@@ -125,7 +125,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
             cftime.DatetimeProlepticGregorian(2000, 1, 1, 6),
             cftime.DatetimeProlepticGregorian(2000, 1, 1, 18),
         ],
-        dims=["sample"],
+        dims=["time"],
     )
     initial_condition.to_netcdf(initial_condition_path, mode="w")
     forcing_loader = ForcingDataLoaderConfig(

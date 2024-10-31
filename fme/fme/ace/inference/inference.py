@@ -102,7 +102,10 @@ def get_initial_condition(
         initial_condition[name] = torch.tensor(ds[name].values).to(fme.get_device())
     if "time" not in ds:
         raise ValueError("Initial condition dataset must have a 'time' variable.")
-    initial_times = ds.time
+    initial_times = xr.DataArray(
+        data=ds.time.values,
+        dims=["sample"],
+    )
     if len(initial_times) != n_samples:
         raise ValueError(
             "Length of 'time' variable must match first dimension of variables "
