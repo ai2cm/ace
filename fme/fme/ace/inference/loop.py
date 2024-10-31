@@ -13,7 +13,12 @@ from fme.core.aggregator.inference.main import (
     InferenceAggregator,
     InferenceEvaluatorAggregator,
 )
-from fme.core.data_loading.batch_data import BatchData, GriddedData, GriddedDataABC
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    GriddedData,
+    GriddedDataABC,
+    PairedData,
+)
 from fme.core.device import move_tensordict_to_device
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
@@ -208,7 +213,10 @@ def run_inference(
                 f"Inference: processing window spanning {i_time}"
                 f" to {i_time + forward_steps_in_memory} steps."
             )
-            writer.append_batch(prediction, i_time, times)
+            writer.append_batch(
+                batch=BatchData(data=prediction, times=times),
+                start_timestep=i_time,
+            )
             timer.stop("data_writer")
             timer.start("aggregator")
             if i_time == 0:
@@ -274,11 +282,12 @@ def run_inference_evaluator(
             data.loader,
             compute_derived_for_loaded_data=True,
         )
-        snapshot_dims = ["sample"] + data.horizontal_coordinates.dims
         writer.save_initial_condition(
-            {k: v[:, 0] for k, v in initial_condition.items()},
-            initial_times.isel(time=0),
-            snapshot_dims,
+            BatchData(
+                data={k: v[:, 0:n_ic_timesteps] for k, v in initial_condition.items()},
+                times=initial_times.isel(time=slice(0, n_ic_timesteps)),
+                horizontal_dims=list(data.horizontal_coordinates.dims),
+            ),
         )
         i_time = 0
         for prediction_batch, target_batch in looper:
@@ -292,10 +301,8 @@ def run_inference_evaluator(
                 f" to {i_time + forward_steps_in_memory} steps."
             )
             writer.append_batch(
-                target=target_data,
-                prediction=prediction,
+                batch=PairedData.from_batch_data(prediction_batch, target_batch),
                 start_timestep=i_time,
-                batch_times=times,
             )
             timer.stop("data_writer")
             timer.start("aggregator")
@@ -388,10 +395,12 @@ def run_dataset_comparison(
 
         # Do not include the initial condition in the data writers
         writer.append_batch(
-            target=stepped_without_ic.target_data,
-            prediction=stepped_without_ic.gen_data,
+            batch=PairedData(
+                target=stepped_without_ic.target_data,
+                prediction=stepped_without_ic.gen_data,
+                times=target_times_without_ic,
+            ),
             start_timestep=i_time,
-            batch_times=target_times_without_ic,
         )
         timer.stop("data_writer")
         timer.start("aggregator")

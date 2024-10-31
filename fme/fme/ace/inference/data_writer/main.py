@@ -2,12 +2,13 @@ import dataclasses
 import datetime
 import warnings
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Union
+from typing import Any, List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
 import xarray as xr
 
+from fme.core.data_loading.batch_data import BatchData, PairedData
 from fme.core.data_loading.data_typing import VariableMetadata
 
 from .histograms import PairedHistogramDataWriter
@@ -240,49 +241,34 @@ class PairedDataWriter:
 
     def save_initial_condition(
         self,
-        ic_data: Dict[str, torch.Tensor],
-        ic_time: xr.DataArray,
-        snapshot_dims: List[str],
+        batch: BatchData,
     ):
-        data_arrays = {}
-        for name in self.prognostic_names:
-            if name not in ic_data:
-                raise KeyError(
-                    f"Initial condition data missing for prognostic variable {name}."
-                )
-            data = ic_data[name].cpu().numpy()
-            data_arrays[name] = xr.DataArray(data, dims=snapshot_dims)
-            if name in self.metadata:
-                data_arrays[name].attrs = {
-                    "long_name": self.metadata[name].long_name,
-                    "units": self.metadata[name].units,
-                }
-        data_arrays["time"] = ic_time
-        ds = xr.Dataset(data_arrays, coords=self.coords)
-        ds.to_netcdf(str(Path(self.path) / "initial_condition.nc"))
+        save_initial_condition(
+            ic_data=batch,
+            path=self.path,
+            prognostic_names=self.prognostic_names,
+            metadata=self.metadata,
+            coords=self.coords,
+        )
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        batch: PairedData,
         start_timestep: int,
-        batch_times: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
 
         Args:
-            target: Target data.
-            prediction: Prediction data.
+            batch: Predictiona and target data.
             start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
         """
         for writer in self._writers:
             writer.append_batch(
-                target=target,
-                prediction=prediction,
+                target=dict(batch.target),
+                prediction=dict(batch.prediction),
                 start_timestep=start_timestep,
-                batch_times=batch_times,
+                batch_times=batch.times,
             )
 
     def flush(self):
@@ -291,6 +277,59 @@ class PairedDataWriter:
         """
         for writer in self._writers:
             writer.flush()
+
+
+def save_initial_condition(
+    ic_data: BatchData,
+    path: str,
+    prognostic_names: Sequence[str],
+    metadata: Mapping[str, VariableMetadata],
+    coords: Mapping[str, np.ndarray],
+):
+    """
+    Save the initial condition to a netCDF file.
+    If the initial condition has only one timestep, the data is squeezed to remove
+    the timestep dimension.
+
+    Args:
+        batch: Batch data containing the initial condition.
+        path: Directory to write the netCDF file as initial_condition.nc.
+        prognostic_names: Names of prognostic variables to save.
+        metadata: Metadata for each variable to be written to the file.
+        coords: Coordinate data to be written to the file.
+    """
+    if ic_data.times.sizes["time"] == 1:
+        time_dim = ic_data.dims.index("time")
+        snapshot_dims = ic_data.dims[:time_dim] + ic_data.dims[time_dim + 1 :]
+
+        def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
+            return x.squeeze(dim=time_dim)
+
+        time_array = ic_data.times.isel(time=0)
+    else:
+        snapshot_dims = ic_data.dims
+
+        def maybe_squeeze(x):
+            return x
+
+        time_array = ic_data.times
+
+    data_arrays = {}
+    for name in prognostic_names:
+        if name not in ic_data.data:
+            raise KeyError(
+                f"Initial condition data missing for prognostic variable {name}."
+            )
+        data = maybe_squeeze(ic_data.data[name]).cpu().numpy()
+        data_arrays[name] = xr.DataArray(data, dims=snapshot_dims)
+        if name in metadata:
+            data_arrays[name].attrs = {
+                "long_name": metadata[name].long_name,
+                "units": metadata[name].units,
+            }
+    data_arrays["time"] = time_array
+    ds = xr.Dataset(data_arrays, coords=coords)
+    ds.to_netcdf(str(Path(path) / "initial_condition.nc"))
 
 
 class DataWriter:
@@ -371,12 +410,15 @@ class DataWriter:
                 coords=coords,
             )
         )
+        self.path = path
+        self.prognostic_names = prognostic_names
+        self.metadata = metadata
+        self.coords = coords
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        batch: BatchData,
         start_timestep: int,
-        batch_times: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -387,7 +429,11 @@ class DataWriter:
             batch_times: Time coordinates for each sample in the batch.
         """
         for writer in self._writers:
-            writer.append_batch(data, start_timestep, batch_times)
+            writer.append_batch(
+                data=dict(batch.data),
+                start_timestep=start_timestep,
+                batch_times=batch.times,
+            )
 
     def flush(self):
         """
@@ -396,8 +442,21 @@ class DataWriter:
         for writer in self._writers:
             writer.flush()
 
+    def save_initial_condition(
+        self,
+        ic_data: BatchData,
+    ):
+        save_initial_condition(
+            ic_data=ic_data,
+            path=self.path,
+            prognostic_names=self.prognostic_names,
+            metadata=self.metadata,
+            coords=self.coords,
+        )
+
 
 class NullDataWriter:
+
     """
     Null pattern for DataWriter, which does nothing.
     """
@@ -407,10 +466,8 @@ class NullDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        batch: Any,
         start_timestep: int,
-        batch_times: xr.DataArray,
     ):
         pass
 
@@ -419,8 +476,6 @@ class NullDataWriter:
 
     def save_initial_condition(
         self,
-        ic_data: Dict[str, torch.Tensor],
-        ic_time: xr.DataArray,
-        snapshot_dims: List[str],
+        ic_data: Any,
     ):
         pass
