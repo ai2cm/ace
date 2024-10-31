@@ -216,7 +216,6 @@ def test_run_on_batch_with_prescribed_ocean():
     stds = {
         "a": np.array([2.0], dtype=np.float32),
         "b": np.array([3.0], dtype=np.float32),
-        "mask": np.array([1.0], dtype=np.float32),
     }
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
@@ -226,7 +225,7 @@ def test_run_on_batch_with_prescribed_ocean():
         in_names=["a", "b"],
         out_names=["a", "b"],
         normalization=NormalizationConfig(
-            means=get_scalar_data(["a", "b", "mask"], 0.0),
+            means=get_scalar_data(["a", "b"], 0.0),
             stds=stds,
         ),
         ocean=OceanConfig("b", "mask"),
@@ -250,7 +249,7 @@ def test_run_on_batch_with_prescribed_ocean():
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
             stepped.normalize(stepped.gen_data)["b"][:, i, :, 0],
-            stepped.normalize(stepped.target_data)["b"][:, i, :, 0],
+            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, i, :, 0],
         )
 
 
@@ -635,7 +634,7 @@ def test_step_with_prescribed_ocean():
     stepper = _get_stepper(
         ["a", "b"], ["a", "b"], ocean_config=OceanConfig("a", "mask")
     )
-    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b", "mask"]}
+    input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     ocean_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "mask"]}
     output = stepper.step(input_data, ocean_data)
     expected_a_output = torch.where(

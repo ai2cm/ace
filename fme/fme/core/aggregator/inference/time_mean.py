@@ -238,6 +238,7 @@ class TimeMeanEvaluatorAggregator:
         target: Literal["norm", "denorm"] = "denorm",
         metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
+        channel_mean_names: Optional[List[str]] = None,
     ):
         """
         Args:
@@ -249,6 +250,8 @@ class TimeMeanEvaluatorAggregator:
                 used in generating logged image captions.
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
+            channel_mean_names: Names of variables whose RMSE will be averaged. If
+                not provided, all available variables will be used.
         """
         self._ops = ops
         self._horizontal_dims = horizontal_dims
@@ -268,6 +271,7 @@ class TimeMeanEvaluatorAggregator:
             metadata=metadata,
             reference_means=reference_means,
         )
+        self._channel_mean_names = channel_mean_names
 
     @torch.no_grad()
     def record_batch(
@@ -330,12 +334,14 @@ class TimeMeanEvaluatorAggregator:
                     }
                 )
         if self._target == "norm":
-            logs.update(
-                {
-                    f"rmse/channel_mean": sum(rmse_all_channels.values())
-                    / len(rmse_all_channels),
-                }
-            )
+            metric_name = "rmse/channel_mean"
+            if self._channel_mean_names is None:
+                values_to_average = list(rmse_all_channels.values())
+            else:
+                values_to_average = [
+                    rmse_all_channels[name] for name in self._channel_mean_names
+                ]
+            logs.update({metric_name: sum(values_to_average) / len(values_to_average)})
 
         if len(label) != 0:
             return {f"{label}/{key}": logs[key] for key in logs}
