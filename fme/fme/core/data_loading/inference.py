@@ -244,6 +244,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             sample_tuples.append((tensors, times))
         result = BatchData.atmospheric_from_sample_tuples(
             sample_tuples,
+            horizontal_dims=list(self._horizontal_coordinates.dims),
             sigma_coordinates=self._sigma_coordinates,
         )
         assert result.times.shape[0] == self._n_initial_conditions // dist.world_size
