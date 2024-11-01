@@ -22,7 +22,6 @@ from fme.core.data_loading.batch_data import (
 from fme.core.device import move_tensordict_to_device
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
-    InferenceEvaluatorAggregatorABC,
 )
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import TrainOutput
@@ -230,14 +229,14 @@ def run_inference(
                             example_tensor, fill_value=torch.nan
                         )
                 aggregator.record_batch(
-                    prediction=BatchData(
+                    data=BatchData(
                         data=ic_filled, times=initial_times.expand_dims("time", axis=1)
                     ),
                     normalize=stepper.normalizer.normalize,
                     i_time_start=i_time,
                 )
             aggregator.record_batch(
-                prediction=BatchData(data=prediction, times=times),
+                data=BatchData(data=prediction, times=times),
                 normalize=stepper.normalizer.normalize,
                 i_time_start=i_time + 1,
             )
@@ -257,7 +256,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceEvaluatorAggregatorABC[BatchData],
+    aggregator: InferenceAggregatorABC[PairedData],
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -300,8 +299,9 @@ def run_inference_evaluator(
                 f"Inference: processing window spanning {i_time}"
                 f" to {i_time + forward_steps_in_memory} steps."
             )
+            paired_data = PairedData.from_batch_data(prediction_batch, target_batch)
             writer.append_batch(
-                batch=PairedData.from_batch_data(prediction_batch, target_batch),
+                batch=paired_data,
                 start_timestep=i_time,
             )
             timer.stop("data_writer")
@@ -316,14 +316,16 @@ def run_inference_evaluator(
                     else:
                         ic_filled[name] = target_data[name][:, 0:1]
                 aggregator.record_batch(
-                    prediction=BatchData(data=ic_filled, times=initial_times),
-                    target=BatchData(data=ic_filled, times=initial_times),
+                    data=PairedData(
+                        prediction=ic_filled,
+                        target=ic_filled,
+                        times=initial_times,
+                    ),
                     normalize=stepper.normalizer.normalize,
                     i_time_start=i_time,
                 )
             aggregator.record_batch(
-                prediction=BatchData(data=prediction, times=times),
-                target=BatchData(data=target_data, times=times),
+                data=paired_data,
                 normalize=stepper.normalizer.normalize,
                 i_time_start=i_time + 1,
             )
@@ -343,7 +345,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceEvaluatorAggregatorABC[BatchData],
+    aggregator: InferenceAggregatorABC[PairedData],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
@@ -406,11 +408,10 @@ def run_dataset_comparison(
         timer.start("aggregator")
         # record metrics, includes the initial condition
         aggregator.record_batch(
-            prediction=BatchData(
-                data=stepped_for_agg.gen_data, times=target_times_for_agg
-            ),
-            target=BatchData(
-                data=stepped_for_agg.target_data, times=target_times_for_agg
+            data=PairedData(
+                prediction=stepped_for_agg.gen_data,
+                target=stepped_for_agg.target_data,
+                times=target_times_for_agg,
             ),
             normalize=normalizer.normalize,
             i_time_start=i_time_aggregator,
