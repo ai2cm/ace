@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, PairedData
 from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
 from fme.core.device import get_device
 
@@ -43,17 +43,17 @@ def test_logs_labels_exist():
         log_zonal_mean_images=True,
     )
     times = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
-    target_data = BatchData(
-        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-        times=times,
-    )
-    gen_data = BatchData(
-        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-        times=times,
-    )
 
     agg.record_batch(
-        prediction=gen_data, target=target_data, normalize=lambda x: x, i_time_start=0
+        data=PairedData(
+            prediction={
+                "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
+            },
+            target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            times=times,
+        ),
+        normalize=lambda x: x,
+        i_time_start=0,
     )
     logs = agg.get_logs(label="test")
     assert "test/mean/series" in logs
@@ -103,16 +103,16 @@ def test_inference_logs_labels_exist():
         record_step_20=True,
         log_video=True,
     )
-    target_data = BatchData(
-        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
-    )
-    gen_data = BatchData(
-        data={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
-    )
     agg.record_batch(
-        prediction=gen_data, target=target_data, normalize=lambda x: x, i_time_start=0
+        data=PairedData(
+            prediction={
+                "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
+            },
+            target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        ),
+        normalize=lambda x: x,
+        i_time_start=0,
     )
     logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
@@ -170,13 +170,14 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        predicted = BatchData(
-            data=sample_data,
+        paired_data = PairedData(
+            prediction=sample_data,
+            target=target_data.data,
             times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
+
         agg.record_batch(
-            prediction=predicted,
-            target=target_data,
+            data=paired_data,
             normalize=lambda x: x,
             i_time_start=i_start,
         )
@@ -229,13 +230,13 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        predicted = BatchData(
-            data=sample_data,
+        paired_data = PairedData(
+            prediction=sample_data,
+            target=target_data.data,
             times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
         agg.record_batch(
-            prediction=predicted,
-            target=target_data,
+            data=paired_data,
             normalize=lambda x: x,
             i_time_start=i_start,
         )
