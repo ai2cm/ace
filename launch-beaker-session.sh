@@ -10,4 +10,6 @@ beaker session create \
 	--secret-env WANDB_API_KEY=wandb-api-key \
 	--shared-memory 10GiB \
 	--mount hostpath://${DIR}=/full-model \
-	--workdir /full-model/fme
+	--workdir /full-model/fme \
+	--workspace ai2/ace \
+	--budget ai2/climate
