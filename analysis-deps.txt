@@ -10,3 +10,4 @@ nc-time-axis
 jupyterlab
 pyproj<3.7
 seaborn
+bokeh>=3.1.0
