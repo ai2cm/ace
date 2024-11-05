@@ -143,6 +143,12 @@ def get_data_loader(
 
     batch_size = dist.local_batch_size(int(config.batch_size))
 
+    if config.prefetch_factor is None:
+        # DataLoader default is not None so we must leave it unset
+        kwargs = {}
+    else:
+        kwargs = {"prefetch_factor": config.prefetch_factor}
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
@@ -151,9 +157,9 @@ def get_data_loader(
         drop_last=True,
         pin_memory=using_gpu(),
         collate_fn=collate_fn,
-        prefetch_factor=config.prefetch_factor,
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        **kwargs,
     )
 
     if len(dataloader) == 0:
@@ -259,9 +265,11 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
+    if initial_times.shape[1] != 1:
+        raise NotImplementedError("code assumes initial times only has 1 timestep")
     available_times = XarrayDataset(config.dataset, requirements).all_times
     start_time_indices = []
-    for time in initial_times.values:
+    for time in initial_times.values[:, 0]:
         start_time_indices.append(available_times.get_loc(time))
     inference_config = config.build_inference_config(
         start_indices=ExplicitIndices(start_time_indices)

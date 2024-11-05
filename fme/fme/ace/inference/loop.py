@@ -5,7 +5,6 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Tuple
 
 import numpy as np
 import torch
-import xarray as xr
 
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
@@ -19,23 +18,15 @@ from fme.core.data_loading.batch_data import (
     GriddedDataABC,
     PairedData,
 )
-from fme.core.device import move_tensordict_to_device
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
 )
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.normalizer import StandardNormalizer
 from fme.core.stepper import TrainOutput
-from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
-from .derived_variables import compute_derived_quantities
-
-
-def _prepend_timesteps(
-    data: TensorMapping, timesteps: TensorMapping, time_dim: int = 1
-) -> TensorDict:
-    return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
 
 
 class Looper:
@@ -46,8 +37,7 @@ class Looper:
     def __init__(
         self,
         stepper: SingleModuleStepper,
-        initial_condition: TensorDict,
-        initial_times: xr.DataArray,
+        initial_condition: PrognosticStateABC[BatchData],
         loader: Iterable[BatchData],
         compute_derived_for_loaded_data: bool = False,
     ):
@@ -55,28 +45,14 @@ class Looper:
         Args:
             stepper: The stepper to use.
             initial_condition: The initial condition data.
-            initial_times: The initial times.
             loader: The loader for the forcing, and possibly target, data.
             compute_derived_for_loaded_data: Whether to compute derived variables for
                 the data returned by the loader.
         """
         self._stepper = stepper
         self._n_ic_timesteps = stepper.n_ic_timesteps
-        assert set(stepper.prognostic_names).issubset(set(initial_condition))
-        self._prognostic_state = move_tensordict_to_device(initial_condition)
-        # Insert fill values for diagnostic variables. This is required only because
-        # we will later prepend the initial condition to the prediction data to allow
-        # for computing tendencies.
-        for name in stepper.diagnostic_names:
-            self._prognostic_state[name] = torch.full_like(
-                self._prognostic_state[stepper.prognostic_names[0]],
-                fill_value=torch.nan,
-            )
+        self._prognostic_state = initial_condition
         self._loader = iter(loader)
-        self._current_time = initial_times
-        self._compute_derived = lambda data, forcing: compute_derived_quantities(
-            data, stepper.sigma_coordinates, stepper.timestep, forcing
-        )
         self._compute_derived_for_loaded_data = compute_derived_for_loaded_data
 
     def __iter__(self):
@@ -88,44 +64,32 @@ class Looper:
         timer = GlobalTimer.get_instance()
         try:
             timer.start("data_loading")
-            batch_data = next(self._loader)
+            forcing_data = next(self._loader)
         except StopIteration:
             timer.stop("data_loading")
             raise StopIteration
-        forcing_data = move_tensordict_to_device(dict(batch_data.data))
-        times = batch_data.times
-        n_forward_steps = times.sizes["time"] - self._n_ic_timesteps
         timer.stop("data_loading")
         timer.start("forward_prediction")
-        prediction = self._stepper.predict(
-            self._prognostic_state, batch_data, n_forward_steps
+        prediction, new_prognostic_state = self._stepper.predict(
+            self._prognostic_state, forcing_data
         )
         timer.stop("forward_prediction")
         timer.start("compute_derived_variables")
-        prediction_with_ic = _prepend_timesteps(prediction.data, self._prognostic_state)
-        prediction_and_derived = self._compute_derived(prediction_with_ic, forcing_data)
+        forward_prediction_and_derived = (
+            prediction.prepend(self._prognostic_state)
+            .compute_derived_variables(forcing_data)
+            .remove_initial_condition(self._n_ic_timesteps)
+        )
         if self._compute_derived_for_loaded_data:
-            forcing_data = self._compute_derived(forcing_data, forcing_data)
+            forcing_data = forcing_data.compute_derived_variables(forcing_data)
 
-        # save prognostic state for next iteration
-        self._prognostic_state = {
-            k: v[:, -self._n_ic_timesteps :] for k, v in prediction.data.items()
-        }
-        self._current_time = times.isel(time=slice(-self._n_ic_timesteps, None))
-
-        # drop initial condition time steps
-        forward_forcing_data = {
-            k: v[:, self._n_ic_timesteps :] for k, v in forcing_data.items()
-        }
-        forward_prediction_and_derived = {
-            k: v[:, self._n_ic_timesteps :] for k, v in prediction_and_derived.items()
-        }
-        forward_times = times.isel(time=slice(self._n_ic_timesteps, None))
+        forcing_data = forcing_data.remove_initial_condition(self._n_ic_timesteps)
         timer.stop("compute_derived_variables")
+        self._prognostic_state = new_prognostic_state
 
         return (
-            BatchData(data=forward_prediction_and_derived, times=forward_times),
-            BatchData(data=forward_forcing_data, times=forward_times),
+            forward_prediction_and_derived,
+            forcing_data,
         )
 
 
@@ -172,11 +136,10 @@ def _log_window_to_wandb(
 
 def run_inference(
     stepper: SingleModuleStepper,
-    initial_condition: TensorDict,
-    initial_times: xr.DataArray,
+    initial_condition: PrognosticStateABC[BatchData],
     forcing_data: GriddedData,
     writer: DataWriter,
-    aggregator: InferenceAggregatorABC[BatchData],
+    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], BatchData],
 ):
     """Run extended inference loop given initial condition and forcing data.
 
@@ -197,15 +160,17 @@ def run_inference(
             raise NotImplementedError(
                 "data loading for n_ic_timesteps != 1 not implemented yet"
             )
-        time_dim = 1
-        initial_condition = {
-            k: v.unsqueeze(time_dim) for k, v in initial_condition.items()
-        }
-        looper = Looper(stepper, initial_condition, initial_times, forcing_data.loader)
+        looper = Looper(stepper, initial_condition, forcing_data.loader)
         i_time = 0
+        aggregator.record_initial_condition(
+            initial_condition=initial_condition,
+            normalize=stepper.normalizer.normalize,
+        )
+        writer.save_initial_condition(
+            initial_condition,
+        )
         for prediction_batch, _ in looper:
             timer.start("data_writer")
-            prediction = prediction_batch.data
             times = prediction_batch.times
             forward_steps_in_memory = times.sizes["time"]
             logging.info(
@@ -213,32 +178,15 @@ def run_inference(
                 f" to {i_time + forward_steps_in_memory} steps."
             )
             writer.append_batch(
-                batch=BatchData(data=prediction, times=times),
+                batch=prediction_batch,
                 start_timestep=i_time,
             )
             timer.stop("data_writer")
             timer.start("aggregator")
-            if i_time == 0:
-                example_tensor = list(initial_condition.values())[0]
-                ic_filled = {}
-                for name in prediction:
-                    if name in initial_condition:
-                        ic_filled[name] = initial_condition[name]
-                    else:
-                        ic_filled[name] = torch.full_like(
-                            example_tensor, fill_value=torch.nan
-                        )
-                aggregator.record_batch(
-                    data=BatchData(
-                        data=ic_filled, times=initial_times.expand_dims("time", axis=1)
-                    ),
-                    normalize=stepper.normalizer.normalize,
-                    i_time_start=i_time,
-                )
             aggregator.record_batch(
-                data=BatchData(data=prediction, times=times),
+                prediction_batch,
                 normalize=stepper.normalizer.normalize,
-                i_time_start=i_time + 1,
+                i_time_start=i_time + stepper.n_ic_timesteps,
             )
             timer.stop("aggregator")
             timer.start("wandb_logging")
@@ -256,7 +204,7 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceAggregatorABC[PairedData],
+    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], PairedData],
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
@@ -268,32 +216,30 @@ def run_inference_evaluator(
     with torch.no_grad():
         n_ic_timesteps = stepper.n_ic_timesteps
         for batch in data.loader:
-            initial_condition = {
-                k: v[:, 0:n_ic_timesteps] for k, v in batch.data.items()
-            }
-            initial_times = batch.times.isel(time=slice(0, n_ic_timesteps))
+            initial_condition = batch.get_start(
+                prognostic_names=stepper.prognostic_names,
+                n_ic_timesteps=n_ic_timesteps,
+            )
             break
-        initial_condition = move_tensordict_to_device(initial_condition)
+        else:
+            raise ValueError("No data in data.loader")
         looper = Looper(
             stepper,
             initial_condition,
-            initial_times,
             data.loader,
             compute_derived_for_loaded_data=True,
         )
+        aggregator.record_initial_condition(
+            initial_condition=initial_condition,
+            normalize=stepper.normalizer.normalize,
+        )
         writer.save_initial_condition(
-            BatchData(
-                data={k: v[:, 0:n_ic_timesteps] for k, v in initial_condition.items()},
-                times=initial_times.isel(time=slice(0, n_ic_timesteps)),
-                horizontal_dims=list(data.horizontal_coordinates.dims),
-            ),
+            initial_condition,
         )
         i_time = 0
         for prediction_batch, target_batch in looper:
             timer.start("data_writer")
             times = prediction_batch.times
-            prediction = prediction_batch.data
-            target_data = target_batch.data
             forward_steps_in_memory = times.sizes["time"]
             logging.info(
                 f"Inference: processing window spanning {i_time}"
@@ -306,28 +252,10 @@ def run_inference_evaluator(
             )
             timer.stop("data_writer")
             timer.start("aggregator")
-            # filter forcing variables out of the target data
-            target_data = {k: v for k, v in target_data.items() if k in prediction}
-            if i_time == 0:
-                ic_filled = {}
-                for name in target_data:
-                    if name in initial_condition:
-                        ic_filled[name] = initial_condition[name]
-                    else:
-                        ic_filled[name] = target_data[name][:, 0:1]
-                aggregator.record_batch(
-                    data=PairedData(
-                        prediction=ic_filled,
-                        target=ic_filled,
-                        times=initial_times,
-                    ),
-                    normalize=stepper.normalizer.normalize,
-                    i_time_start=i_time,
-                )
             aggregator.record_batch(
                 data=paired_data,
                 normalize=stepper.normalizer.normalize,
-                i_time_start=i_time + 1,
+                i_time_start=i_time + stepper.n_ic_timesteps,
             )
             timer.stop("aggregator")
             timer.start("wandb_logging")
@@ -345,7 +273,7 @@ def run_inference_evaluator(
 
 
 def run_dataset_comparison(
-    aggregator: InferenceAggregatorABC[PairedData],
+    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], PairedData],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,

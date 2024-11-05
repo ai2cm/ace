@@ -2,7 +2,7 @@ import copy
 import dataclasses
 import logging
 import os
-from typing import Literal, Optional, Sequence, Tuple, Union
+from typing import Literal, Optional, Sequence, Union
 
 import dacite
 import torch
@@ -16,7 +16,7 @@ from fme.ace.inference.loop import run_inference, write_reduced_metrics
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
-from fme.core.data_loading.batch_data import GriddedData
+from fme.core.data_loading.batch_data import BatchData, GriddedData
 from fme.core.data_loading.getters import get_forcing_data
 from fme.core.data_loading.inference import (
     ExplicitIndices,
@@ -25,10 +25,10 @@ from fme.core.data_loading.inference import (
     TimestampList,
 )
 from fme.core.dicts import to_flat_dict
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.typing_ import TensorDict
 from fme.core.wandb import WandB
 
 from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
@@ -78,7 +78,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset, prognostic_names: Sequence[str]
-) -> Tuple[TensorDict, xr.DataArray]:
+) -> PrognosticStateABC[BatchData]:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
@@ -89,7 +89,7 @@ def get_initial_condition(
         prognostic_names: Names of prognostic variables to extract from the dataset.
 
     Returns:
-        A mapping of variable names to tensors and the time coordinate.
+        The initial condition and the time coordinate.
     """
     initial_condition = {}
     for name in prognostic_names:
@@ -99,19 +99,28 @@ def get_initial_condition(
                 f"(n_samples, n_lat, n_lon). Got shape {ds[name].shape}."
             )
         n_samples = ds[name].shape[0]
-        initial_condition[name] = torch.tensor(ds[name].values).to(fme.get_device())
+        initial_condition[name] = (
+            torch.tensor(ds[name].values).unsqueeze(dim=1).to(fme.get_device())
+        )
     if "time" not in ds:
         raise ValueError("Initial condition dataset must have a 'time' variable.")
     initial_times = xr.DataArray(
-        data=ds.time.values,
-        dims=["sample"],
+        data=ds.time.values[:, None],
+        dims=["sample", "time"],
     )
-    if len(initial_times) != n_samples:
+    if initial_times.shape[0] != n_samples:
         raise ValueError(
             "Length of 'time' variable must match first dimension of variables "
-            f"in initial condition dataset. Got {len(initial_times)} and {n_samples}."
+            f"in initial condition dataset. Got {initial_times.shape[0]} "
+            f"and {n_samples}."
         )
-    return initial_condition, initial_times
+
+    batch_data = BatchData(
+        initial_condition,
+        times=initial_times,
+        horizontal_dims=["lat", "lon"],
+    )
+    return batch_data.get_start(prognostic_names, n_ic_timesteps=1)
 
 
 @dataclasses.dataclass
@@ -239,7 +248,7 @@ def run_inference_from_config(config: InferenceConfig):
         n_forward_steps=config.n_forward_steps
     )
     logging.info("Loading initial condition data")
-    initial_condition, initial_times = get_initial_condition(
+    initial_condition = get_initial_condition(
         config.initial_condition.get_dataset(), stepper_config.prognostic_names
     )
     stepper = config.load_stepper()
@@ -248,7 +257,7 @@ def run_inference_from_config(config: InferenceConfig):
         config.forcing_loader,
         config.forward_steps_in_memory,
         data_requirements,
-        initial_times,
+        initial_condition.as_state().times,
         stepper.surface_temperature_name,
         stepper.ocean_fraction_name,
     )
@@ -270,7 +279,6 @@ def run_inference_from_config(config: InferenceConfig):
     run_inference(
         stepper=stepper,
         initial_condition=initial_condition,
-        initial_times=initial_times,
         forcing_data=data,
         writer=writer,
         aggregator=aggregator,
