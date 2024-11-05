@@ -1,6 +1,5 @@
-import re
 from types import MappingProxyType
-from typing import Callable, List, Mapping, Union
+from typing import Callable, List, Mapping
 
 import torch
 
@@ -13,6 +12,7 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
 CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
@@ -39,29 +39,6 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
-def natural_sort(alist: List[str]) -> List[str]:
-    """Sort to alphabetical order but with numbers sorted
-    numerically, e.g. a11 comes after a2. See [1] and [2].
-
-    [1] https://stackoverflow.com/questions/11150239/natural-sorting
-    [2] https://en.wikipedia.org/wiki/Natural_sort_order
-    """
-
-    def convert(text: str) -> Union[str, int]:
-        if text.isdigit():
-            return int(text)
-        else:
-            return text.lower()
-
-    def alphanum_key(item: str) -> List[Union[str, int]]:
-        return [convert(c) for c in re.split("([0-9]+)", item)]
-
-    return sorted(alist, key=alphanum_key)
-
-
-LEVEL_PATTERN = re.compile(r"_(\d+)$")
-
-
 class ClimateData:
     """Container for climate data for accessing variables and providing
     torch.Tensor views on data with multiple vertical levels."""
@@ -78,114 +55,54 @@ class ClimateData:
 
         Args:
             climate_data: Mapping from field names to tensors.
-            climate_field_name_prefixes: Mapping from field name prefixes (e.g.
-                "specific_total_water_") to standardized prefixes, e.g. "PRESsfc" →
-                "surface_pressure".
+            climate_field_name_prefixes: Mapping which defines the correspondence
+                between an arbitrary set of "standard" names (e.g., "surface_pressure"
+                or "air_temperature") and lists of possible names or prefix variants
+                (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
+                data.
         """
         self._data = dict(climate_data)
-        self._prefixes = climate_field_name_prefixes
-
-    def _extract_levels(self, name: List[str]) -> torch.Tensor:
-        for prefix in name:
-            try:
-                return self._extract_prefix_levels(prefix)
-            except KeyError:
-                pass
-        raise KeyError(name)
-
-    def _natural_sort_names(self, prefix: str) -> List[str]:
-        names = [
-            field_name for field_name in self._data if field_name.startswith(prefix)
-        ]
-
-        levels = []
-        for name in names:
-            match = LEVEL_PATTERN.search(name)
-            if match is None:
-                raise ValueError(
-                    f"Invalid field name {name}, is a prefix variable "
-                    "but does not end in _(number)."
-                )
-            levels.append(int(match.group(1)))
-
-        for i, level in enumerate(sorted(levels)):
-            if i != level:
-                raise KeyError(f"Missing level {i} in {prefix} levels {levels}.")
-
-        if len(names) == 0:
-            raise KeyError(prefix)
-
-        return natural_sort(names)
-
-    def _extract_prefix_levels(self, prefix: str) -> torch.Tensor:
-        names = self._natural_sort_names(prefix)
-
-        return torch.stack([self._data[name] for name in names], dim=-1)
-
-    def _get(self, name):
-        for prefix in self._prefixes[name]:
-            if prefix in self._data.keys():
-                return self._get_prefix(prefix)
-        raise KeyError(name)
-
-    def __getitem__(self, name: str):
-        return getattr(self, name)
-
-    def _get_prefix(self, prefix):
-        return self._data[prefix]
-
-    def _set(self, name, value):
-        for prefix in self._prefixes[name]:
-            if prefix in self._data.keys():
-                self._set_prefix(prefix, value)
-                return
-        raise KeyError(name)
-
-    def _set_prefix(self, prefix, value):
-        self._data[prefix] = value
-
-    def get_all_level_names(self, standard_name: str) -> List[str]:
-        """Get the names of all variables in the data that match one of the
-        prefixes associated with the given standard name. If the prefix
-        corresponds to a 3D variable, returns all vertical level names in their
-        natural order.
-        """
-        if standard_name not in self.standard_names:
-            raise ValueError(f"{standard_name} is not a standard name.")
-        prefixes = self._prefixes[standard_name]
-        for prefix in prefixes:
-            if prefix in self._data:
-                return [prefix]
-            try:
-                return self._natural_sort_names(prefix)
-            except KeyError:
-                pass
-        raise KeyError(
-            f"No prefix associated with {standard_name} was found in data keys."
-        )
-
-    @property
-    def standard_names(self) -> List[str]:
-        return list(self._prefixes.keys())
+        self._prefix_map = climate_field_name_prefixes
+        self._stacker = Stacker(climate_field_name_prefixes)
 
     @property
     def data(self) -> TensorDict:
         """Mapping from field names to tensors."""
         return self._data
 
+    def __getitem__(self, name: str):
+        return getattr(self, name)
+
+    def _get_prefix(self, prefix):
+        return self.data[prefix]
+
+    def _set(self, name, value):
+        for prefix in self._prefix_map[name]:
+            if prefix in self.data.keys():
+                self._set_prefix(prefix, value)
+                return
+        raise KeyError(name)
+
+    def _set_prefix(self, prefix, value):
+        self.data[prefix] = value
+
+    def _get(self, name):
+        for prefix in self._prefix_map[name]:
+            if prefix in self.data.keys():
+                return self._get_prefix(prefix)
+        raise KeyError(name)
+
     @property
     def air_temperature(self) -> torch.Tensor:
         """Returns all vertical levels of air_temperature, e.g. a tensor of
         shape `(..., vertical_level)`."""
-        prefix = self._prefixes["air_temperature"]
-        return self._extract_levels(prefix)
+        return self._stacker("air_temperature", self.data)
 
     @property
     def specific_total_water(self) -> torch.Tensor:
         """Returns all vertical levels of specific total water, e.g. a tensor of
         shape `(..., vertical_level)`."""
-        prefix = self._prefixes["specific_total_water"]
-        return self._extract_levels(prefix)
+        return self._stacker("specific_total_water", self.data)
 
     @property
     def surface_height(self) -> torch.Tensor:
