@@ -5,6 +5,7 @@ import logging
 from typing import (
     Any,
     Callable,
+    Collection,
     Generic,
     Iterator,
     List,
@@ -33,6 +34,7 @@ from fme.core.data_loading.data_typing import (
     VariableMetadata,
 )
 from fme.core.device import move_tensordict_to_device
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -77,6 +79,13 @@ class BatchData:
                 "Expected times to have shape (n_samples, n_times), got shape "
                 f"{self.times.shape}."
             )
+        for k, v in self.data.items():
+            if v.shape[:2] != self.times.shape[:2]:
+                raise ValueError(
+                    f"Data for variable {k} has shape {v.shape}, expected shape "
+                    f"(n_samples, n_times) for times but got shape "
+                    f"{self.times.shape}."
+                )
 
     @property
     def device_data(self) -> TensorMapping:
@@ -138,27 +147,88 @@ class BatchData:
         return cast(SelfType, ret)
 
     def compute_derived_variables(self: SelfType, forcing_data: SelfType) -> SelfType:
+        """
+        Compute derived variables from the data and forcing data.
+
+        The forcing data must have the same times as the batch data.
+        """
         if not np.all(forcing_data.times.values == self.times.values):
             raise ValueError("Forcing data must have the same times as the batch data.")
-        derived_data = self.derive_func(self.data, forcing_data.data)
+        derived_data = self.derive_func(self.device_data, forcing_data.device_data)
         return self.__class__(
             data={**self.data, **derived_data},
             times=self.times,
+            horizontal_dims=self.horizontal_dims,
             derive_func=self.derive_func,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
+        """
+        Remove the initial condition timesteps from the data.
+        """
         if n_ic_timesteps == 0:
             raise RuntimeError("No initial condition timesteps to remove.")
         return self.__class__(
             {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
-            times=self.times[:, n_ic_timesteps:],
+            times=self.times.isel(time=slice(n_ic_timesteps, None)),
+            horizontal_dims=self.horizontal_dims,
+            derive_func=self.derive_func,
         )
 
     def subset_names(self: SelfType, names: Sequence[str]) -> SelfType:
+        """
+        Subset the data to only include the given names.
+        """
         return self.__class__(
             {k: v for k, v in self.data.items() if k in names},
             times=self.times,
+            horizontal_dims=self.horizontal_dims,
+            derive_func=self.derive_func,
+        )
+
+    def get_start(
+        self, prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> PrognosticStateABC["BatchData"]:
+        """
+        Get the initial condition state.
+        """
+        return _PrognosticState.from_batch_data_start(
+            self, prognostic_names, n_ic_timesteps
+        )
+
+    def get_end(
+        self, prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> PrognosticStateABC["BatchData"]:
+        """
+        Get the final state which can be used as a new initial condition.
+        """
+        return _PrognosticState.from_batch_data_end(
+            self, prognostic_names, n_ic_timesteps
+        )
+
+    def prepend(
+        self: SelfType, initial_condition: PrognosticStateABC[SelfType]
+    ) -> SelfType:
+        """
+        Prepend the initial condition to the data.
+        """
+        initial_batch_data = initial_condition.as_state()
+        filled_data = {**initial_batch_data.data}
+        example_tensor = list(initial_batch_data.data.values())[0]
+        state_data_device = list(self.data.values())[
+            0
+        ].device  # not the same as state.device_data[k].device
+        for k in self.data:
+            if k not in filled_data:
+                filled_data[k] = torch.full_like(example_tensor, fill_value=np.nan)
+        return self.__class__(
+            data={
+                k: torch.cat([filled_data[k].to(state_data_device), v], dim=1)
+                for k, v in self.data.items()
+            },
+            times=xr.concat([initial_batch_data.times, self.times], dim="time"),
+            derive_func=self.derive_func,
+            horizontal_dims=self.horizontal_dims,
         )
 
 
@@ -231,7 +301,73 @@ class PairedData:
     def from_batch_data(cls, prediction: BatchData, target: BatchData):
         if not np.all(prediction.times.values == target.times.values):
             raise ValueError("Prediction and target times must be the same.")
-        return cls(prediction.data, target.data, prediction.times)
+        return cls(prediction.device_data, target.device_data, prediction.times)
+
+
+class _PrognosticState(PrognosticStateABC[BatchData]):
+    """
+    PrognosticStateABC implementation for BatchData.
+
+    This should not be used directly, instead type hint as PrognosticStateABC[BatchData]
+    or initialize from BatchData using the from_start or from_end methods.
+    """
+
+    def __init__(self, data: BatchData, _direct_init=True):
+        """
+        Initialize the state. Should not be used directly, instead use the
+        initialization classmethods.
+
+        Args:
+            data: The data to initialize the state with.
+            _direct_init: Whether the state was initialized directly from itself.
+                Do not set this directly, as it allows you to bypass the checks in
+                the true initialization methods.
+        """
+        if _direct_init:
+            raise NotImplementedError(
+                "Direct initialization not implemented, use from_start_state or "
+                "from_end_state instead."
+            )
+        self._data = data
+
+    def as_state(self) -> BatchData:
+        return self._data
+
+    @classmethod
+    def from_batch_data_start(
+        cls, state: "BatchData", prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> "_PrognosticState":
+        return cls(
+            BatchData(
+                {
+                    k: v[:, :n_ic_timesteps]
+                    for k, v in state.data.items()
+                    if k in prognostic_names
+                },
+                times=state.times[:, :n_ic_timesteps],
+                derive_func=state.derive_func,
+                horizontal_dims=state.horizontal_dims,
+            ),
+            _direct_init=False,
+        )
+
+    @classmethod
+    def from_batch_data_end(
+        cls, state: "BatchData", prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> "_PrognosticState":
+        return cls(
+            BatchData(
+                {
+                    k: v[:, -n_ic_timesteps:]
+                    for k, v in state.data.items()
+                    if k in prognostic_names
+                },
+                times=state.times[:, -n_ic_timesteps:],
+                derive_func=state.derive_func,
+                horizontal_dims=state.horizontal_dims,
+            ),
+            _direct_init=False,
+        )
 
 
 T = TypeVar("T", covariant=True)

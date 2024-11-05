@@ -83,6 +83,7 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.core.data_loading.batch_data import (
+    BatchData,
     GriddedData,
     GriddedDataABC,
     PairedData,
@@ -97,6 +98,7 @@ from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.stepper import (
@@ -202,12 +204,13 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
 
 
+PS = TypeVar("PS")  # prognostic state
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
 BD = TypeVar("BD")  # batch data
 SD = TypeVar("SD")  # stepped data from inference
 
 
-class AggregatorBuilderABC(abc.ABC, Generic[TO, SD]):
+class AggregatorBuilderABC(abc.ABC, Generic[PS, TO, SD]):
     @abc.abstractmethod
     def get_train_aggregator(self) -> AggregatorABC[TO]:
         pass
@@ -217,11 +220,13 @@ class AggregatorBuilderABC(abc.ABC, Generic[TO, SD]):
         pass
 
     @abc.abstractmethod
-    def get_inference_aggregator(self) -> InferenceAggregatorABC[SD]:
+    def get_inference_aggregator(self) -> InferenceAggregatorABC[PS, SD]:
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[TrainOutput, PairedData]):
+class AggregatorBuilder(
+    AggregatorBuilderABC[PrognosticStateABC[BatchData], TrainOutput, PairedData]
+):
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
@@ -284,7 +289,9 @@ class Trainer:
         optimization: Optimization,
         ema: EMATracker,
         config: TrainConfigProtocol,
-        aggregator_builder: AggregatorBuilderABC[TO, SD],
+        # TODO: PS and SD don't constrain anything yet, they will need to when
+        # inference is implemented generically.
+        aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
     ):
         logging.info(f"Current device is {fme.get_device()}")

@@ -11,9 +11,13 @@ import xarray as xr
 
 import fme
 from fme.core import ClimateData, metrics
-from fme.core.data_loading.batch_data import BatchData, get_atmospheric_batch_data
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    get_atmospheric_batch_data,
+)
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -649,8 +653,16 @@ def test_step_with_prescribed_ocean():
 
 def get_data_for_predict(
     n_steps, forcing_names: List[str]
-) -> Tuple[TensorDict, BatchData]:
-    input_data = {"a": torch.rand(3, 1, 5, 5).to(DEVICE)}
+) -> Tuple[PrognosticStateABC[BatchData], BatchData]:
+    input_data = BatchData(
+        {"a": torch.rand(3, 1, 5, 5).to(DEVICE)},
+        times=xr.DataArray(
+            np.zeros((3, 1)),
+        ),
+    ).get_start(
+        prognostic_names=["a"],
+        n_ic_timesteps=1,
+    )
     forcing_data = BatchData(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
@@ -666,25 +678,41 @@ def test_predict():
     stepper = _get_stepper(["a"], ["a"])
     n_steps = 3
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
-    output = stepper.predict(input_data, forcing_data, n_steps)
+    forcing_data.data = {}
+    output, new_input_data = stepper.predict(input_data, forcing_data)
+    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
     variable = "a"
     assert output.data[variable].size(dim=1) == n_steps
     torch.testing.assert_close(
-        output.data[variable][:, -1], input_data[variable][:, 0] + n_steps
+        output.data[variable][:, -1],
+        input_data.as_state().data[variable][:, 0] + n_steps,
     )
-    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
+    assert isinstance(new_input_data, PrognosticStateABC)
+    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_state, BatchData)
+    torch.testing.assert_close(
+        new_input_state.data[variable][:, 0], output.data[variable][:, -1]
+    )
+    assert new_input_state.times.equals(output.times[:, -1:])
 
 
 def test_predict_with_forcing():
     stepper = _get_stepper(["a", "b"], ["a"], module_name="ChannelSum")
     n_steps = 3
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=["b"])
-    output = stepper.predict(input_data, forcing_data, n_steps)
+    output, new_input_data = stepper.predict(input_data, forcing_data)
     assert "b" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
+    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
     torch.testing.assert_close(
-        output.data["a"][:, 0], input_data["a"][:, 0] + forcing_data.data["b"][:, 0]
+        output.data["a"][:, 0],
+        input_data.as_state().data["a"][:, 0] + forcing_data.data["b"][:, 0],
     )
+    assert isinstance(new_input_data, PrognosticStateABC)
+    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_state, BatchData)
+    torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
+    assert "b" not in new_input_state.data
     for n in range(1, n_steps):
         expected_a_output = output.data["a"][:, n - 1] + forcing_data.data["b"][:, n]
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
@@ -697,18 +725,26 @@ def test_predict_with_ocean():
     input_data, forcing_data = get_data_for_predict(
         n_steps, forcing_names=["a", "mask"]
     )
-    output = stepper.predict(input_data, forcing_data, n_steps)
+    output, new_input_data = stepper.predict(input_data, forcing_data)
+    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
     assert "mask" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
     for n in range(n_steps):
-        previous_a = input_data["a"][:, 0] if n == 0 else output.data["a"][:, n - 1]
+        previous_a = (
+            input_data.as_state().data["a"][:, 0]
+            if n == 0
+            else output.data["a"][:, n - 1]
+        )
         expected_a_output = torch.where(
             torch.round(forcing_data.data["mask"][:, n + 1]).to(int) == 1,
             forcing_data.data["a"][:, n + 1],
             previous_a + 1,
         )
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
-    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
+    assert isinstance(new_input_data, PrognosticStateABC)
+    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_state, BatchData)
+    torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
 
 
 def test_next_step_forcing_names():
@@ -719,7 +755,7 @@ def test_next_step_forcing_names():
         next_step_forcing_names=["c"],
     )
     input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=["b", "c"])
-    stepper.predict(input_data, forcing_data, 1)
+    stepper.predict(input_data, forcing_data)
     torch.testing.assert_close(
         stepper.module.module.last_input[:, 1, :], forcing_data.data["b"][:, 0]
     )
@@ -743,17 +779,21 @@ def test_prepend_initial_condition():
         metrics={"loss": torch.tensor(0.0)},
         normalize=normalize,
     )
+    ic_data = {
+        "a": torch.rand(3, 1, 5).to(DEVICE),
+        "b": torch.rand(3, 1, 5).to(DEVICE),
+    }
     ic = BatchData(
-        data={
-            "a": torch.rand(3, 1, 5).to(DEVICE),
-            "b": torch.rand(3, 1, 5).to(DEVICE),
-        },
+        data=ic_data,
         times=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+    ).get_start(
+        prognostic_names=["a", "b"],
+        n_ic_timesteps=1,
     )
     prepended = stepped.prepend_initial_condition(ic)
     for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, :1], ic.data[v])
-        assert torch.allclose(prepended.target_data[v][:, :1], ic.data[v])
+        assert torch.allclose(prepended.gen_data[v][:, :1], ic_data[v])
+        assert torch.allclose(prepended.target_data[v][:, :1], ic_data[v])
 
 
 def test__combine_normalizers():

@@ -1,4 +1,5 @@
 import dataclasses
+from collections import defaultdict
 from typing import Dict, List, Literal, Mapping, Optional, Protocol
 
 import numpy as np
@@ -178,38 +179,26 @@ class MeanAggregator:
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
-            self._variable_metrics = {
-                "weighted_rmse": {},
-                "weighted_mean_gen": {},
-                "weighted_mean_target": {},
-                "weighted_bias": {},
-                "weighted_std_gen": {},
-            }
-
-            if self._target == "denorm":
-                # redundant for the "norm" case
-                self._variable_metrics["weighted_grad_mag_percent_diff"] = {}
+            self._variable_metrics = {}
 
             device = get_device()
-            for key in gen_data:
-                self._variable_metrics["weighted_rmse"][
-                    key
-                ] = AreaWeightedReducedMetric(
+            self._variable_metrics["weighted_rmse"] = defaultdict(
+                lambda: AreaWeightedReducedMetric(
                     device=device,
                     compute_metric=self._gridded_operations.area_weighted_rmse,
                     n_timesteps=self._n_timesteps,
                 )
-                if self._target == "denorm":
-                    self._variable_metrics["weighted_grad_mag_percent_diff"][
-                        key
-                    ] = AreaWeightedReducedMetric(
+            )
+            if self._target == "denorm":
+                self._variable_metrics["weighted_grad_mag_percent_diff"] = defaultdict(
+                    lambda: AreaWeightedReducedMetric(
                         device=device,
                         compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff,  # noqa: E501
                         n_timesteps=self._n_timesteps,
                     )
-                self._variable_metrics["weighted_mean_gen"][
-                    key
-                ] = AreaWeightedReducedMetric(
+                )
+            self._variable_metrics["weighted_mean_gen"] = defaultdict(
+                lambda: AreaWeightedReducedMetric(
                     device=device,
                     compute_metric=compute_metric_on(
                         source="gen",
@@ -219,9 +208,9 @@ class MeanAggregator:
                     ),
                     n_timesteps=self._n_timesteps,
                 )
-                self._variable_metrics["weighted_mean_target"][
-                    key
-                ] = AreaWeightedReducedMetric(
+            )
+            self._variable_metrics["weighted_mean_target"] = defaultdict(
+                lambda: AreaWeightedReducedMetric(
                     device=device,
                     compute_metric=compute_metric_on(
                         source="target",
@@ -231,17 +220,16 @@ class MeanAggregator:
                     ),
                     n_timesteps=self._n_timesteps,
                 )
-                self._variable_metrics["weighted_bias"][
-                    key
-                ] = AreaWeightedReducedMetric(
+            )
+            self._variable_metrics["weighted_bias"] = defaultdict(
+                lambda: AreaWeightedReducedMetric(
                     device=device,
                     compute_metric=self._gridded_operations.area_weighted_mean_bias,
                     n_timesteps=self._n_timesteps,
                 )
-
-                self._variable_metrics["weighted_std_gen"][
-                    key
-                ] = AreaWeightedReducedMetric(
+            )
+            self._variable_metrics["weighted_std_gen"] = defaultdict(
+                lambda: AreaWeightedReducedMetric(
                     device=device,
                     compute_metric=compute_metric_on(
                         source="gen",
@@ -253,6 +241,7 @@ class MeanAggregator:
                     ),
                     n_timesteps=self._n_timesteps,
                 )
+            )
         return self._variable_metrics
 
     @torch.no_grad()
@@ -427,21 +416,20 @@ class SingleTargetMeanAggregator:
             }
 
             device = get_device()
-            for key in gen_data:
-                self._variable_metrics["weighted_mean_gen"][
-                    key
-                ] = AreaWeightedSingleTargetReducedMetric(
+            self._variable_metrics["weighted_mean_gen"] = defaultdict(
+                lambda: AreaWeightedSingleTargetReducedMetric(
                     device=device,
                     compute_metric=lambda x: self._ops.area_weighted_mean(x),
                     n_timesteps=self._n_timesteps,
                 )
-                self._variable_metrics["weighted_std_gen"][
-                    key
-                ] = AreaWeightedSingleTargetReducedMetric(
+            )
+            self._variable_metrics["weighted_std_gen"] = defaultdict(
+                lambda: AreaWeightedSingleTargetReducedMetric(
                     device=device,
                     compute_metric=lambda x: self._ops.area_weighted_std(x),
                     n_timesteps=self._n_timesteps,
                 )
+            )
 
         return self._variable_metrics
 

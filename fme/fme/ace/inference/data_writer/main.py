@@ -8,8 +8,12 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData, PairedData
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    PairedData,
+)
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.generics.state import PrognosticStateABC
 
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
@@ -241,10 +245,10 @@ class PairedDataWriter:
 
     def save_initial_condition(
         self,
-        batch: BatchData,
+        ic_data: PrognosticStateABC[BatchData],
     ):
-        save_initial_condition(
-            ic_data=batch,
+        _save_initial_condition(
+            ic_data=ic_data.as_state(),
             path=self.path,
             prognostic_names=self.prognostic_names,
             metadata=self.metadata,
@@ -279,7 +283,7 @@ class PairedDataWriter:
             writer.flush()
 
 
-def save_initial_condition(
+def _save_initial_condition(
     ic_data: BatchData,
     path: str,
     prognostic_names: Sequence[str],
@@ -444,10 +448,10 @@ class DataWriter:
 
     def save_initial_condition(
         self,
-        ic_data: BatchData,
+        ic_data: PrognosticStateABC[BatchData],
     ):
-        save_initial_condition(
-            ic_data=ic_data,
+        _save_initial_condition(
+            ic_data=ic_data.as_state(),
             path=self.path,
             prognostic_names=self.prognostic_names,
             metadata=self.metadata,
