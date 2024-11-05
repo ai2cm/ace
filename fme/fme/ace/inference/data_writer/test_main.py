@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.inference.data_writer.main import save_initial_condition
+from fme.ace.inference.data_writer.main import _save_initial_condition
 from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import VariableMetadata
 
@@ -21,7 +21,7 @@ def test_save_initial_condition_single_timestep():
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        save_initial_condition(
+        _save_initial_condition(
             ic_data=batch,
             path=tmpdir,
             prognostic_names=["air_temperature"],
@@ -61,7 +61,7 @@ def test_save_initial_condition_multiple_timesteps():
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        save_initial_condition(
+        _save_initial_condition(
             ic_data=batch,
             path=tmpdir,
             prognostic_names=["air_temperature"],

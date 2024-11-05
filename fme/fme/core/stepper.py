@@ -28,6 +28,7 @@ from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import (
@@ -337,7 +338,7 @@ class TrainOutput(TrainOutputABC):
 
     def prepend_initial_condition(
         self,
-        initial_condition: BatchData,
+        initial_condition: PrognosticStateABC[BatchData],
     ) -> "TrainOutput":
         """
         Prepends an initial condition to the existing stepped data.
@@ -348,14 +349,15 @@ class TrainOutput(TrainOutputABC):
         Args:
             initial_condition: Initial condition data.
         """
+        batch_data = initial_condition.as_state()
         return TrainOutput(
             metrics=self.metrics,
-            gen_data=_prepend_timesteps(self.gen_data, initial_condition.data),
+            gen_data=_prepend_timesteps(self.gen_data, batch_data.device_data),
             target_data=_prepend_timesteps(
                 self.target_data,
-                initial_condition.data,
+                batch_data.device_data,
             ),
-            times=xr.concat([initial_condition.times, self.times], dim="time"),
+            times=xr.concat([batch_data.times, self.times], dim="time"),
             normalize=self.normalize,
         )
 
@@ -612,15 +614,14 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
 
     def predict(
         self,
-        initial_condition: TensorMapping,
+        initial_condition: PrognosticStateABC[BatchData],
         forcing_data: BatchData,
-        n_forward_steps: int,
-    ) -> BatchData:
+    ) -> Tuple[BatchData, PrognosticStateABC[BatchData]]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
         Args:
-            initial_condition: Mapping from variable name to tensors of shape
+            initial_condition: Prognostic state data with tensors of shape
                 [n_batch, self.n_ic_steps, <horizontal_dims>]. This data is assumed
                 to contain all prognostic variables and be denormalized.
             forcing_data: Contains tensors of shape
@@ -633,11 +634,19 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].
         """
         output_list = []
+        initial_condition_state: BatchData = initial_condition.as_state()
+        if initial_condition_state.times.shape[1] != self.n_ic_timesteps:
+            raise ValueError(
+                f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
+                f"{initial_condition_state.times.shape[1]}."
+            )
         state = {
-            k: initial_condition[k].squeeze(self.TIME_DIM) for k in initial_condition
+            k: initial_condition_state.device_data[k].squeeze(self.TIME_DIM)
+            for k in initial_condition_state.device_data
         }
         forcing_names = self._config.forcing_names
         ocean_forcing_names = self.ocean.forcing_names if self.ocean is not None else []
+        n_forward_steps = forcing_data.times.shape[1] - self.n_ic_timesteps
         for step in range(n_forward_steps):
             current_step_forcing = {
                 k: (
@@ -658,17 +667,13 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             output_timeseries[name] = torch.stack(
                 [x[name] for x in output_list], dim=self.TIME_DIM
             )
-        return BatchData(
-            output_timeseries, forcing_data.times[:, self.n_ic_timesteps :]
+        data = BatchData(
+            output_timeseries,
+            forcing_data.times[:, self.n_ic_timesteps :],
+            derive_func=forcing_data.derive_func,
+            horizontal_dims=forcing_data.horizontal_dims,
         )
-
-    def get_initial_condition(self, data: BatchData) -> BatchData:
-        if self.TIME_DIM != 1:
-            raise NotImplementedError(
-                "get_initial_condition hard-codes time dimension at index 1"
-            )
-        ic = {k: v[:, : self.n_ic_timesteps, ...] for k, v in data.device_data.items()}
-        return BatchData(ic, data.times[:, : self.n_ic_timesteps])
+        return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
 
     def train_on_batch(
         self,
@@ -692,7 +697,6 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
                 and the normalized batch data.
         """
         time_dim = self.TIME_DIM
-        n_ic_timesteps = self.n_ic_timesteps
         if self.ocean is None:
             forcing_names = self._config.forcing_names
         else:
@@ -700,22 +704,17 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
         forcing_data = data.subset_names(forcing_names)
 
         loss = torch.tensor(0.0, device=get_device())
-        metrics: TensorDict = {}
-
-        input_data = {
-            k: data.device_data[k][:, :n_ic_timesteps]
-            for k in self._config.prognostic_names
-        }
+        metrics: Dict[str, float] = {}
+        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = data.remove_initial_condition(self.n_ic_timesteps)
         n_forward_steps = list(target_data.data.values())[0].shape[1]
 
         optimization.set_mode(self.module)
         with optimization.autocast():
             # output from self.predict does not include initial condition
-            gen_data = self.predict(
+            gen_data, _ = self.predict(
                 input_data,
                 forcing_data=forcing_data,
-                n_forward_steps=n_forward_steps,
             )
 
             # compute loss for each timestep
@@ -750,8 +749,9 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             derive_func=data.derive_func,
         )
         if keep_initial_condition:
-            ic = self.get_initial_condition(data)
-            # prepend target/initial input data to both prediction and target data
+            ic = data.get_start(
+                set(data.data.keys()), self.n_ic_timesteps
+            )  # full data and not just prognostic get prepended
             return stepped.prepend_initial_condition(ic)
         return stepped
 

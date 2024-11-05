@@ -369,10 +369,10 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     config = ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path))
     requirements = DataRequirements(["foo"], total_forward_steps + 1)
     time_values = [
-        cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)
+        [cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)]
         for n in range(n_initial_conditions)
     ]
-    initial_times = xr.DataArray(time_values, dims=["sample"])
+    initial_times = xr.DataArray(time_values, dims=["sample", "time"])
     data = get_forcing_data(
         config, forward_steps_in_memory, requirements, initial_times
     )
@@ -384,7 +384,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     assert batch_data.data["foo"].shape[0] == len(time_values)
     assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
     assert list(batch_data.times.dims) == ["sample", "time"]
-    xr.testing.assert_allclose(batch_data.times.isel(time=0), initial_times)
+    xr.testing.assert_allclose(batch_data.times[:, 0], initial_times[:, 0])
     assert batch_data.times.dt.calendar == calendar
 
 

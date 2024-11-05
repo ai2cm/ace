@@ -245,10 +245,13 @@ def inference_helper(
     assert len(wandb_logs) == len(inference_logs)
     for i, log in enumerate(inference_logs):
         for var in all_out_names:
-            # if these are off by something like 90% then probably the stepper
-            # is being used instead of the prediction_data
-            assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
-            assert log[f"inference/mean/weighted_bias/{var}"] == 0.0
+            if i == 0 and var not in in_names:
+                assert np.isnan(log[f"inference/mean/weighted_rmse/{var}"])
+            else:
+                # if these are off by something like 90% then probably the stepper
+                # is being used instead of the prediction_data
+                assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
+                assert log[f"inference/mean/weighted_bias/{var}"] == 0.0
         for metric, val in log.items():
             # check that time series metrics match
             if "inference/mean" in metric:
