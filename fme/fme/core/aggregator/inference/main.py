@@ -16,7 +16,10 @@ from typing import (
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData, PairedData
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    PairedData,
+)
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     LatLonCoordinates,
@@ -26,6 +29,7 @@ from fme.core.data_loading.data_typing import (
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
 )
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -204,7 +208,9 @@ class InferenceEvaluatorAggregatorConfig:
         )
 
 
-class InferenceEvaluatorAggregator(InferenceAggregatorABC[PairedData]):
+class InferenceEvaluatorAggregator(
+    InferenceAggregatorABC[PrognosticStateABC[BatchData], PairedData]
+):
     """
     Aggregates statistics for inference comparing a generated and target series.
 
@@ -374,6 +380,24 @@ class InferenceEvaluatorAggregator(InferenceAggregatorABC[PairedData]):
                 gen_data=data.prediction,
             )
 
+    def record_initial_condition(
+        self,
+        initial_condition: PrognosticStateABC[BatchData],
+        normalize: Callable[[TensorMapping], TensorDict],
+    ):
+        data = initial_condition.as_state().device_data
+        data_norm = normalize(data)
+        for aggregator_name in ["mean", "mean_norm"]:
+            aggregator = self._aggregators.get(aggregator_name)
+            if aggregator is not None:
+                aggregator.record_batch(
+                    target_data=data,
+                    gen_data=data,
+                    target_data_norm=data_norm,
+                    gen_data_norm=data_norm,
+                    i_time_start=0,
+                )
+
     @torch.no_grad()
     def get_logs(self, label: str):
         """
@@ -514,7 +538,9 @@ class InferenceAggregatorConfig:
         )
 
 
-class InferenceAggregator(InferenceAggregatorABC[BatchData]):
+class InferenceAggregator(
+    InferenceAggregatorABC[PrognosticStateABC[BatchData], BatchData]
+):
     """
     Aggregates statistics on a single timeseries of data.
 
@@ -585,6 +611,18 @@ class InferenceAggregator(InferenceAggregatorABC[BatchData]):
             time_dependent_aggregator.record_batch(
                 time=data.times,
                 data=data.data,
+            )
+
+    def record_initial_condition(
+        self,
+        initial_condition: PrognosticStateABC[BatchData],
+        normalize: Callable[[TensorMapping], TensorDict],
+    ):
+        data = initial_condition.as_state().device_data
+        if "mean" in self._aggregators:
+            self._aggregators["mean"].record_batch(
+                data=data,
+                i_time_start=0,
             )
 
     @torch.no_grad()

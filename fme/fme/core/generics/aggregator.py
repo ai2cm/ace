@@ -3,12 +3,13 @@ from typing import Callable, Dict, Generic, List, TypeVar
 
 from fme.core.typing_ import TensorDict, TensorMapping
 
-T = TypeVar("T")
+PS = TypeVar("PS")  # prognostic state
+BD = TypeVar("BD")  # batch data
 
 
-class AggregatorABC(abc.ABC, Generic[T]):
+class AggregatorABC(abc.ABC, Generic[BD]):
     @abc.abstractmethod
-    def record_batch(self, batch: T) -> None:
+    def record_batch(self, batch: BD) -> None:
         pass
 
     @abc.abstractmethod
@@ -16,13 +17,21 @@ class AggregatorABC(abc.ABC, Generic[T]):
         pass
 
 
-class InferenceAggregatorABC(abc.ABC, Generic[T]):
+class InferenceAggregatorABC(abc.ABC, Generic[PS, BD]):
     @abc.abstractmethod
     def record_batch(
         self,
-        data: T,
+        data: BD,
         normalize: Callable[[TensorMapping], TensorDict],
         i_time_start: int,
+    ) -> None:
+        pass
+
+    @abc.abstractmethod
+    def record_initial_condition(
+        self,
+        initial_condition: PS,
+        normalize: Callable[[TensorMapping], TensorDict],
     ) -> None:
         pass
 

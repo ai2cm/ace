@@ -1,7 +1,7 @@
 import datetime
 import unittest.mock
 from collections import namedtuple
-from typing import Iterable, Tuple
+from typing import Callable, Iterable, Optional, Tuple
 
 import numpy as np
 import torch
@@ -41,11 +41,29 @@ def get_scalar_data(names, value):
 
 
 class MockLoader(torch.utils.data.DataLoader):
-    def __init__(self, shape: tuple, names: Iterable[str], n_windows: int):
+    def __init__(
+        self,
+        shape: tuple,
+        names: Iterable[str],
+        n_windows: int,
+        derive_func: Optional[Callable] = None,
+        time: Optional[xr.DataArray] = None,
+    ):
         self._data = {n: torch.rand(*shape) for n in names}
-        self._time = xr.DataArray(np.zeros(shape[:2]), dims=["sample", "time"])
+        if time is None:
+            self._time = xr.DataArray(np.zeros(shape[:2]), dims=["sample", "time"])
+        elif time.shape != shape[:2]:
+            raise ValueError(
+                "Time shape must match the first two dimensions of the data."
+            )
+        else:
+            self._time = time
         self._n_windows = n_windows
         self._current_window = 0
+        if derive_func is None:
+            self._derive_func = lambda data, forcing_data: data
+        else:
+            self._derive_func = derive_func
 
     def __iter__(self):
         return self
@@ -54,7 +72,10 @@ class MockLoader(torch.utils.data.DataLoader):
         if self._current_window < self._n_windows:
             self._current_window += 1
             return BatchData(
-                self._data, self._time + self._current_window * len(self._time)
+                data=self._data,
+                times=self._time
+                + (self._current_window - 1) * (self._time.shape[1] - 1),
+                derive_func=self._derive_func,
             )
         else:
             raise StopIteration
@@ -78,7 +99,10 @@ def _get_stepper():
     all_names = list(set(in_names + out_names))
 
     spherical_data = get_data(all_names, shape)
-    time = xr.DataArray(np.arange(n_time), dims=["time"])
+    time = xr.DataArray(
+        np.repeat(np.expand_dims(np.arange(n_time), axis=0), n_samples, axis=0),
+        dims=["sample", "time"],
+    )
 
     img_shape = spherical_data.data[in_names[0]].shape[2:]
     gridded_operations = LatLonOperations(spherical_data.area_weights)
@@ -103,10 +127,19 @@ def test_looper():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = {n: spherical_data.data[n][:, :1] for n in spherical_data.data}
-    initial_time = time[0:]
-    loader = MockLoader(shape, forcing_names, 3)
-    looper = Looper(stepper, initial_condition, initial_time, loader)
+    initial_condition = BatchData(
+        {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+        times=time[:, 0:1],
+    ).get_start(
+        prognostic_names=stepper.prognostic_names,
+        n_ic_timesteps=1,
+    )
+    loader = MockLoader(shape, forcing_names, 3, time=time)
+    looper = Looper(
+        stepper=stepper,
+        initial_condition=initial_condition,
+        loader=loader,
+    )
 
     expected_output_shape = (shape[0], shape[1] - 1, shape[2], shape[3])
     for prediction_batch, forcing_batch in looper:
@@ -119,7 +152,7 @@ def test_looper():
             assert forcing_batch.data[name].shape == expected_output_shape
 
 
-def _mock_compute_derived_quantities(data, sigma_coords, timestep, forcing_data):
+def _mock_compute_derived_quantities(data, forcing_data):
     data_name = list(data)[0]
     forcing_name = list(forcing_data)[0]
     derived = {"derived": data[data_name] + forcing_data[forcing_name]}
@@ -127,29 +160,50 @@ def _mock_compute_derived_quantities(data, sigma_coords, timestep, forcing_data)
 
 
 def test_looper_with_derived_variables():
-    mock = unittest.mock.MagicMock(side_effect=_mock_compute_derived_quantities)
+    mock_derive_func = unittest.mock.MagicMock(
+        side_effect=_mock_compute_derived_quantities
+    )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = {n: spherical_data.data[n][:, :1] for n in spherical_data.data}
-    initial_time = time[0:]
-    loader = MockLoader(shape, forcing_names, 2)
-    with unittest.mock.patch("fme.ace.inference.loop.compute_derived_quantities", mock):
-        looper = Looper(stepper, initial_condition, initial_time, loader)
+    initial_condition = BatchData(
+        {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+        times=time[:, 0:1],
+        derive_func=mock_derive_func,
+    ).get_start(
+        prognostic_names=stepper.prognostic_names,
+        n_ic_timesteps=1,
+    )
+    loader = MockLoader(shape, forcing_names, 2, mock_derive_func, time=time)
+    looper = Looper(
+        stepper=stepper,
+        initial_condition=initial_condition,
+        loader=loader,
+    )
 
-        for prediction_batch, forcing_batch in looper:
-            assert "derived" in prediction_batch.data
-            assert "derived" not in forcing_batch.data
+    for prediction_batch, forcing_batch in looper:
+        assert "derived" in prediction_batch.data
+        assert "derived" not in forcing_batch.data
+    mock_derive_func.assert_called()
 
 
 def test_looper_with_target_data():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = {n: spherical_data.data[n][:, :1] for n in spherical_data.data}
-    initial_time = time[0:]
-    loader = MockLoader(shape, all_names, 2)
-    looper = Looper(stepper, initial_condition, initial_time, loader)
+    initial_condition = BatchData(
+        {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+        times=time[:, 0:1],
+    ).get_start(
+        prognostic_names=stepper.prognostic_names,
+        n_ic_timesteps=1,
+    )
+    loader = MockLoader(shape, all_names, 2, time=time)
+    looper = Looper(
+        stepper=stepper,
+        initial_condition=initial_condition,
+        loader=loader,
+    )
 
     for prediction_batch, forcing_batch in looper:
         assert set(out_names) == set(prediction_batch.data)
@@ -157,22 +211,29 @@ def test_looper_with_target_data():
 
 
 def test_looper_with_target_data_and_derived_variables():
-    mock = unittest.mock.MagicMock(side_effect=_mock_compute_derived_quantities)
+    mock_derive_func = unittest.mock.MagicMock(
+        side_effect=_mock_compute_derived_quantities
+    )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
-    initial_condition = {n: spherical_data.data[n][:, :1] for n in spherical_data.data}
-    initial_time = time[0:]
-    loader = MockLoader(shape, all_names, 2)
-    with unittest.mock.patch("fme.ace.inference.loop.compute_derived_quantities", mock):
-        looper = Looper(
-            stepper,
-            initial_condition,
-            initial_time,
-            loader,
-            compute_derived_for_loaded_data=True,
-        )
+    initial_condition = BatchData(
+        {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+        times=time[:, 0:1],
+        derive_func=mock_derive_func,
+    ).get_start(
+        prognostic_names=stepper.prognostic_names,
+        n_ic_timesteps=1,
+    )
+    loader = MockLoader(shape, all_names, 2, mock_derive_func, time=time)
+    looper = Looper(
+        stepper,
+        initial_condition=initial_condition,
+        loader=loader,
+        compute_derived_for_loaded_data=True,
+    )
 
-        for prediction_batch, forcing_batch in looper:
-            assert set(out_names + ["derived"]) == set(prediction_batch.data)
-            assert set(all_names + ["derived"]) == set(forcing_batch.data)
+    for prediction_batch, forcing_batch in looper:
+        assert set(out_names + ["derived"]) == set(prediction_batch.data)
+        assert set(all_names + ["derived"]) == set(forcing_batch.data)
+    mock_derive_func.assert_called()

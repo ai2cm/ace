@@ -32,6 +32,7 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
@@ -212,15 +213,20 @@ def test_get_initial_condition():
         np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition, initial_times = get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(data, ["prog"])
+    assert isinstance(initial_condition, PrognosticStateABC)
+    batch_data = initial_condition.as_state()
+    assert batch_data.times.shape == (2, 1)
+    initial_times = batch_data.times.isel(time=0)
     assert initial_times.shape == (2,)
     assert initial_times[0] == 0
     assert initial_times[1] == 5
-    assert initial_condition["prog"].shape == (2, 16, 32)
+    assert batch_data.data["prog"].shape == (2, 1, 16, 32)
     np.testing.assert_allclose(
-        initial_condition["prog"].cpu().numpy(), data["prog"].values
+        batch_data.data["prog"].squeeze(dim=1).cpu().numpy(), data["prog"].values
     )
-    assert initial_condition["prog"].device == fme.get_device()
+    assert batch_data.data["prog"].device == fme.get_device()
+    assert batch_data.times.isel(time=0).equals(initial_times)
 
 
 def test_get_initial_condition_raises_bad_variable_shape():
