@@ -8,7 +8,6 @@ from fme.core.climate_data import (
     _height_at_interface,
     _layer_thickness,
     _pressure_at_interface,
-    natural_sort,
 )
 
 
@@ -52,58 +51,6 @@ def test__height_at_interface():
             [[[15, 12, 10], [21.5, 20.5, 20]], [[15, 12, 10], [21.5, 20.5, 20]]]
         ),
     )
-
-
-@pytest.mark.parametrize(
-    "names, sorted_names",
-    [
-        (
-            ["a_1", "b_1", "c_1", "a_2"],
-            [
-                "a_1",
-                "a_2",
-                "b_1",
-                "c_1",
-            ],
-        ),
-        (
-            [
-                "a_0",
-                "a_1",
-                "a_12",
-                "a_2",
-            ],
-            [
-                "a_0",
-                "a_1",
-                "a_2",
-                "a_12",
-            ],
-        ),
-        (
-            [
-                "a_0001",
-                "a_0012",
-                "a_0002",
-            ],
-            [
-                "a_0001",
-                "a_0002",
-                "a_0012",
-            ],
-        ),
-        (
-            [
-                "ab1",
-                "aa10",
-                "aa2",
-            ],
-            ["aa2", "aa10", "ab1"],
-        ),
-    ],
-)
-def test_natural_sort(names, sorted_names):
-    assert natural_sort(names) == sorted_names
 
 
 @pytest.mark.parametrize("has_water_variable", [True, False])
@@ -176,5 +123,5 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
             2,
         )
     else:
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError):
             _ = climate_data.specific_total_water
