@@ -1,8 +1,7 @@
 import dataclasses
 from typing import List
 
-import torch
-
+from fme.core.masking import replace_on_mask
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -104,11 +103,11 @@ class Prescriber:
             )
         else:
             # overwrite specified target variable in given mask region
-            rounded_mask = torch.round(mask_data[self.mask_name]).to(int)
-            output = torch.where(
-                condition=rounded_mask == self.mask_value,
-                input=target[self.prescribed_name],
-                other=gen[self.prescribed_name],
+            output = replace_on_mask(
+                original=gen[self.prescribed_name],
+                replacement=target[self.prescribed_name],
+                mask=mask_data[self.mask_name],
+                mask_value=self.mask_value,
             )
         return {**gen, self.prescribed_name: output}
 
