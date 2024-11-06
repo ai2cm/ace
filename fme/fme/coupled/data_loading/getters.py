@@ -65,10 +65,12 @@ def get_coupled_data_loader(
         mp_context = None
         persistent_workers = False
 
+    # TODO: this needs to be replaced with a pickleable collate function
     def collate_fn(samples: List[CoupledDatasetItem]):
         return CoupledBatchData.collate_fn(
             samples,
             sigma_coordinates=datasets[0].sigma_coordinates,
+            horizontal_dims=list(datasets[0].horizontal_coordinates.dims),
         )
 
     batch_size = dist.local_batch_size(int(config.batch_size))

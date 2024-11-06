@@ -493,6 +493,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         data=data,
         times=times,
         sigma_coordinates=sigma_coordinates,
+        horizontal_dims=["lat", "lon"],
     )
     # run the stepper on the data
     with torch.no_grad():

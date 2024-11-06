@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Literal, Mapping, Optional, Sequence
+from typing import List, Literal, Mapping, Optional, Sequence
 
 import numpy as np
 import torch
@@ -26,6 +26,7 @@ class CoupledBatchData:
         cls,
         samples: Sequence[CoupledDatasetItem],
         sigma_coordinates: SigmaCoordinates,
+        horizontal_dims: List[str],
         sample_dim_name: str = "sample",
     ) -> "CoupledBatchData":
         """
@@ -40,6 +41,7 @@ class CoupledBatchData:
         )
         atmosphere_data = BatchData.atmospheric_from_sample_tuples(
             [x.atmosphere for x in samples],
+            horizontal_dims=horizontal_dims,
             sample_dim_name=sample_dim_name,
             sigma_coordinates=sigma_coordinates,
         )
