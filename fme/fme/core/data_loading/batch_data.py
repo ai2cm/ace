@@ -33,12 +33,54 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
-from fme.core.device import move_tensordict_to_device
+from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
 SelfType = TypeVar("SelfType", bound="BatchData")
+
+
+class AtmosphericCollateFn:
+    def __init__(self, sigma_coordinates: SigmaCoordinates, horizontal_dims: List[str]):
+        self.sigma_coordinates = sigma_coordinates.to("cpu")
+        self.horizontal_dims = horizontal_dims
+
+    def __call__(
+        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
+    ) -> "BatchData":
+        """
+        Collate function for use with PyTorch DataLoader. Needed since samples contain
+        both tensor mapping and xarray time coordinates, the latter of which we do
+        not want to convert to tensors.
+        """
+        sample_data, sample_times = zip(*samples)
+        batch_data = default_collate(sample_data)
+        batch_times = xr.concat(sample_times, dim="sample")
+        return get_atmospheric_batch_data(
+            data=batch_data,
+            times=batch_times,
+            sigma_coordinates=self.sigma_coordinates,
+            horizontal_dims=self.horizontal_dims,
+        )
+
+
+class AtmosphericDeriveFn:
+    def __init__(
+        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+    ):
+        self.sigma_coordinates = sigma_coordinates.to(
+            "cpu"
+        )  # must be on cpu for multiprocessing fork context
+        self.timestep = timestep
+
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        return compute_derived_quantities(
+            dict(data),
+            sigma_coordinates=self.sigma_coordinates.to(get_device()),
+            timestep=self.timestep,
+            forcing_data=dict(forcing_data),
+        )
 
 
 @dataclasses.dataclass
@@ -122,8 +164,8 @@ class BatchData:
         cls: Type[SelfType],
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sigma_coordinates: SigmaCoordinates,
+        horizontal_dims: List[str],
         sample_dim_name: str = "sample",
-        horizontal_dims: Optional[List[str]] = None,
     ) -> SelfType:
         """
         Collate function for use with PyTorch DataLoader. Needed since samples contain
@@ -133,16 +175,12 @@ class BatchData:
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        if horizontal_dims is None:
-            kwargs = {}
-        else:
-            kwargs = {"horizontal_dims": horizontal_dims}
         ret = get_atmospheric_batch_data(
             cls=cls,
             data=batch_data,
             times=batch_times,
             sigma_coordinates=sigma_coordinates,
-            **kwargs,
+            horizontal_dims=horizontal_dims,
         )
         return cast(SelfType, ret)
 
@@ -236,7 +274,7 @@ def get_atmospheric_batch_data(
     data: TensorMapping,
     times: xr.DataArray,
     sigma_coordinates: SigmaCoordinates,
-    horizontal_dims: Optional[List[str]] = None,
+    horizontal_dims: List[str],
     cls: Type[BatchData] = BatchData,
     # Note in practice return value is the cls type, just impossible to express
     # in python type hints. Use cast on the output if needed to get around this.
@@ -264,26 +302,11 @@ def get_atmospheric_batch_data(
         )
     timestep = times.values[0, 1] - times.values[0, 0]
 
-    def _derive_func(
-        batch_data: TensorMapping, forcing_data: TensorMapping
-    ) -> TensorDict:
-        return compute_derived_quantities(
-            dict(batch_data),
-            sigma_coordinates=sigma_coordinates,
-            timestep=timestep,
-            forcing_data=dict(forcing_data),
-        )
-
-    if horizontal_dims is None:
-        kwargs = {}
-    else:
-        kwargs = {"horizontal_dims": horizontal_dims}
-
     return cls(
         data=data,
         times=times,
-        derive_func=_derive_func,
-        **kwargs,
+        derive_func=AtmosphericDeriveFn(sigma_coordinates, timestep),
+        horizontal_dims=horizontal_dims,
     )
 
 
