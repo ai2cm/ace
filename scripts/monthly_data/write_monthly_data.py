@@ -15,8 +15,11 @@ from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
-from fme.ace.inference.derived_variables import compute_derived_quantities
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import (
+    AtmosphericDeriveFn,
+    BatchData,
+    default_collate,
+)
 from fme.core.data_loading.config import DataLoaderConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_datasets
@@ -24,7 +27,27 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import TensorMapping
+
+
+@dataclasses.dataclass
+class CollateFn:
+    horizontal_dims: List[str]
+    sigma_coordinates: SigmaCoordinates
+    timestep: datetime.timedelta
+
+    def __call__(
+        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
+    ) -> "BatchData":
+        sample_data, sample_times = zip(*samples)
+        batch_data = default_collate(sample_data)
+        batch_times = xr.concat(sample_times, dim="sample")
+        return BatchData(
+            data=batch_data,
+            times=batch_times,
+            horizontal_dims=self.horizontal_dims,
+            derive_func=AtmosphericDeriveFn(self.sigma_coordinates, self.timestep),
+        )
 
 
 def get_data_loaders(
@@ -41,22 +64,6 @@ def get_data_loaders(
     sigma_coordinates = datasets[0].sigma_coordinates
     timestep = datasets[0].timestep
 
-    def _derive_func(
-        batch_data: TensorMapping, forcing_data: TensorMapping
-    ) -> TensorDict:
-        return compute_derived_quantities(
-            dict(batch_data),
-            sigma_coordinates=sigma_coordinates,
-            timestep=timestep,
-            forcing_data=dict(forcing_data),
-        )
-
-    def collate_fn(batch: Sequence[Tuple[TensorMapping, xr.DataArray]]):
-        return BatchData.from_sample_tuples(
-            batch,
-            derive_func=_derive_func,
-        )
-
     data_loaders = []
     for dataset in datasets:
         dataloader = torch.utils.data.DataLoader(
@@ -67,7 +74,11 @@ def get_data_loaders(
             sampler=None,
             drop_last=True,
             pin_memory=using_gpu(),
-            collate_fn=collate_fn,
+            collate_fn=CollateFn(
+                sigma_coordinates=sigma_coordinates,
+                horizontal_dims=list(dataset.horizontal_coordinates.dims),
+                timestep=timestep,
+            ),
         )
         data_loaders.append(dataloader)
     return data_loaders

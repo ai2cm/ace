@@ -6,8 +6,40 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import AtmosphericCollateFn, BatchData
+from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.device import get_device
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+def test_atmospheric_collate_fn_in_multiprocessing_dataloader(very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    dataset = [
+        (
+            # no sample dimension in Dataset
+            {"a": torch.randn(3, 10, 10)},
+            xr.DataArray([1, 2, 3], dims=["time"]),
+        )
+        for _ in range(10)
+    ]
+    sigma_coordinates = SigmaCoordinates(
+        ak=torch.randn(10),
+        bk=torch.randn(10),
+    ).to(get_device())
+    horizontal_dims = ["lat", "lon"]
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=2,
+        num_workers=2,
+        collate_fn=AtmosphericCollateFn(
+            sigma_coordinates=sigma_coordinates,
+            horizontal_dims=horizontal_dims,
+        ),
+        multiprocessing_context="forkserver",
+    )
+    for batch in dataloader:
+        assert isinstance(batch, BatchData)
 
 
 def assert_metadata_equal(a: BatchData, b: BatchData):
