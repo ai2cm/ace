@@ -58,8 +58,12 @@ def get_batch_data(
         [TensorMapping, TensorMapping], TensorDict
     ] = lambda x, _: dict(x),
 ):
+    device = get_device()
     return BatchData(
-        data={name: torch.randn(n_samples, n_times, n_lat, n_lon) for name in names},
+        data={
+            name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
+            for name in names
+        },
         times=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
         derive_func=derive_func,

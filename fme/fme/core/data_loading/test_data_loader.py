@@ -476,5 +476,5 @@ def test_inference_data_with_perturbations(tmp_path):
     batch_data = next(iter(data_loader))
     np.testing.assert_allclose(
         original_foo + 2.0,
-        batch_data.data["foo"][0, :, :, :],
+        batch_data.data["foo"].cpu().numpy()[0, :, :, :],
     )

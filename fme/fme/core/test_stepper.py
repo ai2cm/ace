@@ -13,6 +13,7 @@ import fme
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.batch_data import (
     BatchData,
+    CurrentDevice,
     get_atmospheric_batch_data,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -48,7 +49,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
     ak, bk = torch.arange(nz), torch.arange(nz)
     sigma_coords = SigmaCoordinates(ak, bk)
-    data = BatchData(
+    data = BatchData.new_on_device(
         data=data_dict,
         times=xr.DataArray(
             np.zeros((n_samples, n_time)),
@@ -418,17 +419,15 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     n_forward_steps = 5
     device = get_device()
     data = {
-        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
+        "PRESsfc": 10.0 + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
         "specific_total_water_0": -0.2
-        + torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
-        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(
-            device
-        ),
-        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
-        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)).to(device),
+        + torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "specific_total_water_1": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "PRATEsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
+        "LHTFLsfc": torch.rand(size=(3, n_forward_steps + 1, 5, 5)),
         "tendency_of_total_water_path_due_to_advection": torch.rand(
             size=(3, n_forward_steps + 1, 5, 5)
-        ).to(device),
+        ),
     }
     sigma_coordinates = SigmaCoordinates(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
@@ -448,7 +447,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     )
 
     mean_advection = metrics.weighted_mean(
-        data["tendency_of_total_water_path_due_to_advection"],
+        data["tendency_of_total_water_path_due_to_advection"].to(device),
         weights=area_weights,
         dim=[-2, -1],
     )
@@ -493,8 +492,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         data=data,
         times=times,
         sigma_coordinates=sigma_coordinates,
-        horizontal_dims=["lat", "lon"],
-    )
+    ).to_device()
     # run the stepper on the data
     with torch.no_grad():
         stepped = stepper.train_on_batch(
@@ -654,9 +652,9 @@ def test_step_with_prescribed_ocean():
 
 def get_data_for_predict(
     n_steps, forcing_names: List[str]
-) -> Tuple[PrognosticStateABC[BatchData], BatchData]:
-    input_data = BatchData(
-        {"a": torch.rand(3, 1, 5, 5).to(DEVICE)},
+) -> Tuple[PrognosticStateABC[BatchData[CurrentDevice]], BatchData[CurrentDevice]]:
+    input_data = BatchData.new_on_device(
+        data={"a": torch.rand(3, 1, 5, 5).to(DEVICE)},
         times=xr.DataArray(
             np.zeros((3, 1)),
         ),
@@ -664,7 +662,7 @@ def get_data_for_predict(
         prognostic_names=["a"],
         n_ic_timesteps=1,
     )
-    forcing_data = BatchData(
+    forcing_data = BatchData.new_on_device(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },

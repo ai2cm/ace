@@ -16,7 +16,7 @@ from fme.ace.inference.loop import run_inference, write_reduced_metrics
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
-from fme.core.data_loading.batch_data import BatchData, GriddedData
+from fme.core.data_loading.batch_data import BatchData, CurrentDevice, GriddedData
 from fme.core.data_loading.getters import get_forcing_data
 from fme.core.data_loading.inference import (
     ExplicitIndices,
@@ -78,7 +78,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset, prognostic_names: Sequence[str]
-) -> PrognosticStateABC[BatchData]:
+) -> PrognosticStateABC[BatchData[CurrentDevice]]:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
@@ -115,8 +115,8 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
-    batch_data = BatchData(
-        initial_condition,
+    batch_data = BatchData.new_on_device(
+        data=initial_condition,
         times=initial_times,
         horizontal_dims=["lat", "lon"],
     )

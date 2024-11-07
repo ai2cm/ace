@@ -16,6 +16,7 @@ from fme.ace.inference.data_writer.main import (
 from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.data_loading.batch_data import BatchData, PairedData
+from fme.core.device import get_device
 
 CALENDAR_CFTIME = {
     "julian": cftime.DatetimeJulian,
@@ -416,9 +417,14 @@ class TestDataWriter:
         n_samples = 2
         n_timesteps = 8
         coarsen_factor = 2
+        device = get_device()
         prediction_data = {
-            "temp": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
-            "pressure": torch.rand((n_samples, n_timesteps // coarsen_factor, 4, 5)),
+            "temp": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
+            ),
+            "pressure": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
+            ),
         }
         writer = DataWriter(
             str(tmp_path),
