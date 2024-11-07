@@ -153,7 +153,7 @@ def test_coupled_data_loader(tmp_path):
     sample_idx = 1
     ocean_ds = ics[ic_idx].ocean
     atmos_ds = ics[ic_idx].atmosphere
-    sample = data._loader.dataset[sample_idx]
+    sample = data._loader.dataset[sample_idx]  # type: ignore
     ocean_sample_init_time = sample.ocean[1].isel(time=0).item()
     atmos_sample_init_time = sample.atmosphere[1].isel(time=0).item()
 

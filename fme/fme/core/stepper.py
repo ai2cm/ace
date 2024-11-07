@@ -21,7 +21,7 @@ import xarray as xr
 from torch import nn
 
 from fme.core.corrector import CorrectorConfig
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, CurrentDevice
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
@@ -352,10 +352,10 @@ class TrainOutput(TrainOutputABC):
         batch_data = initial_condition.as_state()
         return TrainOutput(
             metrics=self.metrics,
-            gen_data=_prepend_timesteps(self.gen_data, batch_data.device_data),
+            gen_data=_prepend_timesteps(self.gen_data, batch_data.data),
             target_data=_prepend_timesteps(
                 self.target_data,
-                batch_data.device_data,
+                batch_data.data,
             ),
             times=xr.concat([batch_data.times, self.times], dim="time"),
             normalize=self.normalize,
@@ -421,7 +421,7 @@ class StepperABC(abc.ABC, Generic[BD, SD]):
         pass
 
 
-class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
+class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
     """
     Stepper class for a single pytorch module.
     """
@@ -614,9 +614,9 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
 
     def predict(
         self,
-        initial_condition: PrognosticStateABC[BatchData],
-        forcing_data: BatchData,
-    ) -> Tuple[BatchData, PrognosticStateABC[BatchData]]:
+        initial_condition: PrognosticStateABC[BatchData[CurrentDevice]],
+        forcing_data: BatchData[CurrentDevice],
+    ) -> Tuple[BatchData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -634,15 +634,15 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].
         """
         output_list = []
-        initial_condition_state: BatchData = initial_condition.as_state()
+        initial_condition_state = initial_condition.as_state()
         if initial_condition_state.times.shape[1] != self.n_ic_timesteps:
             raise ValueError(
                 f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
                 f"{initial_condition_state.times.shape[1]}."
             )
         state = {
-            k: initial_condition_state.device_data[k].squeeze(self.TIME_DIM)
-            for k in initial_condition_state.device_data
+            k: initial_condition_state.data[k].squeeze(self.TIME_DIM)
+            for k in initial_condition_state.data
         }
         forcing_names = self._config.forcing_names
         ocean_forcing_names = self.ocean.forcing_names if self.ocean is not None else []
@@ -650,14 +650,14 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
         for step in range(n_forward_steps):
             current_step_forcing = {
                 k: (
-                    forcing_data.device_data[k][:, step]
+                    forcing_data.data[k][:, step]
                     if k not in self._config.next_step_forcing_names
-                    else forcing_data.device_data[k][:, step + 1]
+                    else forcing_data.data[k][:, step + 1]
                 )
                 for k in forcing_names
             }
             next_step_ocean_data = {
-                k: forcing_data.device_data[k][:, step + 1] for k in ocean_forcing_names
+                k: forcing_data.data[k][:, step + 1] for k in ocean_forcing_names
             }
             input_data = {**state, **current_step_forcing}
             state = self.step(input_data, next_step_ocean_data)
@@ -667,7 +667,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
             output_timeseries[name] = torch.stack(
                 [x[name] for x in output_list], dim=self.TIME_DIM
             )
-        data = BatchData(
+        data = BatchData.new_on_device(
             output_timeseries,
             forcing_data.times[:, self.n_ic_timesteps :],
             derive_func=forcing_data.derive_func,
@@ -677,7 +677,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
 
     def train_on_batch(
         self,
-        data: BatchData,
+        data: BatchData[CurrentDevice],
         optimization: OptimizationABC,
         keep_initial_condition: bool = False,
     ) -> TrainOutput:
@@ -685,7 +685,7 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
         Step the model forward multiple steps on a batch of data.
 
         Args:
-            data: The batch data where each tensor in data.device_data has shape
+            data: The batch data where each tensor in data.data has shape
                 [n_sample, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
@@ -722,11 +722,10 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
                 # Note: here we examine the loss for a single timestep,
                 # not a single model call (which may contain multiple timesteps).
                 gen_step = {
-                    k: v.select(time_dim, step) for k, v in gen_data.device_data.items()
+                    k: v.select(time_dim, step) for k, v in gen_data.data.items()
                 }
                 target_step = {
-                    k: v.select(time_dim, step)
-                    for k, v in target_data.device_data.items()
+                    k: v.select(time_dim, step) for k, v in target_data.data.items()
                 }
                 gen_norm_step = self.loss_normalizer.normalize(gen_step)
                 target_norm_step = self.loss_normalizer.normalize(target_step)
@@ -742,8 +741,8 @@ class SingleModuleStepper(StepperABC[BatchData, TrainOutput]):
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=dict(gen_data.device_data),
-            target_data=dict(target_data.device_data),
+            gen_data=dict(gen_data.data),
+            target_data=dict(target_data.data),
             times=gen_data.times,
             normalize=self.normalizer.normalize,
             derive_func=data.derive_func,

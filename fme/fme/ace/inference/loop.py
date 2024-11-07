@@ -296,8 +296,8 @@ def run_dataset_comparison(
             f" to {i_time + forward_steps_in_memory} steps,"
             f" out of total {n_forward_steps}."
         )
-        pred_window_data = dict(pred.device_data)
-        target_window_data = dict(target.device_data)
+        pred_window_data = dict(pred.data)
+        target_window_data = dict(target.data)
         stepped = TrainOutput(
             {"loss": torch.tensor(float("nan"))},
             pred_window_data,

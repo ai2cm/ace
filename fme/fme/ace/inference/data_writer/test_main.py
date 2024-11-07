@@ -15,7 +15,7 @@ def test_save_initial_condition_single_timestep():
     n_lat = 4
     n_lon = 5
     n_time = 1
-    batch = BatchData(
+    batch = BatchData.new_on_cpu(
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
         times=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
@@ -55,7 +55,7 @@ def test_save_initial_condition_multiple_timesteps():
     n_lat = 4
     n_lon = 5
     n_time = 2
-    batch = BatchData(
+    batch = BatchData.new_on_cpu(
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
         times=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
