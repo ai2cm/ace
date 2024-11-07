@@ -9,7 +9,7 @@ import xarray as xr
 
 import fme
 from fme.ace.inference.loop import Looper
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, CurrentDevice
 from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -49,7 +49,8 @@ class MockLoader(torch.utils.data.DataLoader):
         derive_func: Optional[Callable] = None,
         time: Optional[xr.DataArray] = None,
     ):
-        self._data = {n: torch.rand(*shape) for n in names}
+        device = fme.get_device()
+        self._data = {n: torch.rand(*shape, device=device) for n in names}
         if time is None:
             self._time = xr.DataArray(np.zeros(shape[:2]), dims=["sample", "time"])
         elif time.shape != shape[:2]:
@@ -68,10 +69,10 @@ class MockLoader(torch.utils.data.DataLoader):
     def __iter__(self):
         return self
 
-    def __next__(self) -> BatchData:
+    def __next__(self) -> BatchData[CurrentDevice]:
         if self._current_window < self._n_windows:
             self._current_window += 1
-            return BatchData(
+            return BatchData.new_on_device(
                 data=self._data,
                 times=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),

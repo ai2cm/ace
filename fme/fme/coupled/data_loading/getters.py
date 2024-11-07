@@ -5,10 +5,14 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
 from fme.core.data_loading._xarray import transfer_properties
+from fme.core.data_loading.batch_data import CPU
 from fme.core.data_loading.getters import get_xarray_dataset, validate_ensemble
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
-from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledGriddedData
+from fme.coupled.data_loading.batch_data import (
+    CoupledBatchData,
+    CoupledGriddedData,
+)
 from fme.coupled.data_loading.config import CoupledDataConfig, CoupledDataLoaderConfig
 from fme.coupled.data_loading.data_typing import CoupledDataset, CoupledDatasetItem
 from fme.coupled.data_loading.requirements import CoupledDataRequirements
@@ -66,7 +70,7 @@ def get_coupled_data_loader(
         persistent_workers = False
 
     # TODO: this needs to be replaced with a pickleable collate function
-    def collate_fn(samples: List[CoupledDatasetItem]):
+    def collate_fn(samples: List[CoupledDatasetItem]) -> CoupledBatchData[CPU]:
         return CoupledBatchData.collate_fn(
             samples,
             sigma_coordinates=datasets[0].sigma_coordinates,

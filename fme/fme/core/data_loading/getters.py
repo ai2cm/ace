@@ -8,12 +8,13 @@ import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
 from ._xarray import XarrayDataset, as_index_selection, transfer_properties
-from .batch_data import BatchData, GriddedData
+from .batch_data import GriddedData
 from .data_typing import Dataset
 from .inference import (
     ExplicitIndices,
