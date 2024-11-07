@@ -10,7 +10,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import XarrayDataset
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import CPU, BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -210,7 +210,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 SST perturbations require an ocean configuration."
             )
 
-    def __getitem__(self, index) -> BatchData:
+    def __getitem__(self, index) -> BatchData[CPU]:
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []

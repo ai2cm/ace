@@ -6,6 +6,7 @@ from typing import (
     Any,
     Callable,
     Collection,
+    Dict,
     Generic,
     Iterator,
     List,
@@ -15,9 +16,7 @@ from typing import (
     Protocol,
     Sequence,
     Tuple,
-    Type,
     TypeVar,
-    cast,
 )
 
 import numpy as np
@@ -33,12 +32,48 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
-from fme.core.device import get_device, move_tensordict_to_device
+from fme.core.device import get_device
 from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
+
+class AnyDevice:
+    """
+    Indicates the object can be on any device.
+
+    Used in type hints to indicate the device an object is on.
+    """
+
+    pass
+
+
+class CPU(AnyDevice):
+    """
+    Indicates the object must be on the CPU.
+    """
+
+    pass
+
+
+class CurrentDevice(AnyDevice):
+    """
+    Indicates the object must be on the current global device
+    specified by fme.get_device().
+    """
+
+    pass
+
+
 SelfType = TypeVar("SelfType", bound="BatchData")
+
+DeviceType = TypeVar("DeviceType", bound=AnyDevice)
+
+
+def _check_device(data: TensorMapping, device: torch.device):
+    for v in data.values():
+        if v.device != device:
+            raise ValueError(f"data must be on {device}")
 
 
 class AtmosphericCollateFn:
@@ -84,7 +119,7 @@ class AtmosphericDeriveFn:
 
 
 @dataclasses.dataclass
-class BatchData:
+class BatchData(Generic[DeviceType]):
     """A container for the data and time coordinates of a batch.
 
     Attributes:
@@ -114,8 +149,82 @@ class BatchData:
     def dims(self) -> List[str]:
         return ["sample", "time"] + self.horizontal_dims
 
+    def to_device(self) -> "BatchData[CurrentDevice]":
+        return self.__class__.new_on_device(
+            data={k: v.to(get_device()) for k, v in self.data.items()},
+            times=self.times,
+            horizontal_dims=self.horizontal_dims,
+            derive_func=self.derive_func,
+        )
+
+    @classmethod
+    def _get_kwargs(cls, horizontal_dims: Optional[List[str]]) -> Dict[str, Any]:
+        if horizontal_dims is None:
+            kwargs = {}
+        else:
+            kwargs = {"horizontal_dims": horizontal_dims}
+        return kwargs
+
+    @classmethod
+    def new(
+        cls,
+        data: TensorMapping,
+        times: xr.DataArray,
+        horizontal_dims: Optional[List[str]] = None,
+        derive_func: Callable[
+            [TensorMapping, TensorMapping], TensorDict
+        ] = lambda x, _: dict(x),
+    ) -> "BatchData[AnyDevice]":
+        kwargs = cls._get_kwargs(horizontal_dims)
+        return BatchData[AnyDevice](
+            data=data,
+            times=times,
+            derive_func=derive_func,
+            **kwargs,
+        )
+
+    @classmethod
+    def new_on_cpu(
+        cls,
+        data: TensorMapping,
+        times: xr.DataArray,
+        horizontal_dims: Optional[List[str]] = None,
+        derive_func: Callable[
+            [TensorMapping, TensorMapping], TensorDict
+        ] = lambda x, _: dict(x),
+    ) -> "BatchData[CPU]":
+        _check_device(data, torch.device("cpu"))
+        kwargs = cls._get_kwargs(horizontal_dims)
+        return BatchData[CPU](
+            data=data,
+            times=times,
+            derive_func=derive_func,
+            **kwargs,
+        )
+
+    @classmethod
+    def new_on_device(
+        cls,
+        data: TensorMapping,
+        times: xr.DataArray,
+        horizontal_dims: Optional[List[str]] = None,
+        derive_func: Callable[
+            [TensorMapping, TensorMapping], TensorDict
+        ] = lambda x, _: dict(x),
+    ) -> "BatchData[CurrentDevice]":
+        """
+        Move the data to the current global device specified by get_device().
+        """
+        _check_device(data, get_device())
+        kwargs = cls._get_kwargs(horizontal_dims)
+        return BatchData[CurrentDevice](
+            data=data,
+            times=times,
+            derive_func=derive_func,
+            **kwargs,
+        )
+
     def __post_init__(self):
-        self._device_data: Optional[TensorMapping] = None
         if len(self.times.shape) != 2:
             raise ValueError(
                 "Expected times to have shape (n_samples, n_times), got shape "
@@ -129,44 +238,34 @@ class BatchData:
                     f"{self.times.shape}."
                 )
 
-    @property
-    def device_data(self) -> TensorMapping:
-        if self._device_data is None:
-            self._device_data = move_tensordict_to_device(self.data)
-        return self._device_data
-
     @classmethod
     def from_sample_tuples(
-        cls: Type[SelfType],
+        cls,
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
         horizontal_dims: Optional[List[str]] = None,
         derive_func: Callable[
             [TensorMapping, TensorMapping], TensorDict
         ] = lambda x, _: dict(x),
-    ) -> SelfType:
+    ) -> "BatchData[CPU]":
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        if horizontal_dims is None:
-            kwargs = {}
-        else:
-            kwargs = {"horizontal_dims": horizontal_dims}
-        return cls(
+        return BatchData.new_on_cpu(
             data=batch_data,
             times=batch_times,
             derive_func=derive_func,
-            **kwargs,
+            horizontal_dims=horizontal_dims,
         )
 
     @classmethod
     def atmospheric_from_sample_tuples(
-        cls: Type[SelfType],
+        cls,
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sigma_coordinates: SigmaCoordinates,
-        horizontal_dims: List[str],
         sample_dim_name: str = "sample",
-    ) -> SelfType:
+        horizontal_dims: Optional[List[str]] = None,
+    ) -> "BatchData[CPU]":
         """
         Collate function for use with PyTorch DataLoader. Needed since samples contain
         both tensor mapping and xarray time coordinates, the latter of which we do
@@ -175,14 +274,12 @@ class BatchData:
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        ret = get_atmospheric_batch_data(
-            cls=cls,
+        return get_atmospheric_batch_data(
             data=batch_data,
             times=batch_times,
             sigma_coordinates=sigma_coordinates,
             horizontal_dims=horizontal_dims,
         )
-        return cast(SelfType, ret)
 
     def compute_derived_variables(self: SelfType, forcing_data: SelfType) -> SelfType:
         """
@@ -192,7 +289,7 @@ class BatchData:
         """
         if not np.all(forcing_data.times.values == self.times.values):
             raise ValueError("Forcing data must have the same times as the batch data.")
-        derived_data = self.derive_func(self.device_data, forcing_data.device_data)
+        derived_data = self.derive_func(self.data, forcing_data.data)
         return self.__class__(
             data={**self.data, **derived_data},
             times=self.times,
@@ -274,11 +371,10 @@ def get_atmospheric_batch_data(
     data: TensorMapping,
     times: xr.DataArray,
     sigma_coordinates: SigmaCoordinates,
-    horizontal_dims: List[str],
-    cls: Type[BatchData] = BatchData,
+    horizontal_dims: Optional[List[str]] = None,
     # Note in practice return value is the cls type, just impossible to express
     # in python type hints. Use cast on the output if needed to get around this.
-) -> BatchData:
+) -> BatchData[CPU]:
     """
     Get atmospheric batch data.
 
@@ -302,7 +398,7 @@ def get_atmospheric_batch_data(
         )
     timestep = times.values[0, 1] - times.values[0, 0]
 
-    return cls(
+    return BatchData.new_on_cpu(
         data=data,
         times=times,
         derive_func=AtmosphericDeriveFn(sigma_coordinates, timestep),
@@ -310,8 +406,11 @@ def get_atmospheric_batch_data(
     )
 
 
+DeviceArgType = TypeVar("DeviceArgType", bound=AnyDevice)
+
+
 @dataclasses.dataclass
-class PairedData:
+class PairedData(Generic[DeviceType]):
     """A container for the data and time coordinates of a batch, with paired
     prediction and target data.
     """
@@ -321,10 +420,37 @@ class PairedData:
     times: xr.DataArray
 
     @classmethod
-    def from_batch_data(cls, prediction: BatchData, target: BatchData):
+    def from_batch_data(
+        cls,
+        prediction: BatchData[DeviceArgType],
+        target: BatchData[DeviceArgType],
+    ) -> "PairedData[DeviceArgType]":
         if not np.all(prediction.times.values == target.times.values):
             raise ValueError("Prediction and target times must be the same.")
-        return cls(prediction.device_data, target.device_data, prediction.times)
+        return PairedData(prediction.data, target.data, prediction.times)
+
+    @classmethod
+    def new_on_device(
+        cls,
+        prediction: TensorMapping,
+        target: TensorMapping,
+        times: xr.DataArray,
+    ) -> "PairedData[CurrentDevice]":
+        device = get_device()
+        _check_device(prediction, device)
+        _check_device(target, device)
+        return PairedData(prediction, target, times)
+
+    @classmethod
+    def new_on_cpu(
+        cls,
+        prediction: TensorMapping,
+        target: TensorMapping,
+        times: xr.DataArray,
+    ) -> "PairedData[CPU]":
+        _check_device(prediction, torch.device("cpu"))
+        _check_device(target, torch.device("cpu"))
+        return PairedData(prediction, target, times)
 
 
 class _PrognosticState(PrognosticStateABC[BatchData]):
@@ -459,7 +585,7 @@ class GriddedDataABC(abc.ABC, Generic[T]):
         ...
 
 
-class GriddedData(GriddedDataABC[BatchData]):
+class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
     """
     Data as required for pytorch training.
 
@@ -469,7 +595,7 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     def __init__(
         self,
-        loader: torch.utils.data.DataLoader,
+        loader: DataLoader[BatchData[CPU]],
         metadata: Mapping[str, VariableMetadata],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
@@ -501,8 +627,11 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._batch_size: Optional[int] = None
 
     @property
-    def loader(self) -> DataLoader[BatchData]:
-        return self._loader
+    def loader(self) -> DataLoader[BatchData[CurrentDevice]]:
+        def on_device(batch: BatchData[CPU]) -> BatchData[CurrentDevice]:
+            return batch.to_device()
+
+        return map(on_device, self._loader)
 
     @property
     def metadata(self) -> Mapping[str, VariableMetadata]:
@@ -537,19 +666,19 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     @property
     def n_samples(self) -> int:
-        return len(self._loader.dataset)
+        return len(self._loader.dataset)  # type: ignore
 
     @property
     def n_batches(self) -> int:
-        return len(self._loader)
+        return len(self._loader)  # type: ignore
 
     @property
     def _first_time(self) -> Any:
-        return self._loader.dataset[0][1].values[0]
+        return self._loader.dataset[0][1].values[0]  # type: ignore
 
     @property
     def _last_time(self) -> Any:
-        return self._loader.dataset[-1][1].values[0]
+        return self._loader.dataset[-1][1].values[0]  # type: ignore
 
     @property
     def batch_size(self) -> int:
@@ -561,7 +690,7 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     @property
     def n_forward_steps(self) -> int:
-        return self._loader.dataset.n_forward_steps
+        return self._loader.dataset.n_forward_steps  # type: ignore
 
     def log_info(self, name: str):
         logging.info(

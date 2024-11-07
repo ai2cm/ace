@@ -248,7 +248,7 @@ def _concat_list_of_dicts(dict_list: List[TensorMapping], dim: int) -> Dict[str,
 
 
 def _concat_list_of_batch_data(batch_data_list: List[BatchData], dim: int) -> BatchData:
-    data_list = [batch_data.device_data for batch_data in batch_data_list]
+    data_list = [batch_data.data for batch_data in batch_data_list]
     data_concat = _concat_list_of_dicts(data_list, dim=dim)
     times_list = [batch_data.times for batch_data in batch_data_list]
     times_concat = xr.concat(times_list, dim="time")
@@ -446,8 +446,8 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
         # we'll use data_ocean and data_atmos to keep track of their respective
         # targets and forcings needed for future steps, removing whatever is
         # already used as we go
-        data_ocean = data.ocean_data.device_data
-        data_atmos = data.atmosphere_data.device_data
+        data_ocean = data.ocean_data.data
+        data_atmos = data.atmosphere_data.data
 
         loss = torch.tensor(0.0, device=get_device())
         metrics = {}
@@ -481,12 +481,12 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 gen_data_atmos.append(gen_data)
                 target_data = {
                     k: data_atmos[k][:, 1 : self.n_inner_steps + 1]
-                    for k in gen_data.device_data
+                    for k in gen_data.data
                 }
                 # compute inner step metrics
                 for inner_step in range(self.n_inner_steps):
                     step_loss = self._get_step_loss(
-                        gen_data.device_data, target_data, inner_step, self.atmosphere
+                        gen_data.data, target_data, inner_step, self.atmosphere
                     )
                     loss += step_loss
                     metrics[f"loss_atmos_step_{step}.{inner_step}"] = step_loss.detach()
@@ -501,7 +501,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 # sequence of n_inner_steps for time averaging the atmosphere
                 # over the ocean's timestep
                 ocean_forcings = self._get_ocean_forcings(
-                    {**data_ocean, **gen_data.device_data}, times=gen_data.times
+                    {**data_ocean, **gen_data.data}, times=gen_data.times
                 )
                 # ocean always predicts forward one step at a time
                 gen_data, ocean_prognostic = self.ocean.predict(
@@ -511,7 +511,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 target_data = {k: data_ocean[k][:, :1] for k in data_ocean}
                 # compute ocean step metrics
                 step_loss = self._get_step_loss(
-                    gen_data.device_data, target_data, 0, self.ocean
+                    gen_data.data, target_data, 0, self.ocean
                 )
                 loss += step_loss
                 metrics[f"loss_ocean_step_{step}"] = step_loss.detach()
@@ -520,7 +520,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 # get generated ocean-to-atmosphere forcings for next iter
                 if step < n_outer_steps - 1:
                     atmos_forcings = self._get_atmosphere_forcings(
-                        {**data_atmos, **gen_data.device_data}, times=gen_data.times
+                        {**data_atmos, **gen_data.data}, times=gen_data.times
                     )
 
         gen_ocean = _concat_list_of_batch_data(gen_data_ocean, dim=self.ocean.TIME_DIM)
@@ -529,10 +529,10 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
         )
 
         target_ocean: TensorDict = {
-            k: data.ocean_data.device_data[k][:, 1:] for k in gen_ocean.data
+            k: data.ocean_data.data[k][:, 1:] for k in gen_ocean.data
         }
         target_atmos: TensorDict = {
-            k: data.atmosphere_data.device_data[k][:, 1:] for k in gen_atmos.data
+            k: data.atmosphere_data.data[k][:, 1:] for k in gen_atmos.data
         }
 
         metrics["loss"] = loss.detach()
@@ -540,7 +540,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
 
         ocean_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(gen_ocean.device_data),
+            gen_data=dict(gen_ocean.data),
             target_data=target_ocean,
             times=gen_ocean.times,
             normalize=self.ocean.normalizer.normalize,
@@ -548,7 +548,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
         )
         atmos_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(gen_atmos.device_data),
+            gen_data=dict(gen_atmos.data),
             target_data=target_atmos,
             times=gen_atmos.times,
             normalize=self.atmosphere.normalizer.normalize,

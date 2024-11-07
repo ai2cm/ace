@@ -422,8 +422,8 @@ def test_train_on_batch_integration(mock_coupled_data, keep_initial_condition):
     assert len(gen_data_atmos["a_diag"].shape) == 4
     assert len(gen_data_ocean["o_prog"].shape) == 4
 
-    data_atmos = batch.atmosphere_data.device_data
-    data_ocean = batch.ocean_data.device_data
+    data_atmos = batch.atmosphere_data.data
+    data_ocean = batch.ocean_data.data
 
     tdim = coupler.TIME_DIM
 

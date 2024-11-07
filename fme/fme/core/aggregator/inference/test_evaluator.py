@@ -161,7 +161,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         (window_len - overlap) * n_windows + 1,
         initial_times,
     )
-    target_data = BatchData(
+    target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
         times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
     )
@@ -170,7 +170,7 @@ def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_window
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        paired_data = PairedData(
+        paired_data = PairedData.new_on_device(
             prediction=sample_data,
             target=target_data.data,
             times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
@@ -221,7 +221,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         (window_len - overlap) * n_windows + overlap,
         initial_times,
     )
-    target_data = BatchData(
+    target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
         times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
     )
@@ -230,7 +230,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
         for i in range(window_len):
             sample_data["a"][..., i, :, :] = float(i_start + i)
-        paired_data = PairedData(
+        paired_data = PairedData.new_on_device(
             prediction=sample_data,
             target=target_data.data,
             times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),

@@ -1,12 +1,19 @@
 import dataclasses
 import datetime
 import logging
-from typing import List, Literal, Mapping, Optional, Sequence
+from typing import Generic, List, Literal, Mapping, Optional, Sequence, TypeVar
 
 import numpy as np
 import torch
 
-from fme.core.data_loading.batch_data import BatchData, DataLoader, GriddedDataABC
+from fme.core.data_loading.batch_data import (
+    CPU,
+    AnyDevice,
+    BatchData,
+    CurrentDevice,
+    DataLoader,
+    GriddedDataABC,
+)
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     SigmaCoordinates,
@@ -15,11 +22,39 @@ from fme.core.data_loading.data_typing import (
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 
+DeviceType = TypeVar("DeviceType", bound=AnyDevice)
+
 
 @dataclasses.dataclass
-class CoupledBatchData:
-    ocean_data: BatchData
-    atmosphere_data: BatchData
+class CoupledBatchData(Generic[DeviceType]):
+    ocean_data: BatchData[DeviceType]
+    atmosphere_data: BatchData[DeviceType]
+
+    @classmethod
+    def new_on_device(
+        cls,
+        ocean_data: BatchData[CurrentDevice],
+        atmosphere_data: BatchData[CurrentDevice],
+    ) -> "CoupledBatchData[CurrentDevice]":
+        return CoupledBatchData[CurrentDevice](
+            ocean_data=ocean_data, atmosphere_data=atmosphere_data
+        )
+
+    @classmethod
+    def new_on_cpu(
+        cls,
+        ocean_data: BatchData[CPU],
+        atmosphere_data: BatchData[CPU],
+    ) -> "CoupledBatchData[CPU]":
+        return CoupledBatchData[CPU](
+            ocean_data=ocean_data, atmosphere_data=atmosphere_data
+        )
+
+    def to_device(self) -> "CoupledBatchData[CurrentDevice]":
+        return CoupledBatchData.new_on_device(
+            ocean_data=self.ocean_data.to_device(),
+            atmosphere_data=self.atmosphere_data.to_device(),
+        )
 
     @classmethod
     def collate_fn(
@@ -28,7 +63,7 @@ class CoupledBatchData:
         sigma_coordinates: SigmaCoordinates,
         horizontal_dims: List[str],
         sample_dim_name: str = "sample",
-    ) -> "CoupledBatchData":
+    ) -> "CoupledBatchData[CPU]":
         """
         Collate function for use with PyTorch DataLoader. Separates out ocean
         and atmosphere sample tuples and constructs BatchData instances for
@@ -45,13 +80,13 @@ class CoupledBatchData:
             sample_dim_name=sample_dim_name,
             sigma_coordinates=sigma_coordinates,
         )
-        return cls(ocean_data=ocean_data, atmosphere_data=atmosphere_data)
+        return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)
 
 
 class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
-        loader: torch.utils.data.DataLoader,
+        loader: DataLoader[CoupledBatchData[CPU]],
         metadata: Mapping[str, VariableMetadata],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
@@ -83,8 +118,11 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         self._batch_size: Optional[int] = None
 
     @property
-    def loader(self) -> DataLoader[CoupledBatchData]:
-        return self._loader
+    def loader(self) -> DataLoader[CoupledBatchData[CurrentDevice]]:
+        def to_device(x: CoupledBatchData[CPU]) -> CoupledBatchData[CurrentDevice]:
+            return x.to_device()
+
+        return map(to_device, self._loader)
 
     @property
     def metadata(self) -> Mapping[str, VariableMetadata]:
@@ -119,11 +157,11 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def n_samples(self) -> int:
-        return len(self._loader.dataset)
+        return len(self._loader.dataset)  # type: ignore
 
     @property
     def n_batches(self) -> int:
-        return len(self._loader)
+        return len(self._loader)  # type: ignore
 
     @property
     def batch_size(self) -> int:
@@ -135,7 +173,7 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def n_forward_steps(self) -> int:
-        return self._loader.dataset.n_forward_steps
+        return self._loader.dataset.n_forward_steps  # type: ignore
 
     def set_epoch(self, epoch: int):
         """
