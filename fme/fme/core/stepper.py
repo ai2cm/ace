@@ -13,6 +13,7 @@ from typing import (
     Optional,
     Tuple,
     TypeVar,
+    Union,
 )
 
 import dacite
@@ -21,7 +22,8 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.inference.timing import GlobalTimer
-from fme.core.corrector import CorrectorConfig
+from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.registry import CorrectorSelector
 from fme.core.data_loading.batch_data import BatchData, CurrentDevice
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
@@ -32,10 +34,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import (
-    NormalizationConfig,
-    StandardNormalizer,
-)
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.packer import Packer
 from fme.core.registry import ModuleSelector
@@ -79,7 +78,7 @@ class SingleModuleStepperConfig:
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    corrector: CorrectorConfig = dataclasses.field(
+    corrector: Union[CorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: CorrectorConfig()
     )
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
