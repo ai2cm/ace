@@ -13,6 +13,7 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.loop import (
+    DeriverABC,
     run_dataset_comparison,
     run_inference_evaluator,
     write_reduced_metrics,
@@ -20,7 +21,7 @@ from fme.ace.inference.loop import (
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import GriddedData
+from fme.core.data_loading.batch_data import BatchData, GriddedData
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -175,6 +176,28 @@ def main(yaml_config: str):
         return run_evaluator_from_config(config)
 
 
+class _Deriver(DeriverABC):
+    """
+    DeriverABC implementation for dataset comparison.
+    """
+
+    def __init__(self, n_ic_timesteps: int):
+        self._n_ic_timesteps = n_ic_timesteps
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._n_ic_timesteps
+
+    def get_forward_data(
+        self, data: BatchData, compute_derived_variables: bool = False
+    ) -> BatchData:
+        if compute_derived_variables:
+            timer = GlobalTimer.get_instance()
+            with timer.context("compute_derived_variables"):
+                data = data.compute_derived_variables(data)
+        return data.remove_initial_condition(self._n_ic_timesteps)
+
+
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
     timer.start("inference")
@@ -235,12 +258,13 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             config.forward_steps_in_memory,
             data_requirements,
         )
-
+        deriver = _Deriver(n_ic_timesteps=stepper_config.n_ic_timesteps)
         run_dataset_comparison(
             aggregator=aggregator,
             normalizer=stepper.normalizer,
             prediction_data=prediction_data,
             target_data=data,
+            deriver=deriver,
             writer=writer,
         )
     else:
