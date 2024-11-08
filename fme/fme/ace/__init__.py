@@ -27,7 +27,13 @@ from fme.ace.registry.hpx import (
     UNetEncoderConfig,
 )
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
-from fme.core.corrector import CorrectorConfig
+from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.ocean import OceanCorrectorConfig
+from fme.core.corrector.registry import (
+    CorrectorSelector,
+    get_available_corrector_types,
+    register_corrector,
+)
 from fme.core.data_loading.config import TimeSlice, XarrayDataConfig
 from fme.core.data_loading.inference import (
     ExplicitIndices,
