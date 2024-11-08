@@ -1,17 +1,24 @@
 import dataclasses
 import datetime
-from typing import Callable, List, Literal, Optional, Protocol
+from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol
 
+import dacite
 import torch
 
 from fme.core.climate_data import ClimateData
+from fme.core.corrector.registry import (
+    CorrectorABC,
+    CorrectorConfigProtocol,
+    register_corrector,
+)
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+@register_corrector("atmosphere_corrector")
 @dataclasses.dataclass
-class CorrectorConfig:
+class CorrectorConfig(CorrectorConfigProtocol):
     r"""
     Configuration for the post-step state corrector.
 
@@ -101,7 +108,7 @@ class CorrectorConfig:
         gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
-    ) -> Optional["Corrector"]:
+    ) -> "Corrector":
         return Corrector(
             config=self,
             gridded_operations=gridded_operations,
@@ -109,8 +116,14 @@ class CorrectorConfig:
             timestep=timestep,
         )
 
+    @classmethod
+    def from_state(cls, state: Mapping[str, Any]) -> "CorrectorConfig":
+        return dacite.from_dict(
+            data_class=cls, data=state, config=dacite.Config(strict=True)
+        )
 
-class Corrector:
+
+class Corrector(CorrectorABC):
     def __init__(
         self,
         config: CorrectorConfig,
@@ -131,7 +144,7 @@ class Corrector:
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
-            gen_data = _force_positive(gen_data, self._config.force_positive_names)
+            gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.conserve_dry_air:
             gen_data = _force_conserve_dry_air(
                 input_data=input_data,
@@ -156,7 +169,7 @@ class Corrector:
         return gen_data
 
 
-def _force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
+def force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
     """Clamp all tensors defined by `names` to be greater than or equal to zero."""
     out = {**data}
     for name in names:

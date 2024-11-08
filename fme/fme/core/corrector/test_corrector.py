@@ -8,15 +8,16 @@ import torch
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
 from fme.core.climate_data import compute_dry_air_absolute_differences
-from fme.core.corrector import (
-    _force_conserve_dry_air,
-    _force_conserve_moisture,
-    _force_positive,
-    _force_zero_global_mean_moisture_advection,
-)
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
+
+from .corrector import (
+    _force_conserve_dry_air,
+    _force_conserve_moisture,
+    _force_zero_global_mean_moisture_advection,
+    force_positive,
+)
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -233,14 +234,14 @@ def test_force_conserve_moisture(
     np.testing.assert_almost_equal(new_dry_air, original_dry_air, decimal=6)
 
 
-def test__force_positive():
+def test_force_positive():
     data = {
         "foo": torch.tensor([[-1.0, 0.0], [0.0, 1.0], [1.0, 2.0]]),
         "bar": torch.tensor([[-1.0, 0.0], [0.0, -3.0], [1.0, 2.0]]),
     }
     original_min = torch.min(data["foo"])
     assert original_min < 0.0
-    fixed_data = _force_positive(data, ["foo"])
+    fixed_data = force_positive(data, ["foo"])
     new_min = torch.min(fixed_data["foo"])
     # Ensure the minimum value of 'foo' is now 0
     torch.testing.assert_close(new_min, torch.tensor(0.0))
