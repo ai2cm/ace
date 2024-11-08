@@ -3,7 +3,7 @@ from typing import Callable, Dict, Generic, List, TypeVar
 
 from fme.core.typing_ import TensorDict, TensorMapping
 
-PS = TypeVar("PS")  # prognostic state
+PS = TypeVar("PS", contravariant=True)  # prognostic state
 BD = TypeVar("BD")  # batch data
 
 
