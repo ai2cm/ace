@@ -211,7 +211,8 @@ class InferenceEvaluatorAggregatorConfig:
 
 class InferenceEvaluatorAggregator(
     InferenceAggregatorABC[
-        PrognosticStateABC[BatchData[CurrentDevice]], PairedData[CurrentDevice]
+        Union[PairedData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]],
+        PairedData[CurrentDevice],
     ]
 ):
     """
@@ -385,19 +386,29 @@ class InferenceEvaluatorAggregator(
 
     def record_initial_condition(
         self,
-        initial_condition: PrognosticStateABC[BatchData[CurrentDevice]],
+        initial_condition: Union[
+            PairedData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]
+        ],
         normalize: Callable[[TensorMapping], TensorDict],
     ):
-        data = initial_condition.as_state().data
-        data_norm = normalize(data)
+        if isinstance(initial_condition, PairedData):
+            target_data = initial_condition.target
+            target_data_norm = normalize(target_data)
+            gen_data = initial_condition.prediction
+            gen_data_norm = normalize(gen_data)
+        else:
+            target_data = initial_condition.as_state().data
+            target_data_norm = normalize(target_data)
+            gen_data = target_data
+            gen_data_norm = target_data_norm
         for aggregator_name in ["mean", "mean_norm"]:
             aggregator = self._aggregators.get(aggregator_name)
             if aggregator is not None:
                 aggregator.record_batch(
-                    target_data=data,
-                    gen_data=data,
-                    target_data_norm=data_norm,
-                    gen_data_norm=data_norm,
+                    target_data=target_data,
+                    gen_data=gen_data,
+                    target_data_norm=target_data_norm,
+                    gen_data_norm=gen_data_norm,
                     i_time_start=0,
                 )
 

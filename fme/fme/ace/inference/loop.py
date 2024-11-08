@@ -1,3 +1,4 @@
+import abc
 import logging
 import time
 from pathlib import Path
@@ -14,6 +15,7 @@ from fme.core.aggregator.inference.main import (
 )
 from fme.core.data_loading.batch_data import (
     BatchData,
+    CurrentDevice,
     GriddedData,
     GriddedDataABC,
     PairedData,
@@ -23,7 +25,6 @@ from fme.core.generics.aggregator import (
 )
 from fme.core.generics.state import PrognosticStateABC
 from fme.core.normalizer import StandardNormalizer
-from fme.core.stepper import TrainOutput
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
@@ -70,25 +71,18 @@ class Looper:
             raise StopIteration
         timer.stop("data_loading")
         timer.start("forward_prediction")
-        prediction, new_prognostic_state = self._stepper.predict(
-            self._prognostic_state, forcing_data
+        prediction, self._prognostic_state = self._stepper.predict(
+            self._prognostic_state,
+            forcing_data,
+            compute_derived_variables=True,
         )
         timer.stop("forward_prediction")
-        timer.start("compute_derived_variables")
-        forward_prediction_and_derived = (
-            prediction.prepend(self._prognostic_state)
-            .compute_derived_variables(forcing_data)
-            .remove_initial_condition(self._n_ic_timesteps)
+        forcing_data = self._stepper.get_forward_data(
+            forcing_data,
+            compute_derived_variables=self._compute_derived_for_loaded_data,
         )
-        if self._compute_derived_for_loaded_data:
-            forcing_data = forcing_data.compute_derived_variables(forcing_data)
-
-        forcing_data = forcing_data.remove_initial_condition(self._n_ic_timesteps)
-        timer.stop("compute_derived_variables")
-        self._prognostic_state = new_prognostic_state
-
         return (
-            forward_prediction_and_derived,
+            prediction,
             forcing_data,
         )
 
@@ -272,11 +266,31 @@ def run_inference_evaluator(
             timer.stop("wandb_logging")
 
 
+class DeriverABC(abc.ABC):
+    """
+    Abstract base class for processing data during dataset comparison.
+    """
+
+    @abc.abstractmethod
+    def get_forward_data(
+        self, data: BatchData, compute_derived_variables: bool = False
+    ) -> BatchData:
+        ...
+
+    @property
+    @abc.abstractmethod
+    def n_ic_timesteps(self) -> int:
+        ...
+
+
 def run_dataset_comparison(
-    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], PairedData],
+    aggregator: InferenceAggregatorABC[
+        PairedData[CurrentDevice], PairedData[CurrentDevice]
+    ],
     normalizer: StandardNormalizer,
     prediction_data: GriddedData,
     target_data: GriddedData,
+    deriver: DeriverABC,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ):
     if writer is None:
@@ -288,70 +302,55 @@ def run_dataset_comparison(
     i_time = 0
     for pred, target in zip(prediction_data.loader, target_data.loader):
         timer.stop("data_loading")
+        if i_time == 0:
+            all_names = pred.data.keys()
+            with timer.context("aggregator"):
+                aggregator.record_initial_condition(
+                    initial_condition=PairedData.from_batch_data(
+                        prediction=pred.get_start(
+                            all_names, deriver.n_ic_timesteps
+                        ).as_state(),
+                        target=target.get_start(
+                            all_names, deriver.n_ic_timesteps
+                        ).as_state(),
+                    ),
+                    normalize=normalizer.normalize,
+                )
 
-        timer.start("forward_prediction")
         forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
             f"Inference: starting window spanning {i_time}"
             f" to {i_time + forward_steps_in_memory} steps,"
             f" out of total {n_forward_steps}."
         )
-        pred_window_data = dict(pred.data)
-        target_window_data = dict(target.data)
-        stepped = TrainOutput(
-            {"loss": torch.tensor(float("nan"))},
-            pred_window_data,
-            target_window_data,
-            times=pred.times,
-            normalize=normalizer.normalize,
-        )
-        timer.stop("forward_prediction")
-        timer.start("compute_derived_variables")
-        stepped = stepped.compute_derived_variables()
-        target_times = target.times
-        timer.stop("compute_derived_variables")
+        pred = deriver.get_forward_data(pred, compute_derived_variables=True)
+        target = deriver.get_forward_data(target, compute_derived_variables=True)
 
         timer.start("data_writer")
-        stepped_without_ic = stepped.remove_initial_condition(1)
-        target_times_without_ic = target_times.isel(time=slice(1, None))
-        if i_time == 0:
-            i_time_aggregator = i_time
-            stepped_for_agg = stepped
-            target_times_for_agg = target_times
-        else:
-            i_time_aggregator = i_time + 1
-            stepped_for_agg = stepped_without_ic
-            target_times_for_agg = target_times_without_ic
 
         # Do not include the initial condition in the data writers
         writer.append_batch(
-            batch=PairedData(
-                target=stepped_without_ic.target_data,
-                prediction=stepped_without_ic.gen_data,
-                times=target_times_without_ic,
-            ),
+            batch=PairedData.from_batch_data(pred, target),
             start_timestep=i_time,
         )
         timer.stop("data_writer")
         timer.start("aggregator")
         # record metrics, includes the initial condition
         aggregator.record_batch(
-            data=PairedData(
-                prediction=stepped_for_agg.gen_data,
-                target=stepped_for_agg.target_data,
-                times=target_times_for_agg,
-            ),
+            data=PairedData.from_batch_data(pred, target),
             normalize=normalizer.normalize,
-            i_time_start=i_time_aggregator,
+            i_time_start=i_time + 1,
         )
         timer.stop("aggregator")
 
         timer.start("wandb_logging")
+        if i_time == 0:
+            _log_window_to_wandb(
+                aggregator, window_slice=slice(0, 1), label="inference"
+            )
         _log_window_to_wandb(
             aggregator,
-            window_slice=slice(
-                i_time_aggregator, i_time_aggregator + len(target_times["time"])
-            ),
+            window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
             label="inference",
         )
         timer.stop("wandb_logging")

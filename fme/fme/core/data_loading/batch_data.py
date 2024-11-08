@@ -350,9 +350,7 @@ class BatchData(Generic[DeviceType]):
         initial_batch_data = initial_condition.as_state()
         filled_data = {**initial_batch_data.data}
         example_tensor = list(initial_batch_data.data.values())[0]
-        state_data_device = list(self.data.values())[
-            0
-        ].device  # not the same as state.device_data[k].device
+        state_data_device = list(self.data.values())[0].device
         for k in self.data:
             if k not in filled_data:
                 filled_data[k] = torch.full_like(example_tensor, fill_value=np.nan)

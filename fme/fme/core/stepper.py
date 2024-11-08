@@ -20,6 +20,7 @@ import torch
 import xarray as xr
 from torch import nn
 
+from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector import CorrectorConfig
 from fme.core.data_loading.batch_data import BatchData, CurrentDevice
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -108,10 +109,14 @@ class SingleModuleStepperConfig:
                 "in loss scaling."
             )
 
+    @property
+    def n_ic_timesteps(self) -> int:
+        return 1
+
     def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
             names=self.all_names,
-            n_timesteps=n_forward_steps + 1,
+            n_timesteps=n_forward_steps + self.n_ic_timesteps,
         )
 
     def get_forcing_data_requirements(self, n_forward_steps: int) -> DataRequirements:
@@ -120,7 +125,9 @@ class SingleModuleStepperConfig:
         else:
             names = list(set(self.forcing_names).union(self.ocean.forcing_names))
 
-        return DataRequirements(names=names, n_timesteps=n_forward_steps + 1)
+        return DataRequirements(
+            names=names, n_timesteps=n_forward_steps + self.n_ic_timesteps
+        )
 
     def get_state(self):
         return dataclasses.asdict(self)
@@ -616,6 +623,7 @@ class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
         self,
         initial_condition: PrognosticStateABC[BatchData[CurrentDevice]],
         forcing_data: BatchData[CurrentDevice],
+        compute_derived_variables: bool = False,
     ) -> Tuple[BatchData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]]:
         """
         Predict multiple steps forward given initial condition and forcing data.
@@ -625,9 +633,9 @@ class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
                 [n_batch, self.n_ic_steps, <horizontal_dims>]. This data is assumed
                 to contain all prognostic variables and be denormalized.
             forcing_data: Contains tensors of shape
-                [n_batch, n_forward_steps + 1, n_lat, n_lon]. This contains the forcing
+                [n_batch, 1 + n_forward_steps, n_lat, n_lon]. This contains the forcing
                 and ocean data for the initial condition and all subsequent timesteps.
-            n_forward_steps: The number of timesteps to run the model forward for.
+            compute_derived_variables: Whether to compute derived variables.
 
         Returns:
             The output data for all the forward timesteps. Shape of
@@ -673,7 +681,24 @@ class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
             derive_func=forcing_data.derive_func,
             horizontal_dims=forcing_data.horizontal_dims,
         )
+        if compute_derived_variables:
+            timer = GlobalTimer.get_instance()
+            with timer.context("compute_derived_variables"):
+                data = (
+                    data.prepend(initial_condition)
+                    .compute_derived_variables(forcing_data)
+                    .remove_initial_condition(self.n_ic_timesteps)
+                )
         return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
+
+    def get_forward_data(
+        self, data: BatchData, compute_derived_variables: bool = False
+    ) -> BatchData:
+        if compute_derived_variables:
+            timer = GlobalTimer.get_instance()
+            with timer.context("compute_derived_variables"):
+                data = data.compute_derived_variables(data)
+        return data.remove_initial_condition(self.n_ic_timesteps)
 
     def train_on_batch(
         self,
