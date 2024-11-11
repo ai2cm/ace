@@ -215,15 +215,21 @@ class SingleModuleStepperConfig:
                         "SingleModuleStepper being loaded from state cannot be run by "
                         "this version of the code."
                     )
-        if "normalization" in state_copy:
-            if "exclude_names" in state_copy["normalization"]:
-                if state_copy["normalization"]["exclude_names"] is not None:
-                    raise ValueError(
-                        "The exclude_names option in normalization config is no longer "
-                        "supported."
-                    )
-                else:
-                    del state_copy["normalization"]["exclude_names"]
+        for normalization_key in [
+            "normalization",
+            "loss_normalization",
+            "residual_normalization",
+        ]:
+            if state_copy.get(normalization_key) is not None:
+                if "exclude_names" in state_copy[normalization_key]:
+                    if state_copy[normalization_key]["exclude_names"] is not None:
+                        raise ValueError(
+                            "The exclude_names option in normalization config is no "
+                            "longer supported, but excluded names were found in "
+                            f"{normalization_key}."
+                        )
+                    else:
+                        del state_copy[normalization_key]["exclude_names"]
         if "prescriber" in state_copy:
             # want to maintain backwards compatibility for this particular feature
             if state_copy["prescriber"] is not None:
