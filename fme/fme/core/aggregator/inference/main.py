@@ -20,6 +20,7 @@ from fme.core.data_loading.batch_data import (
     BatchData,
     CurrentDevice,
     PairedData,
+    PrognosticState,
 )
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -30,7 +31,6 @@ from fme.core.data_loading.data_typing import (
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
 )
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
@@ -211,7 +211,7 @@ class InferenceEvaluatorAggregatorConfig:
 
 class InferenceEvaluatorAggregator(
     InferenceAggregatorABC[
-        Union[PairedData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]],
+        Union[PairedData[CurrentDevice], PrognosticState[CurrentDevice]],
         PairedData[CurrentDevice],
     ]
 ):
@@ -387,7 +387,7 @@ class InferenceEvaluatorAggregator(
     def record_initial_condition(
         self,
         initial_condition: Union[
-            PairedData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]
+            PairedData[CurrentDevice], PrognosticState[CurrentDevice]
         ],
         normalize: Callable[[TensorMapping], TensorDict],
     ):
@@ -397,7 +397,7 @@ class InferenceEvaluatorAggregator(
             gen_data = initial_condition.prediction
             gen_data_norm = normalize(gen_data)
         else:
-            target_data = initial_condition.as_state().data
+            target_data = initial_condition.as_batch_data().data
             target_data_norm = normalize(target_data)
             gen_data = target_data
             gen_data_norm = target_data_norm
@@ -553,9 +553,7 @@ class InferenceAggregatorConfig:
 
 
 class InferenceAggregator(
-    InferenceAggregatorABC[
-        PrognosticStateABC[BatchData[CurrentDevice]], BatchData[CurrentDevice]
-    ]
+    InferenceAggregatorABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
 ):
     """
     Aggregates statistics on a single timeseries of data.
@@ -631,10 +629,10 @@ class InferenceAggregator(
 
     def record_initial_condition(
         self,
-        initial_condition: PrognosticStateABC[BatchData[CurrentDevice]],
+        initial_condition: PrognosticState[CurrentDevice],
         normalize: Callable[[TensorMapping], TensorDict],
     ):
-        data = initial_condition.as_state().data
+        data = initial_condition.as_batch_data().data
         if "mean" in self._aggregators:
             self._aggregators["mean"].record_batch(
                 data=data,

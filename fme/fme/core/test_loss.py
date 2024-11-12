@@ -43,6 +43,7 @@ def test_loss_of_zeros_is_variance():
 
 @pytest.mark.parametrize("global_mean_weight", [0.0, 1.0, 5.0])
 def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float):
+    torch.manual_seed(0)
     config = LossConfig(
         global_mean_type="LpLoss", global_mean_weight=global_mean_weight
     )

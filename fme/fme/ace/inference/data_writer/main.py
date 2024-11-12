@@ -11,9 +11,9 @@ import xarray as xr
 from fme.core.data_loading.batch_data import (
     BatchData,
     PairedData,
+    PrognosticState,
 )
 from fme.core.data_loading.data_typing import VariableMetadata
-from fme.core.generics.state import PrognosticStateABC
 
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
@@ -245,10 +245,10 @@ class PairedDataWriter:
 
     def save_initial_condition(
         self,
-        ic_data: PrognosticStateABC[BatchData],
+        ic_data: PrognosticState,
     ):
         _save_initial_condition(
-            ic_data=ic_data.as_state(),
+            ic_data=ic_data.as_batch_data(),
             path=self.path,
             prognostic_names=self.prognostic_names,
             metadata=self.metadata,
@@ -448,10 +448,10 @@ class DataWriter:
 
     def save_initial_condition(
         self,
-        ic_data: PrognosticStateABC[BatchData],
+        ic_data: PrognosticState,
     ):
         _save_initial_condition(
-            ic_data=ic_data.as_state(),
+            ic_data=ic_data.as_batch_data(),
             path=self.path,
             prognostic_names=self.prognostic_names,
             metadata=self.metadata,

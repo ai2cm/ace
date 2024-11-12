@@ -83,10 +83,10 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.core.data_loading.batch_data import (
-    BatchData,
     GriddedData,
     GriddedDataABC,
     PairedData,
+    PrognosticState,
 )
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
@@ -98,7 +98,6 @@ from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.stepper import (
@@ -224,9 +223,7 @@ class AggregatorBuilderABC(abc.ABC, Generic[PS, TO, SD]):
         pass
 
 
-class AggregatorBuilder(
-    AggregatorBuilderABC[PrognosticStateABC[BatchData], TrainOutput, PairedData]
-):
+class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, PairedData]):
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
