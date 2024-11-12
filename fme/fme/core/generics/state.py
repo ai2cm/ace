@@ -8,5 +8,5 @@ class PrognosticStateABC(abc.ABC, Generic[T]):
     SelfType = TypeVar("SelfType", bound="PrognosticStateABC")
 
     @abc.abstractmethod
-    def as_state(self) -> T:
+    def as_batch_data(self) -> T:
         ...

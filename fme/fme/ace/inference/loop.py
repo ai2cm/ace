@@ -2,7 +2,19 @@ import abc
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Protocol, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import numpy as np
 import torch
@@ -19,27 +31,31 @@ from fme.core.data_loading.batch_data import (
     GriddedData,
     GriddedDataABC,
     PairedData,
+    PrognosticState,
 )
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
 )
-from fme.core.generics.state import PrognosticStateABC
+from fme.core.generics.inference import InferenceStepperABC
 from fme.core.normalizer import StandardNormalizer
 from fme.core.wandb import WandB
 
 from .data_writer import DataWriter, NullDataWriter, PairedDataWriter
 
+PS = TypeVar("PS")
+BD = TypeVar("BD")
 
-class Looper:
+
+class Looper(Generic[PS, BD]):
     """
     Class for stepping a model forward arbitarily many times.
     """
 
     def __init__(
         self,
-        stepper: SingleModuleStepper,
-        initial_condition: PrognosticStateABC[BatchData],
-        loader: Iterable[BatchData],
+        stepper: InferenceStepperABC[PS, BD],
+        initial_condition: PS,
+        loader: Iterable[BD],
         compute_derived_for_loaded_data: bool = False,
     ):
         """
@@ -51,7 +67,6 @@ class Looper:
                 the data returned by the loader.
         """
         self._stepper = stepper
-        self._n_ic_timesteps = stepper.n_ic_timesteps
         self._prognostic_state = initial_condition
         self._loader = iter(loader)
         self._compute_derived_for_loaded_data = compute_derived_for_loaded_data
@@ -59,7 +74,7 @@ class Looper:
     def __iter__(self):
         return self
 
-    def __next__(self) -> Tuple[BatchData, BatchData]:
+    def __next__(self) -> Tuple[BD, BD]:
         """Return predictions for the time period corresponding to the next batch
         of forcing data. Also returns the forcing data."""
         timer = GlobalTimer.get_instance()
@@ -130,10 +145,12 @@ def _log_window_to_wandb(
 
 def run_inference(
     stepper: SingleModuleStepper,
-    initial_condition: PrognosticStateABC[BatchData],
+    initial_condition: PrognosticState[CurrentDevice],
     forcing_data: GriddedData,
     writer: DataWriter,
-    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], BatchData],
+    aggregator: InferenceAggregatorABC[
+        PrognosticState[CurrentDevice], BatchData[CurrentDevice]
+    ],
 ):
     """Run extended inference loop given initial condition and forcing data.
 
@@ -198,9 +215,11 @@ def run_inference(
 
 
 def run_inference_evaluator(
-    aggregator: InferenceAggregatorABC[PrognosticStateABC[BatchData], PairedData],
+    aggregator: InferenceAggregatorABC[
+        PrognosticState[CurrentDevice], PairedData[CurrentDevice]
+    ],
     stepper: SingleModuleStepper,
-    data: GriddedDataABC[BatchData],
+    data: GriddedDataABC[BatchData[CurrentDevice]],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
 ):
     timer = GlobalTimer.get_instance()
@@ -309,10 +328,10 @@ def run_dataset_comparison(
                     initial_condition=PairedData.from_batch_data(
                         prediction=pred.get_start(
                             all_names, deriver.n_ic_timesteps
-                        ).as_state(),
+                        ).as_batch_data(),
                         target=target.get_start(
                             all_names, deriver.n_ic_timesteps
-                        ).as_state(),
+                        ).as_batch_data(),
                     ),
                     normalize=normalizer.normalize,
                 )

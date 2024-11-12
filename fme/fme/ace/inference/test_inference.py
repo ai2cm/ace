@@ -21,6 +21,7 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
+from fme.core.data_loading.batch_data import PrognosticState
 from fme.core.data_loading.data_typing import (
     DimSize,
     LatLonCoordinates,
@@ -32,7 +33,6 @@ from fme.core.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
@@ -214,8 +214,8 @@ def test_get_initial_condition():
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
     initial_condition = get_initial_condition(data, ["prog"])
-    assert isinstance(initial_condition, PrognosticStateABC)
-    batch_data = initial_condition.as_state()
+    assert isinstance(initial_condition, PrognosticState)
+    batch_data = initial_condition.as_batch_data()
     assert batch_data.times.shape == (2, 1)
     initial_times = batch_data.times.isel(time=0)
     assert initial_times.shape == (2,)

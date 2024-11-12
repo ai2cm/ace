@@ -33,7 +33,6 @@ from fme.core.data_loading.data_typing import (
     VariableMetadata,
 )
 from fme.core.device import get_device
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -116,6 +115,25 @@ class AtmosphericDeriveFn:
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
         )
+
+
+class PrognosticState(Generic[DeviceType]):
+    """
+    Thin typing wrapper around BatchData to indicate that the data is a prognostic
+    state, such as an initial condition or final state when evolving forward in time.
+    """
+
+    def __init__(self, data: "BatchData[DeviceType]"):
+        """
+        Initialize the state.
+
+        Args:
+            data: The data to initialize the state with.
+        """
+        self._data = data
+
+    def as_batch_data(self) -> "BatchData[DeviceType]":
+        return self._data
 
 
 @dataclasses.dataclass
@@ -310,7 +328,7 @@ class BatchData(Generic[DeviceType]):
             derive_func=self.derive_func,
         )
 
-    def subset_names(self: SelfType, names: Sequence[str]) -> SelfType:
+    def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
         """
         Subset the data to only include the given names.
         """
@@ -322,32 +340,47 @@ class BatchData(Generic[DeviceType]):
         )
 
     def get_start(
-        self, prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> PrognosticStateABC["BatchData"]:
+        self: SelfType, prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> PrognosticState[DeviceType]:
         """
         Get the initial condition state.
         """
-        return _PrognosticState.from_batch_data_start(
-            self, prognostic_names, n_ic_timesteps
+        return PrognosticState[DeviceType](
+            self.subset_names(prognostic_names).select_time_slice(
+                slice(0, n_ic_timesteps)
+            )
         )
 
     def get_end(
-        self, prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> PrognosticStateABC["BatchData"]:
+        self: SelfType, prognostic_names: Collection[str], n_ic_timesteps: int
+    ) -> PrognosticState[DeviceType]:
         """
         Get the final state which can be used as a new initial condition.
         """
-        return _PrognosticState.from_batch_data_end(
-            self, prognostic_names, n_ic_timesteps
+        return PrognosticState[DeviceType](
+            self.subset_names(prognostic_names).select_time_slice(
+                slice(-n_ic_timesteps, None)
+            )
+        )
+
+    def select_time_slice(self: SelfType, time_slice: slice) -> SelfType:
+        """
+        Select a window of data from the batch.
+        """
+        return self.__class__(
+            {k: v[:, time_slice] for k, v in self.data.items()},
+            times=self.times[:, time_slice],
+            derive_func=self.derive_func,
+            horizontal_dims=self.horizontal_dims,
         )
 
     def prepend(
-        self: SelfType, initial_condition: PrognosticStateABC[SelfType]
+        self: SelfType, initial_condition: PrognosticState[DeviceType]
     ) -> SelfType:
         """
         Prepend the initial condition to the data.
         """
-        initial_batch_data = initial_condition.as_state()
+        initial_batch_data = initial_condition.as_batch_data()
         filled_data = {**initial_batch_data.data}
         example_tensor = list(initial_batch_data.data.values())[0]
         state_data_device = list(self.data.values())[0].device
@@ -449,72 +482,6 @@ class PairedData(Generic[DeviceType]):
         _check_device(prediction, torch.device("cpu"))
         _check_device(target, torch.device("cpu"))
         return PairedData(prediction, target, times)
-
-
-class _PrognosticState(PrognosticStateABC[BatchData]):
-    """
-    PrognosticStateABC implementation for BatchData.
-
-    This should not be used directly, instead type hint as PrognosticStateABC[BatchData]
-    or initialize from BatchData using the from_start or from_end methods.
-    """
-
-    def __init__(self, data: BatchData, _direct_init=True):
-        """
-        Initialize the state. Should not be used directly, instead use the
-        initialization classmethods.
-
-        Args:
-            data: The data to initialize the state with.
-            _direct_init: Whether the state was initialized directly from itself.
-                Do not set this directly, as it allows you to bypass the checks in
-                the true initialization methods.
-        """
-        if _direct_init:
-            raise NotImplementedError(
-                "Direct initialization not implemented, use from_start_state or "
-                "from_end_state instead."
-            )
-        self._data = data
-
-    def as_state(self) -> BatchData:
-        return self._data
-
-    @classmethod
-    def from_batch_data_start(
-        cls, state: "BatchData", prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> "_PrognosticState":
-        return cls(
-            BatchData(
-                {
-                    k: v[:, :n_ic_timesteps]
-                    for k, v in state.data.items()
-                    if k in prognostic_names
-                },
-                times=state.times[:, :n_ic_timesteps],
-                derive_func=state.derive_func,
-                horizontal_dims=state.horizontal_dims,
-            ),
-            _direct_init=False,
-        )
-
-    @classmethod
-    def from_batch_data_end(
-        cls, state: "BatchData", prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> "_PrognosticState":
-        return cls(
-            BatchData(
-                {
-                    k: v[:, -n_ic_timesteps:]
-                    for k, v in state.data.items()
-                    if k in prognostic_names
-                },
-                times=state.times[:, -n_ic_timesteps:],
-                derive_func=state.derive_func,
-                horizontal_dims=state.horizontal_dims,
-            ),
-            _direct_init=False,
-        )
 
 
 T = TypeVar("T", covariant=True)
