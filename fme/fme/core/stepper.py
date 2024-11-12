@@ -23,7 +23,6 @@ from torch import nn
 
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
-from fme.core.corrector.registry import CorrectorSelector
 from fme.core.data_loading.batch_data import BatchData, CurrentDevice, PrognosticState
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
@@ -37,7 +36,7 @@ from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.packer import Packer
-from fme.core.registry import ModuleSelector
+from fme.core.registry import CorrectorSelector, ModuleSelector
 
 from .optimization import NullOptimization
 from .parameter_init import ParameterInitializationConfig

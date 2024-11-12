@@ -29,11 +29,6 @@ from fme.ace.registry.hpx import (
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
-from fme.core.corrector.registry import (
-    CorrectorSelector,
-    get_available_corrector_types,
-    register_corrector,
-)
 from fme.core.data_loading.config import TimeSlice, XarrayDataConfig
 from fme.core.data_loading.inference import (
     ExplicitIndices,
@@ -52,7 +47,10 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
-from fme.core.registry import ModuleSelector, get_available_module_types, register
+from fme.core.registry.corrector import CorrectorSelector
+from fme.core.registry.module import (
+    ModuleSelector,
+)
 
 from .train.train import run_train
 from .train.train_config import (

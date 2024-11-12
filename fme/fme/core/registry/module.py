@@ -1,9 +1,11 @@
 import abc
 import dataclasses
-from typing import Any, Callable, Dict, Mapping, Tuple, Type
+from typing import Any, Callable, ClassVar, Mapping, Tuple, TypeVar, Union
 
 import dacite
 from torch import nn
+
+from .registry import Registry
 
 
 @dataclasses.dataclass
@@ -49,41 +51,7 @@ class ModuleConfig(abc.ABC):
         )
 
 
-NET_REGISTRY: Dict[str, Type[ModuleConfig]] = {}
-
-
-def get_available_module_types():
-    return NET_REGISTRY.keys()
-
-
-def register(name: str) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:
-    """
-    Register a new ModuleConfig type with the NET_REGISTRY.
-
-    This is useful for adding new ModuleConfig types to the registry from
-    other modules.
-
-    Args:
-        name: name of the ModuleConfig type to register
-
-    Returns:
-        a decorator which registers the decorated class with the NET_REGISTRY
-    """
-    if not isinstance(name, str):
-        raise TypeError(
-            f"name must be a string, got {name}, "
-            "make sure to use as @register('module_name')"
-        )
-
-    def decorator(cls: Type[ModuleConfig]) -> Type[ModuleConfig]:
-        NET_REGISTRY[name] = cls
-        return cls
-
-    return decorator
-
-
-def get_from_registry(name) -> Type[ModuleConfig]:
-    return NET_REGISTRY[name]
+MT = TypeVar("MT", bound=nn.Module)
 
 
 @dataclasses.dataclass
@@ -107,15 +75,15 @@ class ModuleSelector:
 
     type: str
     config: Mapping[str, Any]
+    registry: ClassVar[Registry] = Registry()
 
-    def __post_init__(self):
-        try:
-            self._config = get_from_registry(self.type).from_state(self.config)
-        except KeyError:
-            raise ValueError(
-                f"unknown module type {self.type}, "
-                f"known module types are {list(NET_REGISTRY.keys())}"
-            )
+    def __post__init(self):
+        if self.registry is not Registry():
+            raise ValueError("ModuleSelector.registry should not be set manually")
+
+    @classmethod
+    def register(cls, type_name) -> Callable[[MT], MT]:
+        return cls.registry.register(type_name)
 
     def build(
         self,
@@ -136,13 +104,14 @@ class ModuleSelector:
         Returns:
             a nn.Module
         """
-        return self._config.build(
+        instance = self.registry.from_dict(self.get_state())
+        return instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         )
 
-    def get_state(self) -> Mapping[str, Any]:
+    def get_state(self) -> Union[Mapping[str, Any], dict]:
         """
         Get a dictionary containing all the information needed to build a ModuleConfig.
         """
@@ -157,3 +126,13 @@ class ModuleSelector:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+    @classmethod
+    def from_dict(cls, config: dict):
+        instance = cls.registry.from_dict(config)
+        return cls(config=instance, type=config["type"])
+
+    @classmethod
+    def get_available_types(cls):
+        """This class method is used to expose all available types of Modules."""
+        return cls(type="", config={}).registry._types.keys()

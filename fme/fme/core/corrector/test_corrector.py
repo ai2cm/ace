@@ -8,8 +8,10 @@ import torch
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
 from fme.core.climate_data import compute_dry_air_absolute_differences
+from fme.core.corrector.ocean import OceanCorrector
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping
 
 from .corrector import (
@@ -247,3 +249,16 @@ def test_force_positive():
     torch.testing.assert_close(new_min, torch.tensor(0.0))
     # Ensure other variables are not modified
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
+
+
+def test_corrector_selector():
+    selector = CorrectorSelector(
+        type="ocean_corrector",
+        config={"masking": {"mask_name": "mask", "mask_value": 1}},
+    )
+    ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
+    sigma: SigmaCoordinates = SigmaCoordinates(
+        ak=torch.tensor([1.0, 0.5, 0.0]), bk=torch.tensor([0.0, 0.5, 1.0])
+    )
+    corrector = selector.build(ops, sigma, TIMESTEP)
+    assert isinstance(corrector, OceanCorrector)
