@@ -16,7 +16,12 @@ from fme.ace.inference.loop import run_inference, write_reduced_metrics
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
-from fme.core.data_loading.batch_data import BatchData, CurrentDevice, GriddedData
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    CurrentDevice,
+    GriddedData,
+    PrognosticState,
+)
 from fme.core.data_loading.getters import get_forcing_data
 from fme.core.data_loading.inference import (
     ExplicitIndices,
@@ -25,7 +30,6 @@ from fme.core.data_loading.inference import (
     TimestampList,
 )
 from fme.core.dicts import to_flat_dict
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
@@ -78,7 +82,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset, prognostic_names: Sequence[str]
-) -> PrognosticStateABC[BatchData[CurrentDevice]]:
+) -> PrognosticState[CurrentDevice]:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 
@@ -257,7 +261,7 @@ def run_inference_from_config(config: InferenceConfig):
         config.forcing_loader,
         config.forward_steps_in_memory,
         data_requirements,
-        initial_condition.as_state().times,
+        initial_condition.as_batch_data().times,
         stepper.surface_temperature_name,
         stepper.ocean_fraction_name,
     )

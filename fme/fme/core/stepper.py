@@ -24,14 +24,14 @@ from torch import nn
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.corrector.registry import CorrectorSelector
-from fme.core.data_loading.batch_data import BatchData, CurrentDevice
+from fme.core.data_loading.batch_data import BatchData, CurrentDevice, PrognosticState
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
+from fme.core.generics.inference import InferenceStepperABC
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -350,7 +350,7 @@ class TrainOutput(TrainOutputABC):
 
     def prepend_initial_condition(
         self,
-        initial_condition: PrognosticStateABC[BatchData],
+        initial_condition: PrognosticState[CurrentDevice],
     ) -> "TrainOutput":
         """
         Prepends an initial condition to the existing stepped data.
@@ -361,7 +361,7 @@ class TrainOutput(TrainOutputABC):
         Args:
             initial_condition: Initial condition data.
         """
-        batch_data = initial_condition.as_state()
+        batch_data = initial_condition.as_batch_data()
         return TrainOutput(
             metrics=self.metrics,
             gen_data=_prepend_timesteps(self.gen_data, batch_data.data),
@@ -433,7 +433,10 @@ class StepperABC(abc.ABC, Generic[BD, SD]):
         pass
 
 
-class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
+class SingleModuleStepper(
+    StepperABC[BatchData[CurrentDevice], TrainOutput],
+    InferenceStepperABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]],
+):
     """
     Stepper class for a single pytorch module.
     """
@@ -626,10 +629,10 @@ class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
 
     def predict(
         self,
-        initial_condition: PrognosticStateABC[BatchData[CurrentDevice]],
+        initial_condition: PrognosticState[CurrentDevice],
         forcing_data: BatchData[CurrentDevice],
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData[CurrentDevice], PrognosticStateABC[BatchData[CurrentDevice]]]:
+    ) -> Tuple[BatchData[CurrentDevice], PrognosticState[CurrentDevice]]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -647,7 +650,7 @@ class SingleModuleStepper(StepperABC[BatchData[CurrentDevice], TrainOutput]):
             each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].
         """
         output_list = []
-        initial_condition_state = initial_condition.as_state()
+        initial_condition_state = initial_condition.as_batch_data()
         if initial_condition_state.times.shape[1] != self.n_ic_timesteps:
             raise ValueError(
                 f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
