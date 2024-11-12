@@ -47,7 +47,7 @@ VariableNames = namedtuple(
 
 
 def get_sigma_coordinates(
-    ds: xr.Dataset, dtype: Optional[torch.dtype]
+    ds: xr.Dataset, dtype: Optional[torch.dtype], device: torch.device = "cpu"
 ) -> SigmaCoordinates:
     """
     Get sigma coordinates from a dataset.
@@ -74,8 +74,8 @@ def get_sigma_coordinates(
     if len(ak_list) == 0 or len(bk_list) == 0:
         logger.warning("Dataset does not contain ak and bk coordinates.")
         return SigmaCoordinates(
-            ak=torch.tensor([], device=fme.get_device()),
-            bk=torch.tensor([], device=fme.get_device()),
+            ak=torch.tensor([], device=device),
+            bk=torch.tensor([], device=device),
         )
 
     if len(ak_list) != len(bk_list):
@@ -85,8 +85,8 @@ def get_sigma_coordinates(
         )
 
     return SigmaCoordinates(
-        ak=torch.as_tensor(ak_list, device=fme.get_device(), dtype=dtype),
-        bk=torch.as_tensor(bk_list, device=fme.get_device(), dtype=dtype),
+        ak=torch.as_tensor(ak_list, device=device, dtype=dtype),
+        bk=torch.as_tensor(bk_list, device=device, dtype=dtype),
     )
 
 

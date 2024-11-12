@@ -14,7 +14,6 @@ from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.stepper import (
     SingleModuleStepper,
@@ -456,12 +455,10 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
         gen_data_ocean = []
 
         # get initial condition prognostic variables
-        atmos_prognostic: PrognosticStateABC[
-            BatchData
-        ] = data.atmosphere_data.get_start(
+        atmos_prognostic = data.atmosphere_data.get_start(
             self.atmosphere.prognostic_names, self.n_ic_timesteps
         )
-        ocean_prognostic: PrognosticStateABC[BatchData] = data.ocean_data.get_start(
+        ocean_prognostic = data.ocean_data.get_start(
             self.ocean.prognostic_names, self.n_ic_timesteps
         )
         # get initial condition atmosphere forcing variables

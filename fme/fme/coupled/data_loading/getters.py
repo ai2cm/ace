@@ -78,6 +78,13 @@ def get_coupled_data_loader(
         )
 
     batch_size = dist.local_batch_size(int(config.batch_size))
+
+    if config.prefetch_factor is None:
+        # DataLoader default is not None so we must leave it unset
+        kwargs = {}
+    else:
+        kwargs = {"prefetch_factor": config.prefetch_factor}
+
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=batch_size,
@@ -86,9 +93,9 @@ def get_coupled_data_loader(
         drop_last=True,
         pin_memory=using_gpu(),
         collate_fn=collate_fn,
-        prefetch_factor=config.prefetch_factor,
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
+        **kwargs,
     )
 
     if len(dataloader) == 0:

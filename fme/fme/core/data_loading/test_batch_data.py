@@ -95,7 +95,7 @@ def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps
         n_lon=n_lon,
         derive_func=derive_func,
     )
-    start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_state()
+    start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(start, batch_data)
     assert start.times.equals(batch_data.times.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
@@ -132,7 +132,7 @@ def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: 
         n_lon=n_lon,
         derive_func=derive_func,
     )
-    end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_state()
+    end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(end, batch_data)
     assert end.times.equals(batch_data.times.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
@@ -170,7 +170,7 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
     )
     start_data = batch_data.get_start(prepend_names, n_ic_timesteps)
     prepended = batch_data.prepend(start_data)
-    start_batch_data = start_data.as_state()
+    start_batch_data = start_data.as_batch_data()
     assert_metadata_equal(prepended, batch_data)
     assert prepended.times.isel(time=slice(n_ic_timesteps, None)).equals(
         batch_data.times

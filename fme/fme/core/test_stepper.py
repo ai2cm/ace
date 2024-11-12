@@ -14,11 +14,11 @@ from fme.core import ClimateData, metrics
 from fme.core.data_loading.batch_data import (
     BatchData,
     CurrentDevice,
+    PrognosticState,
     get_atmospheric_batch_data,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
-from fme.core.generics.state import PrognosticStateABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -652,7 +652,7 @@ def test_step_with_prescribed_ocean():
 
 def get_data_for_predict(
     n_steps, forcing_names: List[str]
-) -> Tuple[PrognosticStateABC[BatchData[CurrentDevice]], BatchData[CurrentDevice]]:
+) -> Tuple[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]:
     input_data = BatchData.new_on_device(
         data={"a": torch.rand(3, 1, 5, 5).to(DEVICE)},
         times=xr.DataArray(
@@ -684,10 +684,10 @@ def test_predict():
     assert output.data[variable].size(dim=1) == n_steps
     torch.testing.assert_close(
         output.data[variable][:, -1],
-        input_data.as_state().data[variable][:, 0] + n_steps,
+        input_data.as_batch_data().data[variable][:, 0] + n_steps,
     )
-    assert isinstance(new_input_data, PrognosticStateABC)
-    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_data, PrognosticState)
+    new_input_state = new_input_data.as_batch_data()
     assert isinstance(new_input_state, BatchData)
     torch.testing.assert_close(
         new_input_state.data[variable][:, 0], output.data[variable][:, -1]
@@ -705,10 +705,10 @@ def test_predict_with_forcing():
     xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
     torch.testing.assert_close(
         output.data["a"][:, 0],
-        input_data.as_state().data["a"][:, 0] + forcing_data.data["b"][:, 0],
+        input_data.as_batch_data().data["a"][:, 0] + forcing_data.data["b"][:, 0],
     )
-    assert isinstance(new_input_data, PrognosticStateABC)
-    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_data, PrognosticState)
+    new_input_state = new_input_data.as_batch_data()
     assert isinstance(new_input_state, BatchData)
     torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
     assert "b" not in new_input_state.data
@@ -730,7 +730,7 @@ def test_predict_with_ocean():
     assert output.data["a"].size(dim=1) == n_steps
     for n in range(n_steps):
         previous_a = (
-            input_data.as_state().data["a"][:, 0]
+            input_data.as_batch_data().data["a"][:, 0]
             if n == 0
             else output.data["a"][:, n - 1]
         )
@@ -740,8 +740,8 @@ def test_predict_with_ocean():
             previous_a + 1,
         )
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
-    assert isinstance(new_input_data, PrognosticStateABC)
-    new_input_state = new_input_data.as_state()
+    assert isinstance(new_input_data, PrognosticState)
+    new_input_state = new_input_data.as_batch_data()
     assert isinstance(new_input_state, BatchData)
     torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
 
@@ -782,7 +782,7 @@ def test_prepend_initial_condition():
         "a": torch.rand(3, 1, 5).to(DEVICE),
         "b": torch.rand(3, 1, 5).to(DEVICE),
     }
-    ic = BatchData(
+    ic = BatchData.new_on_device(
         data=ic_data,
         times=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
     ).get_start(
