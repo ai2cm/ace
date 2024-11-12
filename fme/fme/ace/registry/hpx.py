@@ -6,10 +6,10 @@ import torch.nn as nn
 from fme.ace.models.healpix.healpix_decoder import UNetDecoderConfig
 from fme.ace.models.healpix.healpix_encoder import UNetEncoderConfig
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
-from fme.ace.registry.registry import ModuleConfig, register
+from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 
 
-@register("HEALPixRecUNet")
+@ModuleSelector.register("HEALPixRecUNet")
 @dataclasses.dataclass
 class HEALPixRecUNetBuilder(ModuleConfig):
     """

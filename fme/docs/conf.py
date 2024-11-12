@@ -24,7 +24,7 @@ import sys
 sys.path.insert(0, os.path.abspath(".."))
 
 import fme  # noqa
-import fme.ace
+import fme.core.registry
 
 # -- General configuration ---------------------------------------------
 
@@ -33,7 +33,7 @@ import fme.ace
 # needs_sphinx = '1.0'
 
 # Fetch the dynamic data
-module_types = fme.ace.get_available_module_types()
+module_types = fme.core.registry.ModuleSelector.get_available_types()
 
 # Create a dynamic rst snippet that can be included in your documentation
 rst_snippet = f".. code-block:: text\n\n   {module_types}"
