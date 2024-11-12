@@ -127,6 +127,7 @@ class FV3GFSData:
     dim_sizes: DimSizes
     timestep_days: float
     time_varying_values: Optional[List[float]] = None
+    num_data_workers: int = 0
 
     def __post_init__(self):
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -164,7 +165,7 @@ class FV3GFSData:
             start_indices=InferenceInitialConditionIndices(
                 first=0, n_initial_conditions=1, interval=1
             ),
-            num_data_workers=0,
+            num_data_workers=self.num_data_workers,
         )
 
 
