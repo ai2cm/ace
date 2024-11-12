@@ -680,6 +680,7 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         time_varying_values=time_varying_values,
         timestep_days=TIMESTEP.total_seconds() / 86400,
+        num_data_workers=2,
     )
     config = InferenceEvaluatorConfig(
         experiment_dir=str(tmp_path),
