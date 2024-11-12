@@ -2,7 +2,7 @@ import argparse
 import datetime
 import logging
 import os
-from typing import Dict, Optional
+from typing import Sequence
 
 import apache_beam as beam
 import metview
@@ -62,6 +62,8 @@ URL_MOISTURE = f"{URL_GOOGLE_ARCO_ERA5}/model-level-moisture.zarr-v2"
 URL_GOOGLE_LATLON = (
     "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 )
+# following dataset was manually generated in https://github.com/ai2cm/explore/blob/master/oliwm/2024-07-31-generate-ERA5-co2.ipynb # noqa: E501
+URL_CO2 = "gs://vcm-ml-raw-flexible-retention/2024-11-11-co2-annual-mean-for-era5.zarr"
 
 URL_NCAR_ERA5 = "gs://vcm-ml-intermediate/2024-05-17-era5-025deg-2D-variables-from-NCAR-as-zarr"  # noqa: E501
 URL_INVARIANT = f"{URL_NCAR_ERA5}/e5.oper.invariant.zarr"
@@ -188,8 +190,6 @@ DESIRED_ATTRS = {
 # that the uppermost layer uses the higher model top of ECMWF model.
 N_INPUT_LAYERS = 137  # this is the number of full layers, not interfaces
 DEFAULT_OUTPUT_LAYER_INDICES = [0, 48, 67, 79, 90, 100, 109, 119, 137]
-OUTPUT_LAYER_INDICES = [*DEFAULT_OUTPUT_LAYER_INDICES]
-N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
 
 OUTPUT_PRESSURE_LEVELS = [850, 500, 200]  # additionally save these pressure levels
 OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL = [1000, 850, 700, 500, 300, 250, 200]
@@ -201,13 +201,6 @@ RENAME_V_PRES = {f"v_component_of_wind_{p}": f"VGRD{p}" for p in OUTPUT_PRESSURE
 RENAME_Z_PRES = {
     f"geopotential_{p}": f"h{p}" for p in OUTPUT_PRESSURE_LEVELS_GEOPOTENTIAL
 }
-RENAME_ETC = {
-    "skt": "surface_temperature",
-    "t2m": "TMP2m",
-    "u10": "UGRD10m",
-    "v10": "VGRD10m",
-    "d2m": "DPT2m",
-}
 RENAME_PRESSURE_LEVEL = {
     **RENAME_Q_PRES,
     **RENAME_T_PRES,
@@ -215,31 +208,28 @@ RENAME_PRESSURE_LEVEL = {
     **RENAME_V_PRES,
     **RENAME_Z_PRES,
 }
-RENAME_NATIVE: Optional[Dict[str, str]] = None
 
 
-def set_nlayer_globals(output_layer_indices):
-    # set global vars that depend on the output layer indices
-    global OUTPUT_LAYER_INDICES
-    OUTPUT_LAYER_INDICES = output_layer_indices
-    assert OUTPUT_LAYER_INDICES[-1] == N_INPUT_LAYERS
-
-    global N_OUTPUT_LAYERS
-    N_OUTPUT_LAYERS = len(OUTPUT_LAYER_INDICES) - 1
-
-    RENAME_Q = {f"q_{i}": f"specific_total_water_{i}" for i in range(N_OUTPUT_LAYERS)}
-    RENAME_T = {f"t_{i}": f"air_temperature_{i}" for i in range(N_OUTPUT_LAYERS)}
-    RENAME_U = {f"u_{i}": f"eastward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
-    RENAME_V = {f"v_{i}": f"northward_wind_{i}" for i in range(N_OUTPUT_LAYERS)}
-
-    global RENAME_NATIVE
-    RENAME_NATIVE = {
-        **RENAME_Q,
-        **RENAME_T,
-        **RENAME_U,
-        **RENAME_V,
-        **RENAME_ETC,
+def _get_native_rename_dict(n_output_layers):
+    rename_q = {f"q_{i}": f"specific_total_water_{i}" for i in range(n_output_layers)}
+    rename_t = {f"t_{i}": f"air_temperature_{i}" for i in range(n_output_layers)}
+    rename_u = {f"u_{i}": f"eastward_wind_{i}" for i in range(n_output_layers)}
+    rename_v = {f"v_{i}": f"northward_wind_{i}" for i in range(n_output_layers)}
+    rename_etc = {
+        "skt": "surface_temperature",
+        "t2m": "TMP2m",
+        "u10": "UGRD10m",
+        "v10": "VGRD10m",
+        "d2m": "DPT2m",
     }
+    rename_native = {
+        **rename_q,
+        **rename_t,
+        **rename_u,
+        **rename_v,
+        **rename_etc,
+    }
+    return rename_native
 
 
 def _open_zarr(key, sel_indices):
@@ -292,6 +282,17 @@ def open_quarter_degree_datasets(indices) -> xr.Dataset:
     sfc = _open_zarr(SURFACE_ANALYSIS_LATLON, indices)
     invariant = _open_zarr(INVARIANT, indices)
     return sfc, invariant
+
+
+def open_co2_dataset(start_time, end_time) -> xr.Dataset:
+    co2 = xr.open_zarr(URL_CO2, chunks=None)
+    ds_start = pd.Timestamp(co2.time.values[0])
+    ds_stop = pd.Timestamp(co2.time.values[-1])
+    assert start_time >= ds_start, f"CO2 dataset time start out of bounds"
+    assert end_time <= ds_stop, f"CO2 dataset time stop out of bounds"
+    co2 = co2.sel(time=slice(start_time, end_time))
+    co2 = co2.load()
+    return co2
 
 
 def _to_dataset(fs: metview.Fieldset) -> xr.Dataset:
@@ -379,7 +380,12 @@ def process_pressure_level_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
     return new_key, output
 
 
-def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
+def _process_native_data(
+    ds: xr.Dataset, output_grid: str, output_layer_indices: Sequence[int]
+) -> xr.Dataset:
+    n_output_layers = len(output_layer_indices) - 1
+    rename_dict = _get_native_rename_dict(n_output_layers)
+
     xr.set_options(keep_attrs=True)
     # singleton time dimension interferes with metview
     ds = ds.squeeze()
@@ -409,15 +415,15 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     thicknesses = _to_dataarray(thicknesses_fs, "pres")
     for short_name in ["q", "t", "u", "v"]:
         variable = _to_dataarray(fieldset_gg.select(shortName=short_name), short_name)
-        for output_index in range(N_OUTPUT_LAYERS):  # type: ignore[name-defined]
+        for output_index in range(n_output_layers):
             logging.info(
                 f"Computing vertical integral of {short_name} "
                 f"for output layer {output_index}."
             )
 
             fine_levels = slice(
-                OUTPUT_LAYER_INDICES[output_index],  # type: ignore[name-defined]
-                OUTPUT_LAYER_INDICES[output_index + 1],  # type: ignore[name-defined]
+                output_layer_indices[output_index],
+                output_layer_indices[output_index + 1],
             )
             coarse_level_thicknesses = thicknesses.isel(hybrid=fine_levels)
             total_thickness = coarse_level_thicknesses.sum("hybrid")
@@ -459,9 +465,7 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
 
     output = _adjust_latlon(output)
 
-    if RENAME_NATIVE is None:
-        raise RuntimeError("RENAME_NATIVE not set. Did you call set_nlayer_globals?")
-    output = output.rename(RENAME_NATIVE)
+    output = output.rename(rename_dict)
     for name, attrs in DESIRED_ATTRS.items():
         if name in output:
             output[name] = output[name].assign_attrs(**attrs)
@@ -487,8 +491,13 @@ def _process_native_data(ds: xr.Dataset, output_grid: str) -> xr.Dataset:
     return output
 
 
-def process_native_data(key, ds, output_grid=DEFAULT_OUTPUT_GRID):
-    output = _process_native_data(ds, output_grid)
+def process_native_data(
+    key,
+    ds,
+    output_grid=DEFAULT_OUTPUT_GRID,
+    output_layer_indices=DEFAULT_OUTPUT_LAYER_INDICES,
+):
+    output = _process_native_data(ds, output_grid, output_layer_indices)
     new_key = key.replace(
         offsets={"time": key.offsets["time"], "latitude": 0, "longitude": 0},
         vars=frozenset(output.keys()),
@@ -664,7 +673,9 @@ def process_quarter_degree_data_sfc_an(
     return new_key, output_ds
 
 
-def _get_vertical_coordinate(ds: xr.Dataset, name: str) -> xr.Dataset:
+def _get_vertical_coordinate(
+    ds: xr.Dataset, name: str, output_layer_indices: Sequence[int]
+) -> xr.Dataset:
     """Get the ak/bk vertical coordinate on coarse layer interfaces.
 
     Assuming that ds[name] is a 3D variable which includes
@@ -673,8 +684,8 @@ def _get_vertical_coordinate(ds: xr.Dataset, name: str) -> xr.Dataset:
     hybrid_sigma_values = ds[name].attrs["GRIB_pv"]
     ak = hybrid_sigma_values[: N_INPUT_LAYERS + 1]
     bk = hybrid_sigma_values[N_INPUT_LAYERS + 1 :]
-    ak_coarse = [ak[i] for i in OUTPUT_LAYER_INDICES]  # type: ignore[name-defined]
-    bk_coarse = [bk[i] for i in OUTPUT_LAYER_INDICES]  # type: ignore[name-defined]
+    ak_coarse = [ak[i] for i in output_layer_indices]
+    bk_coarse = [bk[i] for i in output_layer_indices]
     ak_coarse_ds = xr.Dataset({f"ak_{i}": value for i, value in enumerate(ak_coarse)})
     bk_coarse_ds = xr.Dataset({f"bk_{i}": value for i, value in enumerate(bk_coarse)})
     for name in ak_coarse_ds:
@@ -690,10 +701,12 @@ def _make_template(
     ds_quarter_degree_sfc,
     ds_quarter_degree_invariant,
     ds_google_latlon,
+    ds_co2,
     ds_akbk,
     output_chunks,
     reuse_template,
     output_grid,
+    output_layer_indices,
 ):
     """Here we (mostly) lazily process the data to make a reference zarr store
     for the output. This function mirrors what the pipeline does."""
@@ -717,7 +730,9 @@ def _make_template(
         ds_sfc_an_regridded = _process_quarter_degree_data_sfc_an(
             ds_quarter_degree_sfc.isel(time=0), ds_invariant_regridded, output_grid
         )
-        ds_native_regridded = _process_native_data(ds_native.isel(time=0), output_grid)
+        ds_native_regridded = _process_native_data(
+            ds_native.isel(time=0), output_grid, output_layer_indices
+        )
         ds_google_latlon_regridded = _process_pressure_level_data(
             ds_google_latlon.isel(time=0), output_grid
         )
@@ -749,6 +764,7 @@ def _make_template(
     # land fraction and temporally variable sea ice fraction
     # this will get written eagerly since it is not chunked
     template = template.update(inv_fields)
+    template = template.update(ds_co2)
 
     return template, inv_fields
 
@@ -810,9 +826,6 @@ def main():
     parser = _get_parser()
     args, pipeline_args = parser.parse_known_args()
 
-    # set globals that depend on output layer indices
-    set_nlayer_globals(args.output_layer_indices)
-
     # desired start/end of output dataset, inclusive
     start_time = datetime.datetime.strptime(args.start_time, "%Y-%m-%dT%H:%M:%S")
     end_time = datetime.datetime.strptime(args.end_time, "%Y-%m-%dT%H:%M:%S")
@@ -861,8 +874,9 @@ def main():
         sel_indices
     )
     ds_google_latlon = open_google_latlon_dataset(sel_indices)
+    ds_co2 = open_co2_dataset(start_time, end_time)
     logging.info("Getting vertical coordinate")
-    ds_akbk = _get_vertical_coordinate(ds_native, "t")
+    ds_akbk = _get_vertical_coordinate(ds_native, "t", args.output_layer_indices)
 
     logging.info("Generating template")
     template, ds_pt25deg_inv_regridded = _make_template(
@@ -871,10 +885,12 @@ def main():
         ds_quarter_degree_sfc,
         ds_quarter_degree_inv,
         ds_google_latlon,
+        ds_co2,
         ds_akbk,
         output_chunks,
         args.reuse_template,
         args.output_grid,
+        args.output_layer_indices,
     )
 
     logging.info("Template finished generating. Starting pipeline.")
@@ -920,7 +936,11 @@ def main():
             p
             | "native_DatasetToChunks"
             >> xbeam.DatasetToChunks(ds_native, chunks={"time": 1})
-            | beam.MapTuple(process_native_data, output_grid=args.output_grid)
+            | beam.MapTuple(
+                process_native_data,
+                output_grid=args.output_grid,
+                output_layer_indices=args.output_layer_indices,
+            )
             | "native_ConsolidateChunks" >> xbeam.ConsolidateChunks(output_chunks)
             | "native_to_zarr"
             >> xbeam.ChunksToZarr(args.output_path, template, output_chunks)
