@@ -5,15 +5,11 @@ from typing import Any, List, Mapping, Optional
 
 import dacite
 
-from fme.core.corrector.corrector import force_positive
-from fme.core.corrector.registry import (
-    CorrectorABC,
-    CorrectorConfigProtocol,
-    register_corrector,
-)
+from fme.core.corrector import CorrectorABC, CorrectorConfigProtocol, force_positive
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.masking import MaskingConfig
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorMapping
 
@@ -28,11 +24,9 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
-@register_corrector("ocean_corrector")
+@CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig(CorrectorConfigProtocol):
-    """Corrector configuration for ocean emulation."""
-
     masking: Optional[MaskingConfig] = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
 
@@ -57,8 +51,6 @@ class OceanCorrectorConfig(CorrectorConfigProtocol):
 
 
 class OceanCorrector(CorrectorABC):
-    """Corrector for ocean emulation."""
-
     def __init__(
         self,
         config: OceanCorrectorConfig,
@@ -67,6 +59,10 @@ class OceanCorrector(CorrectorABC):
         timestep: datetime.timedelta,
     ):
         self._config = config
+        self._gridded_operations = gridded_operations
+        self._sigma_coordinates = sigma_coordinates
+        self._timestep = timestep
+
         if config.masking is not None:
             self._masking = config.masking.build()
         else:

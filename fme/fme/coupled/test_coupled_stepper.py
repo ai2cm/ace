@@ -11,7 +11,7 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
-from fme.core.registry import ModuleSelector
+from fme.core.registry.module import ModuleSelector
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.test_stepper import get_scalar_data
 
