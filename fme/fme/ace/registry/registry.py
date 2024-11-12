@@ -1,6 +1,4 @@
-from fme.core.registry import (  # noqa: F401
+from fme.core.registry.module import (  # noqa: F401
     ModuleConfig,
     ModuleSelector,
-    get_from_registry,
-    register,
 )

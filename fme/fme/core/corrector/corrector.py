@@ -9,14 +9,14 @@ from fme.core.climate_data import ClimateData
 from fme.core.corrector.registry import (
     CorrectorABC,
     CorrectorConfigProtocol,
-    register_corrector,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
-@register_corrector("atmosphere_corrector")
+@CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
 class CorrectorConfig(CorrectorConfigProtocol):
     r"""

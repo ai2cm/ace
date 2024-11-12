@@ -3,10 +3,10 @@ from typing import Tuple
 
 from torch import nn
 
-from fme.ace.registry.registry import ModuleConfig, register
+from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 
 
-@register("prebuilt")
+@ModuleSelector.register("prebuilt")
 @dataclasses.dataclass
 class PreBuiltBuilder(ModuleConfig):
     """

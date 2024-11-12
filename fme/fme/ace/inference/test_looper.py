@@ -16,7 +16,7 @@ from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
 from fme.core.generics.inference import InferenceStepperABC
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.registry import ModuleSelector
+from fme.core.registry.module import ModuleSelector
 from fme.core.stepper import SingleModuleStepperConfig
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
