@@ -233,33 +233,27 @@ def inference_helper(
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        inference_logs = main(
+        wandb.configure(log_to_wandb=True)
+        main(
             yaml_config=str(config_filename),
         )
         wandb_logs = wandb.get_logs()
 
     all_out_names = out_names + derived_names
 
-    # Unlike the data writer outputs, aggregator logs include IC step
-    assert len(inference_logs) == config.n_forward_steps + 1
-    assert len(wandb_logs) == len(inference_logs)
-    for i, log in enumerate(inference_logs):
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert len(wandb_logs) == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    for i in range(n_ic_timesteps + config.n_forward_steps):
+        log = wandb_logs[i]
         for var in all_out_names:
             if i == 0 and var not in in_names:
-                assert np.isnan(log[f"inference/mean/weighted_rmse/{var}"])
+                assert f"inference/mean/weighted_rmse/{var}" not in log
             else:
                 # if these are off by something like 90% then probably the stepper
                 # is being used instead of the prediction_data
                 assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
                 assert log[f"inference/mean/weighted_bias/{var}"] == 0.0
-        for metric, val in log.items():
-            # check that time series metrics match
-            if "inference/mean" in metric:
-                assert metric in wandb_logs[i]
-                if np.isnan(val):
-                    assert np.isnan(wandb_logs[i][metric])
-                else:
-                    assert wandb_logs[i][metric] == val
 
     var = list(set(in_names).difference(forcing_names))[0]
 
@@ -370,9 +364,10 @@ def inference_helper(
         )
         assert same_count_each_timestep
     if monthly_reference_filename is not None:
-        assert f"inference/annual/{var}" in inference_logs[-1]
-        assert f"inference/annual/r2_gen_{var}" in inference_logs[-1]
-        assert f"inference/annual/r2_target_{var}" in inference_logs[-1]
+        assert f"inference/annual/{var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_gen_{var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_target_{var}" in wandb_logs[-1]
+    assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
 @pytest.mark.parametrize(
@@ -424,12 +419,17 @@ def test_inference_writer_boundaries(
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
     with mock_wandb() as wandb:
-        inference_logs = main(
+        wandb.configure(log_to_wandb=True)
+        main(
             yaml_config=str(config_filename),
         )
-    # initial condition + n_forward_steps autoregressive steps
-    assert len(inference_logs) == config.n_forward_steps + 1
-    assert len(wandb.get_logs()) == len(inference_logs)
+        inference_logs = wandb.get_logs()
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert (
+        len(inference_logs)
+        == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    )
 
     prediction_ds = xr.open_dataset(
         tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
@@ -449,7 +449,6 @@ def test_inference_writer_boundaries(
         tar["lat"].values, num_lon=len(tar["lon"])
     )
     # check time mean metrics
-    assert inference_logs[-1]["inference/mean/forecast_step"] == n_forward_steps
     tol = 1e-4  # relative tolerance
     assert metrics.root_mean_squared_error(
         tar_time_mean, gen_time_mean, area_weights
@@ -468,9 +467,9 @@ def test_inference_writer_boundaries(
 
     for i in range(0, n_forward_steps):
         # metrics logs includes IC while saved data does not
-        log = inference_logs[i + 1]
+        log = inference_logs[i + n_ic_timesteps]
         # metric steps should match lead times
-        assert log["inference/mean/forecast_step"] == i + 1
+        assert log["inference/mean/forecast_step"] == i + n_ic_timesteps
         gen_i = torch.from_numpy(gen.isel(time=i).values)
         tar_i = torch.from_numpy(tar.isel(time=i).values)
         # check that manually computed metrics match logged metrics
@@ -700,8 +699,10 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
 
-    with mock_wandb() as _:
-        inference_logs = main(yaml_config=str(config_filename))
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        inference_logs = wandb.get_logs()
 
     # derived variables should not have normalized metrics reported
     assert "inference/mean_norm/weighted_rmse/total_water_path" not in inference_logs[0]
