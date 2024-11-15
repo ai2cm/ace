@@ -1,4 +1,3 @@
-import abc
 import dataclasses
 import datetime
 import os
@@ -144,49 +143,14 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
+    def clean_wandb(self, experiment_dir: str) -> None:
+        self.logging.clean_wandb(experiment_dir=experiment_dir)
+
     def get_inference_epochs(self) -> List[int]:
         return list(range(0, self.max_epochs))[self.inference.epochs.slice]
 
 
-class TrainBuildersABC(abc.ABC):
-    @abc.abstractmethod
-    def get_train_data(self) -> GriddedData:
-        ...
-
-    @abc.abstractmethod
-    def get_validation_data(self) -> GriddedData:
-        ...
-
-    @abc.abstractmethod
-    def get_inference_data(self) -> GriddedData:
-        ...
-
-    @abc.abstractmethod
-    def get_optimization(self, parameters) -> Optimization:
-        ...
-
-    @abc.abstractmethod
-    def get_stepper(
-        self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
-        timestep: datetime.timedelta,
-    ) -> SingleModuleStepper:
-        ...
-
-    @abc.abstractmethod
-    def get_ema(self, modules) -> EMATracker:
-        ...
-
-    @abc.abstractmethod
-    def get_end_of_batch_ops(
-        self, modules: List[torch.nn.Module]
-    ) -> EndOfBatchCallback:
-        ...
-
-
-class TrainBuilders(TrainBuildersABC):
+class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
@@ -275,19 +239,7 @@ class TrainConfigProtocol(Protocol):
         ...
 
     @property
-    def n_forward_steps(self) -> int:
-        ...
-
-    @property
     def log_train_every_n_batches(self) -> int:
-        ...
-
-    @property
-    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig:
-        ...
-
-    @property
-    def inference_n_forward_steps(self) -> int:
         ...
 
     @property
@@ -302,8 +254,7 @@ class TrainConfigProtocol(Protocol):
     def ema_checkpoint_save_epochs(self) -> Optional[Slice]:
         ...
 
-    @property
-    def logging(self) -> LoggingConfig:
+    def clean_wandb(self, experiment_dir: str) -> None:
         ...
 
     def get_inference_epochs(self) -> List[int]:

@@ -73,7 +73,6 @@ from fme.ace.inference.timing import GlobalTimer
 from fme.ace.train.train_config import (
     EndOfBatchCallback,
     TrainBuilders,
-    TrainBuildersABC,
     TrainConfig,
     TrainConfigProtocol,
 )
@@ -121,7 +120,7 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
     return parameters
 
 
-def build_trainer(builder: TrainBuildersABC, config: TrainConfigProtocol) -> "Trainer":
+def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     # note for devs: you don't have to use this function to build a custom
     # trainer, you can build it however you like. This is here for convenience.
     train_data = builder.get_train_data()
@@ -420,7 +419,7 @@ class Trainer:
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
         if segment_max_epochs == self.config.max_epochs:
-            self.config.logging.clean_wandb(experiment_dir=self.config.experiment_dir)
+            self.config.clean_wandb(experiment_dir=self.config.experiment_dir)
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
@@ -657,7 +656,7 @@ def run_train_from_config(config: TrainConfig):
     run_train(TrainBuilders(config), config)
 
 
-def run_train(builders: TrainBuildersABC, config: TrainConfigProtocol):
+def run_train(builders: TrainBuilders, config: TrainConfig):
     dist = Distributed.get_instance()
     if fme.using_gpu():
         torch.backends.cudnn.benchmark = True
