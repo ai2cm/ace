@@ -36,25 +36,33 @@ def _get_parser():
         "destination_path", type=str, help="Path to zarr store to write to"
     )
     parser.add_argument("time_chunk_size", type=int, help="Size of time chunks")
+    parser.add_argument("--era5", action="store_true", help="Use if source is era5")
     return parser
 
 
 def main():
     args, pipeline_args = _get_parser().parse_known_args()
 
-    ds, chunks = xbeam.open_zarr(args.source_path)
+    if args.era5:
+        # there was a mischunked land_frac in era5 so xbeam.open_zarr doesn't work
+        # manually specifying chunks, will need to change depending on source
+        ds = xr.open_zarr(args.source_path, chunks=None)
+        src_chunks = {"time": 20, "latitude": 180, "longitude": 360}
+    else:
+        ds, src_chunks = xbeam.open_zarr(args.source_path)
+
     # Only supports adjusting time chunk size for now
-    time_chunk = {"time": args.time_chunk_size}
+    dst_chunks = {"time": args.time_chunk_size}
     store = args.destination_path
-    template, to_rechunk_ds = get_template(ds, time_chunk)
+    template, to_rechunk_ds = get_template(ds, dst_chunks)
 
     logging.basicConfig(level=logging.INFO)
 
     recipe = (
-        xbeam.DatasetToChunks(to_rechunk_ds, chunks, split_vars=True)
-        | xbeam.SplitChunks(time_chunk)
-        | xbeam.ConsolidateChunks(time_chunk)
-        | xbeam.ChunksToZarr(store, template, time_chunk)
+        xbeam.DatasetToChunks(to_rechunk_ds, src_chunks, split_vars=True)
+        | xbeam.SplitChunks(dst_chunks)
+        | xbeam.ConsolidateChunks(dst_chunks)
+        | xbeam.ChunksToZarr(store, template, dst_chunks)
     )
 
     with beam.Pipeline(options=PipelineOptions(pipeline_args)) as p:
