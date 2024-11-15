@@ -117,6 +117,10 @@ class InferenceDataLoaderConfig:
             the full dataset.
         num_data_workers: Number of parallel workers to use for data loading.
         perturbations: Configuration for SST perturbations.
+        persistence_names: Names of variables for which all returned values
+            will be the same as the initial condition. When evaluating initial
+            condition predictability, set this to forcing variables that should
+            not be updated during inference (e.g. surface temperature).
     """
 
     dataset: XarrayDataConfig
@@ -125,6 +129,7 @@ class InferenceDataLoaderConfig:
     ]
     num_data_workers: int = 0
     perturbations: Optional[SSTPerturbation] = None
+    persistence_names: Optional[Sequence[str]] = None
 
     def __post_init__(self):
         if self.dataset.subset != Slice(None, None, None):
@@ -145,11 +150,16 @@ class ForcingDataLoaderConfig:
         num_data_workers: Number of parallel workers to use for data loading.
         perturbations: Configuration for SST perturbations
             used in forcing data.
+        persistence_names: Names of variables for which all returned values
+            will be the same as the initial condition. When evaluating initial
+            condition predictability, set this to forcing variables that should
+            not be updated during inference (e.g. surface temperature).
     """
 
     dataset: XarrayDataConfig
     num_data_workers: int = 0
     perturbations: Optional[SSTPerturbation] = None
+    persistence_names: Optional[Sequence[str]] = None
 
     def __post_init__(self):
         if self.dataset.subset != Slice(None, None, None):
@@ -161,6 +171,7 @@ class ForcingDataLoaderConfig:
             num_data_workers=self.num_data_workers,
             start_indices=start_indices,
             perturbations=self.perturbations,
+            persistence_names=self.persistence_names,
         )
 
 
@@ -210,7 +221,16 @@ class InferenceDataset(torch.utils.data.Dataset):
                 SST perturbations require an ocean configuration."
             )
 
-    def __getitem__(self, index) -> BatchData[CPU]:
+        self._persistence_data: Optional[BatchData[CPU]]
+        if config.persistence_names is not None:
+            first_sample = self._get_batch_data(0)
+            self._persistence_data = first_sample.subset_names(
+                config.persistence_names
+            ).select_time_slice(slice(0, 1))
+        else:
+            self._persistence_data = None
+
+    def _get_batch_data(self, index) -> BatchData[CPU]:
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []
@@ -242,11 +262,20 @@ class InferenceDataset(torch.utils.data.Dataset):
                         tensors[self._ocean_fraction_name],
                     )
             sample_tuples.append((tensors, times))
-        result = BatchData.atmospheric_from_sample_tuples(
+        return BatchData.atmospheric_from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self._horizontal_coordinates.dims),
             sigma_coordinates=self._sigma_coordinates,
         )
+
+    def __getitem__(self, index) -> BatchData[CPU]:
+        dist = Distributed.get_instance()
+        result = self._get_batch_data(index)
+        if self._persistence_data is not None:
+            updated_data = {}
+            for key, value in self._persistence_data.data.items():
+                updated_data[key] = value.expand_as(result.data[key])
+            result.data = {**result.data, **updated_data}
         assert result.times.shape[0] == self._n_initial_conditions // dist.world_size
         return result
 
