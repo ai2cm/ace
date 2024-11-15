@@ -24,6 +24,7 @@ from fme.core.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
+    InferenceDataset,
     InferenceInitialConditionIndices,
     TimestampList,
 )
@@ -478,3 +479,23 @@ def test_inference_data_with_perturbations(tmp_path):
         original_foo + 2.0,
         batch_data.data["foo"].cpu().numpy()[0, :, :, :],
     )
+
+
+def test_inference_persistence_names(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=14)
+
+    config = InferenceDataLoaderConfig(
+        XarrayDataConfig(data_path=tmp_path),
+        start_indices=ExplicitIndices([0, 3]),
+        persistence_names=["foo"],
+    )
+    requirements = DataRequirements(["foo", "bar"], 10)
+    dataset = InferenceDataset(config, 3, requirements)
+    first_item = dataset[0].data
+    second_item = dataset[1].data
+    # ensure first and second time steps are the same
+    torch.testing.assert_allclose(first_item["foo"][:, 0], first_item["foo"][:, 1])
+    # ensure the entire first and second returned items
+    torch.testing.assert_allclose(first_item["foo"], second_item["foo"])
+    # ensure this is not the case for another variable
+    assert not torch.all(first_item["bar"] == second_item["bar"])
