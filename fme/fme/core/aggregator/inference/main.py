@@ -30,6 +30,8 @@ from fme.core.data_loading.data_typing import (
 )
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
+    InferenceLog,
+    InferenceLogs,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
@@ -350,6 +352,12 @@ class InferenceEvaluatorAggregator(
                 gridded_operations=ops,
                 metadata=metadata,
             )
+        self._summary_aggregators = {
+            name: agg
+            for name, agg in self._aggregators.items()
+            if name not in ["mean", "mean_norm"]
+        }
+        self._n_timesteps_seen = 0
 
     @property
     def log_time_series(self) -> bool:
@@ -360,8 +368,7 @@ class InferenceEvaluatorAggregator(
         self,
         data: PairedData[CurrentDevice],
         normalize: Callable[[TensorMapping], TensorDict],
-        i_time_start: int,
-    ):
+    ) -> InferenceLogs:
         if len(data.prediction) == 0:
             raise ValueError("No prediction values in data")
         if len(data.target) == 0:
@@ -375,7 +382,7 @@ class InferenceEvaluatorAggregator(
                 gen_data=data.prediction,
                 target_data_norm=target_data_norm,
                 gen_data_norm=gen_data_norm,
-                i_time_start=i_time_start,
+                i_time_start=self._n_timesteps_seen,
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
@@ -383,6 +390,12 @@ class InferenceEvaluatorAggregator(
                 target_data=target_data,
                 gen_data=data.prediction,
             )
+        n_times = data.times.shape[1]
+        logs = self._get_inference_logs_slice(
+            step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
+        )
+        self._n_timesteps_seen += n_times
+        return logs
 
     def record_initial_condition(
         self,
@@ -390,17 +403,25 @@ class InferenceEvaluatorAggregator(
             PairedData[CurrentDevice], PrognosticState[CurrentDevice]
         ],
         normalize: Callable[[TensorMapping], TensorDict],
-    ):
+    ) -> InferenceLogs:
+        if self._n_timesteps_seen != 0:
+            raise RuntimeError(
+                "record_initial_condition may only be called once, "
+                "before recording any batches"
+            )
         if isinstance(initial_condition, PairedData):
             target_data = initial_condition.target
             target_data_norm = normalize(target_data)
             gen_data = initial_condition.prediction
             gen_data_norm = normalize(gen_data)
+            n_times = initial_condition.times.shape[1]
         else:
-            target_data = initial_condition.as_batch_data().data
+            batch_data = initial_condition.as_batch_data()
+            target_data = batch_data.data
             target_data_norm = normalize(target_data)
             gen_data = target_data
             gen_data_norm = target_data_norm
+            n_times = batch_data.times.shape[1]
         for aggregator_name in ["mean", "mean_norm"]:
             aggregator = self._aggregators.get(aggregator_name)
             if aggregator is not None:
@@ -411,42 +432,37 @@ class InferenceEvaluatorAggregator(
                     gen_data_norm=gen_data_norm,
                     i_time_start=0,
                 )
+        logs = self._get_inference_logs_slice(
+            step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
+        )
+        self._n_timesteps_seen = n_times
+        return logs
+
+    def get_summary_logs(self) -> InferenceLog:
+        logs = {}
+        for name, aggregator in self._summary_aggregators.items():
+            logs.update(aggregator.get_logs(label=name))
+        return logs
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def _get_logs(self):
         """
         Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
         """
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
         for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
             logs.update(time_dependent_aggregator.get_logs(label=name))
-        logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 
     @torch.no_grad()
-    def get_inference_logs(self, label: str) -> List[Dict[str, Union[float, int]]]:
-        """
-        Returns a list of logs to report to WandB.
-
-        This is done because in inference, we use the wandb step
-        as the time step, meaning we need to re-organize the logged data
-        from tables into a list of dictionaries.
-        """
-        return to_inference_logs(self.get_logs(label=label))
-
-    @torch.no_grad()
-    def get_inference_logs_slice(self, label: str, step_slice: slice):
+    def _get_inference_logs_slice(self, step_slice: slice):
         """
         Returns a subset of the time series for applicable metrics
         for a specific slice of as can be reported to WandB.
 
         Args:
-            label: Label to prepend to all log keys.
             step_slice: Timestep slice to determine the time series subset.
 
         """
@@ -454,7 +470,6 @@ class InferenceEvaluatorAggregator(
         for name, aggregator in self._aggregators.items():
             if isinstance(aggregator, MeanAggregator):
                 logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
-        logs = {f"{label}/{key}": val for key, val in logs.items()}
         return to_inference_logs(logs)
 
     @torch.no_grad()
@@ -474,7 +489,9 @@ class InferenceEvaluatorAggregator(
         if excluded_aggregators is None:
             excluded_aggregators = []
 
-        combined_aggregators = {
+        combined_aggregators: Dict[
+            str, Union[_Aggregator, _TimeDependentAggregator]
+        ] = {
             **self._aggregators,
             **self._time_dependent_aggregators,
         }
@@ -593,7 +610,8 @@ class InferenceAggregator(
             reference_means=time_mean_reference_data,
         )
         self._aggregators = aggregators
-        self._time_dependent_aggregators: Dict[str, _TimeDependentAggregator] = {}
+        self._summary_aggregators = {"time_mean": aggregators["time_mean"]}
+        self._n_timesteps_seen = 0
 
     @property
     def log_time_series(self) -> bool:
@@ -603,15 +621,13 @@ class InferenceAggregator(
     def record_batch(
         self,
         data: BatchData[CurrentDevice],
-        i_time_start: int,
         normalize: Optional[Callable[[TensorMapping], TensorDict]] = None,
-    ):
+    ) -> InferenceLogs:
         """
         Record a batch of data.
 
         Args:
-            prediction: Batch of data to record.
-            i_time_start: Start time index.
+            data: Batch of data to record.
             normalize: Ignored, kept for API compatibility.
         """
         if len(data.data) == 0:
@@ -619,44 +635,56 @@ class InferenceAggregator(
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 data=data.data,
-                i_time_start=i_time_start,
+                i_time_start=self._n_timesteps_seen,
             )
-        for time_dependent_aggregator in self._time_dependent_aggregators.values():
-            time_dependent_aggregator.record_batch(
-                time=data.times,
-                data=data.data,
-            )
+        n_times = data.times.shape[1]
+        logs = self._get_inference_logs_slice(
+            step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
+        )
+        self._n_timesteps_seen += n_times
+        return logs
 
     def record_initial_condition(
         self,
         initial_condition: PrognosticState[CurrentDevice],
         normalize: Callable[[TensorMapping], TensorDict],
-    ):
-        data = initial_condition.as_batch_data().data
+    ) -> InferenceLogs:
+        if self._n_timesteps_seen != 0:
+            raise RuntimeError(
+                "record_initial_condition may only be called once, "
+                "before recording any batches"
+            )
+        batch_data = initial_condition.as_batch_data()
         if "mean" in self._aggregators:
             self._aggregators["mean"].record_batch(
-                data=data,
+                data=batch_data.data,
                 i_time_start=0,
             )
+        n_times = batch_data.times.shape[1]
+        logs = self._get_inference_logs_slice(
+            step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
+        )
+        self._n_timesteps_seen = n_times
+        return logs
+
+    def get_summary_logs(self) -> InferenceLog:
+        logs = {}
+        for name, aggregator in self._summary_aggregators.items():
+            logs.update(aggregator.get_logs(label=name))
+        return logs
 
     @torch.no_grad()
-    def get_logs(self, label: str):
+    def _get_logs(self):
         """
         Returns logs as can be reported to WandB.
-
-        Args:
-            label: Label to prepend to all log keys.
         """
         logs = {}
         for name, aggregator in self._aggregators.items():
             logs.update(aggregator.get_logs(label=name))
-        for name, time_dependent_aggregator in self._time_dependent_aggregators.items():
-            logs.update(time_dependent_aggregator.get_logs(label=name))
-        logs = {f"{label}/{key}": val for key, val in logs.items()}
         return logs
 
     @torch.no_grad()
-    def get_inference_logs(self, label: str) -> List[Dict[str, Union[float, int]]]:
+    def _get_inference_logs(self) -> List[Dict[str, Union[float, int]]]:
         """
         Returns a list of logs to report to WandB.
 
@@ -664,16 +692,15 @@ class InferenceAggregator(
         as the time step, meaning we need to re-organize the logged data
         from tables into a list of dictionaries.
         """
-        return to_inference_logs(self.get_logs(label=label))
+        return to_inference_logs(self._get_logs())
 
     @torch.no_grad()
-    def get_inference_logs_slice(self, label: str, step_slice: slice):
+    def _get_inference_logs_slice(self, step_slice: slice):
         """
         Returns a subset of the time series for applicable metrics
         for a specific slice of as can be reported to WandB.
 
         Args:
-            label: Label to prepend to all log keys.
             step_slice: Timestep slice to determine the time series subset.
 
         """
@@ -681,7 +708,6 @@ class InferenceAggregator(
         for name, aggregator in self._aggregators.items():
             if isinstance(aggregator, SingleTargetMeanAggregator):
                 logs.update(aggregator.get_logs(label=name, step_slice=step_slice))
-        logs = {f"{label}/{key}": val for key, val in logs.items()}
         return to_inference_logs(logs)
 
     @torch.no_grad()
@@ -701,12 +727,8 @@ class InferenceAggregator(
         if excluded_aggregators is None:
             excluded_aggregators = []
 
-        combined_aggregators = {
-            **self._aggregators,
-            **self._time_dependent_aggregators,
-        }
         return {
             name: agg.get_dataset()
-            for name, agg in combined_aggregators.items()
+            for name, agg in self._aggregators.items()
             if name not in excluded_aggregators
         }

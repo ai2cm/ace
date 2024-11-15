@@ -1,6 +1,6 @@
 import collections
 import contextlib
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, List, Mapping
 
 from fme.core import wandb
 from fme.core.distributed import Distributed
@@ -35,8 +35,12 @@ class MockWandB:
         if self._enabled:
             self._logs[step].update(data)
 
-    def get_logs(self) -> Dict[int, Dict[str, Any]]:
-        return self._logs
+    def get_logs(self) -> List[Dict[str, Any]]:
+        n_logs = max(self._logs.keys())
+        return_value: List[Dict[str, Any]] = [dict() for _ in range(n_logs + 1)]
+        for step, log in self._logs.items():
+            return_value[step] = log
+        return return_value
 
     def clean_wandb_dir(self, experiment_dir: str):
         pass

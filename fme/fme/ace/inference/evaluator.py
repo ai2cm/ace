@@ -14,6 +14,7 @@ from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.loop import (
     DeriverABC,
+    get_record_to_wandb,
     run_dataset_comparison,
     run_inference_evaluator,
     write_reduced_metrics,
@@ -28,7 +29,6 @@ from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.wandb import WandB
 
 
 def load_stepper_config(
@@ -252,6 +252,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     timer.stop("initialization")
     logging.info("Starting inference")
+    record_logs = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config.prediction_loader,
@@ -266,6 +267,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             target_data=data,
             deriver=deriver,
             writer=writer,
+            record_logs=record_logs,
         )
     else:
         run_inference_evaluator(
@@ -273,6 +275,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             writer=writer,
             stepper=stepper,
             data=data,
+            record_logs=record_logs,
         )
 
     timer.start("final_writer_flush")
@@ -300,19 +303,13 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         f"{total_steps_per_second:.2f} steps/second"
     )
 
-    step_logs = aggregator.get_inference_logs(label="inference")
-    wandb = WandB.get_instance()
-    if wandb.enabled and len(step_logs) > 0:
-        logging.info("Starting logging of timing and final step metrics to wandb")
-        duration_logs = {
-            "total_steps_per_second": total_steps_per_second,
-        }
-        final_step_logs = {**timer.get_durations(), **duration_logs, **step_logs[-1]}
-        wandb.log(final_step_logs, step=len(step_logs) - 1)
-
+    summary_logs = {
+        "total_steps_per_second": total_steps_per_second,
+        **timer.get_durations(),
+        **aggregator.get_summary_logs(),
+    }
+    record_logs([summary_logs])
     config.clean_wandb()
-
-    return step_logs
 
 
 if __name__ == "__main__":

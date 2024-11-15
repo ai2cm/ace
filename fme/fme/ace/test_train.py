@@ -374,7 +374,7 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
         )
         wandb_logs = wandb.get_logs()
 
-        for log in wandb_logs.values():
+        for log in wandb_logs:
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
 
@@ -383,7 +383,9 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
 
     with mock_wandb() as wandb:
-        inference_logs = inference_evaluator_main(yaml_config=inference_config)
+        wandb.configure(log_to_wandb=True)
+        inference_evaluator_main(yaml_config=inference_config)
+        inference_logs = wandb.get_logs()
 
     prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
     best_checkpoint_path = (
@@ -394,7 +396,10 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     )
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
-    assert len(inference_logs) == 7  # 6 forward steps + 1 initial state
+    n_ic_timesteps = 1
+    n_forward_steps = 6
+    n_summary_steps = 1
+    assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
     assert prediction_output_path.exists()
     ds_prediction = xr.open_dataset(prediction_output_path)
     assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
@@ -418,28 +423,16 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             train_main(
                 yaml_config=train_config,
             )
-        assert (
-            min([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
-            == 0
-        )
-        assert (
-            max([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
-            == 0
-        )
+        assert min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
+        assert max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
         assert not mock.called
         with mock_wandb() as wandb:
             train_main(
                 yaml_config=train_config,
             )
         mock.assert_called()
-        assert (
-            min([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
-            == 1
-        )
-        assert (
-            max([val["epoch"] for val in wandb.get_logs().values() if "epoch" in val])
-            == 1
-        )
+        assert min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+        assert max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])

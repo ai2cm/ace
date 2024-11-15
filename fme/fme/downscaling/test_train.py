@@ -365,7 +365,7 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
         with mock_wandb() as wandb:
             main(config_segment_one_path)
             assert 1 == len(
-                [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
+                [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_not_called()
 
@@ -373,7 +373,7 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
         with mock_wandb() as wandb:
             main(config_segment_two_path)
             assert 2 == len(
-                [log["epoch"] for log in wandb.get_logs().values() if "epoch" in log]
+                [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_called()
 
