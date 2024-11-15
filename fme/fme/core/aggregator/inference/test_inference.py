@@ -29,20 +29,32 @@ def test_logs_labels_exist():
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(
+    logs = agg.record_batch(
         BatchData(
             data=gen_data,
             times=time,
         ),
         normalize=None,
-        i_time_start=0,
     )
-    logs = agg.get_logs(label="test")
-    assert "test/mean/series" in logs
-    assert "test/time_mean/gen_map/a" in logs
-    assert "test/time_mean/ref_bias_map/a" not in logs
-    assert "test/time_mean/ref_bias/a" not in logs
-    assert "test/time_mean/ref_rmse/a" not in logs
+    assert len(logs) == n_time
+    expected_step_keys = [
+        "mean/forecast_step",
+        "mean/weighted_mean_gen/a",
+        "mean/weighted_std_gen/a",
+    ]
+    for log in logs:
+        for key in expected_step_keys:
+            assert key in log, key
+        assert len(log) == len(expected_step_keys), set(log).difference(
+            expected_step_keys
+        )
+    summary_logs = agg.get_summary_logs()
+    expected_summary_keys = ["time_mean/gen_map/a"]
+    for key in expected_summary_keys:
+        assert key in summary_logs, key
+    assert len(summary_logs) == len(expected_summary_keys), set(
+        summary_logs
+    ).difference(expected_summary_keys)
 
 
 def test_logs_labels_exist_with_reference_time_means():
@@ -66,46 +78,34 @@ def test_logs_labels_exist_with_reference_time_means():
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(
+    logs = agg.record_batch(
         BatchData(
             data=gen_data,
             times=time,
         ),
         normalize=None,
-        i_time_start=0,
     )
-    logs = agg.get_logs(label="test")
-    assert "test/mean/series" in logs
-    assert "test/time_mean/gen_map/a" in logs
-    assert "test/time_mean/ref_bias_map/a" in logs
-    assert "test/time_mean/ref_bias/a" in logs
-    assert "test/time_mean/ref_rmse/a" in logs
-
-
-def test_inference_logs_labels_exist():
-    n_sample = 10
-    n_time = 22
-    nx = 2
-    ny = 2
-    area_weights = torch.ones(ny).to(fme.get_device())
-    agg = InferenceAggregator(
-        LatLonOperations(area_weights),
-        n_timesteps=n_time,
-    )
-    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
-    agg.record_batch(
-        BatchData(
-            data=gen_data,
-            times=time,
-        ),
-        normalize=None,
-        i_time_start=0,
-    )
-    logs = agg.get_inference_logs(label="test")
-    assert isinstance(logs, list)
     assert len(logs) == n_time
-    assert "test/mean/weighted_mean_gen/a" in logs[0]
-    assert "test/mean/weighted_mean_gen/a" in logs[-1]
-    # assert len(logs) == n_time use this assertion when timeseries data is generated
-    assert "test/time_mean/gen_map/a" in logs[-1]
+    expected_step_keys = [
+        "mean/forecast_step",
+        "mean/weighted_mean_gen/a",
+        "mean/weighted_std_gen/a",
+    ]
+    for log in logs:
+        for key in expected_step_keys:
+            assert key in log, key
+        assert len(log) == len(expected_step_keys), set(log).difference(
+            expected_step_keys
+        )
+    summary_logs = agg.get_summary_logs()
+    expected_summary_keys = [
+        "time_mean/gen_map/a",
+        "time_mean/ref_bias_map/a",
+        "time_mean/ref_bias/a",
+        "time_mean/ref_rmse/a",
+    ]
+    for key in expected_summary_keys:
+        assert key in summary_logs, key
+    assert len(summary_logs) == len(expected_summary_keys), set(
+        summary_logs
+    ).difference(expected_summary_keys)

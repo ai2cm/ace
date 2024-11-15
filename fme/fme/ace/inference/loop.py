@@ -1,9 +1,9 @@
 import abc
 import logging
-import time
 from pathlib import Path
 from typing import (
     Any,
+    Callable,
     Dict,
     Generic,
     Iterable,
@@ -35,6 +35,7 @@ from fme.core.data_loading.batch_data import (
 )
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
+    InferenceLogs,
 )
 from fme.core.generics.inference import InferenceStepperABC
 from fme.core.normalizer import StandardNormalizer
@@ -113,34 +114,21 @@ class HasWandBInferenceLogData(Protocol):
         ...
 
 
-def _log_window_to_wandb(
-    aggregator: HasWandBInferenceLogData,
-    window_slice: slice,
-    label: str,
-):
-    if not aggregator.log_time_series:
-        return
+def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
     wandb = WandB.get_instance()
-    if wandb.enabled:
-        logging.info(f"Logging inference window to wandb")
-        current_time = time.time()
-        step_logs = aggregator.get_inference_logs_slice(
-            label=label,
-            step_slice=window_slice,
-        )
-        aggregator_duration = time.time() - current_time
-        current_time = time.time()
-        for j, log in enumerate(step_logs):
-            wandb.log(log, step=window_slice.start + j)
-        wandb.log(
-            {
-                "aggregator_get_inference_logs_steps_per_second": len(step_logs)
-                / aggregator_duration,
-                "wandb_log_steps_per_second": len(step_logs)
-                / (time.time() - current_time),
-            },
-            step=window_slice.start + len(step_logs) - 1,
-        )
+    step = 0
+
+    def record_logs(logs: InferenceLogs):
+        nonlocal step
+        if wandb.enabled:
+            for j, log in enumerate(logs):
+                if len(log) > 0:
+                    if label != "":
+                        log = {f"{label}/{k}": v for k, v in log.items()}
+                    wandb.log(log, step=step + j)
+            step += len(logs)
+
+    return record_logs
 
 
 def run_inference(
@@ -151,6 +139,7 @@ def run_inference(
     aggregator: InferenceAggregatorABC[
         PrognosticState[CurrentDevice], BatchData[CurrentDevice]
     ],
+    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
 ):
     """Run extended inference loop given initial condition and forcing data.
 
@@ -163,7 +152,11 @@ def run_inference(
             windows of forcing data appropriately aligned with the initial condition.
         writer: Data writer for saving the inference results to disk.
         aggregator: Aggregator for collecting and reducing metrics.
+        record_logs: Function for recording logs. By default, logs are recorded to
+            wandb.
     """
+    if record_logs is None:
+        record_logs = get_record_to_wandb(label="inference")
     timer = GlobalTimer.get_instance()
     with torch.no_grad():
         n_ic_timesteps = stepper.n_ic_timesteps
@@ -173,44 +166,36 @@ def run_inference(
             )
         looper = Looper(stepper, initial_condition, forcing_data.loader)
         i_time = 0
-        aggregator.record_initial_condition(
-            initial_condition=initial_condition,
-            normalize=stepper.normalizer.normalize,
-        )
-        writer.save_initial_condition(
-            initial_condition,
-        )
+        with timer.context("aggregator"):
+            logs = aggregator.record_initial_condition(
+                initial_condition=initial_condition,
+                normalize=stepper.normalizer.normalize,
+            )
+        with timer.context("wandb_logging"):
+            record_logs(logs)
+        with timer.context("data_writer"):
+            writer.save_initial_condition(
+                initial_condition,
+            )
         for prediction_batch, _ in looper:
-            timer.start("data_writer")
             times = prediction_batch.times
             forward_steps_in_memory = times.sizes["time"]
             logging.info(
                 f"Inference: processing window spanning {i_time}"
                 f" to {i_time + forward_steps_in_memory} steps."
             )
-            writer.append_batch(
-                batch=prediction_batch,
-                start_timestep=i_time,
-            )
-            timer.stop("data_writer")
-            timer.start("aggregator")
-            aggregator.record_batch(
-                prediction_batch,
-                normalize=stepper.normalizer.normalize,
-                i_time_start=i_time + stepper.n_ic_timesteps,
-            )
-            timer.stop("aggregator")
-            timer.start("wandb_logging")
-            if i_time == 0:
-                _log_window_to_wandb(
-                    aggregator, window_slice=slice(0, 1), label="inference"
+            with timer.context("data_writer"):
+                writer.append_batch(
+                    batch=prediction_batch,
+                    start_timestep=i_time,
                 )
-            _log_window_to_wandb(
-                aggregator,
-                window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
-                label="inference",
-            )
-            timer.stop("wandb_logging")
+            with timer.context("aggregator"):
+                logs = aggregator.record_batch(
+                    prediction_batch,
+                    normalize=stepper.normalizer.normalize,
+                )
+            with timer.context("wandb_logging"):
+                record_logs(logs)
             i_time += forward_steps_in_memory
 
 
@@ -221,7 +206,22 @@ def run_inference_evaluator(
     stepper: SingleModuleStepper,
     data: GriddedDataABC[BatchData[CurrentDevice]],
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
+    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
 ):
+    """
+    Run inference evaluator loop.
+
+    Args:
+        aggregator: Aggregator for collecting and reducing metrics.
+        stepper: The model to run inference with.
+        data: GriddedData object which includes a DataLoader which will provide
+            windows of forcing data appropriately aligned with the initial condition.
+        writer: Data writer for saving the inference results to disk.
+        record_logs: Function for recording logs. By default, logs are recorded to
+            wandb.
+    """
+    if record_logs is None:
+        record_logs = get_record_to_wandb(label="inference")
     timer = GlobalTimer.get_instance()
     if writer is None:
         writer = NullDataWriter()
@@ -242,16 +242,19 @@ def run_inference_evaluator(
             data.loader,
             compute_derived_for_loaded_data=True,
         )
-        aggregator.record_initial_condition(
-            initial_condition=initial_condition,
-            normalize=stepper.normalizer.normalize,
-        )
-        writer.save_initial_condition(
-            initial_condition,
-        )
+        with timer.context("aggregator"):
+            logs = aggregator.record_initial_condition(
+                initial_condition=initial_condition,
+                normalize=stepper.normalizer.normalize,
+            )
+        with timer.context("wandb_logging"):
+            record_logs(logs)
+        with timer.context("data_writer"):
+            writer.save_initial_condition(
+                initial_condition,
+            )
         i_time = 0
         for prediction_batch, target_batch in looper:
-            timer.start("data_writer")
             times = prediction_batch.times
             forward_steps_in_memory = times.sizes["time"]
             logging.info(
@@ -259,30 +262,19 @@ def run_inference_evaluator(
                 f" to {i_time + forward_steps_in_memory} steps."
             )
             paired_data = PairedData.from_batch_data(prediction_batch, target_batch)
-            writer.append_batch(
-                batch=paired_data,
-                start_timestep=i_time,
-            )
-            timer.stop("data_writer")
-            timer.start("aggregator")
-            aggregator.record_batch(
-                data=paired_data,
-                normalize=stepper.normalizer.normalize,
-                i_time_start=i_time + stepper.n_ic_timesteps,
-            )
-            timer.stop("aggregator")
-            timer.start("wandb_logging")
-            if i_time == 0:
-                _log_window_to_wandb(
-                    aggregator, window_slice=slice(0, 1), label="inference"
+            with timer.context("data_writer"):
+                writer.append_batch(
+                    batch=paired_data,
+                    start_timestep=i_time,
                 )
-            _log_window_to_wandb(
-                aggregator,
-                window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
-                label="inference",
-            )
+            with timer.context("aggregator"):
+                logs = aggregator.record_batch(
+                    data=paired_data,
+                    normalize=stepper.normalizer.normalize,
+                )
+            with timer.context("wandb_logging"):
+                record_logs(logs)
             i_time += forward_steps_in_memory
-            timer.stop("wandb_logging")
 
 
 class DeriverABC(abc.ABC):
@@ -311,7 +303,10 @@ def run_dataset_comparison(
     target_data: GriddedData,
     deriver: DeriverABC,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
+    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
 ):
+    if record_logs is None:
+        record_logs = get_record_to_wandb(label="inference")
     if writer is None:
         writer = NullDataWriter()
     n_forward_steps = target_data.n_forward_steps
@@ -324,7 +319,7 @@ def run_dataset_comparison(
         if i_time == 0:
             all_names = pred.data.keys()
             with timer.context("aggregator"):
-                aggregator.record_initial_condition(
+                logs = aggregator.record_initial_condition(
                     initial_condition=PairedData.from_batch_data(
                         prediction=pred.get_start(
                             all_names, deriver.n_ic_timesteps
@@ -335,6 +330,8 @@ def run_dataset_comparison(
                     ),
                     normalize=normalizer.normalize,
                 )
+            with timer.context("wandb_logging"):
+                record_logs(logs)
 
         forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
@@ -345,34 +342,21 @@ def run_dataset_comparison(
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)
 
-        timer.start("data_writer")
-
-        # Do not include the initial condition in the data writers
-        writer.append_batch(
-            batch=PairedData.from_batch_data(pred, target),
-            start_timestep=i_time,
-        )
-        timer.stop("data_writer")
-        timer.start("aggregator")
-        # record metrics, includes the initial condition
-        aggregator.record_batch(
-            data=PairedData.from_batch_data(pred, target),
-            normalize=normalizer.normalize,
-            i_time_start=i_time + 1,
-        )
-        timer.stop("aggregator")
-
-        timer.start("wandb_logging")
-        if i_time == 0:
-            _log_window_to_wandb(
-                aggregator, window_slice=slice(0, 1), label="inference"
+        with timer.context("data_writer"):
+            # Do not include the initial condition in the data writers
+            writer.append_batch(
+                batch=PairedData.from_batch_data(pred, target),
+                start_timestep=i_time,
             )
-        _log_window_to_wandb(
-            aggregator,
-            window_slice=slice(i_time + 1, i_time + 1 + forward_steps_in_memory),
-            label="inference",
-        )
-        timer.stop("wandb_logging")
+        with timer.context("aggregator"):
+            # record metrics, includes the initial condition
+            logs = aggregator.record_batch(
+                data=PairedData.from_batch_data(pred, target),
+                normalize=normalizer.normalize,
+            )
+
+        with timer.context("wandb_logging"):
+            record_logs(logs)
 
         timer.start("data_loading")
         i_time += forward_steps_in_memory
