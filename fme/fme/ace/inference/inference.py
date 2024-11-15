@@ -12,7 +12,11 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
-from fme.ace.inference.loop import run_inference, write_reduced_metrics
+from fme.ace.inference.loop import (
+    get_record_to_wandb,
+    run_inference,
+    write_reduced_metrics,
+)
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
@@ -33,7 +37,6 @@ from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.wandb import WandB
 
 from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
 
@@ -280,12 +283,14 @@ def run_inference_from_config(config: InferenceConfig):
 
     timer.stop("initialization")
     logging.info("Starting inference")
+    record_logs = get_record_to_wandb(label="inference")
     run_inference(
         stepper=stepper,
         initial_condition=initial_condition,
         forcing_data=data,
         writer=writer,
         aggregator=aggregator,
+        record_logs=record_logs,
     )
 
     timer.start("final_writer_flush")
@@ -305,20 +310,14 @@ def run_inference_from_config(config: InferenceConfig):
         "Total steps per second (ignoring wandb logging): "
         f"{total_steps_per_second:.2f} steps/second"
     )
-
-    step_logs = aggregator.get_inference_logs(label="inference")
-    wandb = WandB.get_instance()
-    if wandb.enabled:
-        logging.info("Starting logging of timing and final step metrics to wandb")
-        duration_logs = {
-            "total_steps_per_second": total_steps_per_second,
-        }
-        final_step_logs = {**timer.get_durations(), **duration_logs, **step_logs[-1]}
-        wandb.log(final_step_logs, step=len(step_logs) - 1)
+    summary_logs = {
+        "total_steps_per_second": total_steps_per_second,
+        **timer.get_durations(),
+        **aggregator.get_summary_logs(),
+    }
+    record_logs([summary_logs])
 
     config.clean_wandb()
-
-    return step_logs
 
 
 def run_segmented_inference(config: InferenceConfig, segments: int):

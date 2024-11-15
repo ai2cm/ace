@@ -44,7 +44,7 @@ def test_logs_labels_exist():
     )
     times = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
 
-    agg.record_batch(
+    logs = agg.record_batch(
         data=PairedData(
             prediction={
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
@@ -53,31 +53,53 @@ def test_logs_labels_exist():
             times=times,
         ),
         normalize=lambda x: x,
-        i_time_start=0,
     )
-    logs = agg.get_logs(label="test")
-    assert "test/mean/series" in logs
-    assert "test/mean_norm/series" in logs
-    assert "test/mean_step_20/weighted_rmse/a" in logs
-    assert "test/mean_step_20/weighted_bias/a" in logs
-    assert "test/mean_step_20/weighted_grad_mag_percent_diff/a" in logs
-    table = logs["test/mean/series"]
-    assert table.columns == [
-        "forecast_step",
-        "weighted_bias/a",
-        "weighted_grad_mag_percent_diff/a",
-        "weighted_mean_gen/a",
-        "weighted_mean_target/a",
-        "weighted_rmse/a",
-        "weighted_std_gen/a",
+    assert len(logs) == n_time
+    expected_step_keys = [
+        "mean/forecast_step",
+        "mean/weighted_mean_gen/a",
+        "mean/weighted_mean_target/a",
+        "mean/weighted_rmse/a",
+        "mean/weighted_std_gen/a",
+        "mean/weighted_bias/a",
+        "mean/weighted_grad_mag_percent_diff/a",
+        "mean_norm/forecast_step",
+        "mean_norm/weighted_mean_gen/a",
+        "mean_norm/weighted_mean_target/a",
+        "mean_norm/weighted_rmse/a",
+        "mean_norm/weighted_std_gen/a",
+        "mean_norm/weighted_bias/a",
     ]
-    assert "test/time_mean/rmse/a" in logs
-    assert "test/time_mean/bias/a" in logs
-    assert "test/time_mean/bias_map/a" in logs
-    assert "test/time_mean/gen_map/a" in logs
-    assert "test/zonal_mean/error/a" in logs
-    assert "test/zonal_mean/gen/a" in logs
-    assert "test/video/a" in logs
+    for log in logs:
+        for key in expected_step_keys:
+            assert key in log, key
+        assert len(log) == len(expected_step_keys), set(log).difference(
+            expected_step_keys
+        )
+
+    summary_logs = agg.get_summary_logs()
+    expected_keys = [
+        "mean_step_20/loss",
+        "mean_step_20/weighted_rmse/a",
+        "mean_step_20/weighted_bias/a",
+        "mean_step_20/weighted_grad_mag_percent_diff/a",
+        "spherical_power_spectrum/a",
+        "time_mean/rmse/a",
+        "time_mean/bias/a",
+        "time_mean/bias_map/a",
+        "time_mean/gen_map/a",
+        "time_mean_norm/rmse/a",
+        "time_mean_norm/gen_map/a",
+        "time_mean_norm/rmse/channel_mean",
+        "zonal_mean/error/a",
+        "zonal_mean/gen/a",
+        "video/a",
+    ]
+    for key in expected_keys:
+        assert key in summary_logs, key
+    assert len(summary_logs) == len(expected_keys), set(summary_logs).difference(
+        expected_keys
+    )
 
 
 def test_inference_logs_labels_exist():
@@ -103,7 +125,7 @@ def test_inference_logs_labels_exist():
         record_step_20=True,
         log_video=True,
     )
-    agg.record_batch(
+    logs = agg.record_batch(
         data=PairedData(
             prediction={
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
@@ -112,25 +134,23 @@ def test_inference_logs_labels_exist():
             times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
         ),
         normalize=lambda x: x,
-        i_time_start=0,
     )
-    logs = agg.get_inference_logs(label="test")
     assert isinstance(logs, list)
     assert len(logs) == n_time
-    assert "test/mean/weighted_bias/a" in logs[0]
-    assert "test/mean/weighted_mean_gen/a" in logs[0]
-    assert "test/mean/weighted_mean_target/a" in logs[0]
-    assert "test/mean/weighted_grad_mag_percent_diff/a" in logs[0]
-    assert "test/mean/weighted_rmse/a" in logs[0]
-    assert "test/mean_norm/weighted_bias/a" in logs[0]
-    assert "test/mean_norm/weighted_mean_gen/a" in logs[0]
-    assert "test/mean_norm/weighted_mean_target/a" in logs[0]
-    assert "test/mean_norm/weighted_rmse/a" in logs[0]
+    assert "mean/weighted_bias/a" in logs[0]
+    assert "mean/weighted_mean_gen/a" in logs[0]
+    assert "mean/weighted_mean_target/a" in logs[0]
+    assert "mean/weighted_grad_mag_percent_diff/a" in logs[0]
+    assert "mean/weighted_rmse/a" in logs[0]
+    assert "mean_norm/weighted_bias/a" in logs[0]
+    assert "mean_norm/weighted_mean_gen/a" in logs[0]
+    assert "mean_norm/weighted_mean_target/a" in logs[0]
+    assert "mean_norm/weighted_rmse/a" in logs[0]
     # series/table data should be rolled out, not included as a table
-    assert "test/mean/series" not in logs[0]
-    assert "test/mean_norm/series" not in logs[0]
-    assert "test/reduced/series" not in logs[0]
-    assert "test/reduced_norm/series" not in logs[0]
+    assert "mean/series" not in logs[0]
+    assert "mean_norm/series" not in logs[0]
+    assert "reduced/series" not in logs[0]
+    assert "reduced_norm/series" not in logs[0]
 
 
 @pytest.mark.parametrize(
@@ -140,69 +160,10 @@ def test_inference_logs_labels_exist():
         pytest.param(3, 2, id="two_windows"),
     ],
 )
-def test_i_time_start_gets_correct_time_longer_windows(window_len: int, n_windows: int):
-    # while this directly tests the "mean" result, this is really a test that
-    # the data from the correct timestep is piped into the aggregator.
-    overlap = 1  # tested code assumes windows have one overlapping point
-    nz = 3
-    nx, ny = 4, 4
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
-    )
-    initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
-    agg = InferenceEvaluatorAggregator(
-        sigma_coordinates,
-        horizontal_coordinates,
-        TIMESTEP,
-        (window_len - overlap) * n_windows + 1,
-        initial_times,
-    )
-    target_data = BatchData.new_on_device(
-        data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
-        times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
-    )
-    i_start = 0
-    for i in range(n_windows):
-        sample_data = {"a": torch.zeros([2, window_len, ny, nx], device=get_device())}
-        for i in range(window_len):
-            sample_data["a"][..., i, :, :] = float(i_start + i)
-        paired_data = PairedData.new_on_device(
-            prediction=sample_data,
-            target=target_data.data,
-            times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
-        )
-
-        agg.record_batch(
-            data=paired_data,
-            normalize=lambda x: x,
-            i_time_start=i_start,
-        )
-        i_start += window_len - overlap  # subtract 1 for overlapping windows
-    logs = agg.get_logs(label="metrics")
-    table = logs["metrics/mean/series"]
-    # get the weighted_bias column
-    bias = table.get_column("weighted_bias/a")
-    assert len(bias) == (window_len - overlap) * n_windows + overlap
-    for i in range(len(bias)):
-        np.testing.assert_allclose(bias[i], float(i), rtol=1e-5)
-
-
-@pytest.mark.parametrize(
-    "window_len, n_windows, overlap",
-    [
-        pytest.param(3, 1, 0, id="single_window"),
-        pytest.param(3, 2, 0, id="two_windows"),
-        pytest.param(3, 2, 1, id="two_windows_overlap"),
-    ],
-)
-def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
+def test_inference_logs_length(window_len: int, n_windows: int):
     """
     Test that the inference logs are the correct length when using one or more
-    possibly-overlapping windows.
+    windows.
     """
     nz = 3
     nx, ny = 4, 4
@@ -218,7 +179,7 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
         sigma_coordinates,
         horizontal_coordinates,
         TIMESTEP,
-        (window_len - overlap) * n_windows + overlap,
+        window_len * n_windows,
         initial_times,
     )
     target_data = BatchData.new_on_device(
@@ -235,11 +196,9 @@ def test_inference_logs_length(window_len: int, n_windows: int, overlap: int):
             target=target_data.data,
             times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
-        agg.record_batch(
+        logs = agg.record_batch(
             data=paired_data,
             normalize=lambda x: x,
-            i_time_start=i_start,
         )
-        i_start += window_len - overlap  # subtract 1 for overlapping windows
-    logs = agg.get_inference_logs(label="metrics")
-    assert len(logs) == (window_len - overlap) * n_windows + overlap
+        assert len(logs) == window_len
+        i_start += window_len

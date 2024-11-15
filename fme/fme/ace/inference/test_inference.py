@@ -153,12 +153,14 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         yaml.dump(dataclasses.asdict(config), f)
 
     with mock_wandb() as wandb:
-        inference_logs = main(yaml_config=str(config_filename))
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
         wandb_logs = wandb.get_logs()
 
-    assert len(inference_logs) == config.n_forward_steps + 1
-    assert len(wandb_logs) == len(inference_logs)
-    for i, log in enumerate(inference_logs):
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert len(wandb_logs) == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    for i, log in enumerate(wandb_logs):
         for metric, val in log.items():
             # check that time series metrics match
             if "inference/mean" in metric:
@@ -193,7 +195,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     ).gridded_operations
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
-        for log_name in inference_logs[i]:
+        for log_name in wandb_logs[i]:
             if "inference/mean/weighted_mean_gen" in log_name:
                 variable_name = log_name.split("/")[-1]
                 # note raw output does not include initial condition, hence
@@ -203,8 +205,9 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
                     torch.as_tensor(raw_variable.values)
                 ).mean()
                 np.testing.assert_allclose(
-                    raw_global_mean, inference_logs[i][log_name], rtol=1e-6
+                    raw_global_mean, wandb_logs[i][log_name], rtol=1e-6
                 )
+    assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
 def test_get_initial_condition():
