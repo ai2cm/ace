@@ -14,6 +14,7 @@ from fme.core.data_loading.batch_data import (
     PrognosticState,
 )
 from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.generics.writer import WriterABC
 
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
@@ -242,6 +243,7 @@ class PairedDataWriter:
                 coords=coords,
             )
         )
+        self._n_timesteps_seen = 0
 
     def save_initial_condition(
         self,
@@ -258,7 +260,6 @@ class PairedDataWriter:
     def append_batch(
         self,
         batch: PairedData,
-        start_timestep: int,
     ):
         """
         Append a batch of data to the file.
@@ -271,9 +272,10 @@ class PairedDataWriter:
             writer.append_batch(
                 target=dict(batch.target),
                 prediction=dict(batch.prediction),
-                start_timestep=start_timestep,
+                start_timestep=self._n_timesteps_seen,
                 batch_times=batch.times,
             )
+        self._n_timesteps_seen += batch.times.shape[1]
 
     def flush(self):
         """
@@ -336,7 +338,7 @@ def _save_initial_condition(
     ds.to_netcdf(str(Path(path) / "initial_condition.nc"))
 
 
-class DataWriter:
+class DataWriter(WriterABC[PrognosticState, BatchData]):
     def __init__(
         self,
         path: str,
@@ -418,11 +420,11 @@ class DataWriter:
         self.prognostic_names = prognostic_names
         self.variable_metadata = variable_metadata
         self.coords = coords
+        self._n_timesteps_seen = 0
 
     def append_batch(
         self,
         batch: BatchData,
-        start_timestep: int,
     ):
         """
         Append a batch of data to the file.
@@ -435,9 +437,10 @@ class DataWriter:
         for writer in self._writers:
             writer.append_batch(
                 data=dict(batch.data),
-                start_timestep=start_timestep,
+                start_timestep=self._n_timesteps_seen,
                 batch_times=batch.times,
             )
+        self._n_timesteps_seen += batch.times.shape[1]
 
     def flush(self):
         """
@@ -471,7 +474,6 @@ class NullDataWriter:
     def append_batch(
         self,
         batch: Any,
-        start_timestep: int,
     ):
         pass
 

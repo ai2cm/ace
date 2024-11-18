@@ -34,7 +34,6 @@ def test_logs_labels_exist():
             data=gen_data,
             times=time,
         ),
-        normalize=None,
     )
     assert len(logs) == n_time
     expected_step_keys = [
@@ -83,7 +82,6 @@ def test_logs_labels_exist_with_reference_time_means():
             data=gen_data,
             times=time,
         ),
-        normalize=None,
     )
     assert len(logs) == n_time
     expected_step_keys = [

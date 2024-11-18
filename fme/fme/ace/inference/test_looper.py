@@ -9,15 +9,21 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.inference.loop import Looper
+from fme.ace.inference.loop import Looper, get_record_to_wandb, run_inference
 from fme.ace.inference.timing import GlobalTimer
-from fme.core.data_loading.batch_data import BatchData, CurrentDevice, PrognosticState
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    CurrentDevice,
+    PairedData,
+    PrognosticState,
+)
 from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
 from fme.core.generics.inference import InferenceStepperABC
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.stepper import SingleModuleStepperConfig
+from fme.core.testing.wandb import mock_wandb
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 
@@ -71,6 +77,9 @@ class MockLoader(torch.utils.data.DataLoader):
 
     def __iter__(self):
         return self
+
+    def __len__(self) -> int:
+        return self._n_windows
 
     def __next__(self) -> BatchData[CurrentDevice]:
         if self._current_window < self._n_windows:
@@ -365,3 +374,93 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
         # we mocked out the implicit call that happens in .predict and .get_forward_data
         # if this changed, update the test
         assert "compute_derived_variables" not in times
+
+
+@pytest.mark.parametrize(
+    "n_ic_timesteps, n_forward_steps, n_iterations",
+    [
+        pytest.param(1, 2, 5, id="n_ic_timesteps=1"),
+        pytest.param(2, 2, 5, id="n_ic_timesteps=2"),
+    ],
+)
+def test_simple_run_inference(
+    n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
+):
+    stepper = PlusOneStepper(n_ic_timesteps=n_ic_timesteps)
+    derive_func_mock = unittest.mock.MagicMock(
+        side_effect=lambda batch_data, forcing_data: batch_data
+    )
+    initial_condition = get_batch_data(
+        0,
+        n_timesteps=n_ic_timesteps,
+        derive_func=derive_func_mock,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data(
+            i,
+            n_ic_timesteps + n_forward_steps,
+            derive_func=derive_func_mock,
+        )
+        for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
+    ]
+    mock_writer = unittest.mock.MagicMock()
+
+    # record_batch will start at step n_ic_timesteps
+    i = n_ic_timesteps
+
+    def record_batch_side_effect(
+        data: PairedData[CurrentDevice],
+    ):
+        nonlocal i
+        ret = [{"step": j} for j in range(i, i + data.times.shape[1])]
+        i += data.times.shape[1]
+        return ret
+
+    mock_aggregator = unittest.mock.MagicMock()
+    mock_aggregator.record_initial_condition = unittest.mock.MagicMock(
+        return_value=[{"step": j} for j in range(n_ic_timesteps)]
+    )
+
+    def get_summary_logs_side_effect():
+        # we expect this gets called _outside_ of run_inference
+        raise ValueError("should not be called")
+
+    mock_aggregator.get_summary_logs = unittest.mock.MagicMock(
+        side_effect=get_summary_logs_side_effect
+    )
+    mock_aggregator.record_batch = unittest.mock.MagicMock(
+        side_effect=record_batch_side_effect
+    )
+
+    with GlobalTimer():
+        with mock_wandb() as wandb:
+            wandb.configure(log_to_wandb=True)
+            record_logs = unittest.mock.MagicMock(
+                side_effect=get_record_to_wandb("inference")
+            )  # this init must be within mock_wandb context
+            run_inference(
+                stepper,
+                initial_condition,
+                loader,
+                writer=mock_writer,
+                aggregator=mock_aggregator,
+                record_logs=record_logs,
+            )
+            wandb_logs = wandb.get_logs()
+        timer = GlobalTimer.get_instance()
+        times = timer.get_durations()
+        assert times["wandb_logging"] > 0
+        assert times["data_writer"] > 0
+        assert times["aggregator"] > 0
+        assert mock_writer.save_initial_condition.call_count == 1
+        assert mock_aggregator.record_initial_condition.call_count == 1
+        assert mock_writer.append_batch.call_count == n_iterations
+        assert mock_aggregator.record_batch.call_count == n_iterations
+        assert len(wandb_logs) == n_ic_timesteps + n_iterations * n_forward_steps
+        assert wandb_logs == [
+            {"inference/step": i}
+            for i in range(n_ic_timesteps + n_iterations * n_forward_steps)
+        ]
+        assert (
+            record_logs.call_count == n_iterations + 1
+        )  # +1 for the initial condition

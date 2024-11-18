@@ -242,10 +242,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
-        n_timesteps=config.n_forward_steps + 1,
+        n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
         variable_metadata=data.variable_metadata,
         initial_times=initial_times,
         channel_mean_names=stepper.out_names,
+        normalize=stepper.normalizer.normalize,
     )
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
@@ -262,7 +263,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         deriver = _Deriver(n_ic_timesteps=stepper_config.n_ic_timesteps)
         run_dataset_comparison(
             aggregator=aggregator,
-            normalizer=stepper.normalizer,
             prediction_data=prediction_data,
             target_data=data,
             deriver=deriver,

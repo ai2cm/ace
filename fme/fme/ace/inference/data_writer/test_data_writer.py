@@ -178,7 +178,6 @@ class TestDataWriter:
                 target=sample_target_data,
                 times=batch_times,
             ),
-            start_timestep=0,
         )
         start_time_2 = (2020, 1, 1, 18, 0, 0)
         end_time_2 = (2020, 1, 2, 6, 0, 0)
@@ -195,7 +194,6 @@ class TestDataWriter:
                 target=sample_target_data,
                 times=batch_times,
             ),
-            start_timestep=3,
         )
         writer.flush()
 
@@ -338,7 +336,6 @@ class TestDataWriter:
                 target=sample_target_data,
                 times=batch_times,
             ),
-            start_timestep=0,
         )
         writer.flush()
         dataset = Dataset(tmp_path / "autoregressive_predictions.nc", "r")
@@ -410,7 +407,6 @@ class TestDataWriter:
                     target=sample_target_data,
                     times=batch_times,
                 ),
-                start_timestep=0,
             )
 
     def test_prediction_only_append_batch(self, sample_metadata, tmp_path, calendar):
@@ -453,7 +449,6 @@ class TestDataWriter:
                 data=prediction_data,
                 times=batch_times,
             ),
-            start_timestep=0,
         )
         start_time_2 = (2020, 1, 2, 0, 0, 0)
         end_time_2 = (2020, 1, 2, 18, 0, 0)
@@ -469,7 +464,6 @@ class TestDataWriter:
                 data=prediction_data,
                 times=batch_times,
             ),
-            start_timestep=4,
         )
         writer.flush()
 
