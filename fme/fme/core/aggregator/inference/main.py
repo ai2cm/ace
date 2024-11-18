@@ -166,7 +166,7 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps: int,
         initial_times: xr.DataArray,
         record_step_20: bool = False,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
@@ -206,7 +206,7 @@ class InferenceEvaluatorAggregatorConfig:
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             channel_mean_names=channel_mean_names,
         )
 
@@ -238,7 +238,7 @@ class InferenceEvaluatorAggregator(
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
         log_histograms: bool = False,
         time_mean_reference_data: Optional[xr.Dataset] = None,
@@ -261,7 +261,7 @@ class InferenceEvaluatorAggregator(
             log_global_mean_time_series: Whether to log global mean time series metrics.
             log_global_mean_norm_time_series: Whether to log the normalized global mean
                 time series metrics.
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
             log_histograms: Whether to aggregate histograms.
@@ -284,14 +284,14 @@ class InferenceEvaluatorAggregator(
                 ops,
                 target="denorm",
                 n_timesteps=n_timesteps,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
             )
         if log_global_mean_norm_time_series:
             self._aggregators["mean_norm"] = MeanAggregator(
                 ops,
                 target="norm",
                 n_timesteps=n_timesteps,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
             )
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
@@ -301,7 +301,7 @@ class InferenceEvaluatorAggregator(
             if log_zonal_mean_images:
                 self._aggregators["zonal_mean"] = ZonalMeanAggregator(
                     n_timesteps=n_timesteps,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                 )
             self._aggregators[
                 "spherical_power_spectrum"
@@ -314,32 +314,32 @@ class InferenceEvaluatorAggregator(
                 self._aggregators["video"] = VideoAggregator(
                     n_timesteps=n_timesteps,
                     enable_extended_videos=enable_extended_videos,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                 )
         self._aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
             ops,
             horizontal_dims=horizontal_coordinates.dims,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             reference_means=time_mean_reference_data,
         )
         self._aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
             ops,
             horizontal_dims=horizontal_coordinates.dims,
             target="norm",
-            metadata=metadata,
+            variable_metadata=variable_metadata,
         )
         if log_histograms:
             self._aggregators["histogram"] = HistogramAggregator()
         if log_seasonal_means:
             self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
                 ops=ops,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
             )
         if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
                 ops=ops,
                 timestep=timestep,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
                 monthly_reference_data=monthly_reference_data,
             )
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
@@ -350,7 +350,7 @@ class InferenceEvaluatorAggregator(
                 n_timesteps - 1,
                 timestep,
                 gridded_operations=ops,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
             )
         self._summary_aggregators = {
             name: agg
@@ -554,7 +554,7 @@ class InferenceAggregatorConfig:
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
             time_means = xr.open_dataset(self.time_mean_reference_data)
@@ -563,7 +563,7 @@ class InferenceAggregatorConfig:
         return InferenceAggregator(
             gridded_operations=gridded_operations,
             n_timesteps=n_timesteps,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             time_mean_reference_data=time_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
         )
@@ -583,7 +583,7 @@ class InferenceAggregator(
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
         log_global_mean_time_series: bool = True,
     ):
@@ -592,7 +592,7 @@ class InferenceAggregator(
             gridded_operations: Gridded operations for computing horizontal reductions.
             sigma_coordinates: Data sigma coordinates
             timestep: Timestep of the model.
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
             log_global_mean_time_series: Whether to log global mean time series metrics.
@@ -606,7 +606,7 @@ class InferenceAggregator(
             )
         aggregators["time_mean"] = TimeMeanAggregator(
             gridded_operations=gridded_operations,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             reference_means=time_mean_reference_data,
         )
         self._aggregators = aggregators

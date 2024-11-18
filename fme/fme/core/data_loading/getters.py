@@ -57,7 +57,7 @@ def get_datasets(
 
 
 def validate_ensemble(datasets: List[Dataset], strict: bool = True):
-    if not _all_same([d.metadata for d in datasets]):
+    if not _all_same([d.variable_metadata for d in datasets]):
         if strict:
             raise ValueError("Metadata for each ensemble member should be the same.")
         else:
@@ -172,7 +172,7 @@ def get_data_loader(
 
     return GriddedData(
         loader=dataloader,
-        metadata=dataset.metadata,
+        variable_metadata=dataset.variable_metadata,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
         timestep=dataset.timestep,
@@ -231,7 +231,7 @@ def get_inference_data(
     )
     gridded_data = GriddedData(
         loader=loader,
-        metadata=dataset.metadata,
+        variable_metadata=dataset.variable_metadata,
         sigma_coordinates=dataset.sigma_coordinates,
         timestep=dataset.timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,

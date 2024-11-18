@@ -292,20 +292,20 @@ class VideoAggregator:
         self,
         n_timesteps: int,
         enable_extended_videos: bool,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
             n_timesteps: Number of timesteps of inference that will be run.
             enable_extended_videos: Whether to log videos of statistical
                 metrics of state evolution
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged video captions.
         """
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
         self._mean_data = _MeanVideoData(n_timesteps=n_timesteps)
         if enable_extended_videos:
             self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
@@ -374,14 +374,14 @@ class VideoAggregator:
         video_data = {}
 
         def get_units(name: str) -> Optional[str]:
-            if name in self._metadata:
-                return self._metadata[name].units
+            if name in self._variable_metadata:
+                return self._variable_metadata[name].units
             else:
                 return None
 
         def get_long_name(name: str) -> Optional[str]:
-            if name in self._metadata:
-                return self._metadata[name].long_name
+            if name in self._variable_metadata:
+                return self._variable_metadata[name].long_name
             else:
                 return None
 
@@ -479,9 +479,9 @@ class VideoAggregator:
         caption = (
             "Autoregressive (left) prediction and (right) target for {name} [{units}]"
         )
-        if name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+        if name in self._variable_metadata:
+            caption_name = self._variable_metadata[name].long_name
+            units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown units"
         return caption.format(name=caption_name, units=units)

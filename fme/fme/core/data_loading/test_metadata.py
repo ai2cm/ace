@@ -11,28 +11,6 @@ from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.data_loading.getters import get_data_loader
 from fme.core.data_loading.requirements import DataRequirements
 
-METADATA = [
-    pytest.param(
-        {"bar": None},
-        id="one_var_no_metadata",
-    ),
-    pytest.param(
-        {"bar": VariableMetadata("km", "bar_long_name")},
-        id="one_var_metadata",
-    ),
-    pytest.param(
-        {"foo": VariableMetadata("m", "foo_long_name"), "bar": None},
-        id="two_vars_one_metadata",
-    ),
-    pytest.param(
-        {
-            "foo": VariableMetadata("m", "foo_long_name"),
-            "bar": VariableMetadata("km", "bar_long_name"),
-        },
-        id="two_vars_two_metadata",
-    ),
-]
-
 
 def _coord_value(name, size):
     # xarray data loader requires time to be cftime.datetime object
@@ -47,18 +25,18 @@ def _coord_value(name, size):
 
 def _save_netcdf(
     filename,
-    metadata: Mapping[str, Optional[VariableMetadata]],
+    variable_metadata: Mapping[str, Optional[VariableMetadata]],
     num_members=1,
     dim_sizes=None,
 ):
     if dim_sizes is None:
         dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
     data_vars = {}
-    for name in metadata:
+    for name in variable_metadata:
         data = np.random.randn(*list(dim_sizes.values()))
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)
-        item_metadata = metadata[name]
+        item_metadata = variable_metadata[name]
         if item_metadata is None:
             attrs = {}
         else:
@@ -84,24 +62,49 @@ def _save_netcdf(
 
 
 @pytest.mark.parametrize("n_ensemble_members", [1, 2])
-@pytest.mark.parametrize("metadata", METADATA)
-def test_metadata(tmp_path, metadata, n_ensemble_members):
+@pytest.mark.parametrize(
+    "variable_metadata",
+    [
+        pytest.param(
+            {"bar": None},
+            id="one_var_no_metadata",
+        ),
+        pytest.param(
+            {"bar": VariableMetadata("km", "bar_long_name")},
+            id="one_var_metadata",
+        ),
+        pytest.param(
+            {"foo": VariableMetadata("m", "foo_long_name"), "bar": None},
+            id="two_vars_one_metadata",
+        ),
+        pytest.param(
+            {
+                "foo": VariableMetadata("m", "foo_long_name"),
+                "bar": VariableMetadata("km", "bar_long_name"),
+            },
+            id="two_vars_two_metadata",
+        ),
+    ],
+)
+def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
     paths = []
     for i in range(n_ensemble_members):
         path = tmp_path / f"ic{i}"
         path.mkdir(exist_ok=True)
         paths.append(path)
-        _save_netcdf(path / "data.nc", metadata)
+        _save_netcdf(path / "data.nc", variable_metadata)
 
     config = DataLoaderConfig(
         [XarrayDataConfig(data_path=str(path)) for path in paths],
         batch_size=1,
         num_data_workers=0,
     )
-    var_names = list(metadata.keys())
+    var_names = list(variable_metadata.keys())
     requirements = DataRequirements(names=var_names, n_timesteps=2)
     data = get_data_loader(config=config, train=True, requirements=requirements)
     target_metadata = {
-        name: metadata[name] for name in metadata if metadata[name] is not None
+        name: variable_metadata[name]
+        for name in variable_metadata
+        if variable_metadata[name] is not None
     }
-    assert data.metadata == target_metadata  # type: ignore
+    assert data.variable_metadata == target_metadata  # type: ignore

@@ -189,8 +189,8 @@ class HorizontalSubsetDataset(Dataset):
         )
 
     @property
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        return self.dataset.metadata  # type: ignore
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self.dataset.variable_metadata  # type: ignore
 
     @property
     def area_weights(self) -> torch.Tensor:
@@ -345,14 +345,18 @@ class DataLoaderConfig:
             fine_width % coarse_width == 0
         ), "Fine resolution width must be divisible by coarse resolution width"
 
-        common_metadata_keys = set(dataset_fine_subset.metadata).intersection(
-            dataset_coarse_subset.metadata
+        common_metadata_keys = set(dataset_fine_subset.variable_metadata).intersection(
+            dataset_coarse_subset.variable_metadata
         )
         assert all(
-            dataset_fine_subset.metadata[key] == dataset_coarse_subset.metadata[key]
+            dataset_fine_subset.variable_metadata[key]
+            == dataset_coarse_subset.variable_metadata[key]
             for key in common_metadata_keys
         ), "Metadata for variables common to coarse and fine datasets must match."
-        metadata = {**dataset_fine_subset.metadata, **dataset_coarse_subset.metadata}
+        metadata = {
+            **dataset_fine_subset.variable_metadata,
+            **dataset_coarse_subset.variable_metadata,
+        }
 
         if requirements.use_fine_topography:
             fine_topography = get_topography(

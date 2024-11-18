@@ -158,7 +158,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         initial_inference_times=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
         n_timesteps=config.inference_n_forward_steps + 1,
-        metadata=train_data.metadata,
+        variable_metadata=train_data.variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
     )
@@ -233,7 +233,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
         initial_inference_times: xr.DataArray,
         record_step_20: bool,
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
     ):
@@ -245,7 +245,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
         self.initial_inference_times = initial_inference_times
         self.record_step_20 = record_step_20
         self.n_timesteps = n_timesteps
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
 
@@ -256,7 +256,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
         return OneStepAggregator(
             gridded_operations=self.gridded_operations,
             sigma_coordinates=self.sigma_coordinates,
-            metadata=self.metadata,
+            variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,
         )
 
@@ -270,7 +270,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
             initial_times=self.initial_inference_times,
             record_step_20=self.record_step_20,
             n_timesteps=self.n_timesteps,
-            metadata=self.metadata,
+            variable_metadata=self.variable_metadata,
             channel_mean_names=self.channel_mean_names,
         )
 

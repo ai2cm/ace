@@ -339,7 +339,7 @@ class XarrayDataset(Dataset):
                 "`XarrayDataConfig.file_pattern` to match the zarr filename."
             )
 
-    def _get_metadata(self, ds):
+    def _get_variable_metadata(self, ds):
         result = {}
         for name in self._names:
             if name in StaticDerivedData.names:
@@ -349,7 +349,7 @@ class XarrayDataset(Dataset):
                     units=ds[name].units,
                     long_name=ds[name].long_name,
                 )
-        self._metadata = result
+        self._variable_metadata = result
 
     def _get_files_stats(self, n_repeats: int, infer_timestep: bool):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
@@ -377,7 +377,7 @@ class XarrayDataset(Dataset):
         del cum_num_timesteps, time_coords
 
         ds = self._open_file(0)
-        self._get_metadata(ds)
+        self._get_variable_metadata(ds)
 
         logging.info(f"Found {self._n_initial_conditions} samples.")
 
@@ -461,8 +461,8 @@ class XarrayDataset(Dataset):
         return horizontal_coordinates, static_derived_data
 
     @property
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        return self._metadata
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._variable_metadata
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:

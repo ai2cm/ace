@@ -162,7 +162,7 @@ class MeanAggregator:
         gridded_operations: GriddedOperations,
         target: Literal["norm", "denorm"],
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._gridded_operations = gridded_operations
         self._variable_metrics: Optional[Dict[str, Dict[str, MeanMetric]]] = None
@@ -172,10 +172,10 @@ class MeanAggregator:
         self._n_timesteps = n_timesteps
 
         self._dist = Distributed.get_instance()
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -310,7 +310,7 @@ class MeanAggregator:
         """
         data_vars = {}
         for datum in self._get_series_data():
-            metadata = self._metadata.get(
+            metadata = self._variable_metadata.get(
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(
@@ -392,7 +392,7 @@ class SingleTargetMeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._ops = gridded_operations
         self._variable_metrics: Optional[
@@ -403,10 +403,10 @@ class SingleTargetMeanAggregator:
         self._n_timesteps = n_timesteps
 
         self._dist = Distributed.get_instance()
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
 
     def _get_variable_metrics(self, gen_data: TensorMapping):
         if self._variable_metrics is None:
@@ -492,7 +492,7 @@ class SingleTargetMeanAggregator:
         """
         data_vars = {}
         for datum in self._get_series_data():
-            metadata = self._metadata.get(
+            metadata = self._variable_metadata.get(
                 datum.var_name, VariableMetadata("unknown_units", datum.var_name)
             )
             data_vars[datum.get_xarray_key()] = xr.DataArray(

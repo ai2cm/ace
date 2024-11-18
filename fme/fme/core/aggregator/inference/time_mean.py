@@ -61,7 +61,7 @@ class TimeMeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target: Literal["norm", "denorm"] = "denorm",
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
     ):
         """
@@ -69,17 +69,17 @@ class TimeMeanAggregator:
             gridded_operations: Computes gridded operations.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             reference_means: Dataset containing reference time-mean values
                 for bias computation.
         """
         self._ops = gridded_operations
         self._target = target
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._data: Optional[TensorDict] = None
         self._n_timesteps = 0
@@ -187,9 +187,9 @@ class TimeMeanAggregator:
         return logs
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
-        if name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+        if name in self._variable_metadata:
+            caption_name = self._variable_metadata[name].long_name
+            units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
@@ -200,9 +200,9 @@ class TimeMeanAggregator:
         dims = ("lat", "lon")
         data = {}
         for name, pred in self.get_data().items():
-            if name in self._metadata:
-                long_name = self._metadata[name].long_name
-                units = self._metadata[name].units
+            if name in self._variable_metadata:
+                long_name = self._variable_metadata[name].long_name
+                units = self._variable_metadata[name].units
             else:
                 long_name = name
                 units = "unknown_units"
@@ -236,7 +236,7 @@ class TimeMeanEvaluatorAggregator:
         ops: GriddedOperations,
         horizontal_dims: List[str],
         target: Literal["norm", "denorm"] = "denorm",
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         reference_means: Optional[xr.Dataset] = None,
         channel_mean_names: Optional[List[str]] = None,
     ):
@@ -257,18 +257,18 @@ class TimeMeanEvaluatorAggregator:
         self._horizontal_dims = horizontal_dims
         self._target = target
         self._dist = Distributed.get_instance()
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
         self._target_agg = TimeMeanAggregator(
-            gridded_operations=ops, target=target, metadata=metadata
+            gridded_operations=ops, target=target, variable_metadata=variable_metadata
         )
         self._gen_agg = TimeMeanAggregator(
             gridded_operations=ops,
             target=target,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             reference_means=reference_means,
         )
         self._channel_mean_names = channel_mean_names
@@ -348,9 +348,9 @@ class TimeMeanEvaluatorAggregator:
         return logs
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
-        if name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+        if name in self._variable_metadata:
+            caption_name = self._variable_metadata[name].long_name
+            units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._image_captions[key].format(name=caption_name, units=units)
@@ -361,14 +361,14 @@ class TimeMeanEvaluatorAggregator:
         data = {}
         preds = self._get_target_gen_pairs()
         for pred in preds:
-            if pred.name in self._metadata:
-                long_name = self._metadata[pred.name].long_name
-                units = self._metadata[pred.name].units
+            if pred.name in self._variable_metadata:
+                long_name = self._variable_metadata[pred.name].long_name
+                units = self._variable_metadata[pred.name].units
             else:
                 long_name = pred.name
                 units = "unknown_units"
             gen_metadata = VariableMetadata(long_name=long_name, units=units)._asdict()
-            bias_metadata = self._metadata.get(
+            bias_metadata = self._variable_metadata.get(
                 pred.name, VariableMetadata(long_name=long_name, units=units)
             )._asdict()
             data.update(

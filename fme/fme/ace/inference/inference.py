@@ -208,7 +208,7 @@ class InferenceConfig:
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
-            metadata=data.metadata,
+            variable_metadata=data.variable_metadata,
             coords=data.coords,
         )
 
@@ -276,7 +276,7 @@ def run_inference_from_config(config: InferenceConfig):
     aggregator = config.aggregator.build(
         gridded_operations=data.gridded_operations,
         n_timesteps=config.n_forward_steps + 1,
-        metadata=data.metadata,
+        variable_metadata=data.variable_metadata,
     )
 
     writer = config.get_data_writer(data, stepper.prognostic_names)

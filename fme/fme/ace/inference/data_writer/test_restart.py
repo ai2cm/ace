@@ -20,7 +20,7 @@ def test_restart_saves_last_step(tmpdir):
         path=tmpdir,
         is_restart_step=lambda i: True,
         prognostic_names=["a", "b"],
-        metadata={"a": VariableMetadata(long_name="var_a", units="m")},
+        variable_metadata={"a": VariableMetadata(long_name="var_a", units="m")},
         coords={"lon": lon, "lat": lat},
     )
     data = {
@@ -64,7 +64,7 @@ def test_restart_saves_configured_step(tmpdir):
         path=tmpdir,
         is_restart_step=lambda i: i == i_time_target,
         prognostic_names=["a", "b"],
-        metadata={"a": VariableMetadata(long_name="var_a", units="m")},
+        variable_metadata={"a": VariableMetadata(long_name="var_a", units="m")},
         coords={"lon": lon, "lat": lat},
     )
     data = {
@@ -112,7 +112,7 @@ def test_restart_does_not_save(tmpdir):
         path=tmpdir,
         is_restart_step=lambda i: False,
         prognostic_names=["a", "b"],
-        metadata={"a": VariableMetadata(long_name="var_a", units="m")},
+        variable_metadata={"a": VariableMetadata(long_name="var_a", units="m")},
         coords={"lon": lon, "lat": lat},
     )
     data = {

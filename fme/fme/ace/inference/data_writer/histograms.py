@@ -73,21 +73,21 @@ class PairedHistogramDataWriter:
         self,
         path: str,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         save_names: Optional[Sequence[str]],
     ):
         self._target_writer = HistogramDataWriter(
             path=path,
             n_timesteps=n_timesteps,
             filename="histograms_target.nc",
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             save_names=save_names,
         )
         self._prediction_writer = HistogramDataWriter(
             path=path,
             n_timesteps=n_timesteps,
             filename="histograms_prediction.nc",
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             save_names=save_names,
         )
 
@@ -124,18 +124,18 @@ class HistogramDataWriter:
         path: str,
         n_timesteps: int,
         filename: str,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         save_names: Optional[Sequence[str]],
     ):
         """
         Args:
             path: Path to write netCDF file(s).
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
         """
         self.path = path
         self._metrics_filename = str(Path(path) / filename)
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self._histogram = _HistogramAggregator(n_times=n_timesteps, names=save_names)
 
     def append_batch(
@@ -164,11 +164,11 @@ class HistogramDataWriter:
         Flush the data to disk.
         """
         metric_dataset = self._histogram.get_dataset()
-        for name in self.metadata:
+        for name in self.variable_metadata:
             try:
-                metric_dataset[f"{name}_bin_edges"].attrs["units"] = self.metadata[
-                    name
-                ].units
+                metric_dataset[f"{name}_bin_edges"].attrs[
+                    "units"
+                ] = self.variable_metadata[name].units
             except KeyError:
                 logging.info(
                     f"{name} in metadata but not in data written to "

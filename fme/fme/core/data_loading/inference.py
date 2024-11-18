@@ -187,7 +187,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         dataset = XarrayDataset(config.dataset, requirements=requirements)
         self._dataset = dataset
         self._sigma_coordinates = dataset.sigma_coordinates
-        self._metadata = dataset.metadata
+        self._variable_metadata = dataset.variable_metadata
         self._horizontal_coordinates = dataset.horizontal_coordinates
         self._timestep = dataset.timestep
         self._forward_steps_in_memory = forward_steps_in_memory
@@ -290,8 +290,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         return self._sigma_coordinates
 
     @property
-    def metadata(self) -> xr.Dataset:
-        return self._metadata
+    def variable_metadata(self) -> xr.Dataset:
+        return self._variable_metadata
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
