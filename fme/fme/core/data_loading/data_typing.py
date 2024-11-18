@@ -48,16 +48,24 @@ class SigmaCoordinates:
             bk=self.bk.to(device),
         )
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, SigmaCoordinates):
+            return False
+        return torch.allclose(self.ak, other.ak) and torch.allclose(self.bk, other.bk)
+
     def as_dict(self) -> TensorMapping:
         return {"ak": self.ak, "bk": self.bk}
 
 
-@dataclasses.dataclass
 class HorizontalCoordinates(abc.ABC):
     """
     Parent class for horizontal coordinate system grids.
     Contains coords which must be subclassed to provide the coordinates.
     """
+
+    @abc.abstractmethod
+    def __eq__(self, other) -> bool:
+        pass
 
     @property
     @abc.abstractmethod
@@ -144,6 +152,16 @@ class LatLonCoordinates(HorizontalCoordinates):
     def __post_init__(self):
         self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, LatLonCoordinates):
+            return False
+        return (
+            torch.allclose(self.lat, other.lat)
+            and torch.allclose(self.lon, other.lon)
+            and self.loaded_lat_name == other.loaded_lat_name
+            and self.loaded_lon_name == other.loaded_lon_name
+        )
+
     @property
     def area_weights(self) -> torch.Tensor:
         return self._area_weights
@@ -219,6 +237,15 @@ class HEALPixCoordinates(HorizontalCoordinates):
     face: torch.Tensor
     height: torch.Tensor
     width: torch.Tensor
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, HEALPixCoordinates):
+            return False
+        return (
+            torch.allclose(self.face, other.face)
+            and torch.allclose(self.height, other.height)
+            and torch.allclose(self.width, other.width)
+        )
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
