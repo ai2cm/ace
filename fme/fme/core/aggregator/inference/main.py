@@ -165,6 +165,7 @@ class InferenceEvaluatorAggregatorConfig:
         timestep: datetime.timedelta,
         n_timesteps: int,
         initial_times: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
         record_step_20: bool = False,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
@@ -208,6 +209,7 @@ class InferenceEvaluatorAggregatorConfig:
             record_step_20=record_step_20,
             variable_metadata=variable_metadata,
             channel_mean_names=channel_mean_names,
+            normalize=normalize,
         )
 
 
@@ -231,6 +233,7 @@ class InferenceEvaluatorAggregator(
         timestep: datetime.timedelta,
         n_timesteps: int,
         initial_times: xr.DataArray,
+        normalize: Callable[[TensorMapping], TensorDict],
         record_step_20: bool = False,
         log_video: bool = False,
         enable_extended_videos: bool = False,
@@ -251,6 +254,7 @@ class InferenceEvaluatorAggregator(
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
             initial_times: Initial times for each sample.
+            normalize: Normalization function to use.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
             enable_extended_videos: Whether to log videos of statistical
@@ -358,6 +362,7 @@ class InferenceEvaluatorAggregator(
             if name not in ["mean", "mean_norm"]
         }
         self._n_timesteps_seen = 0
+        self._normalize = normalize
 
     @property
     def log_time_series(self) -> bool:
@@ -367,15 +372,14 @@ class InferenceEvaluatorAggregator(
     def record_batch(
         self,
         data: PairedData[CurrentDevice],
-        normalize: Callable[[TensorMapping], TensorDict],
     ) -> InferenceLogs:
         if len(data.prediction) == 0:
             raise ValueError("No prediction values in data")
         if len(data.target) == 0:
             raise ValueError("No target values in data")
         target_data = {k: v for k, v in data.target.items() if k in data.prediction}
-        target_data_norm = normalize(target_data)
-        gen_data_norm = normalize(data.prediction)
+        target_data_norm = self._normalize(target_data)
+        gen_data_norm = self._normalize(data.prediction)
         for aggregator in self._aggregators.values():
             aggregator.record_batch(
                 target_data=target_data,
@@ -402,7 +406,6 @@ class InferenceEvaluatorAggregator(
         initial_condition: Union[
             PairedData[CurrentDevice], PrognosticState[CurrentDevice]
         ],
-        normalize: Callable[[TensorMapping], TensorDict],
     ) -> InferenceLogs:
         if self._n_timesteps_seen != 0:
             raise RuntimeError(
@@ -411,14 +414,14 @@ class InferenceEvaluatorAggregator(
             )
         if isinstance(initial_condition, PairedData):
             target_data = initial_condition.target
-            target_data_norm = normalize(target_data)
+            target_data_norm = self._normalize(target_data)
             gen_data = initial_condition.prediction
-            gen_data_norm = normalize(gen_data)
+            gen_data_norm = self._normalize(gen_data)
             n_times = initial_condition.times.shape[1]
         else:
             batch_data = initial_condition.as_batch_data()
             target_data = batch_data.data
-            target_data_norm = normalize(target_data)
+            target_data_norm = self._normalize(target_data)
             gen_data = target_data
             gen_data_norm = target_data_norm
             n_times = batch_data.times.shape[1]
@@ -465,6 +468,8 @@ class InferenceEvaluatorAggregator(
         Args:
             step_slice: Timestep slice to determine the time series subset.
 
+        Returns:
+            Tuple of start index and list of logs.
         """
         logs = {}
         for name, aggregator in self._aggregators.items():
@@ -590,8 +595,7 @@ class InferenceAggregator(
         """
         Args:
             gridded_operations: Gridded operations for computing horizontal reductions.
-            sigma_coordinates: Data sigma coordinates
-            timestep: Timestep of the model.
+            n_timesteps: Number of timesteps in the model.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
@@ -621,14 +625,12 @@ class InferenceAggregator(
     def record_batch(
         self,
         data: BatchData[CurrentDevice],
-        normalize: Optional[Callable[[TensorMapping], TensorDict]] = None,
     ) -> InferenceLogs:
         """
         Record a batch of data.
 
         Args:
             data: Batch of data to record.
-            normalize: Ignored, kept for API compatibility.
         """
         if len(data.data) == 0:
             raise ValueError("data is empty")
@@ -647,7 +649,6 @@ class InferenceAggregator(
     def record_initial_condition(
         self,
         initial_condition: PrognosticState[CurrentDevice],
-        normalize: Callable[[TensorMapping], TensorDict],
     ) -> InferenceLogs:
         if self._n_timesteps_seen != 0:
             raise RuntimeError(
@@ -702,7 +703,6 @@ class InferenceAggregator(
 
         Args:
             step_slice: Timestep slice to determine the time series subset.
-
         """
         logs = {}
         for name, aggregator in self._aggregators.items():

@@ -36,6 +36,8 @@ class MockWandB:
             self._logs[step].update(data)
 
     def get_logs(self) -> List[Dict[str, Any]]:
+        if len(self._logs) == 0:
+            return []
         n_logs = max(self._logs.keys())
         return_value: List[Dict[str, Any]] = [dict() for _ in range(n_logs + 1)]
         for step, log in self._logs.items():

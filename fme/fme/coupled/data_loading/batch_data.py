@@ -13,6 +13,7 @@ from fme.core.data_loading.batch_data import (
     CurrentDevice,
     DataLoader,
     GriddedDataABC,
+    SizedMap,
 )
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -122,7 +123,7 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         def to_device(x: CoupledBatchData[CPU]) -> CoupledBatchData[CurrentDevice]:
             return x.to_device()
 
-        return map(to_device, self._loader)
+        return SizedMap(to_device, self._loader)
 
     @property
     def variable_metadata(self) -> Mapping[str, VariableMetadata]:

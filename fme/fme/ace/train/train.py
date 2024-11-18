@@ -58,7 +58,7 @@ import os
 import time
 import uuid
 from datetime import timedelta
-from typing import Dict, Generic, Mapping, Optional, Sequence, TypeVar
+from typing import Callable, Dict, Generic, Mapping, Optional, Sequence, TypeVar
 
 import dacite
 import dask
@@ -105,6 +105,7 @@ from fme.core.stepper import (
     TrainOutput,
     TrainOutputABC,
 )
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
 # dask used on individual workers to load batches
@@ -157,10 +158,11 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         timestep=train_data.timestep,
         initial_inference_times=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
-        n_timesteps=config.inference_n_forward_steps + 1,
+        n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
         variable_metadata=train_data.variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
+        normalize=stepper.normalizer.normalize,
     )
     return Trainer(
         train_data=train_data,
@@ -233,6 +235,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
         initial_inference_times: xr.DataArray,
         record_step_20: bool,
         n_timesteps: int,
+        normalize: Callable[[TensorMapping], TensorDict],
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
@@ -248,6 +251,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
         self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
+        self.normalize = normalize
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
@@ -272,6 +276,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
             n_timesteps=self.n_timesteps,
             variable_metadata=self.variable_metadata,
             channel_mean_names=self.channel_mean_names,
+            normalize=self.normalize,
         )
 
 
