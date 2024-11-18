@@ -26,10 +26,20 @@ class CoupledDataset(Dataset):
         ocean: XarrayDataset,
         atmosphere: XarrayDataset,
         ocean_timestep: datetime.timedelta,
-        atmosphere_timestep: datetime.timedelta,
+        n_steps_fast: int,
     ):
+        """
+        Args:
+            ocean: ocean dataset
+            atmosphere: atmosphere dataset
+            ocean_timestep: ocean timestep
+            n_steps_fast: number of atmosphere timesteps per ocean timestep
+        """
         self.ocean = ocean
         self.atmosphere = atmosphere
+        atmosphere_timestep = datetime.timedelta(
+            seconds=ocean_timestep.total_seconds() / n_steps_fast
+        )
         for ts, ds in [(ocean_timestep, ocean), (atmosphere_timestep, atmosphere)]:
             try:
                 timestep = ds.timestep
@@ -43,30 +53,7 @@ class CoupledDataset(Dataset):
                     f"{ts} but got {timestep}."
                 )
 
-        if atmosphere_timestep > ocean_timestep:
-            raise ValueError(f"Atmosphere timestep must be no larger than the ocean's.")
-        self.timestep = ocean_timestep
-
-        n_steps_fast = ocean_timestep / atmosphere_timestep
-        if n_steps_fast != int(n_steps_fast):
-            raise ValueError(
-                f"Expected atmosphere timestep {atmosphere_timestep} to be a multiple "
-                f"of ocean timestep {ocean_timestep}."
-            )
-        self._n_steps_fast = int(n_steps_fast)
-
-        # check for misconfigured DataRequirements n_timesteps in the atmosphere
-        slow_n_steps = self.ocean.n_steps
-        fast_n_steps = (slow_n_steps - 1) * self._n_steps_fast + 1
-        if self.atmosphere.n_steps != fast_n_steps:
-            raise ValueError(
-                f"Atmosphere dataset timestep is {atmosphere_timestep} and "
-                f"ocean dataset timestep is {ocean_timestep}, "
-                f"so we need {self._n_steps_fast} atmosphere steps for each of the "
-                f"{slow_n_steps - 1} ocean steps, giving {fast_n_steps} total "
-                "timepoints (including IC) per sample, but atmosphere dataset "
-                f"was configured to return {self.atmosphere.n_steps} steps."
-            )
+        self._n_steps_fast = n_steps_fast
 
         metadata: Dict[str, VariableMetadata] = {}
         for ds in [ocean, atmosphere]:
