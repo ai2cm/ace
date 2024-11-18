@@ -29,7 +29,7 @@ def get_coupled_dataset(
         ocean,
         atmosphere,
         requirements.ocean_timestep,
-        requirements.atmosphere_timestep,
+        requirements.n_steps_fast,
     )
     return dataset
 
@@ -116,6 +116,6 @@ def get_coupled_data_loader(
         variable_metadata=dataset.variable_metadata,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
-        timestep=max(requirements.timesteps),
+        timestep=requirements.ocean_timestep,
         horizontal_coordinates=dataset.horizontal_coordinates,
     )
