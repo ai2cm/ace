@@ -42,25 +42,25 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self,
         gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
     ):
         """
         Args:
             gridded_operations: Operations for computing metrics on gridded data.
             sigma_coordinates: Coordinates for defining pressure levels.
-            metadata: Metadata for each variable.
+            variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
         """
         aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(gridded_operations)
         }
-        aggregators["snapshot"] = SnapshotAggregator(metadata)
+        aggregators["snapshot"] = SnapshotAggregator(variable_metadata)
         aggregators["derived"] = DerivedMetricsAggregator(
             gridded_operations, sigma_coordinates
         )
-        aggregators["mean_map"] = MapAggregator(metadata)
+        aggregators["mean_map"] = MapAggregator(variable_metadata)
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 

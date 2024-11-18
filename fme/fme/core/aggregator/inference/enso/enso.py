@@ -78,7 +78,7 @@ class EnsoCoefficientEvaluatorAggregator:
         n_forward_timesteps: Number of timesteps for each sample.
         timestep: Timestep duration.
         gridded_operations: GriddedOperations instance for area-weighted RMSE.
-        metadata: Metadata for the variables in the data.
+        variable_metadata: Metadata for the variables in the data.
     """
 
     def __init__(
@@ -87,7 +87,7 @@ class EnsoCoefficientEvaluatorAggregator:
         n_forward_timesteps: int,
         timestep: datetime.timedelta,
         gridded_operations: GriddedOperations,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._sample_index_series: List[
             Optional[xr.DataArray]
@@ -95,10 +95,10 @@ class EnsoCoefficientEvaluatorAggregator:
             self.enso_index, initial_times, n_forward_timesteps, timestep
         )
         self._ops = gridded_operations
-        if metadata is not None:
-            self._metadata: Mapping[str, VariableMetadata] = metadata
+        if variable_metadata is not None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = variable_metadata
         else:
-            self._metadata = {}
+            self._variable_metadata = {}
         n_samples = len(self._sample_index_series)
         self._target_covariances: List[TensorDict] = [{} for _ in range(n_samples)]
         self._gen_covariances: List[TensorDict] = [{} for _ in range(n_samples)]
@@ -248,9 +248,9 @@ class EnsoCoefficientEvaluatorAggregator:
         wandb = WandB.get_instance()
         images, metrics = {}, {}
         for name in gen_coefficients.keys():
-            if name in self._metadata:
-                caption_name = self._metadata[name].long_name
-                caption_units = self._metadata[name].units
+            if name in self._variable_metadata:
+                caption_name = self._variable_metadata[name].long_name
+                caption_units = self._variable_metadata[name].units
             else:
                 caption_name = name
                 caption_units = "unknown units"
@@ -323,9 +323,9 @@ class EnsoCoefficientEvaluatorAggregator:
         return xr.concat([target_coefficients_ds, gen_coefficients_ds], dim="source")
 
     def _get_var_attrs(self, name: str) -> Dict[str, str]:
-        if name in self._metadata:
-            attrs_name = self._metadata[name].long_name
-            attrs_units = self._metadata[name].units
+        if name in self._variable_metadata:
+            attrs_name = self._variable_metadata[name].long_name
+            attrs_units = self._variable_metadata[name].units
         else:
             attrs_name = name
             attrs_units = "unknown units"

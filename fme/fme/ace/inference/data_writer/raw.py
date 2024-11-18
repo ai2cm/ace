@@ -36,7 +36,7 @@ class PairedRawDataWriter:
         path: str,
         n_initial_conditions: int,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         self._target_writer = RawDataWriter(
@@ -44,7 +44,7 @@ class PairedRawDataWriter:
             label="autoregressive_target.nc",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
         self._prediction_writer = RawDataWriter(
@@ -52,7 +52,7 @@ class PairedRawDataWriter:
             label="autoregressive_predictions.nc",
             n_initial_conditions=n_initial_conditions,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
 
@@ -90,7 +90,7 @@ class RawDataWriter:
         label: str,
         n_initial_conditions: int,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -105,7 +105,7 @@ class RawDataWriter:
         """
         filename = str(Path(path) / label)
         self._save_names = save_names
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
         self.dataset.createDimension(LEAD_TIME_DIM, None)  # unlimited dimension
@@ -177,13 +177,13 @@ class RawDataWriter:
                     dims,
                     fill_value=np.nan,
                 )
-                if variable_name in self.metadata:
-                    self.dataset.variables[variable_name].units = self.metadata[
+                if variable_name in self.variable_metadata:
+                    self.dataset.variables[
                         variable_name
-                    ].units
-                    self.dataset.variables[variable_name].long_name = self.metadata[
+                    ].units = self.variable_metadata[variable_name].units
+                    self.dataset.variables[
                         variable_name
-                    ].long_name
+                    ].long_name = self.variable_metadata[variable_name].long_name
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME]
                 )

@@ -561,7 +561,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
     def __init__(
         self,
         loader: DataLoader[BatchData[CPU]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -573,7 +573,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
                 TensorMapping where keys indicate variable name.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
-            metadata: Metadata for each variable.
+            variable_metadata: Metadata for each variable.
             area_weights: Weights for each grid cell, used for computing area-weighted
                 averages. Has shape [n_x_coord, n_y_coord].
             sigma_coordinates: Sigma coordinates for each grid cell, used for computing
@@ -584,7 +584,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
                 distributed training.
         """
         self._loader = loader
-        self._metadata = metadata
+        self._variable_metadata = variable_metadata
         self._sigma_coordinates = sigma_coordinates
         self._horizontal_coordinates = horizontal_coordinates
         self._timestep = timestep
@@ -599,8 +599,8 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
         return map(on_device, self._loader)
 
     @property
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        return self._metadata
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._variable_metadata
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:

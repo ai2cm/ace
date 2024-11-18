@@ -38,7 +38,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         n_samples=n_samples,
         n_months=24,
         save_names=None,
-        metadata={"x": VariableMetadata(units="m", long_name="x_name")},
+        variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
     )
     month_values = []

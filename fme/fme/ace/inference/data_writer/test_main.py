@@ -25,7 +25,7 @@ def test_save_initial_condition_single_timestep():
             ic_data=batch,
             path=tmpdir,
             prognostic_names=["air_temperature"],
-            metadata={
+            variable_metadata={
                 "air_temperature": VariableMetadata(
                     long_name="Air Temperature", units="K"
                 )
@@ -65,7 +65,7 @@ def test_save_initial_condition_multiple_timesteps():
             ic_data=batch,
             path=tmpdir,
             prognostic_names=["air_temperature"],
-            metadata={
+            variable_metadata={
                 "air_temperature": VariableMetadata(
                     long_name="Air Temperature", units="K"
                 )

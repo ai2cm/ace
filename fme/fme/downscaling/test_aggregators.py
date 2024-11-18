@@ -98,11 +98,11 @@ def test_mean_shapes(metric, input_shape, output_shape):
 
 
 def test_snapshot_runs():
-    metadata = {
+    variable_metadata = {
         "x": VariableMetadata("foo/sec", "bary bar bar"),
         "y": VariableMetadata("bar/m", "fooey foo"),
     }
-    snapshot = SnapshotAggregator(metadata)
+    snapshot = SnapshotAggregator(variable_metadata)
     batch_size, height, width = 2, 4, 8
 
     target = {

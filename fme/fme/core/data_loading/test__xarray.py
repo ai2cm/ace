@@ -709,10 +709,14 @@ def test_transfer_properties(overrides):
         BASE_PROPERTIES = Dataset.BASE_PROPERTIES
 
         def __init__(
-            self, is_remote, metadata, horizontal_coordinates, sigma_coordinates
+            self,
+            is_remote,
+            variable_metadata,
+            horizontal_coordinates,
+            sigma_coordinates,
         ):
             self.is_remote = is_remote
-            self.metadata = metadata
+            self.variable_metadata = variable_metadata
             self.horizontal_coordinates = horizontal_coordinates
             self.sigma_coordinates = sigma_coordinates
             self.not_property_a = "a"
@@ -720,7 +724,7 @@ def test_transfer_properties(overrides):
 
     dataset_source = MockDataset(
         is_remote=True,
-        metadata="metadata",
+        variable_metadata="metadata",
         horizontal_coordinates="horizontal_coordinates",
         sigma_coordinates="sigma_coordinates",
     )

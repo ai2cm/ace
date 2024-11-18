@@ -155,7 +155,7 @@ class InferenceEvaluatorConfig:
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
-            metadata=data.metadata,
+            variable_metadata=data.variable_metadata,
             coords=data.coords,
         )
 
@@ -243,7 +243,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + 1,
-        metadata=data.metadata,
+        variable_metadata=data.variable_metadata,
         initial_times=initial_times,
         channel_mean_names=stepper.out_names,
     )
