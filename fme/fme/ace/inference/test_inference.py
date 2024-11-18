@@ -164,10 +164,14 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         for metric, val in log.items():
             # check that time series metrics match
             if "inference/mean" in metric:
-                assert metric in wandb_logs[i]
-                if np.isnan(val):
-                    assert np.isnan(wandb_logs[i][metric])
-                else:
+                if i > 0:
+                    assert metric in wandb_logs[i]
+                    if np.isnan(val):
+                        assert np.isnan(wandb_logs[i][metric])
+                    else:
+                        assert wandb_logs[i][metric] == val
+                elif not np.isnan(val):  # for IC only valid data is reported to wandb
+                    assert metric in wandb_logs[i]
                     assert wandb_logs[i][metric] == val
 
     ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")

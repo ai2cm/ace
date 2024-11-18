@@ -275,7 +275,7 @@ def run_inference_from_config(config: InferenceConfig):
         )
     aggregator = config.aggregator.build(
         gridded_operations=data.gridded_operations,
-        n_timesteps=config.n_forward_steps + 1,
+        n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
         variable_metadata=data.variable_metadata,
     )
 
@@ -287,7 +287,7 @@ def run_inference_from_config(config: InferenceConfig):
     run_inference(
         stepper=stepper,
         initial_condition=initial_condition,
-        forcing_data=data,
+        forcing_data=data.loader,
         writer=writer,
         aggregator=aggregator,
         record_logs=record_logs,
