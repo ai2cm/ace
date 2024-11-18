@@ -18,14 +18,20 @@ See complete documentation [here](https://ai2-climate-emulator.readthedocs.io/en
 
 ## Model checkpoints
 
-Publically released model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.
+Pretrained model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.
 
 ## Available datasets
 Two versions of the complete dataset described in [arxiv:2310.02074](https://arxiv.org/abs/2310.02074)
-are available on a requester pays Google Cloud Storage bucket:
+are available on a [requester pays](https://cloud.google.com/storage/docs/requester-pays) Google Cloud Storage bucket:
 ```
 gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-zarrs
 gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs
 ```
 The `zarr` format is convenient for ad-hoc analysis. The netCDF version contains our
 train/validation split which was used for training and inference.
+
+The datasets used in the forthcoming ACE2 paper are available at:
+```
+gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/c96-1deg-shield/
+gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/era5-1deg-1940-2022.zarr/
+```
