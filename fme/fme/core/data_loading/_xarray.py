@@ -280,7 +280,6 @@ class XarrayDataset(Dataset):
         self.engine = config.engine
         self.dtype = config.torch_dtype
         self.spatial_dimensions = config.spatial_dimensions
-        self._default_file_pattern_check()
         fs = _get_fs(self.path)
         glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
         self._raw_paths = _preserve_protocol(self.path, glob_paths)
@@ -330,14 +329,6 @@ class XarrayDataset(Dataset):
     def all_times(self) -> xr.CFTimeIndex:
         """Time index of all available times in the data"""
         return self._all_times
-
-    def _default_file_pattern_check(self):
-        if self.engine == "zarr" and self.file_pattern == "*.nc":
-            raise ValueError(
-                "The file pattern is set to the default NetCDF file pattern *.nc "
-                "but the engine is specified as 'zarr'. Please set "
-                "`XarrayDataConfig.file_pattern` to match the zarr filename."
-            )
 
     def _get_variable_metadata(self, ds):
         result = {}
