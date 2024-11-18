@@ -8,6 +8,7 @@ from typing import (
     Collection,
     Dict,
     Generic,
+    Iterable,
     Iterator,
     List,
     Literal,
@@ -15,6 +16,7 @@ from typing import (
     Optional,
     Protocol,
     Sequence,
+    Sized,
     Tuple,
     TypeVar,
 )
@@ -487,9 +489,8 @@ class PairedData(Generic[DeviceType]):
 T = TypeVar("T", covariant=True)
 
 
-class DataLoader(Protocol, Generic[T]):
-    def __iter__(self) -> Iterator[T]:
-        ...
+class DataLoader(Protocol, Generic[T], Sized, Iterable[T]):
+    pass
 
 
 class GriddedDataABC(abc.ABC, Generic[T]):
@@ -550,6 +551,21 @@ class GriddedDataABC(abc.ABC, Generic[T]):
         ...
 
 
+U = TypeVar("U")
+
+
+class SizedMap(Generic[T, U], Sized, Iterable[U]):
+    def __init__(self, func: Callable[[T], U], iterable: DataLoader[T]):
+        self._func = func
+        self._iterable = iterable
+
+    def __len__(self) -> int:
+        return len(self._iterable)
+
+    def __iter__(self) -> Iterator[U]:
+        return map(self._func, self._iterable)
+
+
 class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
     """
     Data as required for pytorch training.
@@ -596,7 +612,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
         def on_device(batch: BatchData[CPU]) -> BatchData[CurrentDevice]:
             return batch.to_device()
 
-        return map(on_device, self._loader)
+        return SizedMap(on_device, self._loader)
 
     @property
     def variable_metadata(self) -> Mapping[str, VariableMetadata]:
