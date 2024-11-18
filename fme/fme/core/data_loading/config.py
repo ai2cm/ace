@@ -252,6 +252,14 @@ class XarrayDataConfig:
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     renamed_variables: Optional[Mapping[str, str]] = None
 
+    def _default_file_pattern_check(self):
+        if self.engine == "zarr" and self.file_pattern == "*.nc":
+            raise ValueError(
+                "The file pattern is set to the default NetCDF file pattern *.nc "
+                "but the engine is specified as 'zarr'. Please set "
+                "`XarrayDataConfig.file_pattern` to match the zarr filename."
+            )
+
     def __post_init__(self):
         if self.n_repeats > 1 and not self.infer_timestep:
             raise ValueError(
@@ -276,6 +284,7 @@ class XarrayDataConfig:
                     f"renaming: {overlap}. "
                     "Please use the final renamed variables in the overwrite config."
                 )
+        self._default_file_pattern_check()
 
 
 @dataclasses.dataclass
