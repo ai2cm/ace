@@ -19,10 +19,10 @@ class SeasonalAggregator:
     def __init__(
         self,
         ops: GriddedOperations,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         self._area_weighted_mean = ops.area_weighted_mean
-        self._metadata = metadata
+        self._variable_metadata = variable_metadata
         self._target_dataset: Optional[xr.Dataset] = None
         self._gen_dataset: Optional[xr.Dataset] = None
 
@@ -94,9 +94,9 @@ class SeasonalAggregator:
             if name == "counts":
                 continue
 
-            if self._metadata is not None and name in self._metadata:
-                long_name = self._metadata[name].long_name
-                units = self._metadata[name].units
+            if self._variable_metadata is not None and name in self._variable_metadata:
+                long_name = self._variable_metadata[name].long_name
+                units = self._variable_metadata[name].units
                 caption_name = f"{long_name} ({units})"
             else:
                 caption_name = name

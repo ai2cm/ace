@@ -113,7 +113,7 @@ def get_coupled_data_loader(
 
     return CoupledGriddedData(
         loader=dataloader,
-        metadata=dataset.metadata,
+        variable_metadata=dataset.variable_metadata,
         sampler=sampler,
         sigma_coordinates=dataset.sigma_coordinates,
         timestep=max(requirements.timesteps),

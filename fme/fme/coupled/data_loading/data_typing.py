@@ -70,9 +70,9 @@ class CoupledDataset(Dataset):
 
         metadata: Dict[str, VariableMetadata] = {}
         for ds in [ocean, atmosphere]:
-            metadata.update(ds.metadata)
+            metadata.update(ds.variable_metadata)
         self._is_remote = any(ds.is_remote for ds in [ocean, atmosphere])
-        self._metadata = metadata
+        self._variable_metadata = metadata
         self._sigma_coordinates = atmosphere.sigma_coordinates
         self._horizontal_coordinates = atmosphere.horizontal_coordinates
 
@@ -81,8 +81,8 @@ class CoupledDataset(Dataset):
         return self.ocean.n_steps - 1
 
     @property
-    def metadata(self) -> Mapping[str, VariableMetadata]:
-        return self._metadata
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._variable_metadata
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:

@@ -82,7 +82,7 @@ class DataWriterConfig:
         n_timesteps: int,
         timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "PairedDataWriter":
         return PairedDataWriter(
@@ -90,7 +90,7 @@ class DataWriterConfig:
             n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
             timestep=timestep,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
@@ -108,7 +108,7 @@ class DataWriterConfig:
         n_timesteps: int,
         timestep: datetime.timedelta,
         prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "DataWriter":
         if self.save_histogram_files:
@@ -125,7 +125,7 @@ class DataWriterConfig:
             path=experiment_dir,
             n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
             timestep=timestep,
             enable_prediction_netcdfs=self.save_prediction_files,
@@ -142,7 +142,7 @@ class PairedDataWriter:
         path: str,
         n_initial_conditions: int,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
@@ -158,7 +158,7 @@ class PairedDataWriter:
             path: Path to write netCDF file(s).
             n_initial_conditions: Number of ICs/ensemble members to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
                 containing the predictions and target values.
@@ -174,7 +174,7 @@ class PairedDataWriter:
         self._writers: List[PairedSubwriter] = []
         self.path = path
         self.coords = coords
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.prognostic_names = prognostic_names
 
         if time_coarsen is not None:
@@ -194,7 +194,7 @@ class PairedDataWriter:
                         path=path,
                         n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -207,7 +207,7 @@ class PairedDataWriter:
                     n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=save_names,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                     coords=coords,
                 )
             )
@@ -217,7 +217,7 @@ class PairedDataWriter:
                     PairedVideoDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -228,7 +228,7 @@ class PairedDataWriter:
                     PairedHistogramDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         save_names=save_names,
                     )
                 )
@@ -238,7 +238,7 @@ class PairedDataWriter:
                 path=path,
                 is_restart_step=lambda i: i == n_timesteps - 1,
                 prognostic_names=prognostic_names,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
                 coords=coords,
             )
         )
@@ -251,7 +251,7 @@ class PairedDataWriter:
             ic_data=ic_data.as_batch_data(),
             path=self.path,
             prognostic_names=self.prognostic_names,
-            metadata=self.metadata,
+            variable_metadata=self.variable_metadata,
             coords=self.coords,
         )
 
@@ -287,7 +287,7 @@ def _save_initial_condition(
     ic_data: BatchData,
     path: str,
     prognostic_names: Sequence[str],
-    metadata: Mapping[str, VariableMetadata],
+    variable_metadata: Mapping[str, VariableMetadata],
     coords: Mapping[str, np.ndarray],
 ):
     """
@@ -299,7 +299,7 @@ def _save_initial_condition(
         batch: Batch data containing the initial condition.
         path: Directory to write the netCDF file as initial_condition.nc.
         prognostic_names: Names of prognostic variables to save.
-        metadata: Metadata for each variable to be written to the file.
+        variable_metadata: Metadata for each variable to be written to the file.
         coords: Coordinate data to be written to the file.
     """
     if ic_data.times.sizes["time"] == 1:
@@ -326,10 +326,10 @@ def _save_initial_condition(
             )
         data = maybe_squeeze(ic_data.data[name]).cpu().numpy()
         data_arrays[name] = xr.DataArray(data, dims=snapshot_dims)
-        if name in metadata:
+        if name in variable_metadata:
             data_arrays[name].attrs = {
-                "long_name": metadata[name].long_name,
-                "units": metadata[name].units,
+                "long_name": variable_metadata[name].long_name,
+                "units": variable_metadata[name].units,
             }
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
@@ -342,7 +342,7 @@ class DataWriter:
         path: str,
         n_initial_conditions: int,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
@@ -357,7 +357,7 @@ class DataWriter:
             n_initial_conditions: Number of initial conditions / timeseries
                 to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             timestep: Timestep of the model.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
@@ -386,7 +386,7 @@ class DataWriter:
                         label="autoregressive_predictions.nc",
                         n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -400,7 +400,7 @@ class DataWriter:
                     n_samples=n_initial_conditions,
                     n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                     coords=coords,
                 )
             )
@@ -410,13 +410,13 @@ class DataWriter:
                 path=path,
                 is_restart_step=lambda i: i == n_timesteps - 1,
                 prognostic_names=prognostic_names,
-                metadata=metadata,
+                variable_metadata=variable_metadata,
                 coords=coords,
             )
         )
         self.path = path
         self.prognostic_names = prognostic_names
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
 
     def append_batch(
@@ -454,7 +454,7 @@ class DataWriter:
             ic_data=ic_data.as_batch_data(),
             path=self.path,
             prognostic_names=self.prognostic_names,
-            metadata=self.metadata,
+            variable_metadata=self.variable_metadata,
             coords=self.coords,
         )
 

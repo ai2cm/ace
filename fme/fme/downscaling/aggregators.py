@@ -186,8 +186,10 @@ class ZonalPowerSpectrum:
 
 
 class SnapshotAggregator:
-    def __init__(self, metadata: Optional[Mapping[str, VariableMetadata]]) -> None:
-        self._snapshot_aggregator = CoreSnapshotAggregator(metadata)
+    def __init__(
+        self, variable_metadata: Optional[Mapping[str, VariableMetadata]]
+    ) -> None:
+        self._snapshot_aggregator = CoreSnapshotAggregator(variable_metadata)
 
     def _tile_time_dim(self, x: torch.Tensor) -> torch.Tensor:
         time_dim = -3
@@ -228,20 +230,20 @@ class MeanMapAggregator:
     bias maps.
 
     Args:
-        metadata: metadata for the variables.
+        variable_metadata: metadata for the variables.
         gap_width: Width between the prediction and target images.
     """
 
     def __init__(
         self,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         gap_width: int = 4,
     ):
         self.gap_width = gap_width
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
 
         def batch_mean(x: torch.Tensor) -> torch.Tensor:
             assert (
@@ -288,9 +290,9 @@ class MeanMapAggregator:
     }
 
     def _get_caption(self, key: str, name: str, vmin: float, vmax: float) -> str:
-        if name in self._metadata:
-            caption_name = self._metadata[name].long_name
-            units = self._metadata[name].units
+        if name in self._variable_metadata:
+            caption_name = self._variable_metadata[name].long_name
+            units = self._variable_metadata[name].units
         else:
             caption_name, units = name, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
@@ -326,7 +328,7 @@ class MeanMapAggregator:
             "source": ["target", "prediction"],
         }
         for var_name in target:
-            metadata = self._metadata.get(
+            metadata = self._variable_metadata.get(
                 var_name, VariableMetadata("unknown_units", var_name)
             )._asdict()
             datum = torch.stack(
@@ -472,7 +474,11 @@ class Aggregator:
     Args:
         area_weights: Tensor of area weights.
         latitudes: Tensor of latitudes.
+        downscale_factor: Downscaling factor.
+        n_histogram_bins: Number of bins for histogram comparisons.
+        percentiles: Percentiles for histogram comparisons.
         ssim_kwargs: Optional keyword arguments for SSIM computation.
+        variable_metadata: Metadata for each variable.
     """
 
     def __init__(
@@ -483,7 +489,7 @@ class Aggregator:
         n_histogram_bins: int = 300,
         percentiles: Optional[List[float]] = None,
         ssim_kwargs: Optional[Mapping[str, Any]] = None,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> None:
         self.downscale_factor = downscale_factor
         if area_weights is not None:
@@ -500,8 +506,8 @@ class Aggregator:
         self._comparisons: Mapping[str, _ComparisonAggregator] = {
             "rmse": MeanComparison(metrics.root_mean_squared_error),
             "weighted_rmse": MeanComparison(_area_weighted_rmse),
-            "snapshot": SnapshotAggregator(metadata),
-            "time_mean_map": MeanMapAggregator(metadata),
+            "snapshot": SnapshotAggregator(variable_metadata),
+            "time_mean_map": MeanMapAggregator(variable_metadata),
             "histogram": ComparedDynamicHistograms(
                 n_bins=n_histogram_bins, percentiles=percentiles
             ),
