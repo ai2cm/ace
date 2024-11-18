@@ -18,7 +18,7 @@ class PairedVideoDataWriter:
         self,
         path: str,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -26,17 +26,19 @@ class PairedVideoDataWriter:
             filename: Path to write netCDF file(s).
             n_samples: Number of samples to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         self.path = path
         self._metrics_filename = str(
             Path(path) / "reduced_autoregressive_predictions.nc"
         )
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self._video = VideoAggregator(
-            n_timesteps=n_timesteps, enable_extended_videos=True, metadata=metadata
+            n_timesteps=n_timesteps,
+            enable_extended_videos=True,
+            variable_metadata=variable_metadata,
         )
 
     def append_batch(

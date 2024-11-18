@@ -18,7 +18,7 @@ class PairedRestartWriter:
         path: str,
         is_restart_step: Callable[[int], bool],
         prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -27,11 +27,11 @@ class PairedRestartWriter:
             is_restart_step: Function that returns True if the given timestep is a
                 restart step.
             prognostic_names: Names of prognostic variables to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         self._writer = RestartWriter(
-            path, is_restart_step, prognostic_names, metadata, coords
+            path, is_restart_step, prognostic_names, variable_metadata, coords
         )
 
     def append_batch(
@@ -66,7 +66,7 @@ class RestartWriter:
         path: str,
         is_restart_step: Callable[[int], bool],
         prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -75,12 +75,12 @@ class RestartWriter:
             is_restart_step: Function that returns True if the given timestep is a
                 restart step.
             prognostic_names: Names of prognostic variables to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         self.restart_filename = str(Path(path) / "restart.nc")
         self._save_names = prognostic_names
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self.is_restart_step = is_restart_step
         self._get_horizontal_dims()
@@ -133,10 +133,10 @@ class RestartWriter:
             data_vars[name] = xr.DataArray(
                 prediction_data, dims=["sample", *self._horizontal_dims]
             )
-            if name in self.metadata:
+            if name in self.variable_metadata:
                 data_vars[name].attrs = {
-                    "long_name": self.metadata[name].long_name,
-                    "units": self.metadata[name].units,
+                    "long_name": self.variable_metadata[name].long_name,
+                    "units": self.variable_metadata[name].units,
                 }
         data_vars["time"] = restart_time
         ds = xr.Dataset(

@@ -45,7 +45,7 @@ class PairedMonthlyDataWriter:
         n_timesteps: int,
         timestep: datetime.timedelta,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         n_months = months_for_timesteps(n_timesteps, timestep)
@@ -55,7 +55,7 @@ class PairedMonthlyDataWriter:
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
         self._prediction_writer = MonthlyDataWriter(
@@ -64,7 +64,7 @@ class PairedMonthlyDataWriter:
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
 
@@ -101,7 +101,7 @@ class MonthlyDataWriter:
         n_samples: int,
         n_months: int,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -113,14 +113,14 @@ class MonthlyDataWriter:
             n_months: Number of months to write to the file.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         if label != "":
             label = "_" + label
         filename = str(Path(path) / f"monthly_mean{label}.nc")
         self._save_names = save_names
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
         self.dataset.createDimension(LEAD_TIME_DIM, n_months)
@@ -258,13 +258,13 @@ class MonthlyDataWriter:
                     fill_value=np.nan,
                 )
                 self.dataset.variables[variable_name][:] = 0.0
-                if variable_name in self.metadata:
-                    self.dataset.variables[variable_name].units = self.metadata[
+                if variable_name in self.variable_metadata:
+                    self.dataset.variables[
                         variable_name
-                    ].units
-                    self.dataset.variables[variable_name].long_name = self.metadata[
+                    ].units = self.variable_metadata[variable_name].units
+                    self.dataset.variables[
                         variable_name
-                    ].long_name
+                    ].long_name = self.variable_metadata[variable_name].long_name
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME]
                 )

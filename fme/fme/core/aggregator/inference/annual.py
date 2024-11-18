@@ -20,12 +20,12 @@ class GlobalMeanAnnualAggregator:
         self,
         ops: GriddedOperations,
         timestep: datetime.timedelta,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         monthly_reference_data: Optional[xr.Dataset] = None,
     ):
         self._area_weighted_mean = ops.area_weighted_mean
         self.timestep = timestep
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self._target_datasets: Optional[List[xr.Dataset]] = None
         self._gen_datasets: Optional[List[xr.Dataset]] = None
         self._monthly_reference_data = monthly_reference_data

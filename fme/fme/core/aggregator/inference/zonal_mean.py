@@ -61,7 +61,7 @@ class ZonalMeanAggregator:
     def __init__(
         self,
         n_timesteps: int,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
         """
         Args:
@@ -71,10 +71,10 @@ class ZonalMeanAggregator:
         """
         self._n_timesteps = n_timesteps
         self._dist = Distributed.get_instance()
-        if metadata is None:
-            self._metadata: Mapping[str, VariableMetadata] = {}
+        if variable_metadata is None:
+            self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
-            self._metadata = metadata
+            self._variable_metadata = variable_metadata
 
         self._target_data: Optional[TensorDict] = None
         self._gen_data: Optional[TensorDict] = None
@@ -135,7 +135,9 @@ class ZonalMeanAggregator:
                 .numpy()
             )
 
-            metadata = self._metadata.get(name, VariableMetadata("unknown_units", name))
+            metadata = self._variable_metadata.get(
+                name, VariableMetadata("unknown_units", name)
+            )
             vmin, vmax = get_cmap_limits(gen)
             data[f"gen/{name}"] = _RawData(
                 datum=gen,
@@ -174,9 +176,9 @@ class ZonalMeanAggregator:
         return ret
 
     def _get_caption(self, key: str, varname: str, vmin: float, vmax: float) -> str:
-        if varname in self._metadata:
-            caption_name = self._metadata[varname].long_name
-            units = self._metadata[varname].units
+        if varname in self._variable_metadata:
+            caption_name = self._variable_metadata[varname].long_name
+            units = self._variable_metadata[varname].units
         else:
             caption_name, units = varname, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)

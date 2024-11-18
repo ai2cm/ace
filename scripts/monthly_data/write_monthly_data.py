@@ -148,7 +148,7 @@ class Config:
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
             n_months=n_months,
-            metadata=data.loaders[0].dataset.metadata,
+            variable_metadata=data.loaders[0].dataset.variable_metadata,
             coords=coords,
         )
 

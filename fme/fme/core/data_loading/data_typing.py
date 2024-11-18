@@ -317,7 +317,7 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
     # List of properties to transfer by default from
     # dataset if using torch Concat or Subset
     BASE_PROPERTIES: List[str] = [
-        "metadata",
+        "variable_metadata",
         "horizontal_coordinates",
         "sigma_coordinates",
         "is_remote",
@@ -325,7 +325,7 @@ class Dataset(torch.utils.data.Dataset, abc.ABC):
 
     @property
     @abc.abstractmethod
-    def metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
         ...
 
     @property
