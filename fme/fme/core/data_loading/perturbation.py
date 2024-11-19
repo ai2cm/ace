@@ -1,39 +1,12 @@
 import abc
 import dataclasses
-from typing import Any, Callable, Dict, Mapping, Tuple, Type
+from typing import Any, Callable, ClassVar, Mapping, Tuple, Type, TypeVar
 
 import dacite
 import numpy as np
 import torch
 
-
-@dataclasses.dataclass
-class PerturbationSelector:
-    name: str
-    config: Mapping[str, Any]
-
-    def __post_init__(self):
-        try:
-            self.perturbation = get_from_registry(self.name).from_state(self.config)
-        except KeyError:
-            raise ValueError(
-                f"unknown module type {self.name}, "
-                f"known module types are {list(PERTURBATION_REGISTRY.keys())}"
-            )
-
-
-@dataclasses.dataclass
-class SSTPerturbation:
-    """
-    Configuration for sea surface temperature perturbations
-    applied to initial condition and forcing data.
-    Currently, this is strictly applied to both.
-
-    Attributes:
-        sst: List of perturbation selectors for SST perturbations.
-    """
-
-    sst: list[PerturbationSelector]
+from fme.core.registry.registry import Registry
 
 
 @dataclasses.dataclass
@@ -63,46 +36,64 @@ class PerturbationConfig(abc.ABC):
         ...
 
 
-PERTURBATION_REGISTRY: Dict[str, Type[PerturbationConfig]] = {}
+PT = TypeVar("PT", bound=Type[PerturbationConfig])
 
 
-def get_from_registry(name) -> Type[PerturbationConfig]:
-    return PERTURBATION_REGISTRY[name]
+@dataclasses.dataclass
+class PerturbationSelector:
+    type: str
+    config: Mapping[str, Any]
+    registry: ClassVar[Registry] = Registry()
+
+    def __post__init(self):
+        if self.registry is not Registry():
+            raise ValueError("PerturbationSelector.registry should not be set manually")
+
+    @classmethod
+    def register(cls, type_name) -> Callable[[PT], PT]:
+        return cls.registry.register(type_name)
+
+    def build(self) -> PerturbationConfig:
+        return self.registry.from_dict(self.get_state())
+
+    def get_state(self) -> Mapping[str, Any]:
+        """
+        Get a dictionary containing all the information needed to build a
+        PerturbationConfig.
+
+        """
+        return {"type": self.type, "config": self.config}
+
+    @classmethod
+    def get_available_types(cls):
+        """This class method is used to expose all available types of Perturbations."""
+        return cls(type="", config={}).registry._types.keys()
 
 
-def register(
-    name: str,
-) -> Callable[[Type[PerturbationConfig]], Type[PerturbationConfig]]:
+@dataclasses.dataclass
+class SSTPerturbation:
     """
-    Register a new PerturbationConfig type with the PERTURBATION_REGISTRY.
+    Configuration for sea surface temperature perturbations
+    applied to initial condition and forcing data.
+    Currently, this is strictly applied to both.
 
-    This is useful for adding new PerturbationConfig types to the registry from
-    other modules.
-
-    Args:
-        name: name of the PerturbationConfig type to register
-
-    Returns:
-        a decorator which registers the decorated class with the PERTURBATION_REGISTRY
+    Attributes:
+        sst: List of perturbation selectors for SST perturbations.
     """
-    if not isinstance(name, str):
-        raise TypeError(
-            f"name must be a string, got {name}, "
-            "make sure to use as @register('module_name')"
-        )
 
-    def decorator(cls: Type[PerturbationConfig]) -> Type[PerturbationConfig]:
-        PERTURBATION_REGISTRY[name] = cls
-        return cls
+    sst: list[PerturbationSelector]
 
-    return decorator
+    def __post_init__(self):
+        self.perturbations: list[PerturbationConfig] = [
+            perturbation.build() for perturbation in self.sst
+        ]
 
 
 def _get_ocean_mask(ocean_fraction: torch.Tensor, cutoff: float = 0.5) -> torch.Tensor:
     return ocean_fraction > cutoff
 
 
-@register("constant")
+@PerturbationSelector.register("constant")
 @dataclasses.dataclass
 class ConstantConfig(PerturbationConfig):
     """
@@ -122,7 +113,7 @@ class ConstantConfig(PerturbationConfig):
         data[ocean_mask] += self.amplitude  # type: ignore
 
 
-@register("greens_function")
+@PerturbationSelector.register("greens_function")
 @dataclasses.dataclass
 class GreensFunctionConfig(PerturbationConfig):
     """

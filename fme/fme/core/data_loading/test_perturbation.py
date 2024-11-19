@@ -10,10 +10,10 @@ from fme.core.data_loading.perturbation import (
 
 def test_constant_perturbation_config():
     selector = PerturbationSelector(
-        name="constant",
+        type="constant",
         config={"amplitude": 1.0},
     )
-    perturbation = selector.perturbation
+    perturbation = selector.build()
     assert isinstance(perturbation, ConstantConfig)
     assert perturbation.amplitude == 1.0
     nx, ny = 5, 5
@@ -29,7 +29,7 @@ def test_constant_perturbation_config():
 
 def test_green_function_perturbation_config():
     selector = PerturbationSelector(
-        name="greens_function",
+        type="greens_function",
         config={
             "amplitude": 1.0,
             "lat_center": 0.0,
@@ -38,7 +38,7 @@ def test_green_function_perturbation_config():
             "lon_width": 10.0,
         },
     )
-    perturbation = selector.perturbation
+    perturbation = selector.build()
     assert isinstance(perturbation, GreensFunctionConfig)
     assert perturbation.amplitude == 1.0
     assert perturbation.lat_center == 0.0
