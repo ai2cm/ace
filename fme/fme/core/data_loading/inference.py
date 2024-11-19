@@ -254,8 +254,8 @@ class InferenceDataset(torch.utils.data.Dataset):
                         to apply SST perturbations."
                     )
                 logging.debug("Applying SST perturbations to forcing data")
-                for select in self._perturbations.sst:
-                    select.perturbation.apply_perturbation(
+                for perturbation in self._perturbations.perturbations:
+                    perturbation.apply_perturbation(
                         tensors[self._surface_temperature_name],
                         self._lats,
                         self._lons,

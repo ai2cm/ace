@@ -459,7 +459,7 @@ def test_inference_data_with_perturbations(tmp_path):
             first=0, n_initial_conditions=batch_size, interval=step
         ),
         perturbations=SSTPerturbation(
-            sst=[PerturbationSelector(name="constant", config={"amplitude": 2.0})]
+            sst=[PerturbationSelector(type="constant", config={"amplitude": 2.0})]
         ),
     )
     n_forward_steps_in_memory = 3
