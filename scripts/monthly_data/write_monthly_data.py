@@ -16,7 +16,6 @@ from fme.ace.inference.data_writer.monthly import (
     months_for_timesteps,
 )
 from fme.core.data_loading.batch_data import (
-    AtmosphericDeriveFn,
     BatchData,
     default_collate,
 )
@@ -27,14 +26,13 @@ from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
+from fme.core.stepper import AtmosphericDeriveFn
 from fme.core.typing_ import TensorMapping
 
 
 @dataclasses.dataclass
 class CollateFn:
     horizontal_dims: List[str]
-    sigma_coordinates: SigmaCoordinates
-    timestep: datetime.timedelta
 
     def __call__(
         self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
@@ -46,7 +44,6 @@ class CollateFn:
             data=batch_data,
             times=batch_times,
             horizontal_dims=self.horizontal_dims,
-            derive_func=AtmosphericDeriveFn(self.sigma_coordinates, self.timestep),
         )
 
 
@@ -61,8 +58,6 @@ def get_data_loaders(
         )
 
     datasets = get_datasets(config.dataset, requirements)
-    sigma_coordinates = datasets[0].sigma_coordinates
-    timestep = datasets[0].timestep
 
     data_loaders = []
     for dataset in datasets:
@@ -75,9 +70,7 @@ def get_data_loaders(
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=CollateFn(
-                sigma_coordinates=sigma_coordinates,
                 horizontal_dims=list(dataset.horizontal_coordinates.dims),
-                timestep=timestep,
             ),
         )
         data_loaders.append(dataloader)
@@ -183,13 +176,21 @@ def run(config: Config):
     data = config.get_data()
     writer = config.get_data_writer(data)
 
+    derive_func = AtmosphericDeriveFn(
+        sigma_coordinates=data.sigma_coordinates,
+        timestep=data.timestep,
+    )
+
     n_batches = len(data.loaders[0].dataset) // config.data_loader.batch_size
     for i, window_batch_data in enumerate(merge_loaders(data.loaders)):
         # no need to trim initial conditions because
         # we set n_timesteps to 1 in the DataRequirements
         assert list(window_batch_data.data.values())[0].shape[1] == 1
 
-        window_batch_data.compute_derived_variables(window_batch_data)
+        window_batch_data = window_batch_data.compute_derived_variables(
+            derive_func=derive_func,
+            forcing_data=window_batch_data,
+        )
         writer.append_batch(
             data=window_batch_data.data,
             start_timestep=-1,  # ignored
