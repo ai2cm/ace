@@ -21,6 +21,7 @@ import torch
 import xarray as xr
 from torch import nn
 
+from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.data_loading.batch_data import BatchData, CurrentDevice, PrognosticState
@@ -44,6 +45,24 @@ from .typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
+
+
+class AtmosphericDeriveFn:
+    def __init__(
+        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+    ):
+        self.sigma_coordinates = sigma_coordinates.to(
+            "cpu"
+        )  # must be on cpu for multiprocessing fork context
+        self.timestep = timestep
+
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        return compute_derived_quantities(
+            dict(data),
+            sigma_coordinates=self.sigma_coordinates.to(get_device()),
+            timestep=self.timestep,
+            forcing_data=dict(forcing_data),
+        )
 
 
 @dataclasses.dataclass
@@ -151,12 +170,14 @@ class SingleModuleStepperConfig:
         timestep: datetime.timedelta,
     ):
         logging.info("Initializing stepper from provided config")
+        derive_func = AtmosphericDeriveFn(sigma_coordinates, timestep)
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
+            derive_func=derive_func,
         )
 
     @classmethod
@@ -449,6 +470,7 @@ class SingleModuleStepper(
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         init_weights: bool = True,
     ):
@@ -459,6 +481,7 @@ class SingleModuleStepper(
             area: (n_lat, n_lon) array containing relative gridcell area,
                 in any units including unitless.
             sigma_coordinates: The sigma coordinates.
+            derive_func: Function to compute derived variables.
             timestep: Timestep of the model.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
@@ -484,7 +507,7 @@ class SingleModuleStepper(
             self.module, init_weights=init_weights
         )
         self.module = module.to(get_device())
-
+        self.derive_func = derive_func
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -685,7 +708,6 @@ class SingleModuleStepper(
         data = BatchData.new_on_device(
             output_timeseries,
             forcing_data.times[:, self.n_ic_timesteps :],
-            derive_func=forcing_data.derive_func,
             horizontal_dims=forcing_data.horizontal_dims,
         )
         if compute_derived_variables:
@@ -693,7 +715,10 @@ class SingleModuleStepper(
             with timer.context("compute_derived_variables"):
                 data = (
                     data.prepend(initial_condition)
-                    .compute_derived_variables(forcing_data)
+                    .compute_derived_variables(
+                        derive_func=self.derive_func,
+                        forcing_data=forcing_data,
+                    )
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
         return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
@@ -704,7 +729,10 @@ class SingleModuleStepper(
         if compute_derived_variables:
             timer = GlobalTimer.get_instance()
             with timer.context("compute_derived_variables"):
-                data = data.compute_derived_variables(data)
+                data = data.compute_derived_variables(
+                    derive_func=self.derive_func,
+                    forcing_data=data,
+                )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
     def train_on_batch(
@@ -777,7 +805,7 @@ class SingleModuleStepper(
             target_data=dict(target_data.data),
             times=gen_data.times,
             normalize=self.normalizer.normalize,
-            derive_func=data.derive_func,
+            derive_func=self.derive_func,
         )
         if keep_initial_condition:
             ic = data.get_start(
@@ -867,12 +895,15 @@ class SingleModuleStepper(
             for v in state["data_shapes"].values():
                 img_shape = v[-2:]
                 break
+        # TODO: need a way to serialize and deserialize the derive_func
+        derive_func = AtmosphericDeriveFn(sigma_coordinates, timestep)
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             sigma_coordinates=sigma_coordinates,
             timestep=timestep,
+            derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
             init_weights=False,
         )
