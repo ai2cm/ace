@@ -1,50 +1,16 @@
-from typing import Callable, List
-from unittest.mock import MagicMock
+from typing import List
 
 import numpy as np
 import pytest
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import AtmosphericCollateFn, BatchData
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.device import get_device
-from fme.core.typing_ import TensorDict, TensorMapping
-
-
-def test_atmospheric_collate_fn_in_multiprocessing_dataloader(very_fast_only: bool):
-    if very_fast_only:
-        pytest.skip("Skipping non-fast tests")
-    dataset = [
-        (
-            # no sample dimension in Dataset
-            {"a": torch.randn(3, 10, 10)},
-            xr.DataArray([1, 2, 3], dims=["time"]),
-        )
-        for _ in range(10)
-    ]
-    sigma_coordinates = SigmaCoordinates(
-        ak=torch.randn(10),
-        bk=torch.randn(10),
-    ).to(get_device())
-    horizontal_dims = ["lat", "lon"]
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=2,
-        num_workers=2,
-        collate_fn=AtmosphericCollateFn(
-            sigma_coordinates=sigma_coordinates,
-            horizontal_dims=horizontal_dims,
-        ),
-        multiprocessing_context="forkserver",
-    )
-    for batch in dataloader:
-        assert isinstance(batch, BatchData)
 
 
 def assert_metadata_equal(a: BatchData, b: BatchData):
     assert a.horizontal_dims == b.horizontal_dims
-    assert a.derive_func is b.derive_func
 
 
 def get_batch_data(
@@ -54,9 +20,6 @@ def get_batch_data(
     horizontal_dims: List[str],
     n_lat: int = 8,
     n_lon: int = 16,
-    derive_func: Callable[
-        [TensorMapping, TensorMapping], TensorDict
-    ] = lambda x, _: dict(x),
 ):
     device = get_device()
     return BatchData(
@@ -66,7 +29,6 @@ def get_batch_data(
         },
         times=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
-        derive_func=derive_func,
     )
 
 
@@ -85,7 +47,6 @@ def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps
     n_lat = 8
     n_lon = 16
     horizontal_dims = ["lat", "lon"]
-    derive_func = MagicMock(side_effect=lambda x, _: x)
     batch_data = get_batch_data(
         names=names,
         n_samples=n_samples,
@@ -93,7 +54,6 @@ def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
-        derive_func=derive_func,
     )
     start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(start, batch_data)
@@ -122,7 +82,6 @@ def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: 
     n_lat = 8
     n_lon = 16
     horizontal_dims = ["lat", "lon"]
-    derive_func = MagicMock(side_effect=lambda x, _: x)
     batch_data = get_batch_data(
         names=names,
         n_samples=n_samples,
@@ -130,7 +89,6 @@ def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: 
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
-        derive_func=derive_func,
     )
     end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(end, batch_data)
@@ -158,7 +116,6 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
     n_lat = 8
     n_lon = 16
     horizontal_dims = ["lat", "lon"]
-    derive_func = MagicMock(side_effect=lambda x, _: x)
     batch_data = get_batch_data(
         names=names,
         n_samples=n_samples,
@@ -166,7 +123,6 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
         horizontal_dims=horizontal_dims,
         n_lat=n_lat,
         n_lon=n_lon,
-        derive_func=derive_func,
     )
     start_data = batch_data.get_start(prepend_names, n_ic_timesteps)
     prepended = batch_data.prepend(start_data)

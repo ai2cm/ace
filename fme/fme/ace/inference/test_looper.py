@@ -24,6 +24,7 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.testing.wandb import mock_wandb
+from fme.core.typing_ import TensorDict, TensorMapping
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
 
@@ -55,7 +56,6 @@ class MockLoader(torch.utils.data.DataLoader):
         shape: tuple,
         names: Iterable[str],
         n_windows: int,
-        derive_func: Optional[Callable] = None,
         time: Optional[xr.DataArray] = None,
     ):
         device = fme.get_device()
@@ -70,10 +70,6 @@ class MockLoader(torch.utils.data.DataLoader):
             self._time = time
         self._n_windows = n_windows
         self._current_window = 0
-        if derive_func is None:
-            self._derive_func = lambda data, forcing_data: data
-        else:
-            self._derive_func = derive_func
 
     def __iter__(self):
         return self
@@ -88,7 +84,6 @@ class MockLoader(torch.utils.data.DataLoader):
                 data=self._data,
                 times=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),
-                derive_func=self._derive_func,
             )
         else:
             raise StopIteration
@@ -177,17 +172,17 @@ def test_looper_with_derived_variables():
         side_effect=_mock_compute_derived_quantities
     )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
+    stepper.derive_func = mock_derive_func
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         times=time[:, 0:1],
-        derive_func=mock_derive_func,
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
     )
-    loader = MockLoader(shape, forcing_names, 2, mock_derive_func, time=time)
+    loader = MockLoader(shape, forcing_names, 2, time=time)
     looper = Looper(
         stepper=stepper,
         initial_condition=initial_condition,
@@ -228,17 +223,17 @@ def test_looper_with_target_data_and_derived_variables():
         side_effect=_mock_compute_derived_quantities
     )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
+    stepper.derive_func = mock_derive_func
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
         times=time[:, 0:1],
-        derive_func=mock_derive_func,
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
     )
-    loader = MockLoader(shape, all_names, 2, mock_derive_func, time=time)
+    loader = MockLoader(shape, all_names, 2, time=time)
     looper = Looper(
         stepper,
         initial_condition=initial_condition,
@@ -255,7 +250,6 @@ def test_looper_with_target_data_and_derived_variables():
 def get_batch_data(
     start_time,
     n_timesteps,
-    derive_func=lambda x, y=None: dict(x),
 ):
     n_samples = 1
     n_lat = 3
@@ -274,15 +268,26 @@ def get_batch_data(
             )
         },
         times=times,
-        derive_func=derive_func,
     )
 
 
 class PlusOneStepper(
     InferenceStepperABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
 ):
-    def __init__(self, n_ic_timesteps: int):
+    def __init__(
+        self,
+        n_ic_timesteps: int,
+        derive_func: Optional[
+            Callable[[TensorMapping, TensorMapping], TensorDict]
+        ] = None,
+    ):
         self.n_ic_timesteps = n_ic_timesteps
+        if derive_func is None:
+            self.derive_func: Callable[
+                [TensorMapping, TensorMapping], TensorDict
+            ] = unittest.mock.MagicMock(side_effect=lambda x, y=None: dict(x))
+        else:
+            self.derive_func = derive_func
 
     def predict(
         self,
@@ -305,10 +310,11 @@ class PlusOneStepper(
         data = BatchData.new_on_device(
             data={"var": out_tensor},
             times=forcing.times[:, self.n_ic_timesteps :],
-            derive_func=ic_state.derive_func,
         )
         if compute_derived_variables:
-            data = data.compute_derived_variables(forcing_data=data)
+            data = data.compute_derived_variables(
+                derive_func=self.derive_func, forcing_data=data
+            )
         return data, data.get_end(["var"], self.n_ic_timesteps)
 
     def get_forward_data(
@@ -317,7 +323,9 @@ class PlusOneStepper(
         compute_derived_variables: bool = False,
     ) -> BatchData[CurrentDevice]:
         if compute_derived_variables:
-            forcing = forcing.compute_derived_variables(forcing_data=forcing)
+            forcing = forcing.compute_derived_variables(
+                derive_func=self.derive_func, forcing_data=forcing
+            )
         return forcing.remove_initial_condition(self.n_ic_timesteps)
 
 
@@ -329,20 +337,20 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
     n_ic_timesteps = 1
     n_forward_steps = 2
     n_iterations = 10
-    stepper = PlusOneStepper(n_ic_timesteps=n_ic_timesteps)
-    derive_func_mock = unittest.mock.MagicMock(
+    mock_derive_func = unittest.mock.MagicMock(
         side_effect=lambda batch_data, forcing_data: batch_data
+    )
+    stepper = PlusOneStepper(
+        n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
     )
     initial_condition = get_batch_data(
         0,
         n_timesteps=n_ic_timesteps,
-        derive_func=derive_func_mock,
     ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
     loader = [
         get_batch_data(
             i,
             n_ic_timesteps + n_forward_steps,
-            derive_func=derive_func_mock,
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
@@ -368,9 +376,9 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
         assert times["data_loading"] > 0
         assert times["forward_prediction"] > 0
         if compute_derived_for_loaded:
-            assert derive_func_mock.call_count == 2 * n_iterations
+            assert mock_derive_func.call_count == 2 * n_iterations
         else:
-            assert derive_func_mock.call_count == n_iterations
+            assert mock_derive_func.call_count == n_iterations
         # we mocked out the implicit call that happens in .predict and .get_forward_data
         # if this changed, update the test
         assert "compute_derived_variables" not in times
@@ -386,20 +394,20 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
 def test_simple_run_inference(
     n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
 ):
-    stepper = PlusOneStepper(n_ic_timesteps=n_ic_timesteps)
-    derive_func_mock = unittest.mock.MagicMock(
+    mock_derive_func = unittest.mock.MagicMock(
         side_effect=lambda batch_data, forcing_data: batch_data
+    )
+    stepper = PlusOneStepper(
+        n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
     )
     initial_condition = get_batch_data(
         0,
         n_timesteps=n_ic_timesteps,
-        derive_func=derive_func_mock,
     ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
     loader = [
         get_batch_data(
             i,
             n_ic_timesteps + n_forward_steps,
-            derive_func=derive_func_mock,
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
