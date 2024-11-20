@@ -15,7 +15,6 @@ from fme.core.data_loading.batch_data import (
     BatchData,
     CurrentDevice,
     PrognosticState,
-    get_atmospheric_batch_data,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
@@ -488,10 +487,9 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         ],
         dims=["sample", "time"],
     )
-    batch_data = get_atmospheric_batch_data(
+    batch_data = BatchData.new_on_cpu(
         data=data,
         times=times,
-        sigma_coordinates=sigma_coordinates,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():

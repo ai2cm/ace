@@ -136,9 +136,8 @@ def get_data_loader(
         persistent_workers = False
 
     def collate_fn(samples):
-        return BatchData.atmospheric_from_sample_tuples(
+        return BatchData.from_sample_tuples(
             samples,
-            sigma_coordinates=dataset.sigma_coordinates,
             horizontal_dims=list(dataset.horizontal_coordinates.dims),
         )
 

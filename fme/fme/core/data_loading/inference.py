@@ -262,10 +262,9 @@ class InferenceDataset(torch.utils.data.Dataset):
                         tensors[self._ocean_fraction_name],
                     )
             sample_tuples.append((tensors, times))
-        return BatchData.atmospheric_from_sample_tuples(
+        return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self._horizontal_coordinates.dims),
-            sigma_coordinates=self._sigma_coordinates,
         )
 
     def __getitem__(self, index) -> BatchData[CPU]:
