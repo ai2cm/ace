@@ -73,7 +73,6 @@ def get_coupled_data_loader(
     def collate_fn(samples: List[CoupledDatasetItem]) -> CoupledBatchData[CPU]:
         return CoupledBatchData.collate_fn(
             samples,
-            sigma_coordinates=datasets[0].sigma_coordinates,
             horizontal_dims=list(datasets[0].horizontal_coordinates.dims),
         )
 

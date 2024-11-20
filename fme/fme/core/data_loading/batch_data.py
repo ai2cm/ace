@@ -26,9 +26,6 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
-from fme.ace.inference.derived_variables import (
-    compute_derived_quantities,  # TODO: move to core or move stepper to ace
-)
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     SigmaCoordinates,
@@ -77,48 +74,6 @@ def _check_device(data: TensorMapping, device: torch.device):
             raise ValueError(f"data must be on {device}")
 
 
-class AtmosphericCollateFn:
-    def __init__(self, sigma_coordinates: SigmaCoordinates, horizontal_dims: List[str]):
-        self.sigma_coordinates = sigma_coordinates.to("cpu")
-        self.horizontal_dims = horizontal_dims
-
-    def __call__(
-        self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
-    ) -> "BatchData":
-        """
-        Collate function for use with PyTorch DataLoader. Needed since samples contain
-        both tensor mapping and xarray time coordinates, the latter of which we do
-        not want to convert to tensors.
-        """
-        sample_data, sample_times = zip(*samples)
-        batch_data = default_collate(sample_data)
-        batch_times = xr.concat(sample_times, dim="sample")
-        return get_atmospheric_batch_data(
-            data=batch_data,
-            times=batch_times,
-            sigma_coordinates=self.sigma_coordinates,
-            horizontal_dims=self.horizontal_dims,
-        )
-
-
-class AtmosphericDeriveFn:
-    def __init__(
-        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
-    ):
-        self.sigma_coordinates = sigma_coordinates.to(
-            "cpu"
-        )  # must be on cpu for multiprocessing fork context
-        self.timestep = timestep
-
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        return compute_derived_quantities(
-            dict(data),
-            sigma_coordinates=self.sigma_coordinates.to(get_device()),
-            timestep=self.timestep,
-            forcing_data=dict(forcing_data),
-        )
-
-
 class PrognosticState(Generic[DeviceType]):
     """
     Thin typing wrapper around BatchData to indicate that the data is a prognostic
@@ -151,9 +106,6 @@ class BatchData(Generic[DeviceType]):
             predictions with time coordinates, not directly in ML.
         horizontal_dims: Horizontal dimensions of the data. Used for writing to
             netCDF files.
-        derive_func: A function that takes a batch of data and a batch of forcing data
-            and returns a batch of derived data. If not given, no derived variables
-            are computed.
     """
 
     data: TensorMapping
@@ -161,9 +113,6 @@ class BatchData(Generic[DeviceType]):
     horizontal_dims: List[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
-    derive_func: Callable[
-        [TensorMapping, TensorMapping], TensorDict
-    ] = lambda x, _: dict(x)
 
     @property
     def dims(self) -> List[str]:
@@ -174,7 +123,6 @@ class BatchData(Generic[DeviceType]):
             data={k: v.to(get_device()) for k, v in self.data.items()},
             times=self.times,
             horizontal_dims=self.horizontal_dims,
-            derive_func=self.derive_func,
         )
 
     @classmethod
@@ -191,15 +139,11 @@ class BatchData(Generic[DeviceType]):
         data: TensorMapping,
         times: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
-        derive_func: Callable[
-            [TensorMapping, TensorMapping], TensorDict
-        ] = lambda x, _: dict(x),
     ) -> "BatchData[AnyDevice]":
         kwargs = cls._get_kwargs(horizontal_dims)
         return BatchData[AnyDevice](
             data=data,
             times=times,
-            derive_func=derive_func,
             **kwargs,
         )
 
@@ -209,16 +153,12 @@ class BatchData(Generic[DeviceType]):
         data: TensorMapping,
         times: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
-        derive_func: Callable[
-            [TensorMapping, TensorMapping], TensorDict
-        ] = lambda x, _: dict(x),
     ) -> "BatchData[CPU]":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
         return BatchData[CPU](
             data=data,
             times=times,
-            derive_func=derive_func,
             **kwargs,
         )
 
@@ -228,9 +168,6 @@ class BatchData(Generic[DeviceType]):
         data: TensorMapping,
         times: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
-        derive_func: Callable[
-            [TensorMapping, TensorMapping], TensorDict
-        ] = lambda x, _: dict(x),
     ) -> "BatchData[CurrentDevice]":
         """
         Move the data to the current global device specified by get_device().
@@ -240,7 +177,6 @@ class BatchData(Generic[DeviceType]):
         return BatchData[CurrentDevice](
             data=data,
             times=times,
-            derive_func=derive_func,
             **kwargs,
         )
 
@@ -264,9 +200,6 @@ class BatchData(Generic[DeviceType]):
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
         horizontal_dims: Optional[List[str]] = None,
-        derive_func: Callable[
-            [TensorMapping, TensorMapping], TensorDict
-        ] = lambda x, _: dict(x),
     ) -> "BatchData[CPU]":
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
@@ -274,47 +207,31 @@ class BatchData(Generic[DeviceType]):
         return BatchData.new_on_cpu(
             data=batch_data,
             times=batch_times,
-            derive_func=derive_func,
             horizontal_dims=horizontal_dims,
         )
 
-    @classmethod
-    def atmospheric_from_sample_tuples(
-        cls,
-        samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
-        sigma_coordinates: SigmaCoordinates,
-        sample_dim_name: str = "sample",
-        horizontal_dims: Optional[List[str]] = None,
-    ) -> "BatchData[CPU]":
-        """
-        Collate function for use with PyTorch DataLoader. Needed since samples contain
-        both tensor mapping and xarray time coordinates, the latter of which we do
-        not want to convert to tensors.
-        """
-        sample_data, sample_times = zip(*samples)
-        batch_data = default_collate(sample_data)
-        batch_times = xr.concat(sample_times, dim=sample_dim_name)
-        return get_atmospheric_batch_data(
-            data=batch_data,
-            times=batch_times,
-            sigma_coordinates=sigma_coordinates,
-            horizontal_dims=horizontal_dims,
-        )
-
-    def compute_derived_variables(self: SelfType, forcing_data: SelfType) -> SelfType:
+    def compute_derived_variables(
+        self: SelfType,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        forcing_data: SelfType,
+    ) -> SelfType:
         """
         Compute derived variables from the data and forcing data.
 
         The forcing data must have the same times as the batch data.
+
+        Args:
+            derive_func: A function that takes the data and forcing data and returns a
+                dictionary of derived variables.
+            forcing_data: The forcing data to compute derived variables from.
         """
         if not np.all(forcing_data.times.values == self.times.values):
             raise ValueError("Forcing data must have the same times as the batch data.")
-        derived_data = self.derive_func(self.data, forcing_data.data)
+        derived_data = derive_func(self.data, forcing_data.data)
         return self.__class__(
             data={**self.data, **derived_data},
             times=self.times,
             horizontal_dims=self.horizontal_dims,
-            derive_func=self.derive_func,
         )
 
     def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
@@ -327,7 +244,6 @@ class BatchData(Generic[DeviceType]):
             {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
             times=self.times.isel(time=slice(n_ic_timesteps, None)),
             horizontal_dims=self.horizontal_dims,
-            derive_func=self.derive_func,
         )
 
     def subset_names(self: SelfType, names: Collection[str]) -> SelfType:
@@ -338,7 +254,6 @@ class BatchData(Generic[DeviceType]):
             {k: v for k, v in self.data.items() if k in names},
             times=self.times,
             horizontal_dims=self.horizontal_dims,
-            derive_func=self.derive_func,
         )
 
     def get_start(
@@ -372,7 +287,6 @@ class BatchData(Generic[DeviceType]):
         return self.__class__(
             {k: v[:, time_slice] for k, v in self.data.items()},
             times=self.times[:, time_slice],
-            derive_func=self.derive_func,
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -395,48 +309,8 @@ class BatchData(Generic[DeviceType]):
                 for k, v in self.data.items()
             },
             times=xr.concat([initial_batch_data.times, self.times], dim="time"),
-            derive_func=self.derive_func,
             horizontal_dims=self.horizontal_dims,
         )
-
-
-def get_atmospheric_batch_data(
-    data: TensorMapping,
-    times: xr.DataArray,
-    sigma_coordinates: SigmaCoordinates,
-    horizontal_dims: Optional[List[str]] = None,
-    # Note in practice return value is the cls type, just impossible to express
-    # in python type hints. Use cast on the output if needed to get around this.
-) -> BatchData[CPU]:
-    """
-    Get atmospheric batch data.
-
-    Args:
-        data: Data for each variable in each sample of shape (sample, time, ...),
-            concatenated along samples to make a batch.
-        times: An array of times of shape (sample, time) for each sample in the batch,
-            concatenated along samples to make a batch.
-        sigma_coordinates: Sigma coordinates for the data.
-        horizontal_dims: Horizontal dimensions of the data. Used for writing to
-            netCDF files.
-
-    Returns:
-        BatchData: The batch data.
-    """
-    if times.shape[1] < 2:
-        raise ValueError(
-            "Times must have at least two timesteps to compute derived variables. "
-            "If you don't need to compute derived variables, initialize BatchData "
-            "directly."
-        )
-    timestep = times.values[0, 1] - times.values[0, 0]
-
-    return BatchData.new_on_cpu(
-        data=data,
-        times=times,
-        derive_func=AtmosphericDeriveFn(sigma_coordinates, timestep),
-        horizontal_dims=horizontal_dims,
-    )
 
 
 DeviceArgType = TypeVar("DeviceArgType", bound=AnyDevice)

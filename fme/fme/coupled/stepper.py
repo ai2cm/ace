@@ -541,7 +541,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
             target_data=target_ocean,
             times=gen_ocean.times,
             normalize=self.ocean.normalizer.normalize,
-            derive_func=data.ocean_data.derive_func,
+            derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
             metrics={},
@@ -549,7 +549,7 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
             target_data=target_atmos,
             times=gen_atmos.times,
             normalize=self.atmosphere.normalizer.normalize,
-            derive_func=data.atmosphere_data.derive_func,
+            derive_func=self.atmosphere.derive_func,
         )
 
         if keep_initial_condition:

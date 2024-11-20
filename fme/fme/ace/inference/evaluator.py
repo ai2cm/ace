@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import Optional, Sequence
+from typing import Callable, Optional, Sequence
 
 import dacite
 import torch
@@ -29,6 +29,7 @@ from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
 from fme.core.stepper import SingleModuleStepperConfig
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def load_stepper_config(
@@ -181,8 +182,13 @@ class _Deriver(DeriverABC):
     DeriverABC implementation for dataset comparison.
     """
 
-    def __init__(self, n_ic_timesteps: int):
+    def __init__(
+        self,
+        n_ic_timesteps: int,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+    ):
         self._n_ic_timesteps = n_ic_timesteps
+        self._derive_func = derive_func
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -194,7 +200,10 @@ class _Deriver(DeriverABC):
         if compute_derived_variables:
             timer = GlobalTimer.get_instance()
             with timer.context("compute_derived_variables"):
-                data = data.compute_derived_variables(data)
+                data = data.compute_derived_variables(
+                    derive_func=self._derive_func,
+                    forcing_data=data,
+                )
         return data.remove_initial_condition(self._n_ic_timesteps)
 
 
@@ -260,7 +269,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             config.forward_steps_in_memory,
             data_requirements,
         )
-        deriver = _Deriver(n_ic_timesteps=stepper_config.n_ic_timesteps)
+        deriver = _Deriver(
+            n_ic_timesteps=stepper_config.n_ic_timesteps,
+            derive_func=stepper.derive_func,
+        )
         run_dataset_comparison(
             aggregator=aggregator,
             prediction_data=prediction_data,
