@@ -31,5 +31,6 @@ class CorrectorABC(abc.ABC):
         self,
         input_data: TensorMapping,
         gen_data: TensorMapping,
+        forcing_data: TensorMapping,
     ) -> TensorMapping:
         ...
