@@ -245,7 +245,7 @@ def get_sizes(
         loaded_lon_name="grid_xt",
     ),
     n_time=3,
-    nz_interface=7,
+    nz_interface=3,
 ) -> DimSizes:
     return DimSizes(
         n_time=n_time,
@@ -269,8 +269,13 @@ def _setup(
         path.mkdir()
     seed = 0
     np.random.seed(seed)
-    in_variable_names = ["foo", "bar", "baz"]
-    out_variable_names = ["foo", "bar"]
+    in_variable_names = [
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "baz",
+    ]
+    out_variable_names = ["PRESsfc", "specific_total_water_0", "specific_total_water_1"]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names))
 
@@ -402,8 +407,9 @@ def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
     assert prediction_output_path.exists()
     ds_prediction = xr.open_dataset(prediction_output_path)
-    assert np.sum(np.isnan(ds_prediction["foo"].values)) == 0
-    assert np.sum(np.isnan(ds_prediction["bar"].values)) == 0
+    assert np.sum(np.isnan(ds_prediction["PRESsfc"].values)) == 0
+    assert np.sum(np.isnan(ds_prediction["specific_total_water_0"].values)) == 0
+    assert np.sum(np.isnan(ds_prediction["specific_total_water_1"].values)) == 0
     ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
