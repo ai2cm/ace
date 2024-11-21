@@ -73,6 +73,7 @@ class OceanCorrector(CorrectorABC):
         self,
         input_data: TensorMapping,
         gen_data: TensorMapping,
+        forcing_data: TensorMapping,
     ) -> TensorMapping:
         if self._masking is not None:
             gen_data = self._masking(self._stacker, gen_data, input_data)

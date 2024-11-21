@@ -102,16 +102,16 @@ class Ocean:
 
     def __call__(
         self,
-        target_data: TensorMapping,
         input_data: TensorMapping,
         gen_data: TensorMapping,
+        target_data: TensorMapping,
     ) -> TensorDict:
         """
         Args:
-            target_data: Denormalized data that includes mask and forcing data. Assumed
-                to correspond to the same time step as gen_data.
             input_data: Denormalized input data for current step.
             gen_data: Denormalized output data for current step.
+            target_data: Denormalized data that includes mask and forcing data. Assumed
+                to correspond to the same time step as gen_data.
 
         Returns:
             gen_data with sea surface temperature overwritten by ocean model.

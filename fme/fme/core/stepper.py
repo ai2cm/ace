@@ -621,7 +621,7 @@ class SingleModuleStepper(
     def step(
         self,
         input: TensorMapping,
-        ocean_data: TensorMapping,
+        next_step_forcing_data: TensorMapping,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -630,10 +630,9 @@ class SingleModuleStepper(
             input: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
                 and is assumed to contain all input variables and be denormalized.
-            ocean_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary data at the
-                output timestep for the ocean model (e.g. surface temperature,
-                mixed-layer depth etc.).
+            next_step_forcing_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
+                data at the output timestep for the ocean model and corrector.
 
         Returns:
             The denormalized output data at the next time step.
@@ -644,9 +643,9 @@ class SingleModuleStepper(
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize(output_norm)
         if self._corrector is not None:
-            output = self._corrector(input, output)
+            output = self._corrector(input, output, next_step_forcing_data)
         if self.ocean is not None:
-            output = self.ocean(ocean_data, input, output)
+            output = self.ocean(input, output, next_step_forcing_data)
         return output
 
     def predict(
@@ -682,23 +681,24 @@ class SingleModuleStepper(
             k: initial_condition_state.data[k].squeeze(self.TIME_DIM)
             for k in initial_condition_state.data
         }
-        forcing_names = self._config.forcing_names
+        ml_forcing_names = self._config.forcing_names
         ocean_forcing_names = self.ocean.forcing_names if self.ocean is not None else []
+        all_forcing_names = list(set(ml_forcing_names).union(ocean_forcing_names))
         n_forward_steps = forcing_data.times.shape[1] - self.n_ic_timesteps
         for step in range(n_forward_steps):
-            current_step_forcing = {
+            ml_input_forcing = {
                 k: (
                     forcing_data.data[k][:, step]
                     if k not in self._config.next_step_forcing_names
                     else forcing_data.data[k][:, step + 1]
                 )
-                for k in forcing_names
+                for k in ml_forcing_names
             }
-            next_step_ocean_data = {
-                k: forcing_data.data[k][:, step + 1] for k in ocean_forcing_names
+            next_step_forcing_data = {
+                k: forcing_data.data[k][:, step + 1] for k in all_forcing_names
             }
-            input_data = {**state, **current_step_forcing}
-            state = self.step(input_data, next_step_ocean_data)
+            input_data = {**state, **ml_input_forcing}
+            state = self.step(input_data, next_step_forcing_data)
             output_list.append(state)
         output_timeseries = {}
         for name in state:
