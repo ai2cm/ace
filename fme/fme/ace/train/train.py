@@ -259,7 +259,7 @@ class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, Paire
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
             gridded_operations=self.gridded_operations,
-            sigma_coordinates=self.sigma_coordinates,
+            sigma_coordinates=self.sigma_coordinates.to(device=fme.get_device()),
             variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,
         )
