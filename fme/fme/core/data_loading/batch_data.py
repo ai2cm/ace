@@ -26,6 +26,7 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
+from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     SigmaCoordinates,
@@ -446,10 +447,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
     def __init__(
         self,
         loader: DataLoader[BatchData[CPU]],
-        variable_metadata: Mapping[str, VariableMetadata],
-        sigma_coordinates: SigmaCoordinates,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: datetime.timedelta,
+        properties: DatasetProperties,
         sampler: Optional[torch.utils.data.Sampler] = None,
     ):
         """
@@ -458,21 +456,13 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
                 TensorMapping where keys indicate variable name.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
-            variable_metadata: Metadata for each variable.
-            area_weights: Weights for each grid cell, used for computing area-weighted
-                averages. Has shape [n_x_coord, n_y_coord].
-            sigma_coordinates: Sigma coordinates for each grid cell, used for computing
-                pressure levels.
-            horizontal_coordinates: horizontal coordinates for the data.
-            timestep: Timestep of the model.
+            properties: Batch-constant properties for the dataset, such as variable
+                metadata and coordinate information.
             sampler: Optional sampler for the data loader. Provided to allow support for
                 distributed training.
         """
         self._loader = loader
-        self._variable_metadata = variable_metadata
-        self._sigma_coordinates = sigma_coordinates
-        self._horizontal_coordinates = horizontal_coordinates
-        self._timestep = timestep
+        self._properties = properties
         self._sampler = sampler
         self._batch_size: Optional[int] = None
 
@@ -485,19 +475,19 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
 
     @property
     def variable_metadata(self) -> Mapping[str, VariableMetadata]:
-        return self._variable_metadata
+        return self._properties.variable_metadata
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._sigma_coordinates
+        return self._properties.sigma_coordinates
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self._horizontal_coordinates
+        return self._properties.horizontal_coordinates
 
     @property
     def timestep(self) -> datetime.timedelta:
-        return self._timestep
+        return self._properties.timestep
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:

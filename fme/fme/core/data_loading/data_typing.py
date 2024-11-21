@@ -314,35 +314,6 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
 
 class Dataset(torch.utils.data.Dataset, abc.ABC):
-    # List of properties to transfer by default from
-    # dataset if using torch Concat or Subset
-    BASE_PROPERTIES: List[str] = [
-        "variable_metadata",
-        "horizontal_coordinates",
-        "sigma_coordinates",
-        "is_remote",
-    ]
-
-    @property
-    @abc.abstractmethod
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def is_remote(self) -> bool:
-        ...
-
     @abc.abstractmethod
     def get_sample_by_time_slice(
         self, time_slice: slice
