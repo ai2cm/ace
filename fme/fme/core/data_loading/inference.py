@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading._xarray import XarrayDataset
+from fme.core.data_loading._xarray import DatasetProperties, XarrayDataset
 from fme.core.data_loading.batch_data import CPU, BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import (
@@ -287,6 +287,10 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
         return self._sigma_coordinates
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return self._dataset.properties
 
     @property
     def variable_metadata(self) -> xr.Dataset:

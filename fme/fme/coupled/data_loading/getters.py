@@ -1,12 +1,12 @@
-from typing import Any, Dict, List
+import warnings
+from typing import List, Optional, Sequence, Tuple
 
 import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.data_loading._xarray import transfer_properties
 from fme.core.data_loading.batch_data import CPU
-from fme.core.data_loading.getters import get_xarray_dataset, validate_ensemble
+from fme.core.data_loading.getters import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import (
@@ -14,24 +14,58 @@ from fme.coupled.data_loading.batch_data import (
     CoupledGriddedData,
 )
 from fme.coupled.data_loading.config import CoupledDataConfig, CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import CoupledDataset, CoupledDatasetItem
+from fme.coupled.data_loading.data_typing import (
+    CoupledDataset,
+    CoupledDatasetItem,
+    CoupledProperties,
+)
 from fme.coupled.data_loading.requirements import CoupledDataRequirements
 
 
 def get_coupled_dataset(
     config: CoupledDataConfig, requirements: CoupledDataRequirements
-) -> CoupledDataset:
+) -> Tuple[CoupledDataset, CoupledProperties]:
     ocean_reqs = requirements.ocean_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
-    ocean = get_xarray_dataset(config.ocean, ocean_reqs)
-    atmosphere = get_xarray_dataset(config.atmosphere, atmosphere_reqs)
-    dataset = CoupledDataset(
-        ocean,
-        atmosphere,
-        requirements.ocean_timestep,
-        requirements.n_steps_fast,
+    ocean, ocean_properties = get_xarray_dataset(config.ocean, ocean_reqs)
+    atmosphere, atmosphere_properties = get_xarray_dataset(
+        config.atmosphere, atmosphere_reqs
     )
-    return dataset
+    properties = CoupledProperties(ocean_properties, atmosphere_properties)
+    dataset = CoupledDataset(
+        ocean=ocean,
+        atmosphere=atmosphere,
+        properties=properties,
+        n_steps_fast=requirements.n_steps_fast,
+    )
+    return dataset, properties
+
+
+def get_coupled_datasets(
+    configs: Sequence[CoupledDataConfig],
+    requirements: CoupledDataRequirements,
+    strict: bool = True,
+) -> Tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledProperties]:
+    datasets = []
+    properties: Optional[CoupledProperties] = None
+    for coupled_data_config in configs:
+        ds, prop = get_coupled_dataset(coupled_data_config, requirements)
+        datasets.append(ds)
+        if properties is None:
+            properties = prop
+        elif not strict:
+            try:
+                properties.update(prop)
+            except ValueError as e:
+                warnings.warn(
+                    f"Metadata for each ensemble member are not the same: {e}"
+                )
+        else:
+            properties.update(prop)
+    if properties is None:
+        raise ValueError("At least one dataset must be provided.")
+    dataset = torch.utils.data.ConcatDataset(datasets)
+    return dataset, properties
 
 
 def get_coupled_data_loader(
@@ -46,22 +80,16 @@ def get_coupled_data_loader(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
-    datasets: List[CoupledDataset] = [
-        get_coupled_dataset(
-            coupled_data_config,
-            requirements,
-        )
-        for i, coupled_data_config in enumerate(config.dataset)
-    ]
-    validate_ensemble(datasets, strict=config.strict_ensemble)
-    dataset = torch.utils.data.ConcatDataset(datasets)
+    dataset, properties = get_coupled_datasets(
+        config.dataset, requirements, strict=config.strict_ensemble
+    )
     dist = Distributed.get_instance()
     if dist.is_distributed():
         sampler = DistributedSampler(dataset, shuffle=train)
     else:
         sampler = RandomSampler(dataset) if train else None
 
-    if any([ds.is_remote for ds in datasets]):
+    if properties.is_remote:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         mp_context = "forkserver"
         persistent_workers = True
@@ -73,7 +101,7 @@ def get_coupled_data_loader(
     def collate_fn(samples: List[CoupledDatasetItem]) -> CoupledBatchData[CPU]:
         return CoupledBatchData.collate_fn(
             samples,
-            horizontal_dims=list(datasets[0].horizontal_coordinates.dims),
+            horizontal_dims=list(properties.atmosphere.horizontal_coordinates.dims),
         )
 
     batch_size = dist.local_batch_size(int(config.batch_size))
@@ -104,16 +132,11 @@ def get_coupled_data_loader(
             f"Batch size is {dataloader.batch_size}"
         )
 
-    override: Dict[str, Any] = {
-        "is_remote": any(d.is_remote for d in datasets),
-    }
-    transfer_properties(datasets[0], dataset, attr_override=override)
-
     return CoupledGriddedData(
         loader=dataloader,
-        variable_metadata=dataset.variable_metadata,
+        variable_metadata=properties.variable_metadata,
         sampler=sampler,
-        sigma_coordinates=dataset.sigma_coordinates,
+        sigma_coordinates=properties.sigma_coordinates,
         timestep=requirements.ocean_timestep,
-        horizontal_coordinates=dataset.horizontal_coordinates,
+        horizontal_coordinates=properties.horizontal_coordinates,
     )

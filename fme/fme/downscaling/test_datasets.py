@@ -4,6 +4,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import Dataset, DimSize, LatLonCoordinates
 from fme.core.testing.fv3gfs_data import DimSizes, FV3GFSData
@@ -123,10 +124,12 @@ def test_horizontal_subset(
         xr.DataArray([0.0]),
     )
     base_dataset = MagicMock(spec=Dataset)
-    base_dataset.horizontal_coordinates = coords
+    properties = MagicMock(spec=DatasetProperties)
+    properties.horizontal_coordinates = coords
     base_dataset.__getitem__.return_value = datum
     dataset = HorizontalSubsetDataset(
         dataset=base_dataset,
+        properties=properties,
         lat_interval=ClosedInterval(float(lat_interval[0]), float(lat_interval[1])),
         lon_interval=ClosedInterval(float(lon_interval[0]), float(lon_interval[1])),
     )
