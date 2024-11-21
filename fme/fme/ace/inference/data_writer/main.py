@@ -137,7 +137,7 @@ class DataWriterConfig:
         )
 
 
-class PairedDataWriter:
+class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         path: str,
@@ -265,8 +265,7 @@ class PairedDataWriter:
         Append a batch of data to the file.
 
         Args:
-            batch: Predictiona and target data.
-            start_timestep: Timestep at which to start writing.
+            batch: Prediction and target data.
         """
         for writer in self._writers:
             writer.append_batch(
@@ -427,12 +426,10 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
         batch: BatchData,
     ):
         """
-        Append a batch of data to the file.
+        Append prediction data to the file.
+
         Args:
-            data: Data to write.
-            start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch: Data to be written.
         """
         for writer in self._writers:
             writer.append_batch(
@@ -462,7 +459,7 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
         )
 
 
-class NullDataWriter:
+class NullDataWriter(WriterABC[Any, Any]):
 
     """
     Null pattern for DataWriter, which does nothing.
