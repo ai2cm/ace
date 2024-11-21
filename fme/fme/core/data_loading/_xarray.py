@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import namedtuple
 from functools import lru_cache
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 import fsspec
@@ -258,6 +258,43 @@ def _open_file_fh_cached(path, **kwargs):
     )
 
 
+class DatasetProperties:
+    def __init__(
+        self,
+        variable_metadata: Mapping[str, VariableMetadata],
+        sigma_coordinates: SigmaCoordinates,
+        horizontal_coordinates: HorizontalCoordinates,
+        timestep: datetime.timedelta,
+        is_remote: bool,
+    ):
+        self.variable_metadata = variable_metadata
+        self.sigma_coordinates = sigma_coordinates
+        self.horizontal_coordinates = horizontal_coordinates
+        self.timestep = timestep
+        self.is_remote = is_remote
+
+    def update(self, other: "DatasetProperties"):
+        self.is_remote = self.is_remote or other.is_remote
+        if self.timestep != other.timestep:
+            raise ValueError("Inconsistent timesteps between datasets")
+        if self.variable_metadata != other.variable_metadata:
+            raise ValueError("Inconsistent metadata between datasets")
+        if self.sigma_coordinates != other.sigma_coordinates:
+            raise ValueError("Inconsistent sigma coordinates between datasets")
+        if self.horizontal_coordinates != other.horizontal_coordinates:
+            raise ValueError("Inconsistent horizontal coordinates between datasets")
+
+
+def get_xarray_dataset(
+    config: XarrayDataConfig, requirements: DataRequirements
+) -> Tuple["Dataset", DatasetProperties]:
+    dataset = XarrayDataset(config, requirements)
+    properties = dataset.properties
+    index_slice = as_index_selection(config.subset, dataset)
+    dataset = dataset.subset(index_slice)
+    return dataset, properties
+
+
 class XarrayDataset(Dataset):
     """Load data from a directory of files matching a pattern using xarray. The
     number of contiguous timesteps to load for each sample is specified by
@@ -280,12 +317,13 @@ class XarrayDataset(Dataset):
         self.engine = config.engine
         self.dtype = config.torch_dtype
         self.spatial_dimensions = config.spatial_dimensions
+
         fs = _get_fs(self.path)
         glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
         self._raw_paths = _preserve_protocol(self.path, glob_paths)
         if len(self._raw_paths) == 0:
             raise ValueError(
-                f"No files found matching '{self.path}/{config.file_pattern}'."
+                f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
         self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
@@ -306,6 +344,16 @@ class XarrayDataset(Dataset):
         ) = self._group_variable_names_by_time_type()
         self._sigma_coordinates = get_sigma_coordinates(first_dataset, self.dtype)
         self.overwrite = config.overwrite
+
+    @property
+    def properties(self) -> DatasetProperties:
+        return DatasetProperties(
+            self._variable_metadata,
+            self._sigma_coordinates,
+            self._horizontal_coordinates,
+            self.timestep,
+            self.is_remote,
+        )
 
     def _get_names_to_load(self, names: List[str]) -> List[str]:
         # requirements.names from stepper config refer to the final set of
@@ -411,7 +459,9 @@ class XarrayDataset(Dataset):
             static_derived_names,
         )
 
-    def configure_horizontal_coordinates(self, first_dataset):
+    def configure_horizontal_coordinates(
+        self, first_dataset
+    ) -> Tuple[HorizontalCoordinates, StaticDerivedData]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
         dims = get_horizontal_dimensions(first_dataset, self.dtype)
@@ -570,50 +620,7 @@ class XarrayDataset(Dataset):
         indices = range(len(self))[subset]
         logging.info(f"Subsetting dataset samples according to {subset}.")
         subsetted_dataset = torch.utils.data.Subset(self, indices)
-        override = {
-            "sample_start_times": self.sample_start_times[subset],
-            "all_times": self.all_times[subset],
-        }
-        if self._timestep is not None:
-            override["timestep"] = self._timestep
-
-        transfer_properties(self, subsetted_dataset, attr_override=override)
         return subsetted_dataset
-
-
-def transfer_properties(
-    source: Dataset,
-    target: Dataset,
-    attr_override: Optional[Mapping[str, Any]] = None,
-) -> None:
-    """
-    Transfers Dataset.BASE_PROPERTIES along with any specified
-    attribute overrides from source to target.  Useful for
-    keeping attributes after using torch dataset Subset or Concat.
-
-    Args:
-        source: The dataset to transfer properties from.
-        target: The dataset to transfer properties to.
-        attr_override: A mapping of property names to new values.
-            overrides the value of the property in source.
-    """
-
-    if attr_override is None:
-        attr_override = {}
-
-    transfer_propoerties = list(set(source.BASE_PROPERTIES).union(attr_override.keys()))
-    logger.debug(
-        f"Transferring properties to new dataset object: {transfer_properties}"
-    )
-
-    for attr_name in transfer_propoerties:
-        if attr_name in attr_override:
-            value = attr_override[attr_name]
-        else:
-            value = getattr(source, attr_name)
-        setattr(target, attr_name, value)
-
-    target.BASE_PROPERTIES = source.BASE_PROPERTIES
 
 
 def as_index_selection(

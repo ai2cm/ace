@@ -1,6 +1,5 @@
 import argparse
 import dataclasses
-import datetime
 import logging
 import os
 from typing import List, Sequence, Tuple
@@ -15,12 +14,12 @@ from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
+from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.batch_data import (
     BatchData,
     default_collate,
 )
 from fme.core.data_loading.config import DataLoaderConfig
-from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_datasets
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import using_gpu
@@ -49,7 +48,7 @@ class CollateFn:
 
 def get_data_loaders(
     config: DataLoaderConfig, requirements: DataRequirements
-) -> List[torch.utils.data.DataLoader]:
+) -> Tuple[List[torch.utils.data.DataLoader], DatasetProperties]:
     dist = Distributed.get_instance()
     if dist.world_size > 1:
         raise RuntimeError(
@@ -57,7 +56,7 @@ def get_data_loaders(
             "supported in distributed mode."
         )
 
-    datasets = get_datasets(config.dataset, requirements)
+    datasets, properties = get_datasets(config.dataset, requirements)
 
     data_loaders = []
     for dataset in datasets:
@@ -70,11 +69,11 @@ def get_data_loaders(
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=CollateFn(
-                horizontal_dims=list(dataset.horizontal_coordinates.dims),
+                horizontal_dims=list(properties.horizontal_coordinates.dims),
             ),
         )
         data_loaders.append(dataloader)
-    return data_loaders
+    return data_loaders, properties
 
 
 def get_timesteps(data_loaders: List[torch.utils.data.DataLoader]) -> int:
@@ -111,7 +110,7 @@ class Config:
             raise ValueError("Batch size must be 1 to write dataset using writer.")
 
     def get_data(self) -> "Data":
-        data_loaders = get_data_loaders(
+        data_loaders, properties = get_data_loaders(
             config=self.data_loader,
             requirements=DataRequirements(
                 names=self.variable_names,
@@ -121,8 +120,7 @@ class Config:
         n_timesteps = get_timesteps(data_loaders=data_loaders)
         return Data(
             loaders=data_loaders,
-            sigma_coordinates=data_loaders[0].dataset.sigma_coordinates,
-            timestep=data_loaders[0].dataset.timestep,
+            properties=properties,
             n_timesteps=n_timesteps,
         )
 
@@ -130,10 +128,10 @@ class Config:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def get_data_writer(self, data: "Data") -> MonthlyDataWriter:
-        n_months = months_for_timesteps(data.n_timesteps, data.timestep)
+        n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
-            **data.loaders[0].dataset.horizontal_coordinates.coords,
-            **data.loaders[0].dataset.sigma_coordinates.coords,
+            **data.properties.horizontal_coordinates.coords,
+            **data.properties.sigma_coordinates.coords,
         }
         return MonthlyDataWriter(
             path=self.experiment_dir,
@@ -141,7 +139,7 @@ class Config:
             save_names=None,  # save all data given
             n_samples=self.data_loader.batch_size * len(data.loaders),
             n_months=n_months,
-            variable_metadata=data.loaders[0].dataset.variable_metadata,
+            variable_metadata=data.properties.variable_metadata,
             coords=coords,
         )
 
@@ -149,8 +147,7 @@ class Config:
 @dataclasses.dataclass
 class Data:
     loaders: List[torch.utils.data.DataLoader]
-    sigma_coordinates: SigmaCoordinates
-    timestep: datetime.timedelta
+    properties: DatasetProperties
     n_timesteps: int
 
 
@@ -177,8 +174,8 @@ def run(config: Config):
     writer = config.get_data_writer(data)
 
     derive_func = AtmosphericDeriveFn(
-        sigma_coordinates=data.sigma_coordinates,
-        timestep=data.timestep,
+        sigma_coordinates=data.properties.sigma_coordinates,
+        timestep=data.properties.timestep,
     )
 
     n_batches = len(data.loaders[0].dataset) // config.data_loader.batch_size
