@@ -127,7 +127,6 @@ def test_coupled_data_loader(tmp_path):
     # unshuffled data loader
     data = get_coupled_data_loader(config, False, coupled_requirements)
 
-    assert data.n_forward_steps == 1
     assert data.n_batches == 2 * n_ics  # 2 samples per IC
     for batch in data.loader:
         ocean_data = batch.ocean_data

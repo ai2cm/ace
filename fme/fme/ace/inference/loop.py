@@ -279,12 +279,12 @@ def run_dataset_comparison(
         record_logs = get_record_to_wandb(label="inference")
     if writer is None:
         writer = NullDataWriter()
-    n_forward_steps = target_data.n_forward_steps
 
     timer = GlobalTimer.get_instance()
     timer.start("data_loading")
     i_time = 0
-    for pred, target in zip(prediction_data.loader, target_data.loader):
+    n_windows = min(len(prediction_data.loader), len(target_data.loader))
+    for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
         timer.stop("data_loading")
         if i_time == 0:
             all_names = pred.data.keys()
@@ -304,9 +304,8 @@ def run_dataset_comparison(
 
         forward_steps_in_memory = list(pred.data.values())[0].size(1) - 1
         logging.info(
-            f"Inference: starting window spanning {i_time}"
-            f" to {i_time + forward_steps_in_memory} steps,"
-            f" out of total {n_forward_steps}."
+            f"Inference: Processing window {i + 1} of {n_windows}"
+            f" spanning {i_time} to {i_time + forward_steps_in_memory} steps."
         )
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)

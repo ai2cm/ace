@@ -408,11 +408,6 @@ class GriddedDataABC(abc.ABC, Generic[T]):
     def batch_size(self) -> int:
         ...
 
-    @property
-    @abc.abstractmethod
-    def n_forward_steps(self) -> int:
-        ...
-
     @abc.abstractmethod
     def set_epoch(self, epoch: int):
         ...
@@ -542,10 +537,6 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
             example_tensor = next(iter(example_data.values()))
             self._batch_size = example_tensor.shape[0]
         return self._batch_size
-
-    @property
-    def n_forward_steps(self) -> int:
-        return self._loader.dataset.n_forward_steps  # type: ignore
 
     def log_info(self, name: str):
         logging.info(
