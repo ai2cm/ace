@@ -64,10 +64,6 @@ class CoupledDataset(Dataset):
         self._horizontal_coordinates = atmosphere.horizontal_coordinates
 
     @property
-    def n_forward_steps(self) -> int:
-        return self.ocean.n_steps - 1
-
-    @property
     def variable_metadata(self) -> Mapping[str, VariableMetadata]:
         return self._variable_metadata
 

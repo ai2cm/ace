@@ -170,10 +170,6 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
             self._batch_size = example_tensor.shape[0]
         return self._batch_size
 
-    @property
-    def n_forward_steps(self) -> int:
-        return self._loader.dataset.n_forward_steps  # type: ignore
-
     def set_epoch(self, epoch: int):
         """
         Set the epoch for the data loader sampler, if it is a distributed sampler.
@@ -186,6 +182,5 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
     def log_info(self, name: str):
         logging.info(
             f"Dataset {name} has {self.n_samples} samples, {self.n_batches} batches, "
-            f"batch size {self.batch_size}, timestep {self.timestep}, "
-            f"n_forward_steps {self.n_forward_steps}."
+            f"batch size {self.batch_size}, timestep {self.timestep}."
         )
