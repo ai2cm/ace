@@ -108,7 +108,6 @@ def get_coupled_data_loader(
         "is_remote": any(d.is_remote for d in datasets),
     }
     transfer_properties(datasets[0], dataset, attr_override=override)
-    dataset.n_forward_steps = datasets[0].n_forward_steps
 
     return CoupledGriddedData(
         loader=dataloader,
