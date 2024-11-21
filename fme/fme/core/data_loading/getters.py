@@ -1,8 +1,7 @@
 import logging
 import warnings
-from typing import Any, Dict, List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
-import numpy as np
 import torch.utils.data
 import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
@@ -13,9 +12,12 @@ from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import XarrayDataset, as_index_selection, transfer_properties
+from ._xarray import (
+    DatasetProperties,
+    XarrayDataset,
+    get_xarray_dataset,
+)
 from .batch_data import GriddedData
-from .data_typing import Dataset
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -27,84 +29,41 @@ from .requirements import DataRequirements
 logger = logging.getLogger(__name__)
 
 
-def _all_same(iterable, cmp=lambda x, y: x == y):
-    it = iter(iterable)
-    try:
-        first = next(it)
-    except StopIteration:
-        return True
-    return all(cmp(first, rest) for rest in it)
-
-
-def get_xarray_dataset(
-    config: XarrayDataConfig, requirements: DataRequirements
-) -> XarrayDataset:
-    dataset = XarrayDataset(config, requirements)
-    index_slice = as_index_selection(config.subset, dataset)
-    dataset = dataset.subset(index_slice)
-    dataset.n_steps = dataset.dataset.n_steps
-    return dataset
-
-
 def get_datasets(
-    dataset_configs: Sequence[XarrayDataConfig], requirements: DataRequirements
-) -> List[XarrayDataset]:
+    dataset_configs: Sequence[XarrayDataConfig],
+    requirements: DataRequirements,
+    strict: bool = True,
+) -> Tuple[List[XarrayDataset], DatasetProperties]:
     datasets = []
+    properties: Optional[DatasetProperties] = None
     for config in dataset_configs:
-        dataset = get_xarray_dataset(config, requirements)
+        dataset, new_properties = get_xarray_dataset(config, requirements)
         datasets.append(dataset)
-    return datasets
-
-
-def validate_ensemble(datasets: List[Dataset], strict: bool = True):
-    if not _all_same([d.variable_metadata for d in datasets]):
-        if strict:
-            raise ValueError("Metadata for each ensemble member should be the same.")
+        if properties is None:
+            properties = new_properties
+        elif not strict:
+            try:
+                properties.update(new_properties)
+            except ValueError as e:
+                warnings.warn(
+                    f"Metadata for each ensemble member are not the same: {e}"
+                )
         else:
-            warnings.warn(
-                "Metadata for each ensemble member are not the same. You may be "
-                "concatenating incompatible datasets."
-            )
-    sigma_coords = [d.sigma_coordinates for d in datasets]
-    ak, bk = list(
-        zip(*[(s.ak.cpu().numpy(), s.bk.cpu().numpy()) for s in sigma_coords])
-    )
-    if not (_all_same(ak, cmp=np.allclose) and _all_same(bk, cmp=np.allclose)):
-        if strict:
-            raise ValueError(
-                "Sigma coordinates for each ensemble member should be the same."
-            )
-        else:
-            warnings.warn(
-                "Vertical coordinates for each ensemble member are not the same. You "
-                "may be concatenating incompatible datasets."
-            )
+            properties.update(new_properties)
+    if properties is None:
+        raise ValueError("At least one dataset must be provided.")
+
+    return datasets, properties
 
 
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
     requirements: DataRequirements,
     strict: bool = True,
-) -> torch.utils.data.ConcatDataset[XarrayDataset]:
-    datasets = get_datasets(dataset_configs, requirements)
-    validate_ensemble(datasets, strict=strict)
-
+) -> Tuple[torch.utils.data.ConcatDataset[XarrayDataset], DatasetProperties]:
+    datasets, properties = get_datasets(dataset_configs, requirements, strict=strict)
     ensemble = torch.utils.data.ConcatDataset(datasets)
-    override: Dict[str, Any] = {
-        "is_remote": any(d.is_remote for d in datasets),
-    }
-
-    try:
-        timestep = datasets[0].timestep
-        override["timestep"] = timestep
-    except ValueError:
-        logger.debug(
-            "Timestep not found in dataset, skipping property inclusion for ensemble"
-        )
-        pass
-
-    transfer_properties(datasets[0], ensemble, attr_override=override)
-    return ensemble
+    return ensemble, properties
 
 
 def get_data_loader(
@@ -119,7 +78,9 @@ def get_data_loader(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
-    dataset = get_dataset(config.dataset, requirements, strict=config.strict_ensemble)
+    dataset, properties = get_dataset(
+        config.dataset, requirements, strict=config.strict_ensemble
+    )
     dist = Distributed.get_instance()
 
     if dist.is_distributed():
@@ -127,7 +88,7 @@ def get_data_loader(
     else:
         sampler = RandomSampler(dataset) if train else None
 
-    if dataset.is_remote:
+    if properties.is_remote:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         mp_context = "forkserver"
         persistent_workers = True
@@ -138,7 +99,7 @@ def get_data_loader(
     def collate_fn(samples):
         return BatchData.from_sample_tuples(
             samples,
-            horizontal_dims=list(dataset.horizontal_coordinates.dims),
+            horizontal_dims=list(properties.horizontal_coordinates.dims),
         )
 
     batch_size = dist.local_batch_size(int(config.batch_size))
@@ -171,11 +132,8 @@ def get_data_loader(
 
     return GriddedData(
         loader=dataloader,
-        variable_metadata=dataset.variable_metadata,
+        properties=properties,
         sampler=sampler,
-        sigma_coordinates=dataset.sigma_coordinates,
-        timestep=dataset.timestep,
-        horizontal_coordinates=dataset.horizontal_coordinates,
     )
 
 
@@ -230,10 +188,7 @@ def get_inference_data(
     )
     gridded_data = GriddedData(
         loader=loader,
-        variable_metadata=dataset.variable_metadata,
-        sigma_coordinates=dataset.sigma_coordinates,
-        timestep=dataset.timestep,
-        horizontal_coordinates=dataset.horizontal_coordinates,
+        properties=dataset.properties,
     )
 
     return gridded_data

@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core import metrics
+from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
 from fme.core.data_loading.config import XarrayDataConfig
 from fme.core.data_loading.data_typing import (
@@ -125,14 +126,21 @@ class HorizontalSubsetDataset(Dataset):
     def __init__(
         self,
         dataset: Union[Dataset, torch.utils.data.ConcatDataset[Dataset]],
+        properties: DatasetProperties,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
     ):
         self.dataset = dataset
+        self._properties = properties
         self.lat_interval = lat_interval
         self.lon_interval = lon_interval
 
-        coords: LatLonCoordinates = dataset.horizontal_coordinates  # type: ignore
+        if not isinstance(properties.horizontal_coordinates, LatLonCoordinates):
+            raise NotImplementedError(
+                "Horizontal coordinates must be of type LatLonCoordinates"
+            )
+
+        coords: LatLonCoordinates = properties.horizontal_coordinates
         lats = torch.tensor(
             [
                 i
@@ -190,7 +198,7 @@ class HorizontalSubsetDataset(Dataset):
 
     @property
     def variable_metadata(self) -> Mapping[str, VariableMetadata]:
-        return self.dataset.variable_metadata  # type: ignore
+        return self._properties.variable_metadata
 
     @property
     def area_weights(self) -> torch.Tensor:
@@ -202,11 +210,11 @@ class HorizontalSubsetDataset(Dataset):
 
     @property
     def sigma_coordinates(self):
-        return self.dataset.sigma_coordinates  # type: ignore
+        return self._properties.sigma_coordinates
 
     @property
     def is_remote(self) -> bool:
-        return self.dataset.is_remote  # type: ignore
+        return self._properties.is_remote
 
     def __len__(self):
         return len(self.dataset)
@@ -244,7 +252,7 @@ class GriddedData:
     area_weights: FineResCoarseResPair[torch.Tensor]
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
-    metadata: Mapping[str, VariableMetadata]
+    variable_metadata: Mapping[str, VariableMetadata]
     fine_topography: Optional[torch.Tensor] = None
 
     def __post_init__(self):
@@ -281,24 +289,30 @@ class DataLoaderConfig:
         if dist is None:
             dist = Distributed.get_instance()
 
-        dataset_fine = get_dataset(
+        dataset_fine, properties_fine = get_dataset(
             self.fine,
             CoreDataRequirements(requirements.fine_names, requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
-        dataset_coarse = get_dataset(
+        dataset_coarse, properties_coarse = get_dataset(
             self.coarse,
             CoreDataRequirements(requirements.coarse_names, requirements.n_timesteps),
             strict=self.strict_ensemble,
         )
 
         dataset_fine_subset = HorizontalSubsetDataset(
-            dataset_fine, self.lat_interval, self.lon_interval
-        )  # type: ignore
+            dataset_fine,
+            properties=properties_fine,
+            lat_interval=self.lat_interval,
+            lon_interval=self.lon_interval,
+        )
 
         dataset_coarse_subset = HorizontalSubsetDataset(
-            dataset_coarse, self.lat_interval, self.lon_interval
-        )  # type: ignore
+            dataset_coarse,
+            properties=properties_coarse,
+            lat_interval=self.lat_interval,
+            lon_interval=self.lon_interval,
+        )
 
         dataset = PairedDataset(
             dataset_fine_subset, dataset_coarse_subset  # type: ignore
@@ -353,7 +367,7 @@ class DataLoaderConfig:
             == dataset_coarse_subset.variable_metadata[key]
             for key in common_metadata_keys
         ), "Metadata for variables common to coarse and fine datasets must match."
-        metadata = {
+        variable_metadata = {
             **dataset_fine_subset.variable_metadata,
             **dataset_coarse_subset.variable_metadata,
         }
@@ -374,6 +388,6 @@ class DataLoaderConfig:
             area_weights,
             horizontal_coordinates,
             img_shape,
-            metadata,
+            variable_metadata,
             fine_topography=fine_topography,
         )
