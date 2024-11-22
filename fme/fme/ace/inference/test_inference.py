@@ -104,6 +104,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         names=["forcing_var", "DSWRFtoa"],
         dim_sizes=dim_sizes,
         timestep_days=0.25,
+        save_vertical_coordinate=False,
     )
     initial_condition = xr.Dataset(
         {
