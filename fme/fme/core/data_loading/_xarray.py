@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-import fme
+from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
 
 from .config import RepeatedInterval, Slice, TimeSlice, XarrayDataConfig
@@ -46,8 +46,8 @@ VariableNames = namedtuple(
 )
 
 
-def get_sigma_coordinates(
-    ds: xr.Dataset, dtype: Optional[torch.dtype], device: torch.device = "cpu"
+def _get_sigma_coordinates(
+    ds: xr.Dataset, dtype: Optional[torch.dtype]
 ) -> SigmaCoordinates:
     """
     Get sigma coordinates from a dataset.
@@ -74,8 +74,8 @@ def get_sigma_coordinates(
     if len(ak_list) == 0 or len(bk_list) == 0:
         logger.warning("Dataset does not contain ak and bk coordinates.")
         return SigmaCoordinates(
-            ak=torch.tensor([], device=device),
-            bk=torch.tensor([], device=device),
+            ak=torch.tensor([]),
+            bk=torch.tensor([]),
         )
 
     if len(ak_list) != len(bk_list):
@@ -85,8 +85,8 @@ def get_sigma_coordinates(
         )
 
     return SigmaCoordinates(
-        ak=torch.as_tensor(ak_list, device=device, dtype=dtype),
-        bk=torch.as_tensor(bk_list, device=device, dtype=dtype),
+        ak=torch.as_tensor(ak_list, dtype=dtype),
+        bk=torch.as_tensor(bk_list, dtype=dtype),
     )
 
 
@@ -273,6 +273,16 @@ class DatasetProperties:
         self.timestep = timestep
         self.is_remote = is_remote
 
+    def to_device(self) -> "DatasetProperties":
+        device = get_device()
+        return DatasetProperties(
+            self.variable_metadata,
+            self.sigma_coordinates.to(device),
+            self.horizontal_coordinates.to(device),
+            self.timestep,
+            self.is_remote,
+        )
+
     def update(self, other: "DatasetProperties"):
         self.is_remote = self.is_remote or other.is_remote
         if self.timestep != other.timestep:
@@ -342,7 +352,7 @@ class XarrayDataset(Dataset):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._sigma_coordinates = get_sigma_coordinates(first_dataset, self.dtype)
+        self._sigma_coordinates = _get_sigma_coordinates(first_dataset, self.dtype)
         self.overwrite = config.overwrite
 
     @property
@@ -473,8 +483,8 @@ class XarrayDataset(Dataset):
             lon_name = names[0]
             lat_name = names[1]
             horizontal_coordinates = LatLonCoordinates(
-                lon=lons.to(device=fme.get_device()),
-                lat=lats.to(device=fme.get_device()),
+                lon=lons,
+                lat=lats,
                 loaded_lat_name=lat_name,
                 loaded_lon_name=lon_name,
             )
@@ -484,9 +494,9 @@ class XarrayDataset(Dataset):
             height = dims[1]
             width = dims[2]
             horizontal_coordinates = HEALPixCoordinates(
-                face=face.to(device=fme.get_device()),
-                height=height.to(device=fme.get_device()),
-                width=width.to(device=fme.get_device()),
+                face=face,
+                height=height,
+                width=width,
             )
             static_derived_data = StaticDerivedData(horizontal_coordinates)
         else:
