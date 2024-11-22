@@ -459,7 +459,7 @@ class InferenceGriddedData(
                 metadata and coordinate information.
         """
         self._loader = loader
-        self._properties = properties
+        self._properties = properties.to_device()
         self._n_initial_conditions: Optional[int] = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState[
@@ -564,7 +564,7 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
                 distributed training.
         """
         self._loader = loader
-        self._properties = properties
+        self._properties = properties.to_device()
         self._sampler = sampler
         self._batch_size: Optional[int] = None
 

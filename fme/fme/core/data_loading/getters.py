@@ -179,8 +179,9 @@ def get_inference_data(
         surface_temperature_name,
         ocean_fraction_name,
     )
+    properties = dataset.properties
 
-    if dataset.is_remote:
+    if properties.is_remote:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
         # persist workers since startup is slow
         mp_context = "forkserver"
@@ -204,7 +205,7 @@ def get_inference_data(
     gridded_data = InferenceGriddedData(
         loader=loader,
         initial_condition=initial_condition,
-        properties=dataset.properties,
+        properties=properties,
     )
 
     return gridded_data
