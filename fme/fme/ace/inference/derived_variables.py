@@ -1,7 +1,6 @@
-import dataclasses
 import datetime
 import logging
-from typing import Callable, Dict, List, MutableMapping, Optional
+from typing import Callable, Dict, MutableMapping, Optional
 
 import torch
 
@@ -10,42 +9,23 @@ from fme.core.climate_data import ClimateData
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 
-
-@dataclasses.dataclass
-class DerivedVariableRegistryEntry:
-    func: Callable[[ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor]
-    required_inputs: Optional[List[str]] = None
+DerivedVariableFunc = Callable[
+    [ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor
+]
 
 
-_DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableRegistryEntry] = {}
+_DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableFunc] = {}
 
 
-def register(
-    required_inputs: Optional[List[str]] = None,
-):
-    """Decorator for registering a function that computes a derived variable.
-    Args:
-        required_inputs: refers to the keys of CLIMATE_FIELD_NAME_PREFIXES
-            in fme.core.climate_data
-    """
-
-    def decorator(
-        func: Callable[
-            [ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor
-        ]
-    ):
-        label = func.__name__
-        if label in _DERIVED_VARIABLE_REGISTRY:
-            raise ValueError(f"Function {label} has already been added to registry.")
-        _DERIVED_VARIABLE_REGISTRY[label] = DerivedVariableRegistryEntry(
-            func=func, required_inputs=required_inputs
-        )
-        return func
-
-    return decorator
+def register(func: DerivedVariableFunc):
+    label = func.__name__
+    if label in _DERIVED_VARIABLE_REGISTRY:
+        raise ValueError(f"Function {label} has already been added to registry.")
+    _DERIVED_VARIABLE_REGISTRY[label] = func
+    return func
 
 
-@register()
+@register
 def surface_pressure_due_to_dry_air(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -59,7 +39,19 @@ def surface_pressure_due_to_dry_air(
     )
 
 
-@register()
+@register
+def surface_pressure_due_to_dry_air_absolute_tendency(
+    data: ClimateData,
+    sigma_coordinates: SigmaCoordinates,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    ps_dry = surface_pressure_due_to_dry_air(data, sigma_coordinates, timestep)
+    abs_ps_dry_tendency = torch.zeros_like(ps_dry)
+    abs_ps_dry_tendency[:, 1:] = torch.diff(ps_dry, n=1, dim=1).abs()
+    return abs_ps_dry_tendency
+
+
+@register
 def total_water_path(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -73,7 +65,7 @@ def total_water_path(
     )
 
 
-@register()
+@register
 def total_water_path_budget_residual(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -98,11 +90,7 @@ def total_water_path_budget_residual(
     return twp_budget_residual
 
 
-@register(
-    required_inputs=[
-        "toa_down_sw_radiative_flux",
-    ]
-)
+@register
 def net_energy_flux_toa_into_atmosphere(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -115,7 +103,7 @@ def net_energy_flux_toa_into_atmosphere(
     )
 
 
-@register()
+@register
 def net_energy_flux_sfc_into_atmosphere(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -126,11 +114,7 @@ def net_energy_flux_sfc_into_atmosphere(
     return -data.net_surface_energy_flux_without_frozen_precip
 
 
-@register(
-    required_inputs=[
-        "toa_down_sw_radiative_flux",
-    ]
-)
+@register
 def net_energy_flux_into_atmospheric_column(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -141,7 +125,7 @@ def net_energy_flux_into_atmospheric_column(
     ) + net_energy_flux_toa_into_atmosphere(data, sigma_coordinates, timestep)
 
 
-@register(required_inputs=["surface_height"])
+@register
 def column_moist_static_energy(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -155,7 +139,7 @@ def column_moist_static_energy(
     )
 
 
-@register(required_inputs=["surface_height"])
+@register
 def column_moist_static_energy_tendency(
     data: ClimateData,
     sigma_coordinates: SigmaCoordinates,
@@ -178,29 +162,28 @@ def _compute_derived_variable(
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
     label: str,
-    derived_variable: DerivedVariableRegistryEntry,
+    derived_variable_func: DerivedVariableFunc,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Computes a derived variable and adds it to the given data.
 
-    If the required input data is not available,
-    no change will be made to the data.
+    The derived variable name must not already exist in the data.
+
+    If any required input data are not available,
+    the derived variable will not be computed.
 
     Args:
         data: dictionary of data add the derived variable to.
         sigma_coordinates: the vertical coordinate.
         timestep: Timestep of the model.
         label: the name of the derived variable.
-        derived_variable: class indicating required names and function to compute.
+        derived_variable_func: derived variable function to compute.
         forcing_data: optional dictionary of forcing data needed for some derived
             variables. If necessary forcing inputs are missing, the derived
             variable will not be computed.
 
     Returns:
-        A new TrainOutput instance with the derived variable added.
-
-    Note:
-        Derived variables are only computed for the denormalized data in stepped.
+        A new data dictionary with the derived variable added.
     """
     if label in data:
         raise ValueError(
@@ -216,7 +199,7 @@ def _compute_derived_variable(
     climate_data = ClimateData(data)
 
     try:
-        output = derived_variable.func(climate_data, sigma_coordinates, timestep)
+        output = derived_variable_func(climate_data, sigma_coordinates, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
@@ -231,13 +214,13 @@ def compute_derived_quantities(
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Computes all derived quantities from the given data."""
-    for label, derived_variable in _DERIVED_VARIABLE_REGISTRY.items():
+    for label, func in _DERIVED_VARIABLE_REGISTRY.items():
         data = _compute_derived_variable(
             data,
             sigma_coordinates,
             timestep,
             label,
-            derived_variable,
+            func,
             forcing_data=forcing_data,
         )
     return data

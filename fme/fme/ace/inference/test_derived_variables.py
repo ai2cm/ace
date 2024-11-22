@@ -11,7 +11,6 @@ from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .derived_variables import (
-    DerivedVariableRegistryEntry,
     _compute_derived_variable,
     compute_derived_quantities,
 )
@@ -24,11 +23,12 @@ def test_compute_derived_variable():
     sigma_coordinates = SigmaCoordinates(
         ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
     )
-    derived_variable = DerivedVariableRegistryEntry(
-        func=lambda data, *_: data.surface_pressure + data.precipitation_rate
-    )
+
+    def _derived_variable_func(data: ClimateData, *_) -> torch.Tensor:
+        return data.surface_pressure + data.precipitation_rate
+
     output_data = _compute_derived_variable(
-        fake_data, sigma_coordinates, TIMESTEP, "c", derived_variable
+        fake_data, sigma_coordinates, TIMESTEP, "c", _derived_variable_func
     )
     torch.testing.assert_close(output_data["c"], torch.tensor([3.0]))
 
@@ -42,12 +42,10 @@ def test_compute_derived_variable_raises_value_error_when_overwriting():
     def add_surface_pressure_and_precipitation(data: ClimateData, *_) -> torch.Tensor:
         return data.surface_pressure + data.precipitation_rate
 
-    derived_variable = DerivedVariableRegistryEntry(
-        func=add_surface_pressure_and_precipitation
-    )
+    derived_variable_func = add_surface_pressure_and_precipitation
     with pytest.raises(ValueError):
         _compute_derived_variable(
-            fake_data, sigma_coordinates, TIMESTEP, "PRATEsfc", derived_variable
+            fake_data, sigma_coordinates, TIMESTEP, "PRATEsfc", derived_variable_func
         )
 
 
@@ -112,6 +110,7 @@ def test_compute_derived_quantities(dataset: str):
         "total_water_path_budget_residual",
         "total_water_path",
         "surface_pressure_due_to_dry_air",
+        "surface_pressure_due_to_dry_air_absolute_tendency",
         "net_energy_flux_toa_into_atmosphere",
     ):
         assert name in out_data.gen_data
