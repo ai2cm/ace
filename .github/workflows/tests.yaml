@@ -22,8 +22,8 @@ jobs:
           key: ${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
-          python -m pip install uv==0.2.5
-          uv pip install --system -c constraints.txt -e fme[dev]
+          python -m pip install uv
+          uv pip install --system -c constraints.txt -e ./fme[dev]
       - name: Run pytest
         run: |
           make test
@@ -40,8 +40,8 @@ jobs:
           key: ${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
-          python -m pip install uv==0.2.5
-          uv pip install --system -c constraints.txt -e fme[dev]
+          python -m pip install uv
+          uv pip install --system -c constraints.txt -e ./fme[dev]
       - name: Run pytest
         run: |
           make test_very_fast
@@ -62,8 +62,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y make git
-          python -m pip install uv==0.2.5
-          uv pip install --system -c constraints.txt -e fme[dev]
+          python -m pip install uv
+          uv pip install --system -c constraints.txt -e ./fme[dev]
       - name: Run CUDA check and pytest
         run: |
             export PATH=/usr/local/nvidia/bin:${PATH}
