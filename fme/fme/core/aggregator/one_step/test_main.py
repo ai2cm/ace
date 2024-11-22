@@ -4,8 +4,6 @@ import torch
 import xarray as xr
 
 from fme.core.aggregator.one_step import OneStepAggregator
-from fme.core.aggregator.one_step.derived import DerivedMetricsAggregator
-from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.stepper import TrainOutput
@@ -14,11 +12,10 @@ from fme.core.stepper import TrainOutput
 def test_labels_exist():
     n_sample = 10
     n_time = 3
-    nx, ny, nz = 2, 2, 3
+    nx, ny = 2, 2
     loss = 1.0
     area_weights = torch.ones(ny).to(get_device())
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights))
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     agg.record_batch(
@@ -45,10 +42,9 @@ def test_aggregator_raises_on_no_data():
     Basic test the aggregator combines loss correctly
     with multiple batches and no distributed training.
     """
-    ny, nz = 2, 3
+    ny = 2
     area_weights = torch.ones(ny).to(get_device())
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
-    agg = OneStepAggregator(LatLonOperations(area_weights), sigma_coordinates)
+    agg = OneStepAggregator(LatLonOperations(area_weights))
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             batch=TrainOutput(
@@ -63,76 +59,7 @@ def test_aggregator_raises_on_no_data():
         assert "No data" in str(excinfo.value)
 
 
-def test_derived():
-    n_sample = 5
-    n_time = 3
-    nx, ny, nz = 2, 4, 3
-    loss = 1.0
-    area_weights = torch.ones(ny).to(get_device())
-    sigma_coordinates = SigmaCoordinates(
-        torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
-    )
-    agg = DerivedMetricsAggregator(LatLonOperations(area_weights), sigma_coordinates)
-
-    def _make_data():
-        fields = ["a", "PRESsfc"] + [f"specific_total_water_{i}" for i in range(nz)]
-        return {
-            field: torch.randn(n_sample, n_time, nx, ny, device=get_device())
-            for field in fields
-        }
-
-    target_data = _make_data()
-    gen_data = _make_data()
-    target_data_norm = _make_data()
-    gen_data_norm = _make_data()
-
-    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
-
-    logs = agg.get_logs("")
-    target = logs["/surface_pressure_due_to_dry_air/target"]
-    gen = logs["/surface_pressure_due_to_dry_air/gen"]
-
-    assert target.shape == ()
-    assert not torch.isnan(target).any()
-    assert gen.shape == ()
-    assert not torch.isnan(target).any()
-
-
-def test_derived_missing_surface_pressure():
-    n_sample = 5
-    n_time = 3
-    nx, ny, nz = 2, 4, 3
-    loss = 1.0
-    area_weights = torch.ones(ny).to(get_device())
-    sigma_coordinates = SigmaCoordinates(
-        torch.arange(nz + 1).to(get_device()), torch.arange(nz + 1).to(get_device())
-    )
-    agg = DerivedMetricsAggregator(LatLonOperations(area_weights), sigma_coordinates)
-
-    def _make_data():
-        fields = ["a"]  # N.B. no surface pressure or water fields.
-        return {
-            field: torch.randn(n_sample, n_time, nx, ny, device=get_device())
-            for field in fields
-        }
-
-    target_data = _make_data()
-    gen_data = _make_data()
-    target_data_norm = _make_data()
-    gen_data_norm = _make_data()
-
-    agg.record_batch(loss, target_data, gen_data, target_data_norm, gen_data_norm)
-
-    logs = agg.get_logs("")
-    target = logs["/surface_pressure_due_to_dry_air/target"]
-    gen = logs["/surface_pressure_due_to_dry_air/gen"]
-
-    assert target.shape == () and torch.isnan(target).all()
-    assert gen.shape == () and torch.isnan(target).all()
-
-
 def test__get_loss_scaled_mse_components():
-    x = torch.ones(10).to(get_device())
     loss_scaling = {
         "a": torch.tensor(1.0),
         "b": torch.tensor(0.5),
@@ -141,7 +68,6 @@ def test__get_loss_scaled_mse_components():
         gridded_operations=LatLonOperations(
             area_weights=torch.ones(10).to(get_device())
         ),
-        sigma_coordinates=SigmaCoordinates(x, x),
         loss_scaling=loss_scaling,
     )
 
