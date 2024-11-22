@@ -1,9 +1,8 @@
 import logging
 import warnings
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple, TypeVar, Union
 
 import torch.utils.data
-import xarray as xr
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
@@ -17,14 +16,22 @@ from ._xarray import (
     XarrayDataset,
     get_xarray_dataset,
 )
-from .batch_data import GriddedData
+from .batch_data import (
+    AnyDevice,
+    GriddedData,
+    InferenceGriddedData,
+    PrognosticState,
+)
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
-from .requirements import DataRequirements
+from .requirements import (
+    DataRequirements,
+    PrognosticStateDataRequirements,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -137,18 +144,26 @@ def get_data_loader(
     )
 
 
+D = TypeVar("D", bound=AnyDevice)
+
+
 def get_inference_data(
     config: InferenceDataLoaderConfig,
-    forward_steps_in_memory: int,
-    requirements: DataRequirements,
+    total_forward_steps: int,
+    window_requirements: DataRequirements,
+    initial_condition: Union[PrognosticState, PrognosticStateDataRequirements],
     surface_temperature_name: Optional[str] = None,
     ocean_fraction_name: Optional[str] = None,
-) -> GriddedData:
+) -> InferenceGriddedData:
     """
     Args:
         config: Parameters for the data loader.
-        forward_steps_in_memory: Number of forward steps to keep in memory at once.
+        total_forward_steps: Total number of forward steps to take over the course of
+            inference.
         requirements: Data requirements for the model.
+        initial_condition: Initial condition for the inference, or a requirements object
+            specifying how to extract the initial condition from the first batch of
+            data
         surface_temperature_name: Name of the surface temperature variable. Can be
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
@@ -159,8 +174,8 @@ def get_inference_data(
     """
     dataset = InferenceDataset(
         config,
-        forward_steps_in_memory,
-        requirements,
+        total_forward_steps,
+        window_requirements,
         surface_temperature_name,
         ocean_fraction_name,
     )
@@ -186,8 +201,9 @@ def get_inference_data(
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
     )
-    gridded_data = GriddedData(
+    gridded_data = InferenceGriddedData(
         loader=loader,
+        initial_condition=initial_condition,
         properties=dataset.properties,
     )
 
@@ -196,22 +212,22 @@ def get_inference_data(
 
 def get_forcing_data(
     config: ForcingDataLoaderConfig,
-    forward_steps_in_memory: int,
-    requirements: DataRequirements,
-    initial_times: xr.DataArray,
+    total_forward_steps: int,
+    window_requirements: DataRequirements,
+    initial_condition: PrognosticState,
     surface_temperature_name: Optional[str] = None,
     ocean_fraction_name: Optional[str] = None,
-) -> GriddedData:
-    """Return a GriddedData loader for forcing data only. This function determines the
-    start indices for the forcing data based on the initial times provided.
+) -> InferenceGriddedData:
+    """Return a GriddedData loader for forcing data based on the initial condition.
+    This function determines the start indices for the forcing data based on the initial
+    times in the provided initial condition.
 
     Args:
         config: Parameters for the forcing data loader.
-        forward_steps_in_memory: Number of forward steps to provide per window of
-            forcing data that will be returned by loader.
-        requirements: Data requirements for the forcing data.
-        initial_times: Desired initial times for the forcing data. This must be a 1D
-            data array, whose length determines the ensemble size.
+        total_forward_steps: Total number of forward steps to take over the course of
+            inference.
+        window_requirements: Data requirements for the forcing data.
+        initial_condition: Initial condition for the inference.
         surface_temperature_name: Name of the surface temperature variable. Can be
             set to None if no ocean temperature prescribing is being used.
         ocean_fraction_name: Name of the ocean fraction variable. Can be set to None
@@ -220,9 +236,10 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
+    initial_times = initial_condition.as_batch_data().times
     if initial_times.shape[1] != 1:
         raise NotImplementedError("code assumes initial times only has 1 timestep")
-    available_times = XarrayDataset(config.dataset, requirements).all_times
+    available_times = XarrayDataset(config.dataset, window_requirements).all_times
     start_time_indices = []
     for time in initial_times.values[:, 0]:
         start_time_indices.append(available_times.get_loc(time))
@@ -230,9 +247,10 @@ def get_forcing_data(
         start_indices=ExplicitIndices(start_time_indices)
     )
     return get_inference_data(
-        inference_config,
-        forward_steps_in_memory,
-        requirements,
-        surface_temperature_name,
-        ocean_fraction_name,
+        config=inference_config,
+        total_forward_steps=total_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition,
+        surface_temperature_name=surface_temperature_name,
+        ocean_fraction_name=ocean_fraction_name,
     )

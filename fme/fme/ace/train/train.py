@@ -58,7 +58,7 @@ import os
 import time
 import uuid
 from datetime import timedelta
-from typing import Callable, Dict, Generic, Mapping, Optional, Sequence, TypeVar
+from typing import Callable, Dict, Generic, Mapping, Optional, Sequence, TypeVar, cast
 
 import dacite
 import dask
@@ -82,8 +82,8 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.core.data_loading.batch_data import (
-    GriddedData,
     GriddedDataABC,
+    InferenceGriddedData,
     PairedData,
     PrognosticState,
 )
@@ -97,6 +97,7 @@ from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
+from fme.core.generics.inference import InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.stepper import (
@@ -126,7 +127,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     # trainer, you can build it however you like. This is here for convenience.
     train_data = builder.get_train_data()
     validation_data = builder.get_validation_data()
-    inference_data = builder.get_inference_data()
+    inference_data = builder.get_evaluation_inference_data()
 
     for batch in train_data.loader:
         shapes = {k: v.shape for k, v in batch.data.items()}
@@ -285,12 +286,12 @@ class Trainer:
         self,
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
-        inference_data: GriddedDataABC[BD],
+        inference_data: InferenceDataABC[PS, BD],
         stepper: StepperABC[BD, TO],
         optimization: Optimization,
         ema: EMATracker,
         config: TrainConfigProtocol,
-        # TODO: PS and SD don't constrain anything yet, they will need to when
+        # TODO: SD doesn't constrain anything yet, it will need to when
         # inference is implemented generically.
         aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
@@ -520,7 +521,10 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        aggregator = self._aggregator_builder.get_inference_aggregator()
+        aggregator: InferenceEvaluatorAggregator = cast(
+            InferenceEvaluatorAggregator,
+            self._aggregator_builder.get_inference_aggregator(),
+        )
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             if (
                 isinstance(aggregator, InferenceEvaluatorAggregator)
@@ -528,7 +532,7 @@ class Trainer:
                     self.stepper,
                     SingleModuleStepper,
                 )
-                and isinstance(self._inference_data, GriddedData)
+                and isinstance(self._inference_data, InferenceGriddedData)
             ):
                 # TODO: update inference to be generic, then remove this
                 # if-block and this comment
@@ -536,6 +540,10 @@ class Trainer:
                     aggregator=aggregator,
                     stepper=self.stepper,
                     data=self._inference_data,
+                )
+            else:
+                raise NotImplementedError(
+                    "Inference evaluation not implemented for this configuration."
                 )
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}

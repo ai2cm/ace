@@ -22,7 +22,10 @@ from fme.ace.inference.loop import (
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import BatchData, GriddedData
+from fme.core.data_loading.batch_data import (
+    BatchData,
+    InferenceGriddedData,
+)
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -148,7 +151,7 @@ class InferenceEvaluatorConfig:
         return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
     def get_data_writer(
-        self, data: GriddedData, prognostic_names: Sequence[str]
+        self, data: InferenceGriddedData, prognostic_names: Sequence[str]
     ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
@@ -226,13 +229,17 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
-    data_requirements = stepper_config.get_data_requirements(
-        n_forward_steps=config.n_forward_steps
+    window_requirements = stepper_config.get_evaluation_window_data_requirements(
+        n_forward_steps=config.forward_steps_in_memory
+    )
+    initial_condition_requirements = (
+        stepper_config.get_prognostic_state_data_requirements()
     )
     data = get_inference_data(
-        config.loader,
-        config.forward_steps_in_memory,
-        data_requirements,
+        config=config.loader,
+        total_forward_steps=config.n_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
     )
 
     stepper = config.load_stepper()
@@ -266,8 +273,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config.prediction_loader,
-            config.forward_steps_in_memory,
-            data_requirements,
+            total_forward_steps=config.n_forward_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition_requirements,
         )
         deriver = _Deriver(
             n_ic_timesteps=stepper_config.n_ic_timesteps,

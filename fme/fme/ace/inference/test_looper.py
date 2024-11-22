@@ -18,7 +18,7 @@ from fme.core.data_loading.batch_data import (
     PrognosticState,
 )
 from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
-from fme.core.generics.inference import InferenceStepperABC
+from fme.core.generics.inference import InferenceStepperABC, SimpleInferenceData
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
@@ -145,8 +145,7 @@ def test_looper():
     loader = MockLoader(shape, forcing_names, 3, time=time)
     looper = Looper(
         stepper=stepper,
-        initial_condition=initial_condition,
-        loader=loader,
+        data=SimpleInferenceData(initial_condition, loader),
     )
 
     expected_output_shape = (shape[0], shape[1] - 1, shape[2], shape[3])
@@ -185,8 +184,7 @@ def test_looper_with_derived_variables():
     loader = MockLoader(shape, forcing_names, 2, time=time)
     looper = Looper(
         stepper=stepper,
-        initial_condition=initial_condition,
-        loader=loader,
+        data=SimpleInferenceData(initial_condition, loader),
     )
 
     for prediction_batch, forcing_batch in looper:
@@ -209,8 +207,7 @@ def test_looper_with_target_data():
     loader = MockLoader(shape, all_names, 2, time=time)
     looper = Looper(
         stepper=stepper,
-        initial_condition=initial_condition,
-        loader=loader,
+        data=SimpleInferenceData(initial_condition, loader),
     )
 
     for prediction_batch, forcing_batch in looper:
@@ -236,8 +233,7 @@ def test_looper_with_target_data_and_derived_variables():
     loader = MockLoader(shape, all_names, 2, time=time)
     looper = Looper(
         stepper,
-        initial_condition=initial_condition,
-        loader=loader,
+        data=SimpleInferenceData(initial_condition, loader),
         compute_derived_for_loaded_data=True,
     )
 
@@ -358,8 +354,7 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
         timer = GlobalTimer.get_instance()
         looper = Looper(
             stepper,
-            initial_condition=initial_condition,
-            loader=loader,
+            data=SimpleInferenceData(initial_condition, loader),
             compute_derived_for_loaded_data=compute_derived_for_loaded,
         )
         for i, (prediction, forcing) in enumerate(looper):
@@ -448,8 +443,7 @@ def test_simple_run_inference(
             )  # this init must be within mock_wandb context
             run_inference(
                 stepper,
-                initial_condition,
-                loader,
+                data=SimpleInferenceData(initial_condition, loader),
                 writer=mock_writer,
                 aggregator=mock_aggregator,
                 record_logs=record_logs,

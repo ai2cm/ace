@@ -20,7 +20,9 @@ from fme.core.data_loading.data_typing import (
     VariableMetadata,
 )
 from fme.core.data_loading.getters import get_dataset
-from fme.core.data_loading.requirements import DataRequirements as CoreDataRequirements
+from fme.core.data_loading.requirements import (
+    DataRequirements as CoreDataRequirements,
+)
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
