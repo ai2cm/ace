@@ -1,7 +1,7 @@
 import abc
 import dataclasses
 from collections import namedtuple
-from typing import List, Literal, Mapping, Optional, Tuple
+from typing import List, Literal, Mapping, Optional, Tuple, TypeVar
 
 import numpy as np
 import torch
@@ -57,6 +57,9 @@ class SigmaCoordinates:
         return {"ak": self.ak, "bk": self.bk}
 
 
+HC = TypeVar("HC", bound="HorizontalCoordinates")
+
+
 class HorizontalCoordinates(abc.ABC):
     """
     Parent class for horizontal coordinate system grids.
@@ -65,6 +68,10 @@ class HorizontalCoordinates(abc.ABC):
 
     @abc.abstractmethod
     def __eq__(self, other) -> bool:
+        pass
+
+    @abc.abstractmethod
+    def to(self: HC, device: str) -> HC:
         pass
 
     @property
@@ -162,6 +169,14 @@ class LatLonCoordinates(HorizontalCoordinates):
             and self.loaded_lon_name == other.loaded_lon_name
         )
 
+    def to(self, device: str) -> "LatLonCoordinates":
+        return LatLonCoordinates(
+            lon=self.lon.to(device),
+            lat=self.lat.to(device),
+            loaded_lat_name=self.loaded_lat_name,
+            loaded_lon_name=self.loaded_lon_name,
+        )
+
     @property
     def area_weights(self) -> torch.Tensor:
         return self._area_weights
@@ -245,6 +260,13 @@ class HEALPixCoordinates(HorizontalCoordinates):
             torch.allclose(self.face, other.face)
             and torch.allclose(self.height, other.height)
             and torch.allclose(self.width, other.width)
+        )
+
+    def to(self, device: str) -> "HEALPixCoordinates":
+        return HEALPixCoordinates(
+            face=self.face.to(device),
+            height=self.height.to(device),
+            width=self.width.to(device),
         )
 
     @property
