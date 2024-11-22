@@ -26,7 +26,10 @@ from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.data_loading.batch_data import BatchData, CurrentDevice, PrognosticState
 from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.requirements import (
+    DataRequirements,
+    PrognosticStateDataRequirements,
+)
 from fme.core.data_loading.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -130,21 +133,35 @@ class SingleModuleStepperConfig:
     def n_ic_timesteps(self) -> int:
         return 1
 
-    def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
+    def get_evaluation_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
         return DataRequirements(
             names=self.all_names,
-            n_timesteps=n_forward_steps + self.n_ic_timesteps,
+            n_timesteps=self._window_steps_required(n_forward_steps),
         )
 
-    def get_forcing_data_requirements(self, n_forward_steps: int) -> DataRequirements:
+    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
+        return PrognosticStateDataRequirements(
+            names=self.prognostic_names,
+            n_timesteps=self.n_ic_timesteps,
+        )
+
+    def get_forcing_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
         if self.ocean is None:
             names = self.forcing_names
         else:
             names = list(set(self.forcing_names).union(self.ocean.forcing_names))
 
         return DataRequirements(
-            names=names, n_timesteps=n_forward_steps + self.n_ic_timesteps
+            names=names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
         )
+
+    def _window_steps_required(self, n_forward_steps: int) -> int:
+        return n_forward_steps + self.n_ic_timesteps
 
     def get_state(self):
         return dataclasses.asdict(self)
@@ -279,18 +296,33 @@ class ExistingStepperConfig:
 
     checkpoint_path: str
 
+    def __post_init__(self):
+        self._stepper_config = SingleModuleStepperConfig.from_state(
+            self._load_checkpoint()["stepper"]["config"]
+        )
+
     def _load_checkpoint(self) -> Mapping[str, Any]:
         return torch.load(self.checkpoint_path, map_location=get_device())
 
-    def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
-        return SingleModuleStepperConfig.from_state(
-            self._load_checkpoint()["stepper"]["config"]
-        ).get_data_requirements(n_forward_steps)
+    def get_evaluation_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
+        return self._stepper_config.get_evaluation_window_data_requirements(
+            n_forward_steps
+        )
+
+    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
+        return self._stepper_config.get_prognostic_state_data_requirements()
+
+    def get_forcing_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
+        return self._stepper_config.get_forcing_window_data_requirements(
+            n_forward_steps
+        )
 
     def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
-        return SingleModuleStepperConfig.from_state(
-            self._load_checkpoint()["stepper"]["config"]
-        ).get_base_weights()
+        return self._stepper_config.get_base_weights()
 
     def get_stepper(self, img_shape, gridded_operations, sigma_coordinates, timestep):
         del img_shape  # unused
@@ -565,9 +597,6 @@ class SingleModuleStepper(
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
-
-    def get_data_requirements(self, n_forward_steps: int) -> DataRequirements:
-        return self._config.get_data_requirements(n_forward_steps)
 
     @property
     def effective_loss_scaling(self) -> TensorDict:

@@ -11,7 +11,6 @@ from fme.core.data_loading.batch_data import (
     AnyDevice,
     BatchData,
     CurrentDevice,
-    DataLoader,
     GriddedDataABC,
     SizedMap,
 )
@@ -20,6 +19,7 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
+from fme.core.generics.data import DataLoader
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 

@@ -18,7 +18,9 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
 )
 from fme.core.data_loading.perturbation import SSTPerturbation
-from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.requirements import (
+    DataRequirements,
+)
 from fme.core.distributed import Distributed
 
 
@@ -179,7 +181,7 @@ class InferenceDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         config: InferenceDataLoaderConfig,
-        forward_steps_in_memory: int,
+        total_forward_steps: int,
         requirements: DataRequirements,
         surface_temperature_name: Optional[str] = None,
         ocean_fraction_name: Optional[str] = None,
@@ -190,8 +192,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         self._variable_metadata = dataset.variable_metadata
         self._horizontal_coordinates = dataset.horizontal_coordinates
         self._timestep = dataset.timestep
-        self._forward_steps_in_memory = forward_steps_in_memory
-        self._total_steps = requirements.n_timesteps - 1
+        self._forward_steps_in_memory = requirements.n_timesteps - 1
+        self._total_forward_steps = total_forward_steps
         self._is_remote = dataset.is_remote
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
@@ -240,8 +242,12 @@ class InferenceDataset(torch.utils.data.Dataset):
                 continue
             i_window_start = i_start + self._start_indices[i_member]
             i_window_end = i_window_start + self._forward_steps_in_memory + 1
-            if i_window_end > (self._total_steps + self._start_indices[i_member]):
-                i_window_end = self._total_steps + self._start_indices[i_member] + 1
+            if i_window_end > (
+                self._total_forward_steps + self._start_indices[i_member]
+            ):
+                i_window_end = (
+                    self._total_forward_steps + self._start_indices[i_member] + 1
+                )
             window_time_slice = slice(i_window_start, i_window_end)
             tensors, times = self._dataset.get_sample_by_time_slice(window_time_slice)
             if self._perturbations is not None:
@@ -282,7 +288,7 @@ class InferenceDataset(torch.utils.data.Dataset):
         # The ceil is necessary so if the last batch is smaller
         # than the rest the ratio will be rounded up and the last batch
         # will be included in the loading
-        return int(ceil(self._total_steps / self._forward_steps_in_memory))
+        return int(ceil(self._total_forward_steps / self._forward_steps_in_memory))
 
     @property
     def sigma_coordinates(self) -> SigmaCoordinates:
@@ -310,13 +316,14 @@ class InferenceDataset(torch.utils.data.Dataset):
 
     @property
     def n_forward_steps(self) -> int:
-        return self._total_steps
+        return self._total_forward_steps
 
     def _validate_n_forward_steps(self):
-        max_steps = self._dataset.total_timesteps - self._start_indices[-1] - 1
-        if self._total_steps > max_steps:
+        max_steps = self._dataset.total_timesteps - max(self._start_indices) - 1
+        if self._total_forward_steps > max_steps:
             raise ValueError(
-                f"The number of forward inference steps ({self._total_steps}) must "
-                f"be less than or equal to the number of possible steps ({max_steps})"
-                f"in dataset after the last initial condition's start index."
+                f"The number of forward inference steps ({self._total_forward_steps}) "
+                "must be less than or equal to the number of possible steps "
+                f"({max_steps}) in dataset after the last initial condition's "
+                "start index."
             )
