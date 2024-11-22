@@ -23,7 +23,7 @@ from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.batch_data import (
     BatchData,
     CurrentDevice,
-    GriddedData,
+    InferenceGriddedData,
     PrognosticState,
 )
 from fme.core.data_loading.getters import get_forcing_data
@@ -199,12 +199,12 @@ class InferenceConfig:
         return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
     def get_data_writer(
-        self, data: GriddedData, prognostic_names: Sequence[str]
+        self, data: InferenceGriddedData, prognostic_names: Sequence[str]
     ) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=data.batch_size,
+            n_initial_conditions=data.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
             prognostic_names=prognostic_names,
@@ -251,8 +251,8 @@ def run_inference_from_config(config: InferenceConfig):
     logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
-    data_requirements = stepper_config.get_forcing_data_requirements(
-        n_forward_steps=config.n_forward_steps
+    data_requirements = stepper_config.get_forcing_window_data_requirements(
+        n_forward_steps=config.forward_steps_in_memory
     )
     logging.info("Loading initial condition data")
     initial_condition = get_initial_condition(
@@ -261,12 +261,12 @@ def run_inference_from_config(config: InferenceConfig):
     stepper = config.load_stepper()
     logging.info("Initializing forcing data loaded")
     data = get_forcing_data(
-        config.forcing_loader,
-        config.forward_steps_in_memory,
-        data_requirements,
-        initial_condition.as_batch_data().times,
-        stepper.surface_temperature_name,
-        stepper.ocean_fraction_name,
+        config=config.forcing_loader,
+        total_forward_steps=config.n_forward_steps,
+        window_requirements=data_requirements,
+        initial_condition=initial_condition,
+        surface_temperature_name=stepper.surface_temperature_name,
+        ocean_fraction_name=stepper.ocean_fraction_name,
     )
     if stepper.timestep != data.timestep:
         raise ValueError(
@@ -286,8 +286,7 @@ def run_inference_from_config(config: InferenceConfig):
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
         stepper=stepper,
-        initial_condition=initial_condition,
-        forcing_data=data.loader,
+        data=data,
         writer=writer,
         aggregator=aggregator,
         record_logs=record_logs,
@@ -301,7 +300,7 @@ def run_inference_from_config(config: InferenceConfig):
     timer.stop("final_writer_flush")
 
     timer.stop("inference")
-    total_steps = config.n_forward_steps * data.batch_size
+    total_steps = config.n_forward_steps * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
     wandb_logging_duration = timer.get_duration("wandb_logging")
     total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)

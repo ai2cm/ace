@@ -14,11 +14,11 @@ from typing import (
     Literal,
     Mapping,
     Optional,
-    Protocol,
     Sequence,
     Sized,
     Tuple,
     TypeVar,
+    Union,
 )
 
 import numpy as np
@@ -32,7 +32,10 @@ from fme.core.data_loading.data_typing import (
     SigmaCoordinates,
     VariableMetadata,
 )
+from fme.core.data_loading.requirements import PrognosticStateDataRequirements
 from fme.core.device import get_device
+from fme.core.generics.data import DataLoader
+from fme.core.generics.inference import InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -89,6 +92,9 @@ class PrognosticState(Generic[DeviceType]):
             data: The data to initialize the state with.
         """
         self._data = data
+
+    def to_device(self) -> "PrognosticState[CurrentDevice]":
+        return PrognosticState(self._data.to_device())
 
     def as_batch_data(self) -> "BatchData[DeviceType]":
         return self._data
@@ -362,36 +368,13 @@ class PairedData(Generic[DeviceType]):
 
 
 T = TypeVar("T", covariant=True)
-
-
-class DataLoader(Protocol, Generic[T], Sized, Iterable[T]):
-    pass
+IC = TypeVar("IC")
 
 
 class GriddedDataABC(abc.ABC, Generic[T]):
     @property
     @abc.abstractmethod
     def loader(self) -> DataLoader[T]:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def timestep(self) -> datetime.timedelta:
-        ...
-
-    @property
-    @abc.abstractmethod
-    def gridded_operations(self) -> GriddedOperations:
         ...
 
     @property
@@ -434,6 +417,125 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
 
     def __iter__(self) -> Iterator[U]:
         return map(self._func, self._iterable)
+
+
+def get_initial_condition(
+    loader: DataLoader[BatchData],
+    requirements: PrognosticStateDataRequirements,
+) -> PrognosticState[CurrentDevice]:
+    for batch in loader:
+        return batch.to_device().get_start(
+            prognostic_names=requirements.names,
+            n_ic_timesteps=requirements.n_timesteps,
+        )
+    raise ValueError("No initial condition found in loader")
+
+
+class InferenceGriddedData(
+    InferenceDataABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
+):
+    """
+    Data as required for inference.
+    """
+
+    def __init__(
+        self,
+        loader: DataLoader[BatchData[CPU]],
+        initial_condition: Union[
+            PrognosticState[AnyDevice], PrognosticStateDataRequirements
+        ],
+        properties: DatasetProperties,
+    ):
+        """
+        Args:
+            loader: torch DataLoader, which returns batches of type
+                TensorMapping where keys indicate variable name.
+                Each tensor has shape
+                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            initial_condition: Initial condition for the inference, or a requirements
+                object specifying how to extract the initial condition from the first
+                batch of data.
+            properties: Batch-constant properties for the dataset, such as variable
+                metadata and coordinate information.
+        """
+        self._loader = loader
+        self._properties = properties
+        self._n_initial_conditions: Optional[int] = None
+        if isinstance(initial_condition, PrognosticStateDataRequirements):
+            self._initial_condition: PrognosticState[
+                CurrentDevice
+            ] = get_initial_condition(loader, initial_condition)
+        else:
+            self._initial_condition = initial_condition.to_device()
+
+    @property
+    def loader(self) -> DataLoader[BatchData[CurrentDevice]]:
+        def on_device(batch: BatchData[CPU]) -> BatchData[CurrentDevice]:
+            return batch.to_device()
+
+        return SizedMap(on_device, self._loader)
+
+    @property
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._properties.variable_metadata
+
+    @property
+    def sigma_coordinates(self) -> SigmaCoordinates:
+        return self._properties.sigma_coordinates
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._properties.horizontal_coordinates
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self._properties.timestep
+
+    @property
+    def coords(self) -> Mapping[str, np.ndarray]:
+        return {
+            **self.horizontal_coordinates.coords,
+            **self.sigma_coordinates.coords,
+        }
+
+    @property
+    def gridded_operations(self) -> GriddedOperations:
+        return self.horizontal_coordinates.gridded_operations
+
+    @property
+    def _n_samples(self) -> int:
+        return len(self._loader.dataset)  # type: ignore
+
+    @property
+    def _n_batches(self) -> int:
+        return len(self._loader)  # type: ignore
+
+    @property
+    def _first_time(self) -> Any:
+        return self._loader.dataset[0][1].values[0]  # type: ignore
+
+    @property
+    def _last_time(self) -> Any:
+        return self._loader.dataset[-1][1].values[0]  # type: ignore
+
+    @property
+    def n_initial_conditions(self) -> int:
+        if self._n_initial_conditions is None:
+            example_data = next(iter(self.loader)).data
+            example_tensor = next(iter(example_data.values()))
+            self._n_initial_conditions = example_tensor.shape[0]
+        return self._n_initial_conditions
+
+    @property
+    def initial_condition(self) -> PrognosticState[CurrentDevice]:
+        return self._initial_condition
+
+    def log_info(self, name: str):
+        logging.info(
+            f"{name} data: {self._n_samples} samples, " f"{self._n_batches} batches"
+        )
+        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
+        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
 
 class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
