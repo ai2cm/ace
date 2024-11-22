@@ -1,5 +1,4 @@
 import dataclasses
-import datetime
 import logging
 from math import ceil
 from typing import Optional, Sequence, Union
@@ -13,9 +12,7 @@ from fme.core.data_loading._xarray import DatasetProperties, XarrayDataset
 from fme.core.data_loading.batch_data import CPU, BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import (
-    HorizontalCoordinates,
     LatLonCoordinates,
-    SigmaCoordinates,
 )
 from fme.core.data_loading.perturbation import SSTPerturbation
 from fme.core.data_loading.requirements import (
@@ -188,13 +185,9 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         dataset = XarrayDataset(config.dataset, requirements=requirements)
         self._dataset = dataset
-        self._sigma_coordinates = dataset.sigma_coordinates
-        self._variable_metadata = dataset.variable_metadata
-        self._horizontal_coordinates = dataset.horizontal_coordinates
-        self._timestep = dataset.timestep
+        self._properties = dataset.properties
         self._forward_steps_in_memory = requirements.n_timesteps - 1
         self._total_forward_steps = total_forward_steps
-        self._is_remote = dataset.is_remote
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
@@ -205,10 +198,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         else:
             self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()
-        if isinstance(self._horizontal_coordinates, LatLonCoordinates):
-            self._lats, self._lons = self._horizontal_coordinates.meshgrid
-            self._lats = self._lats.to("cpu")
-            self._lons = self._lons.to("cpu")
+        if isinstance(self._properties.horizontal_coordinates, LatLonCoordinates):
+            self._lats, self._lons = self._properties.horizontal_coordinates.meshgrid
         else:
             if self._perturbations is not None:
                 raise ValueError(
@@ -270,7 +261,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             sample_tuples.append((tensors, times))
         return BatchData.from_sample_tuples(
             sample_tuples,
-            horizontal_dims=list(self._horizontal_coordinates.dims),
+            horizontal_dims=list(self.properties.horizontal_coordinates.dims),
         )
 
     def __getitem__(self, index) -> BatchData[CPU]:
@@ -291,28 +282,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         return int(ceil(self._total_forward_steps / self._forward_steps_in_memory))
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._sigma_coordinates
-
-    @property
     def properties(self) -> DatasetProperties:
-        return self._dataset.properties
-
-    @property
-    def variable_metadata(self) -> xr.Dataset:
-        return self._variable_metadata
-
-    @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self._horizontal_coordinates
-
-    @property
-    def timestep(self) -> datetime.timedelta:
-        return self._timestep
-
-    @property
-    def is_remote(self) -> bool:
-        return self._is_remote
+        return self._properties
 
     @property
     def n_forward_steps(self) -> int:

@@ -12,6 +12,7 @@ import pytest
 import torch
 import xarray as xr
 
+import fme
 from fme.core.data_loading.batch_data import BatchData, PrognosticState
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -172,6 +173,7 @@ def test_xarray_loader(tmp_path):
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(config, True, requirements)  # type: ignore
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+    assert data.sigma_coordinates.ak.device == fme.get_device()
 
 
 def test_xarray_loader_hpx(tmp_path):
@@ -197,6 +199,7 @@ def test_xarray_loader_hpx(tmp_path):
         assert batch.data["foo"].shape == (1, window_timesteps, 12, 16, 16)
         break
     assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+    assert data.sigma_coordinates.ak.device == fme.get_device()
 
 
 def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
@@ -254,6 +257,7 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.times.dt.calendar == "proleptic_gregorian"
     assert data._n_batches == 2
+    assert data.sigma_coordinates.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
     assert isinstance(initial_condition, BatchData)
     assert "bar" not in initial_condition.data
