@@ -12,7 +12,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, PrognosticState
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import (
@@ -29,7 +29,10 @@ from fme.core.data_loading.inference import (
     TimestampList,
 )
 from fme.core.data_loading.perturbation import PerturbationSelector, SSTPerturbation
-from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.requirements import (
+    DataRequirements,
+    PrognosticStateDataRequirements,
+)
 
 
 def _get_coords(dim_sizes, calendar, timestep_size=1):
@@ -220,26 +223,41 @@ def test_inference_data_loader(tmp_path):
         ),
     )
     n_forward_steps_in_memory = 3
-    requirements = DataRequirements(["foo"], n_timesteps=7)
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
     data = get_inference_data(
         config,
-        forward_steps_in_memory=n_forward_steps_in_memory,
-        requirements=requirements,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
     )
     data_loader = data.loader
     batch_data = next(iter(data_loader))
     assert isinstance(batch_data, BatchData)
-    assert isinstance(batch_data.data["foo"], torch.Tensor)
-    assert batch_data.data["foo"].shape[0] == batch_size
-    assert batch_data.data["foo"].shape[1] == n_forward_steps_in_memory + 1
-    assert batch_data.data["foo"].shape[2] == 16
-    assert batch_data.data["foo"].shape[3] == 32
+    for name in ["foo", "bar"]:
+        assert isinstance(batch_data.data[name], torch.Tensor)
+        assert batch_data.data[name].shape == (
+            batch_size,
+            n_forward_steps_in_memory + 1,
+            16,
+            32,
+        )
     assert isinstance(batch_data.times, xr.DataArray)
     assert list(batch_data.times.dims) == ["sample", "time"]
     assert batch_data.times.sizes["sample"] == batch_size
     assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.times.dt.calendar == "proleptic_gregorian"
-    assert data.n_batches == 2
+    assert data._n_batches == 2
+    initial_condition = data.initial_condition.as_batch_data()
+    assert isinstance(initial_condition, BatchData)
+    assert "bar" not in initial_condition.data
+    assert initial_condition.data["foo"].shape == (batch_size, 1, 16, 32)
 
 
 @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
@@ -320,20 +338,29 @@ def test_inference_data_loader_validate_n_forward_steps(
         start_indices=start_indices,
     )
     n_forward_steps_in_memory = num_forward_steps
-    requirements = DataRequirements(["foo"], n_timesteps=num_forward_steps + 1)
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
 
     if raises_error:
         with pytest.raises(ValueError):
             get_inference_data(
                 config,
-                forward_steps_in_memory=n_forward_steps_in_memory,
-                requirements=requirements,
+                total_forward_steps=num_forward_steps,
+                window_requirements=window_requirements,
+                initial_condition=initial_condition_requirements,
             )
     else:
         get_inference_data(
             config,
-            forward_steps_in_memory=n_forward_steps_in_memory,
-            requirements=requirements,
+            total_forward_steps=num_forward_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition_requirements,
         )
 
 
@@ -368,16 +395,25 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     forward_steps_in_memory = 2
     _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
     config = ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path))
-    requirements = DataRequirements(["foo"], total_forward_steps + 1)
+    window_requirements = DataRequirements(
+        names=["foo"],
+        n_timesteps=forward_steps_in_memory + 1,
+    )
     time_values = [
         [cftime.datetime(1970, 1, 1 + 2 * n, calendar=calendar)]
         for n in range(n_initial_conditions)
     ]
-    initial_times = xr.DataArray(time_values, dims=["sample", "time"])
-    data = get_forcing_data(
-        config, forward_steps_in_memory, requirements, initial_times
+    initial_condition = BatchData.new_on_cpu(
+        data={"foo": torch.randn(n_initial_conditions, 1, 1, 1)},
+        times=xr.DataArray(time_values, dims=["sample", "time"]),
     )
-    assert data.n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
+    data = get_forcing_data(
+        config,
+        total_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=PrognosticState(initial_condition),
+    )
+    assert data._n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
@@ -385,8 +421,16 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     assert batch_data.data["foo"].shape[0] == len(time_values)
     assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
     assert list(batch_data.times.dims) == ["sample", "time"]
-    xr.testing.assert_allclose(batch_data.times[:, 0], initial_times[:, 0])
+    xr.testing.assert_allclose(batch_data.times[:, 0], initial_condition.times[:, 0])
     assert batch_data.times.dt.calendar == calendar
+    xr.testing.assert_equal(
+        data.initial_condition.as_batch_data().times,
+        initial_condition.times,
+    )
+    np.testing.assert_allclose(
+        data.initial_condition.as_batch_data().data["foo"].cpu().numpy(),
+        initial_condition.data["foo"].cpu().numpy(),
+    )
 
 
 def test_inference_loader_raises_if_subset():
@@ -466,18 +510,30 @@ def test_inference_data_with_perturbations(tmp_path):
     original_foo = xr.open_dataset(os.path.join(tmp_path, "data.nc"))["foo"].values[
         0 : n_forward_steps_in_memory + 1, :, :
     ]
-    requirements = DataRequirements(["foo", "constant_mask"], n_timesteps=7)
-    data_loader = get_inference_data(
+    window_requirements = DataRequirements(
+        names=["foo", "constant_mask"],
+        n_timesteps=n_forward_steps_in_memory + 1,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
         config,
-        forward_steps_in_memory=n_forward_steps_in_memory,
-        requirements=requirements,
+        total_forward_steps=6,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
         surface_temperature_name="foo",
         ocean_fraction_name="constant_mask",
-    ).loader
-    batch_data = next(iter(data_loader))
+    )
+    batch_data = next(iter(data.loader))
     np.testing.assert_allclose(
         original_foo + 2.0,
         batch_data.data["foo"].cpu().numpy()[0, :, :, :],
+    )
+    np.testing.assert_allclose(
+        original_foo[:1, :, :] + 2.0,
+        data.initial_condition.as_batch_data().data["foo"].cpu().numpy()[0, :, :, :],
     )
 
 
@@ -489,8 +545,15 @@ def test_inference_persistence_names(tmp_path):
         start_indices=ExplicitIndices([0, 3]),
         persistence_names=["foo"],
     )
-    requirements = DataRequirements(["foo", "bar"], 10)
-    dataset = InferenceDataset(config, 3, requirements)
+    window_requirements = DataRequirements(
+        names=["foo", "bar"],
+        n_timesteps=3,
+    )
+    dataset = InferenceDataset(
+        config,
+        9,
+        requirements=window_requirements,
+    )
     first_item = dataset[0].data
     second_item = dataset[1].data
     # ensure first and second time steps are the same

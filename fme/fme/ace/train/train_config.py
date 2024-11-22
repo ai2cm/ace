@@ -6,12 +6,18 @@ from typing import Any, ClassVar, Dict, List, Optional, Protocol, Tuple, Union
 import torch
 
 from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import GriddedData
+from fme.core.data_loading.batch_data import (
+    GriddedData,
+    InferenceGriddedData,
+)
 from fme.core.data_loading.config import DataLoaderConfig, Slice
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
-from fme.core.data_loading.requirements import DataRequirements
+from fme.core.data_loading.requirements import (
+    DataRequirements,
+    PrognosticStateDataRequirements,
+)
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.gridded_ops import GriddedOperations
@@ -154,11 +160,18 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
-    def _get_data_requirements(self) -> DataRequirements:
-        return self.config.stepper.get_data_requirements(self.config.n_forward_steps)
+    def _get_evaluation_window_data_requirements(self) -> DataRequirements:
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            self.config.inference.forward_steps_in_memory
+        )
+
+    def _get_initial_condition_data_requirements(
+        self,
+    ) -> PrognosticStateDataRequirements:
+        return self.config.stepper.get_prognostic_state_data_requirements()
 
     def get_train_data(self) -> GriddedData:
-        data_requirements = self._get_data_requirements()
+        data_requirements = self._get_evaluation_window_data_requirements()
         return get_data_loader(
             self.config.train_loader,
             requirements=data_requirements,
@@ -166,23 +179,21 @@ class TrainBuilders:
         )
 
     def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_data_requirements()
+        data_requirements = self._get_evaluation_window_data_requirements()
         return get_data_loader(
             self.config.validation_loader,
             requirements=data_requirements,
             train=False,
         )
 
-    def get_inference_data(self) -> GriddedData:
-        data_requirements = self._get_data_requirements()
-        inference_data_requirements = dataclasses.replace(data_requirements)
-        inference_data_requirements.n_timesteps = (
-            self.config.inference.n_forward_steps + 1
-        )
+    def get_evaluation_inference_data(
+        self,
+    ) -> InferenceGriddedData:
         return get_inference_data(
-            self.config.inference.loader,
-            self.config.inference.forward_steps_in_memory,
-            inference_data_requirements,
+            config=self.config.inference.loader,
+            total_forward_steps=self.config.inference_n_forward_steps,
+            window_requirements=self._get_evaluation_window_data_requirements(),
+            initial_condition=self._get_initial_condition_data_requirements(),
         )
 
     def get_optimization(self, parameters) -> Optimization:
