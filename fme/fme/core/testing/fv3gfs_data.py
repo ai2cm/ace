@@ -65,6 +65,7 @@ def save_nd_netcdf(
     variable_names: List[str],
     timestep_days: float,
     time_varying_values: Optional[List[float]] = None,
+    save_vertical_coordinate: bool = True,
 ):
     """
     Save a ND netcdf file with random data for the given variable names and
@@ -75,11 +76,13 @@ def save_nd_netcdf(
         dim_sizes: The dimensions of the data.
         variable_names: The names of the variables to save.
         time_varying_values: If not None, the values to use for each time step.
+        save_vertical_coordinate: If True, save vertical coordinate variables.
     """
     ds = get_nd_dataset(
         dim_sizes=dim_sizes,
         variable_names=variable_names,
         timestep_days=timestep_days,
+        include_vertical_coordinate=save_vertical_coordinate,
     )
     if time_varying_values is not None:
         for name in variable_names:
@@ -128,6 +131,7 @@ class FV3GFSData:
     timestep_days: float
     time_varying_values: Optional[List[float]] = None
     num_data_workers: int = 0
+    save_vertical_coordinate: bool = True
 
     def __post_init__(self):
         self.data_path.mkdir(parents=True, exist_ok=True)
@@ -145,6 +149,7 @@ class FV3GFSData:
             variable_names=self.names,
             timestep_days=self.timestep_days,
             time_varying_values=self.time_varying_values,
+            save_vertical_coordinate=self.save_vertical_coordinate,
         )
 
     @property
@@ -236,6 +241,7 @@ def get_nd_dataset(
     dim_sizes: DimSizes,
     variable_names: Sequence[str],
     timestep_days: float = 1.0,
+    include_vertical_coordinate: bool = True,
 ):
     """
     Gets a dataset of [time, <horizontal dims>] data.
@@ -262,9 +268,10 @@ def get_nd_dataset(
         for dim_name, size in dim_sizes.items
     }
 
-    for i in range(dim_sizes.nz_interface):
-        data_vars[f"ak_{i}"] = np.float64(i)
-        data_vars[f"bk_{i}"] = np.float64(i + 1)
+    if include_vertical_coordinate:
+        for i in range(dim_sizes.nz_interface):
+            data_vars[f"ak_{i}"] = np.float64(i)
+            data_vars[f"bk_{i}"] = np.float64(i + 1)
 
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     return ds
