@@ -4,12 +4,12 @@ import torch
 import torch_harmonics
 
 import fme
+from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.metrics import (
     net_surface_energy_flux,
     quantile,
     spherical_power_spectrum,
     surface_pressure_due_to_dry_air,
-    vertical_integral,
 )
 
 
@@ -255,22 +255,13 @@ def test_gradient_magnitude_percent_diff():
     torch.testing.assert_close(percent_diff, -100 * torch.ones((5, 2)))
 
 
-def test_vertical_integral_shape():
-    nlat, nlon, nz = 4, 8, 3
-    water = torch.rand(nlat, nlon, nz)
-    pressure = torch.rand(nlat, nlon)
-    ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
-    water_path = vertical_integral(water, pressure, ak, bk)
-    assert water_path.shape == (nlat, nlon)
-
-
 def test_dry_air_shapes():
     nlat, nlon, nz = 4, 8, 3
     water = torch.rand(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
-
-    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    coords = SigmaCoordinates(ak, bk)
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     assert dry_air.shape == (nlat, nlon)
 
 
@@ -286,8 +277,8 @@ def test_single_level_dry_air_no_water():
     water = torch.zeros(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
-
-    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    coords = SigmaCoordinates(ak, bk)
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_allclose(dry_air.cpu().numpy(), pressure.cpu().numpy())
 
 
@@ -297,8 +288,8 @@ def test_single_level_dry_air_all_water():
     water = torch.ones(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
-
-    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    coords = SigmaCoordinates(ak, bk)
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_almost_equal(dry_air.cpu().numpy(), 0.0, decimal=6)
 
 
@@ -309,8 +300,8 @@ def test_single_level_dry_air_some_water():
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
     target_dry_air = pressure * (1.0 - water[:, :, 0])
-
-    dry_air = surface_pressure_due_to_dry_air(water, pressure, ak, bk)
+    coords = SigmaCoordinates(ak, bk)
+    dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_allclose(
         dry_air.cpu().numpy(), target_dry_air.cpu().numpy(), rtol=1e-5
     )
