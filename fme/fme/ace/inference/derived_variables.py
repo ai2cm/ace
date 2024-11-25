@@ -34,8 +34,7 @@ def surface_pressure_due_to_dry_air(
     return metrics.surface_pressure_due_to_dry_air(
         data.specific_total_water,
         data.surface_pressure,
-        sigma_coordinates.ak,
-        sigma_coordinates.bk,
+        sigma_coordinates,
     )
 
 
@@ -57,11 +56,9 @@ def total_water_path(
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    return metrics.vertical_integral(
+    return sigma_coordinates.vertical_integral(
         data.specific_total_water,
         data.surface_pressure,
-        sigma_coordinates.ak,
-        sigma_coordinates.bk,
     )
 
 
@@ -71,11 +68,9 @@ def total_water_path_budget_residual(
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
 ):
-    total_water_path = metrics.vertical_integral(
+    total_water_path = sigma_coordinates.vertical_integral(
         data.specific_total_water,
         data.surface_pressure,
-        sigma_coordinates.ak,
-        sigma_coordinates.bk,
     )
     twp_total_tendency = (total_water_path[:, 1:] - total_water_path[:, :-1]) / (
         timestep.total_seconds()
@@ -131,11 +126,9 @@ def column_moist_static_energy(
     sigma_coordinates: SigmaCoordinates,
     timestep: datetime.timedelta,
 ):
-    return metrics.vertical_integral(
+    return sigma_coordinates.vertical_integral(
         data.moist_static_energy(sigma_coordinates),
         data.surface_pressure,
-        sigma_coordinates.ak,
-        sigma_coordinates.bk,
     )
 
 

@@ -9,6 +9,7 @@ import xarray as xr
 from astropy_healpix import HEALPix
 
 from fme.core import metrics
+from fme.core.constants import GRAVITY
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
@@ -38,6 +39,25 @@ class SigmaCoordinates:
     ak: torch.Tensor
     bk: torch.Tensor
 
+    def __post_init__(self):
+        if len(self.ak.shape) != 1:
+            raise ValueError(
+                f"ak must be a 1-dimensional tensor. Got shape: {self.ak.shape}"
+            )
+        if len(self.bk.shape) != 1:
+            raise ValueError(
+                f"bk must be a 1-dimensional tensor. Got shape: {self.bk.shape}"
+            )
+        if len(self.ak) != len(self.bk):
+            raise ValueError(
+                f"ak and bk must have the same length. Got len(ak)={len(self.ak)} and "
+                f"len(bk)={len(self.bk)}."
+            )
+
+    def __len__(self):
+        """The number of vertical layer interfaces"""
+        return len(self.ak)
+
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
@@ -55,6 +75,51 @@ class SigmaCoordinates:
 
     def as_dict(self) -> TensorMapping:
         return {"ak": self.ak, "bk": self.bk}
+
+    def interface_pressure(self, surface_pressure: torch.Tensor) -> torch.Tensor:
+        """
+        Compute pressure at vertical layer interfaces.
+
+        Args:
+            surface_pressure: The surface pressure in units of Pa.
+
+        Returns:
+            A tensor of pressure at vertical layer interfaces. Will contain a new
+            dimension at the end, representing the vertical.
+        """
+        return torch.stack(
+            [ak + bk * surface_pressure for ak, bk in zip(self.ak, self.bk)],
+            dim=-1,
+        )
+
+    def vertical_integral(
+        self, integrand: torch.Tensor, surface_pressure: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute the mass-weighted vertical integral of the integrand.
+
+        (1 / g) * ∫ x dp
+
+        where
+        - g = acceleration due to gravity
+        - x = integrad
+        - p = pressure level
+
+        Args:
+            surface_pressure: The surface pressure in units of Pa.
+            integrand: A tensor whose last dimension is the vertical.
+
+        Returns:
+            A tensor of same shape as integrand but without the last dimension.
+        """
+        if len(self.ak) != integrand.shape[-1] + 1:
+            raise ValueError(
+                "The last dimension of integrand must match the number of vertical "
+                "layers in the hybrid sigma-pressure vertical coordinate."
+            )
+        interface_pressure = self.interface_pressure(surface_pressure)
+        pressure_thickness = interface_pressure.diff(dim=-1)
+        return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
 HC = TypeVar("HC", bound="HorizontalCoordinates")

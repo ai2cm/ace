@@ -3,22 +3,7 @@
 import pytest
 import torch
 
-from fme.core.climate_data import (
-    ClimateData,
-    _height_at_interface,
-    _layer_thickness,
-    _pressure_at_interface,
-)
-
-
-def test__pressure_at_interface():
-    ak = torch.tensor([2.0, 0.5, 0.0])
-    bk = torch.tensor([0.0, 0.5, 1.0])
-    psfc = torch.tensor([[1, 1], [2, 2]])
-    pinterface = _pressure_at_interface(ak=ak, bk=bk, surface_pressure=psfc)
-    assert pinterface.shape == (2, 2, 3)
-    assert pinterface[0, 0, 0] == ak[0]
-    assert pinterface[0, 0, -1] == bk[-1] * psfc[0, 0]
+from fme.core.climate_data import ClimateData, _height_at_interface, _layer_thickness
 
 
 def test__layer_thickness():

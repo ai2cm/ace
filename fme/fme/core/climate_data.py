@@ -152,16 +152,13 @@ class ClimateData:
         return metrics.surface_pressure_due_to_dry_air(
             self.specific_total_water,
             self.surface_pressure,
-            sigma_coordinates.ak,
-            sigma_coordinates.bk,
+            sigma_coordinates,
         )
 
     def total_water_path(self, sigma_coordinates: SigmaCoordinates) -> torch.Tensor:
-        return metrics.vertical_integral(
+        return sigma_coordinates.vertical_integral(
             self.specific_total_water,
             self.surface_pressure,
-            sigma_coordinates.ak,
-            sigma_coordinates.bk,
         )
 
     @property
@@ -227,11 +224,9 @@ class ClimateData:
         """
         Compute vertical height at layer log midpoints
         """
-        pressure_interfaces = _pressure_at_interface(
-            sigma_coordinates.ak, sigma_coordinates.bk, self.surface_pressure
-        )
+        interface_pressure = sigma_coordinates.interface_pressure(self.surface_pressure)
         layer_thickness = _layer_thickness(
-            pressure_at_interface=pressure_interfaces,
+            pressure_at_interface=interface_pressure,
             air_temperature=self.air_temperature,
             specific_total_water=self.specific_total_water,
         )
@@ -273,12 +268,7 @@ def compute_dry_air_absolute_differences(
         pressure = climate_data.surface_pressure
     except KeyError:
         return torch.tensor([torch.nan])
-    ps_dry = metrics.surface_pressure_due_to_dry_air(
-        water,  # (sample, time, y, x, level)
-        pressure,
-        sigma_coordinates.ak,
-        sigma_coordinates.bk,
-    )
+    ps_dry = metrics.surface_pressure_due_to_dry_air(water, pressure, sigma_coordinates)
     ps_dry_mean = area_weighted_mean(ps_dry)
     return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 
@@ -297,19 +287,6 @@ def _layer_thickness(
     # Enforce min log(p) = 0 so that geopotential energy calculation is finite
     dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
-
-
-def _pressure_at_interface(
-    ak: torch.tensor, bk: torch.tensor, surface_pressure: torch.tensor
-) -> torch.Tensor:
-    """
-    Computes pressure at layer interfaces from sigma coefficients.
-    Vertical coordinate is the last tensor dimension.
-    """
-    return torch.stack(
-        [ak[i] + bk[i] * surface_pressure for i in range(ak.shape[-1])],
-        dim=-1,
-    )
 
 
 def _height_at_interface(
