@@ -6,6 +6,7 @@ import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY
+from fme.core.data_loading.data_typing import SigmaCoordinates
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
@@ -219,74 +220,24 @@ def time_and_global_mean_bias(
     return result
 
 
-def vertical_integral(
-    integrand: torch.Tensor,
-    surface_pressure: torch.Tensor,
-    sigma_grid_offsets_ak: torch.Tensor,
-    sigma_grid_offsets_bk: torch.Tensor,
-) -> torch.Tensor:
-    """Computes a vertical integral, namely:
-
-    (1 / g) * ∫ x dp
-
-    where
-    - g = acceleration due to gravity
-    - x = integrad
-    - p = pressure level
-
-    Args:
-        integrand (lat, lon, vertical_level), (kg/kg)
-        surface_pressure: (lat, lon), (Pa)
-        sigma_grid_offsets_ak: Sorted sigma grid offsets ak, (vertical_level + 1,)
-        sigma_grid_offsets_bk: Sorted sigma grid offsets bk, (vertical_level + 1,)
-
-    Returns:
-        Vertical integral of the integrand (lat, lon).
-    """
-    ak, bk = sigma_grid_offsets_ak, sigma_grid_offsets_bk
-    pressure_thickness = ((ak + (surface_pressure.unsqueeze(-1) * bk))).diff(
-        dim=-1
-    )  # Pa
-    integral = torch.sum(pressure_thickness * integrand, axis=-1)  # type: ignore
-    return 1 / GRAVITY * integral
-
-
 def surface_pressure_due_to_dry_air(
     specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
-    sigma_grid_offsets_ak: torch.Tensor,
-    sigma_grid_offsets_bk: torch.Tensor,
+    sigma_coordinate: SigmaCoordinates,
 ) -> torch.Tensor:
     """Computes the dry air (Pa).
 
     Args:
-        specific_total_water (lat, lon, vertical_level), (kg/kg)
-        surface_pressure: (lat, lon), (Pa)
-        sigma_grid_offsets_ak: Sorted sigma grid offsets ak, (vertical_level + 1,)
-        sigma_grid_offsets_bk: Sorted sigma grid offsets bk, (vertical_level + 1,)
+        specific_total_water: last dimension is vertical level (kg/kg)
+        surface_pressure: the surface preessure in Pa.
+        sigma_coordinate: the vertical coordinate for computing vertical integral.
 
     Returns:
-        Vertically integrated dry air (lat, lon) (Pa)
+        The surface pressure due to dry air mass only. (Pa)
     """
 
-    num_levels = len(sigma_grid_offsets_ak) - 1
-
-    if (
-        num_levels != len(sigma_grid_offsets_bk) - 1
-        or num_levels != specific_total_water.shape[-1]
-    ):
-        raise ValueError(
-            (
-                "Number of vertical levels in ak, bk, and specific_total_water must "
-                "be the same."
-            )
-        )
-
-    total_water_path = vertical_integral(
-        specific_total_water,
-        surface_pressure,
-        sigma_grid_offsets_ak,
-        sigma_grid_offsets_bk,
+    total_water_path = sigma_coordinate.vertical_integral(
+        specific_total_water, surface_pressure
     )
     dry_air = surface_pressure - GRAVITY * total_water_path
     return dry_air
