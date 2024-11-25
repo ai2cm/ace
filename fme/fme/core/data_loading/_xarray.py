@@ -78,12 +78,6 @@ def _get_sigma_coordinates(
             bk=torch.tensor([]),
         )
 
-    if len(ak_list) != len(bk_list):
-        raise ValueError(
-            "Expected same number of ak and bk coordinates, "
-            f"got {len(ak_list)} and {len(bk_list)}."
-        )
-
     return SigmaCoordinates(
         ak=torch.as_tensor(ak_list, dtype=dtype),
         bk=torch.as_tensor(bk_list, dtype=dtype),
