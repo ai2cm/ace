@@ -924,7 +924,6 @@ class SingleModuleStepper(
             for v in state["data_shapes"].values():
                 img_shape = v[-2:]
                 break
-        # TODO: need a way to serialize and deserialize the derive_func
         derive_func = AtmosphericDeriveFn(sigma_coordinates, timestep)
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
