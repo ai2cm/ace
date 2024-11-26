@@ -358,7 +358,8 @@ class InferenceEvaluatorAggregator(
             )
         self._summary_aggregators = {
             name: agg
-            for name, agg in self._aggregators.items()
+            for name, agg in list(self._aggregators.items())
+            + list(self._time_dependent_aggregators.items())
             if name not in ["mean", "mean_norm"]
         }
         self._n_timesteps_seen = 0
