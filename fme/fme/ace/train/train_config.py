@@ -196,8 +196,8 @@ class TrainBuilders:
             initial_condition=self._get_initial_condition_data_requirements(),
         )
 
-    def get_optimization(self, parameters) -> Optimization:
-        return self.config.optimization.build(parameters, self.config.max_epochs)
+    def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
+        return self.config.optimization.build(modules, self.config.max_epochs)
 
     def get_stepper(
         self,

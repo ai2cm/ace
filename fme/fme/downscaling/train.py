@@ -307,7 +307,8 @@ class TrainerConfig:
         )
 
         optimization = self.optimization.build(
-            downscaling_model.module.parameters(), self.max_epochs
+            modules=[downscaling_model.module],
+            max_epochs=self.max_epochs,
         )
 
         return Trainer(

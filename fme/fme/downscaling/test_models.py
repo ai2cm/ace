@@ -95,7 +95,7 @@ def test_train_and_generate(use_opt, use_fine_topography):
         {"x": torch.ones(batch_size, *coarse_shape)},
     )
     if use_opt:
-        optimization = OptimizationConfig().build(model.module.parameters(), 2)
+        optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
         outputs = model.train_on_batch(batch, optimization)
     else:
         outputs = model.generate_on_batch(batch)
@@ -229,7 +229,7 @@ def test_diffusion_model_train_and_generate(predict_residual):
         {"x": torch.ones(batch_size, *fine_shape)},
         {"x": torch.ones(batch_size, *coarse_shape)},
     )
-    optimization = OptimizationConfig().build(model.module.parameters(), 2)
+    optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
     train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine["x"])
 
