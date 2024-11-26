@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
-from typing import Any, Literal, Mapping, Optional
+import itertools
+from typing import Any, Iterable, Literal, Mapping, Optional
 
 import torch
 import torch.cuda.amp as amp
@@ -13,7 +14,7 @@ from fme.core.scheduler import SchedulerConfig
 class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters,
+        parameters: Iterable[torch.nn.Parameter],
         optimizer_type: Literal["Adam", "FusedAdam"],
         lr: float,
         max_epochs: int,
@@ -133,7 +134,8 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
 
-    def build(self, parameters, max_epochs: int) -> Optimization:
+    def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
+        parameters = itertools.chain(*[module.parameters() for module in modules])
         return Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,
