@@ -337,7 +337,7 @@ def _setup_and_run_on_batch(
     if optimization_config is None:
         optimization: Union[NullOptimization, Optimization] = NullOptimization()
     else:
-        optimization = optimization_config.build(module.parameters(), 2)
+        optimization = optimization_config.build(modules=[module], max_epochs=2)
 
     area = torch.ones((5, 5), device=DEVICE)
     sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))

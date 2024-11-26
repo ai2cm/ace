@@ -52,7 +52,6 @@ import abc
 import contextlib
 import dataclasses
 import gc
-import itertools
 import logging
 import os
 import time
@@ -142,10 +141,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         sigma_coordinates=train_data.sigma_coordinates,
         timestep=train_data.timestep,
     )
-    optimization = builder.get_optimization(
-        itertools.chain(*[m.parameters() for m in stepper.modules])
-    )
-    ema = builder.get_ema(stepper.modules)
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
     for batch in inference_data.loader:
@@ -170,8 +165,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         validation_data=validation_data,
         inference_data=inference_data,
         stepper=stepper,
-        optimization=optimization,
-        ema=ema,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
         config=config,
         aggregator_builder=aggregator_builder,
         end_of_batch_callback=end_of_batch_ops,
@@ -287,8 +282,8 @@ class Trainer:
         validation_data: GriddedDataABC[BD],
         inference_data: InferenceDataABC[PS, BD],
         stepper: StepperABC[BD, TO],
-        optimization: Optimization,
-        ema: EMATracker,
+        build_optimization: Callable[[torch.nn.ModuleList], Optimization],
+        build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
         # TODO: SD doesn't constrain anything yet, it will need to when
         # inference is implemented generically.
@@ -322,7 +317,7 @@ class Trainer:
         self._best_inference_error = torch.inf
 
         self.stepper = stepper
-        self.optimization = optimization
+        self.optimization = build_optimization(stepper.modules)
         self._end_of_batch_ops = end_of_batch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
@@ -345,7 +340,7 @@ class Trainer:
         )
 
         self._inference_data = inference_data
-        self._ema = ema
+        self._ema = build_ema(stepper.modules)
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
