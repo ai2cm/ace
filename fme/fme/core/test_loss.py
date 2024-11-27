@@ -29,6 +29,7 @@ def test_loss_builds_and_runs(global_mean_type):
 
 
 def test_loss_of_zeros_is_variance():
+    torch.manual_seed(0)
     config = LossConfig(global_mean_type=None)
     area = torch.randn(10, 10, device=get_device())
     loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
@@ -64,6 +65,7 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
 
 
 def test_global_mean_loss():
+    torch.manual_seed(0)
     area = torch.randn(10, 10, device=get_device())
     loss = GlobalMeanLoss(
         LatLonOperations(area).area_weighted_mean, loss=torch.nn.MSELoss()

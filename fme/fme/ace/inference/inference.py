@@ -235,7 +235,7 @@ def main(yaml_config: str, segments: Optional[int] = None):
 
 def run_inference_from_config(config: InferenceConfig):
     timer = GlobalTimer.get_instance()
-    timer.start("inference")
+    timer.start_outer("inference")
     timer.start("initialization")
 
     if not os.path.isdir(config.experiment_dir):
@@ -281,11 +281,11 @@ def run_inference_from_config(config: InferenceConfig):
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
 
-    timer.stop("initialization")
+    timer.stop()
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
-        stepper=stepper,
+        predict=stepper.predict,
         data=data,
         writer=writer,
         aggregator=aggregator,
@@ -297,9 +297,9 @@ def run_inference_from_config(config: InferenceConfig):
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
     write_reduced_metrics(aggregator, data.coords, config.experiment_dir)
-    timer.stop("final_writer_flush")
+    timer.stop()
 
-    timer.stop("inference")
+    timer.stop_outer("inference")
     total_steps = config.n_forward_steps * data.n_initial_conditions
     inference_duration = timer.get_duration("inference")
     wandb_logging_duration = timer.get_duration("wandb_logging")

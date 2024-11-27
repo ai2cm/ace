@@ -5,9 +5,9 @@ from typing import (
     Callable,
     Generic,
     Iterable,
+    Iterator,
     Mapping,
     Optional,
-    Tuple,
     TypeVar,
     Union,
 )
@@ -16,7 +16,6 @@ import numpy as np
 import torch
 
 from fme.ace.inference.timing import GlobalTimer
-from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference.main import (
     InferenceAggregator,
     InferenceEvaluatorAggregator,
@@ -31,72 +30,61 @@ from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLogs,
 )
-from fme.core.generics.inference import InferenceDataABC, InferenceStepperABC
+from fme.core.generics.inference import (
+    InferenceDataABC,
+    PredictFunction,
+)
 from fme.core.generics.writer import WriterABC
 from fme.core.wandb import WandB
 
 from .data_writer import NullDataWriter, PairedDataWriter
 
-PS = TypeVar("PS")
-BD = TypeVar("BD")
+PS = TypeVar("PS")  # prognostic state
+FD = TypeVar("FD")  # forcing data
+SD = TypeVar("SD")  # stepped data
 
 
-class Looper(Generic[PS, BD]):
+class Looper(Generic[PS, FD, SD]):
     """
     Class for stepping a model forward arbitarily many times.
     """
 
     def __init__(
         self,
-        stepper: InferenceStepperABC[PS, BD],
-        data: InferenceDataABC[PS, BD],
-        compute_derived_for_loaded_data: bool = False,
+        predict: PredictFunction[PS, FD, SD],
+        data: InferenceDataABC[PS, FD],
     ):
         """
         Args:
-            stepper: The stepper to use.
+            predict: The prediction function to use.
             data: The data to use.
-            compute_derived_for_loaded_data: Whether to compute derived variables for
-                the data returned by the loader.
         """
-        self._stepper = stepper
+        self._predict = predict
         self._prognostic_state = data.initial_condition
         self._len = len(data.loader)
         self._loader = iter(data.loader)
-        self._compute_derived_for_loaded_data = compute_derived_for_loaded_data
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[SD]:
         return self
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self._len
 
-    def __next__(self) -> Tuple[BD, BD]:
+    def __next__(self) -> SD:
         """Return predictions for the time period corresponding to the next batch
-        of forcing data. Also returns the forcing data."""
+        of forcing data."""
         timer = GlobalTimer.get_instance()
-        try:
-            timer.start("data_loading")
-            forcing_data = next(self._loader)
-        except StopIteration:
-            timer.stop("data_loading")
-            raise StopIteration
-        timer.stop("data_loading")
-        timer.start("forward_prediction")
-        prediction, self._prognostic_state = self._stepper.predict(
+        with timer.context("data_loading"):
+            try:
+                forcing_data = next(self._loader)
+            except StopIteration:
+                raise StopIteration
+        output_data, self._prognostic_state = self._predict(
             self._prognostic_state,
-            forcing_data,
+            forcing=forcing_data,
             compute_derived_variables=True,
         )
-        timer.stop("forward_prediction")
-        forcing_data = self._stepper.get_forward_data(
-            forcing_data,
-            compute_derived_variables=self._compute_derived_for_loaded_data,
-        )
-        return (
-            prediction,
-            forcing_data,
-        )
+        return output_data
 
 
 def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
@@ -116,28 +104,30 @@ def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
 
 
 def run_inference(
-    stepper: InferenceStepperABC[PS, BD],
-    data: InferenceDataABC[PS, BD],
-    writer: WriterABC[PS, BD],
-    aggregator: InferenceAggregatorABC[PS, BD],
+    predict: PredictFunction[PS, FD, SD],
+    data: InferenceDataABC[PS, FD],
+    aggregator: InferenceAggregatorABC[PS, SD],
+    writer: Optional[WriterABC[PS, SD]] = None,
     record_logs: Optional[Callable[[InferenceLogs], None]] = None,
 ):
     """Run extended inference loop given initial condition and forcing data.
 
     Args:
-        stepper: The model to run inference with.
+        predict: The prediction function to use.
         data: Provides an initial condition and appropriately aligned windows of
             forcing data.
-        writer: Data writer for saving the inference results to disk.
         aggregator: Aggregator for collecting and reducing metrics.
+        writer: Data writer for saving the inference results to disk.
         record_logs: Function for recording logs. By default, logs are recorded to
             wandb.
     """
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference")
+    if writer is None:
+        writer = NullDataWriter()
     timer = GlobalTimer.get_instance()
     with torch.no_grad():
-        looper = Looper(stepper, data)
+        looper = Looper(predict=predict, data=data)
         with timer.context("aggregator"):
             logs = aggregator.record_initial_condition(
                 initial_condition=data.initial_condition,
@@ -149,85 +139,20 @@ def run_inference(
                 data.initial_condition,
             )
         n_windows = len(looper)
-        for i, (prediction_batch, _) in enumerate(looper):
+        for i, batch in enumerate(looper):
             logging.info(
                 f"Inference: processing output from window {i + 1} of {n_windows}."
             )
             with timer.context("data_writer"):
                 writer.append_batch(
-                    batch=prediction_batch,
+                    batch=batch,
                 )
             with timer.context("aggregator"):
                 logs = aggregator.record_batch(
-                    data=prediction_batch,
+                    data=batch,
                 )
             with timer.context("wandb_logging"):
                 record_logs(logs)
-
-
-def run_inference_evaluator(
-    aggregator: InferenceAggregatorABC[
-        PrognosticState[CurrentDevice], PairedData[CurrentDevice]
-    ],
-    stepper: SingleModuleStepper,
-    data: InferenceDataABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]],
-    writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
-    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
-):
-    """
-    Run inference evaluator loop.
-
-    Args:
-        aggregator: Aggregator for collecting and reducing metrics.
-        stepper: The model to run inference with.
-        data: Provides an initial condition and appropriately aligned windows of
-            forcing and target data.
-        writer: Data writer for saving the inference results to disk.
-        record_logs: Function for recording logs. By default, logs are recorded to
-            wandb.
-    """
-    if record_logs is None:
-        record_logs = get_record_to_wandb(label="inference")
-    timer = GlobalTimer.get_instance()
-    if writer is None:
-        writer = NullDataWriter()
-
-    with torch.no_grad():
-        looper = Looper(
-            stepper,
-            data,
-            compute_derived_for_loaded_data=True,
-        )
-        with timer.context("aggregator"):
-            logs = aggregator.record_initial_condition(
-                initial_condition=data.initial_condition,
-            )
-        with timer.context("wandb_logging"):
-            record_logs(logs)
-        with timer.context("data_writer"):
-            writer.save_initial_condition(
-                data.initial_condition,
-            )
-        i_time = 0
-        for prediction_batch, target_batch in looper:
-            times = prediction_batch.times
-            forward_steps_in_memory = times.sizes["time"]
-            logging.info(
-                f"Inference: processing window spanning {i_time}"
-                f" to {i_time + forward_steps_in_memory} forward steps."
-            )
-            paired_data = PairedData.from_batch_data(prediction_batch, target_batch)
-            with timer.context("data_writer"):
-                writer.append_batch(
-                    batch=paired_data,
-                )
-            with timer.context("aggregator"):
-                logs = aggregator.record_batch(
-                    data=paired_data,
-                )
-            with timer.context("wandb_logging"):
-                record_logs(logs)
-            i_time += forward_steps_in_memory
 
 
 class DeriverABC(abc.ABC):
@@ -269,7 +194,7 @@ def run_dataset_comparison(
     i_time = 0
     n_windows = min(len(prediction_data.loader), len(target_data.loader))
     for i, (pred, target) in enumerate(zip(prediction_data.loader, target_data.loader)):
-        timer.stop("data_loading")
+        timer.stop()
         if i_time == 0:
             with timer.context("aggregator"):
                 logs = aggregator.record_initial_condition(
@@ -288,16 +213,15 @@ def run_dataset_comparison(
         )
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)
+        paired_data = PairedData.from_batch_data(prediction=pred, target=target)
 
         with timer.context("data_writer"):
-            # Do not include the initial condition in the data writers
             writer.append_batch(
-                batch=PairedData.from_batch_data(pred, target),
+                batch=paired_data,
             )
         with timer.context("aggregator"):
-            # record metrics, includes the initial condition
             logs = aggregator.record_batch(
-                data=PairedData.from_batch_data(pred, target),
+                data=paired_data,
             )
 
         with timer.context("wandb_logging"):
@@ -306,7 +230,7 @@ def run_dataset_comparison(
         timer.start("data_loading")
         i_time += forward_steps_in_memory
 
-    timer.stop("data_loading")
+    timer.stop()
 
 
 def write_reduced_metrics(

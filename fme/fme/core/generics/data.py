@@ -8,11 +8,11 @@ class DataLoader(Protocol, Generic[T], Sized, Iterable[T]):
     pass
 
 
-PS = TypeVar("PS")
-BD = TypeVar("BD")
+PS = TypeVar("PS")  # prognostic state
+FD = TypeVar("FD", covariant=True)  # forcing data
 
 
-class InferenceDataABC(abc.ABC, Generic[PS, BD]):
+class InferenceDataABC(abc.ABC, Generic[PS, FD]):
     @property
     @abc.abstractmethod
     def initial_condition(self) -> PS:
@@ -20,5 +20,5 @@ class InferenceDataABC(abc.ABC, Generic[PS, BD]):
 
     @property
     @abc.abstractmethod
-    def loader(self) -> DataLoader[BD]:
+    def loader(self) -> DataLoader[FD]:
         ...
