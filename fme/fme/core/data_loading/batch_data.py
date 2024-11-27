@@ -368,7 +368,6 @@ class PairedData(Generic[DeviceType]):
 
 
 T = TypeVar("T", covariant=True)
-IC = TypeVar("IC")
 
 
 class GriddedDataABC(abc.ABC, Generic[T]):

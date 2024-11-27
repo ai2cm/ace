@@ -57,7 +57,7 @@ import os
 import time
 import uuid
 from datetime import timedelta
-from typing import Callable, Dict, Generic, Mapping, Optional, Sequence, TypeVar, cast
+from typing import Callable, Dict, Generic, Mapping, Optional, Sequence, TypeVar
 
 import dacite
 import dask
@@ -67,7 +67,7 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.ace.inference import run_inference_evaluator
+from fme.ace.inference.loop import run_inference
 from fme.ace.inference.timing import GlobalTimer
 from fme.ace.train.train_config import (
     EndOfBatchCallback,
@@ -82,7 +82,6 @@ from fme.core.aggregator.inference.main import (
 )
 from fme.core.data_loading.batch_data import (
     GriddedDataABC,
-    InferenceGriddedData,
     PairedData,
     PrognosticState,
 )
@@ -200,9 +199,10 @@ class CheckpointPaths:
         return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
 
 
-PS = TypeVar("PS")  # prognostic state
+PS = TypeVar("PS", contravariant=True)  # prognostic state
 TO = TypeVar("TO", bound="TrainOutputABC")  # train output
-BD = TypeVar("BD")  # batch data
+BD = TypeVar("BD")  # batch data for training
+FD = TypeVar("FD")  # forcing data for inference
 SD = TypeVar("SD")  # stepped data from inference
 
 
@@ -220,7 +220,9 @@ class AggregatorBuilderABC(abc.ABC, Generic[PS, TO, SD]):
         pass
 
 
-class AggregatorBuilder(AggregatorBuilderABC[PrognosticState, TrainOutput, PairedData]):
+class AggregatorBuilder(
+    AggregatorBuilderABC[PrognosticState, TrainOutput, PairedData],
+):
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
@@ -280,13 +282,11 @@ class Trainer:
         self,
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
-        inference_data: InferenceDataABC[PS, BD],
-        stepper: StepperABC[BD, TO],
+        inference_data: InferenceDataABC[PS, FD],
+        stepper: StepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
-        # TODO: SD doesn't constrain anything yet, it will need to when
-        # inference is implemented generically.
         aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
     ):
@@ -515,30 +515,13 @@ class Trainer:
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
-        aggregator: InferenceEvaluatorAggregator = cast(
-            InferenceEvaluatorAggregator,
-            self._aggregator_builder.get_inference_aggregator(),
-        )
+        aggregator = self._aggregator_builder.get_inference_aggregator()
         with torch.no_grad(), self._validation_context(), GlobalTimer():
-            if (
-                isinstance(aggregator, InferenceEvaluatorAggregator)
-                and isinstance(
-                    self.stepper,
-                    SingleModuleStepper,
-                )
-                and isinstance(self._inference_data, InferenceGriddedData)
-            ):
-                # TODO: update inference to be generic, then remove this
-                # if-block and this comment
-                run_inference_evaluator(
-                    aggregator=aggregator,
-                    stepper=self.stepper,
-                    data=self._inference_data,
-                )
-            else:
-                raise NotImplementedError(
-                    "Inference evaluation not implemented for this configuration."
-                )
+            run_inference(
+                predict=self.stepper.predict_paired,
+                data=self._inference_data,
+                aggregator=aggregator,
+            )
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
 
