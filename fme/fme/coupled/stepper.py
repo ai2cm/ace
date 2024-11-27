@@ -9,7 +9,7 @@ import torch
 import xarray as xr
 from torch import nn
 
-from fme.core.data_loading.batch_data import BatchData
+from fme.core.data_loading.batch_data import BatchData, PairedData
 from fme.core.data_loading.data_typing import SigmaCoordinates
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device
@@ -18,7 +18,6 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
-    StepperABC,
     TrainOutput,
     TrainOutputABC,
 )
@@ -246,12 +245,16 @@ def _concat_list_of_dicts(dict_list: List[TensorMapping], dim: int) -> Dict[str,
     return concat_dict
 
 
-def _concat_list_of_batch_data(batch_data_list: List[BatchData], dim: int) -> BatchData:
-    data_list = [batch_data.data for batch_data in batch_data_list]
+def _concat_list_of_paired_data(
+    paired_data_list: List[PairedData], dim: int
+) -> PairedData:
+    data_list = [paired_data.prediction for paired_data in paired_data_list]
+    target_list = [paired_data.target for paired_data in paired_data_list]
     data_concat = _concat_list_of_dicts(data_list, dim=dim)
-    times_list = [batch_data.times for batch_data in batch_data_list]
+    target_concat = _concat_list_of_dicts(target_list, dim=dim)
+    times_list = [paired_data.times for paired_data in paired_data_list]
     times_concat = xr.concat(times_list, dim="time")
-    return BatchData(data_concat, times=times_concat)
+    return PairedData(prediction=data_concat, target=target_concat, times=times_concat)
 
 
 @dataclasses.dataclass
@@ -287,7 +290,10 @@ class CoupledTrainOutput(TrainOutputABC):
         return self.metrics
 
 
-class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
+class CoupledStepper(
+    # TODO: add `predict_paired` method so we implement
+    # StepperABC[CoupledBatchData, CoupledTrainOutput],
+):
     TIME_DIM = 1
 
     def __init__(
@@ -472,18 +478,17 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 # atmosphere steps
 
                 # predict atmosphere forward n_inner_steps
-                gen_data, atmos_prognostic = self.atmosphere.predict(
+                gen_data, atmos_prognostic = self.atmosphere.predict_paired(
                     atmos_prognostic, atmos_forcings
                 )
                 gen_data_atmos.append(gen_data)
-                target_data = {
-                    k: data_atmos[k][:, 1 : self.n_inner_steps + 1]
-                    for k in gen_data.data
-                }
                 # compute inner step metrics
                 for inner_step in range(self.n_inner_steps):
                     step_loss = self._get_step_loss(
-                        gen_data.data, target_data, inner_step, self.atmosphere
+                        gen_data.prediction,
+                        gen_data.target,
+                        inner_step,
+                        self.atmosphere,
                     )
                     loss += step_loss
                     metrics[f"loss_atmos_step_{step}.{inner_step}"] = step_loss.detach()
@@ -498,17 +503,16 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 # sequence of n_inner_steps for time averaging the atmosphere
                 # over the ocean's timestep
                 ocean_forcings = self._get_ocean_forcings(
-                    {**data_ocean, **gen_data.data}, times=gen_data.times
+                    {**data_ocean, **gen_data.prediction}, times=gen_data.times
                 )
                 # ocean always predicts forward one step at a time
-                gen_data, ocean_prognostic = self.ocean.predict(
+                gen_data, ocean_prognostic = self.ocean.predict_paired(
                     ocean_prognostic, ocean_forcings
                 )
                 gen_data_ocean.append(gen_data)
-                target_data = {k: data_ocean[k][:, :1] for k in data_ocean}
                 # compute ocean step metrics
                 step_loss = self._get_step_loss(
-                    gen_data.data, target_data, 0, self.ocean
+                    gen_data.prediction, gen_data.target, 0, self.ocean
                 )
                 loss += step_loss
                 metrics[f"loss_ocean_step_{step}"] = step_loss.detach()
@@ -517,36 +521,29 @@ class CoupledStepper(StepperABC[CoupledBatchData, CoupledTrainOutput]):
                 # get generated ocean-to-atmosphere forcings for next iter
                 if step < n_outer_steps - 1:
                     atmos_forcings = self._get_atmosphere_forcings(
-                        {**data_atmos, **gen_data.data}, times=gen_data.times
+                        {**data_atmos, **gen_data.prediction}, times=gen_data.times
                     )
 
-        gen_ocean = _concat_list_of_batch_data(gen_data_ocean, dim=self.ocean.TIME_DIM)
-        gen_atmos = _concat_list_of_batch_data(
+        gen_ocean = _concat_list_of_paired_data(gen_data_ocean, dim=self.ocean.TIME_DIM)
+        gen_atmos = _concat_list_of_paired_data(
             gen_data_atmos, dim=self.atmosphere.TIME_DIM
         )
-
-        target_ocean: TensorDict = {
-            k: data.ocean_data.data[k][:, 1:] for k in gen_ocean.data
-        }
-        target_atmos: TensorDict = {
-            k: data.atmosphere_data.data[k][:, 1:] for k in gen_atmos.data
-        }
 
         metrics["loss"] = loss.detach()
         optimization.step_weights(loss)
 
         ocean_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(gen_ocean.data),
-            target_data=target_ocean,
+            gen_data=dict(gen_ocean.prediction),
+            target_data=dict(gen_ocean.target),
             times=gen_ocean.times,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(gen_atmos.data),
-            target_data=target_atmos,
+            gen_data=dict(gen_atmos.prediction),
+            target_data=dict(gen_atmos.target),
             times=gen_atmos.times,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,

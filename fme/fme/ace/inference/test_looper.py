@@ -9,7 +9,11 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.inference.loop import Looper, get_record_to_wandb, run_inference
+from fme.ace.inference.loop import (
+    Looper,
+    get_record_to_wandb,
+    run_inference,
+)
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.data_loading.batch_data import (
     BatchData,
@@ -18,7 +22,8 @@ from fme.core.data_loading.batch_data import (
     PrognosticState,
 )
 from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
-from fme.core.generics.inference import InferenceStepperABC, SimpleInferenceData
+from fme.core.device import get_device
+from fme.core.generics.inference import PredictFunction, SimpleInferenceData
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
@@ -144,19 +149,42 @@ def test_looper():
     )
     loader = MockLoader(shape, forcing_names, 3, time=time)
     looper = Looper(
-        stepper=stepper,
+        predict=stepper.predict,
         data=SimpleInferenceData(initial_condition, loader),
     )
 
     expected_output_shape = (shape[0], shape[1] - 1, shape[2], shape[3])
-    for prediction_batch, forcing_batch in looper:
-        xr.testing.assert_identical(prediction_batch.times, forcing_batch.times)
-        assert set(out_names) == set(prediction_batch.data)
-        assert set(forcing_names) == set(forcing_batch.data)
+    for batch in looper:
+        assert set(out_names) == set(batch.data)
         for name in out_names:
-            assert prediction_batch.data[name].shape == expected_output_shape
+            assert batch.data[name].shape == expected_output_shape
+
+
+def test_looper_paired():
+    stepper, spherical_data, time, in_names, out_names = _get_stepper()
+    forcing_names = set(in_names) - set(out_names)
+    shape = spherical_data.data[in_names[0]].shape
+    initial_condition = BatchData.new_on_device(
+        data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
+        times=time[:, 0:1],
+    ).get_start(
+        prognostic_names=stepper.prognostic_names,
+        n_ic_timesteps=1,
+    )
+    loader = MockLoader(shape, forcing_names, 3, time=time)
+    looper = Looper(
+        predict=stepper.predict_paired,
+        data=SimpleInferenceData(initial_condition, loader),
+    )
+
+    expected_output_shape = (shape[0], shape[1] - 1, shape[2], shape[3])
+    for batch in looper:
+        assert set(out_names) == set(batch.prediction)
+        assert set(forcing_names) == set(batch.target)
+        for name in out_names:
+            assert batch.prediction[name].shape == expected_output_shape
         for name in forcing_names:
-            assert forcing_batch.data[name].shape == expected_output_shape
+            assert batch.target[name].shape == expected_output_shape
 
 
 def _mock_compute_derived_quantities(data, forcing_data):
@@ -166,7 +194,7 @@ def _mock_compute_derived_quantities(data, forcing_data):
     return {**data, **derived}
 
 
-def test_looper_with_derived_variables():
+def test_looper_paired_with_derived_variables():
     mock_derive_func = unittest.mock.MagicMock(
         side_effect=_mock_compute_derived_quantities
     )
@@ -183,17 +211,17 @@ def test_looper_with_derived_variables():
     )
     loader = MockLoader(shape, forcing_names, 2, time=time)
     looper = Looper(
-        stepper=stepper,
+        predict=stepper.predict_paired,
         data=SimpleInferenceData(initial_condition, loader),
     )
 
-    for prediction_batch, forcing_batch in looper:
-        assert "derived" in prediction_batch.data
-        assert "derived" not in forcing_batch.data
+    for batch in looper:
+        assert "derived" in batch.prediction
+        assert "derived" in batch.target
     mock_derive_func.assert_called()
 
 
-def test_looper_with_target_data():
+def test_looper_paired_with_target_data():
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
@@ -206,16 +234,16 @@ def test_looper_with_target_data():
     )
     loader = MockLoader(shape, all_names, 2, time=time)
     looper = Looper(
-        stepper=stepper,
+        predict=stepper.predict_paired,
         data=SimpleInferenceData(initial_condition, loader),
     )
 
-    for prediction_batch, forcing_batch in looper:
-        assert set(out_names) == set(prediction_batch.data)
-        assert set(all_names) == set(forcing_batch.data)
+    for batch in looper:
+        assert set(out_names) == set(batch.prediction)
+        assert set(all_names) == set(batch.target)
 
 
-def test_looper_with_target_data_and_derived_variables():
+def test_looper_paired_with_target_data_and_derived_variables():
     mock_derive_func = unittest.mock.MagicMock(
         side_effect=_mock_compute_derived_quantities
     )
@@ -232,14 +260,13 @@ def test_looper_with_target_data_and_derived_variables():
     )
     loader = MockLoader(shape, all_names, 2, time=time)
     looper = Looper(
-        stepper,
+        predict=stepper.predict_paired,
         data=SimpleInferenceData(initial_condition, loader),
-        compute_derived_for_loaded_data=True,
     )
 
-    for prediction_batch, forcing_batch in looper:
-        assert set(out_names + ["derived"]) == set(prediction_batch.data)
-        assert set(all_names + ["derived"]) == set(forcing_batch.data)
+    for batch in looper:
+        assert set(out_names + ["derived"]) == set(batch.prediction)
+        assert set(all_names + ["derived"]) == set(batch.target)
     mock_derive_func.assert_called()
 
 
@@ -251,7 +278,7 @@ def get_batch_data(
     n_lat = 3
     n_lon = 4
     time_values = torch.arange(
-        start_time, start_time + n_timesteps, device=fme.get_device()
+        start_time, start_time + n_timesteps, device=get_device()
     )[None, :, None, None]
     time_axis = torch.broadcast_to(
         start_time + torch.arange(n_timesteps)[None, :], (n_samples, n_timesteps)
@@ -267,9 +294,7 @@ def get_batch_data(
     )
 
 
-class PlusOneStepper(
-    InferenceStepperABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
-):
+class PlusOneStepper:
     def __init__(
         self,
         n_ic_timesteps: int,
@@ -284,6 +309,11 @@ class PlusOneStepper(
             ] = unittest.mock.MagicMock(side_effect=lambda x, y=None: dict(x))
         else:
             self.derive_func = derive_func
+        _: PredictFunction[  # for type checking
+            PrognosticState[CurrentDevice],
+            BatchData[CurrentDevice],
+            BatchData[CurrentDevice],
+        ] = self.predict
 
     def predict(
         self,
@@ -325,11 +355,7 @@ class PlusOneStepper(
         return forcing.remove_initial_condition(self.n_ic_timesteps)
 
 
-@pytest.mark.parametrize(
-    "compute_derived_for_loaded",
-    [True, False],
-)
-def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
+def test_looper_simple_batch_data():
     n_ic_timesteps = 1
     n_forward_steps = 2
     n_iterations = 10
@@ -350,63 +376,35 @@ def test_simple_batch_data_looper(compute_derived_for_loaded: bool):
         )
         for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
     ]
-    with GlobalTimer():
-        timer = GlobalTimer.get_instance()
-        looper = Looper(
-            stepper,
-            data=SimpleInferenceData(initial_condition, loader),
-            compute_derived_for_loaded_data=compute_derived_for_loaded,
-        )
-        for i, (prediction, forcing) in enumerate(looper):
-            for j in range(prediction.times.shape[1]):
-                assert torch.allclose(
-                    prediction.data["var"][:, j, ...],
-                    torch.as_tensor(n_ic_timesteps + i * n_forward_steps + j),
-                )
-                assert torch.allclose(
-                    forcing.data["var"][:, j, ...],
-                    torch.as_tensor(n_ic_timesteps + i * n_forward_steps + j),
-                )
-        times = timer.get_durations()
-        assert times["data_loading"] > 0
-        assert times["forward_prediction"] > 0
-        if compute_derived_for_loaded:
-            assert mock_derive_func.call_count == 2 * n_iterations
-        else:
+
+    mock_predict = unittest.mock.MagicMock(side_effect=stepper.predict)
+    with unittest.mock.patch.object(stepper, "predict", mock_predict):
+        with GlobalTimer():
+            timer = GlobalTimer.get_instance()
+            looper = Looper(
+                predict=stepper.predict,
+                data=SimpleInferenceData(initial_condition, loader),
+            )
+            for i, batch in enumerate(looper):
+                for j in range(batch.times.shape[1]):
+                    assert torch.allclose(
+                        batch.data["var"][:, j, ...],
+                        torch.as_tensor(n_ic_timesteps + i * n_forward_steps + j),
+                    )
+            times = timer.get_durations()
+            assert times["data_loading"] > 0
             assert mock_derive_func.call_count == n_iterations
-        # we mocked out the implicit call that happens in .predict and .get_forward_data
-        # if this changed, update the test
-        assert "compute_derived_variables" not in times
+            assert mock_predict.call_count == n_iterations
+            # we mocked out the implicit calls that happen in .predict
+            # if this changed, update the test
+            assert "forward_prediction" not in times
+            assert "compute_derived_variables" not in times
 
 
-@pytest.mark.parametrize(
-    "n_ic_timesteps, n_forward_steps, n_iterations",
-    [
-        pytest.param(1, 2, 5, id="n_ic_timesteps=1"),
-        pytest.param(2, 2, 5, id="n_ic_timesteps=2"),
-    ],
-)
-def test_simple_run_inference(
-    n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
-):
-    mock_derive_func = unittest.mock.MagicMock(
-        side_effect=lambda batch_data, forcing_data: batch_data
-    )
-    stepper = PlusOneStepper(
-        n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
-    )
-    initial_condition = get_batch_data(
-        0,
-        n_timesteps=n_ic_timesteps,
-    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
-    loader = [
-        get_batch_data(
-            i,
-            n_ic_timesteps + n_forward_steps,
-        )
-        for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
-    ]
-    mock_writer = unittest.mock.MagicMock()
+def get_mock_aggregator(
+    n_ic_timesteps: int,
+) -> unittest.mock.MagicMock:
+    mock_aggregator = unittest.mock.MagicMock()
 
     # record_batch will start at step n_ic_timesteps
     i = n_ic_timesteps
@@ -434,6 +432,43 @@ def test_simple_run_inference(
     mock_aggregator.record_batch = unittest.mock.MagicMock(
         side_effect=record_batch_side_effect
     )
+    return mock_aggregator
+
+
+def get_mock_writer() -> unittest.mock.MagicMock:
+    mock_writer = unittest.mock.MagicMock()
+    return mock_writer
+
+
+@pytest.mark.parametrize(
+    "n_ic_timesteps, n_forward_steps, n_iterations",
+    [
+        pytest.param(1, 2, 5, id="n_ic_timesteps=1"),
+        pytest.param(2, 2, 5, id="n_ic_timesteps=2"),
+    ],
+)
+def test_run_inference_simple(
+    n_ic_timesteps: int, n_forward_steps: int, n_iterations: int
+):
+    mock_derive_func = unittest.mock.MagicMock(
+        side_effect=lambda batch_data, forcing_data: batch_data
+    )
+    stepper = PlusOneStepper(
+        n_ic_timesteps=n_ic_timesteps, derive_func=mock_derive_func
+    )
+    initial_condition = get_batch_data(
+        0,
+        n_timesteps=n_ic_timesteps,
+    ).get_start(prognostic_names=["var"], n_ic_timesteps=n_ic_timesteps)
+    loader = [
+        get_batch_data(
+            i,
+            n_ic_timesteps + n_forward_steps,
+        )
+        for i in range(0, n_iterations * n_forward_steps, n_forward_steps)
+    ]
+    mock_writer = get_mock_writer()
+    mock_aggregator = get_mock_aggregator(n_ic_timesteps)
 
     with GlobalTimer():
         with mock_wandb() as wandb:
@@ -442,7 +477,7 @@ def test_simple_run_inference(
                 side_effect=get_record_to_wandb("inference")
             )  # this init must be within mock_wandb context
             run_inference(
-                stepper,
+                predict=stepper.predict,
                 data=SimpleInferenceData(initial_condition, loader),
                 writer=mock_writer,
                 aggregator=mock_aggregator,

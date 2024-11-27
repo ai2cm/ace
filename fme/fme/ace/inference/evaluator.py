@@ -16,7 +16,7 @@ from fme.ace.inference.loop import (
     DeriverABC,
     get_record_to_wandb,
     run_dataset_comparison,
-    run_inference_evaluator,
+    run_inference,
     write_reduced_metrics,
 )
 from fme.ace.inference.timing import GlobalTimer
@@ -212,7 +212,7 @@ class _Deriver(DeriverABC):
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     timer = GlobalTimer.get_instance()
-    timer.start("inference")
+    timer.start_outer("inference")
     timer.start("initialization")
 
     if not os.path.isdir(config.experiment_dir):
@@ -267,7 +267,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     writer = config.get_data_writer(data, stepper.prognostic_names)
 
-    timer.stop("initialization")
+    timer.stop()
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
@@ -290,11 +290,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             record_logs=record_logs,
         )
     else:
-        run_inference_evaluator(
+        run_inference(
+            predict=stepper.predict_paired,
+            data=data,
             aggregator=aggregator,
             writer=writer,
-            stepper=stepper,
-            data=data,
             record_logs=record_logs,
         )
 
@@ -310,9 +310,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
             "video",
         ],
     )
-    timer.stop("final_writer_flush")
+    timer.stop()
 
-    timer.stop("inference")
+    timer.stop_outer("inference")
     total_steps = config.n_forward_steps * config.loader.n_initial_conditions
     inference_duration = timer.get_duration("inference")
     wandb_logging_duration = timer.get_duration("wandb_logging")

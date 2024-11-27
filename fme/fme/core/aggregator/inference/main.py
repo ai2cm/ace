@@ -576,7 +576,10 @@ class InferenceAggregatorConfig:
 
 
 class InferenceAggregator(
-    InferenceAggregatorABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
+    InferenceAggregatorABC[
+        PrognosticState[CurrentDevice],
+        BatchData[CurrentDevice],
+    ]
 ):
     """
     Aggregates statistics on a single timeseries of data.

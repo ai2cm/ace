@@ -1,11 +1,11 @@
 import abc
 from typing import Generic, TypeVar
 
-PS = TypeVar("PS")
-BD = TypeVar("BD")
+PS = TypeVar("PS", contravariant=True)  # prognostic state
+SD = TypeVar("SD", contravariant=True)  # stepped data
 
 
-class WriterABC(abc.ABC, Generic[PS, BD]):
+class WriterABC(abc.ABC, Generic[PS, SD]):
     @abc.abstractmethod
     def save_initial_condition(
         self,
@@ -16,7 +16,7 @@ class WriterABC(abc.ABC, Generic[PS, BD]):
     @abc.abstractmethod
     def append_batch(
         self,
-        batch: BD,
+        batch: SD,
     ):
         """
         Append a batch of data to the file.

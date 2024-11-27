@@ -2,12 +2,12 @@ import abc
 from typing import Any, Dict, Generic, List, TypeVar
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
-BD = TypeVar("BD")  # batch data
+T = TypeVar("T", contravariant=True)
 
 
-class AggregatorABC(abc.ABC, Generic[BD]):
+class AggregatorABC(abc.ABC, Generic[T]):
     @abc.abstractmethod
-    def record_batch(self, batch: BD) -> None:
+    def record_batch(self, batch: T) -> None:
         pass
 
     @abc.abstractmethod
@@ -19,11 +19,11 @@ InferenceLog = Dict[str, Any]
 InferenceLogs = List[InferenceLog]
 
 
-class InferenceAggregatorABC(abc.ABC, Generic[PS, BD]):
+class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
     @abc.abstractmethod
     def record_batch(
         self,
-        data: BD,
+        data: T,
     ) -> InferenceLogs:
         """
         Record a batch of data.

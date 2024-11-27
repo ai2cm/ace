@@ -651,10 +651,12 @@ def test_step_with_prescribed_ocean():
 def get_data_for_predict(
     n_steps, forcing_names: List[str]
 ) -> Tuple[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]:
+    n_samples = 3
     input_data = BatchData.new_on_device(
-        data={"a": torch.rand(3, 1, 5, 5).to(DEVICE)},
+        data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
         times=xr.DataArray(
-            np.zeros((3, 1)),
+            np.zeros((n_samples, 1)),
+            dims=["sample", "time"],
         ),
     ).get_start(
         prognostic_names=["a"],
@@ -665,7 +667,8 @@ def get_data_for_predict(
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
         times=xr.DataArray(
-            np.random.randn(3, n_steps + 1),
+            np.zeros((n_samples, n_steps + 1)),
+            dims=["sample", "time"],
         ),
     )
     return input_data, forcing_data
@@ -714,6 +717,7 @@ def test_predict_with_forcing():
         expected_a_output = output.data["a"][:, n - 1] + forcing_data.data["b"][:, n]
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
     xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
+    assert new_input_state.times.equals(output.times[:, -1:])
 
 
 def test_predict_with_ocean():
@@ -742,6 +746,7 @@ def test_predict_with_ocean():
     new_input_state = new_input_data.as_batch_data()
     assert isinstance(new_input_state, BatchData)
     torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
+    assert new_input_state.times.equals(output.times[:, -1:])
 
 
 def test_next_step_forcing_names():
