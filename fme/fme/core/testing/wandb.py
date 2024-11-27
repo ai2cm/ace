@@ -11,6 +11,7 @@ class MockWandB:
         self._enabled = False
         self._configured = False
         self._logs: Dict[int, Dict[str, Any]] = collections.defaultdict(dict)
+        self._last_step = 0
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
@@ -31,6 +32,12 @@ class MockWandB:
             pass
 
     def log(self, data: Mapping[str, Any], step: int, sleep=None):
+        if step < self._last_step:
+            raise ValueError(
+                f"step {step} is less than last step {self._last_step}, "
+                "steps must be logged in order"
+            )
+        self._last_step = step
         # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)

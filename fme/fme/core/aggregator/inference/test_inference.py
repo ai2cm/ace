@@ -30,10 +30,7 @@ def test_logs_labels_exist():
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     logs = agg.record_batch(
-        BatchData(
-            data=gen_data,
-            times=time,
-        ),
+        BatchData(data=gen_data, times=time),
     )
     assert len(logs) == n_time
     expected_step_keys = [

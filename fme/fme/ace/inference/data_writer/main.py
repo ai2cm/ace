@@ -10,6 +10,7 @@ import xarray as xr
 
 from fme.core.data_loading.batch_data import (
     BatchData,
+    CurrentDevice,
     PairedData,
     PrognosticState,
 )
@@ -337,7 +338,7 @@ def _save_initial_condition(
     ds.to_netcdf(str(Path(path) / "initial_condition.nc"))
 
 
-class DataWriter(WriterABC[PrognosticState, BatchData]):
+class DataWriter(WriterABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]):
     def __init__(
         self,
         path: str,
