@@ -13,7 +13,6 @@ import fme
 from fme.core import ClimateData, metrics
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     PrognosticState,
 )
 from fme.core.data_loading.data_typing import SigmaCoordinates
@@ -650,7 +649,7 @@ def test_step_with_prescribed_ocean():
 
 def get_data_for_predict(
     n_steps, forcing_names: List[str]
-) -> Tuple[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]:
+) -> Tuple[PrognosticState, BatchData]:
     n_samples = 3
     input_data = BatchData.new_on_device(
         data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},

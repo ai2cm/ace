@@ -1,6 +1,6 @@
 import logging
 import warnings
-from typing import List, Optional, Sequence, Tuple, TypeVar, Union
+from typing import List, Optional, Sequence, Tuple, Union
 
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
@@ -17,7 +17,6 @@ from ._xarray import (
     get_xarray_dataset,
 )
 from .batch_data import (
-    AnyDevice,
     GriddedData,
     InferenceGriddedData,
     PrognosticState,
@@ -142,9 +141,6 @@ def get_data_loader(
         properties=properties,
         sampler=sampler,
     )
-
-
-D = TypeVar("D", bound=AnyDevice)
 
 
 def get_inference_data(

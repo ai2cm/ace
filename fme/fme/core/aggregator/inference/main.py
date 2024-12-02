@@ -18,7 +18,6 @@ import xarray as xr
 
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     PairedData,
     PrognosticState,
 )
@@ -215,8 +214,8 @@ class InferenceEvaluatorAggregatorConfig:
 
 class InferenceEvaluatorAggregator(
     InferenceAggregatorABC[
-        Union[PairedData[CurrentDevice], PrognosticState[CurrentDevice]],
-        PairedData[CurrentDevice],
+        Union[PairedData, PrognosticState],
+        PairedData,
     ]
 ):
     """
@@ -372,7 +371,7 @@ class InferenceEvaluatorAggregator(
     @torch.no_grad()
     def record_batch(
         self,
-        data: PairedData[CurrentDevice],
+        data: PairedData,
     ) -> InferenceLogs:
         if len(data.prediction) == 0:
             raise ValueError("No prediction values in data")
@@ -404,9 +403,7 @@ class InferenceEvaluatorAggregator(
 
     def record_initial_condition(
         self,
-        initial_condition: Union[
-            PairedData[CurrentDevice], PrognosticState[CurrentDevice]
-        ],
+        initial_condition: Union[PairedData, PrognosticState],
     ) -> InferenceLogs:
         if self._n_timesteps_seen != 0:
             raise RuntimeError(
@@ -577,8 +574,8 @@ class InferenceAggregatorConfig:
 
 class InferenceAggregator(
     InferenceAggregatorABC[
-        PrognosticState[CurrentDevice],
-        BatchData[CurrentDevice],
+        PrognosticState,
+        BatchData,
     ]
 ):
     """
@@ -628,7 +625,7 @@ class InferenceAggregator(
     @torch.no_grad()
     def record_batch(
         self,
-        data: BatchData[CurrentDevice],
+        data: BatchData,
     ) -> InferenceLogs:
         """
         Record a batch of data.
@@ -652,7 +649,7 @@ class InferenceAggregator(
 
     def record_initial_condition(
         self,
-        initial_condition: PrognosticState[CurrentDevice],
+        initial_condition: PrognosticState,
     ) -> InferenceLogs:
         if self._n_timesteps_seen != 0:
             raise RuntimeError(

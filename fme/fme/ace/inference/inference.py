@@ -22,7 +22,6 @@ from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceAggregatorConfig
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     InferenceGriddedData,
     PrognosticState,
 )
@@ -85,7 +84,7 @@ class InitialConditionConfig:
 
 def get_initial_condition(
     ds: xr.Dataset, prognostic_names: Sequence[str]
-) -> PrognosticState[CurrentDevice]:
+) -> PrognosticState:
     """Given a dataset, extract a mapping of variables to tensors.
     and the time coordinate corresponding to the initial conditions.
 

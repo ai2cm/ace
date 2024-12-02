@@ -26,7 +26,6 @@ from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     PairedData,
     PrognosticState,
 )
@@ -407,7 +406,7 @@ class TrainOutput(TrainOutputABC):
 
     def prepend_initial_condition(
         self,
-        initial_condition: PrognosticState[CurrentDevice],
+        initial_condition: PrognosticState,
     ) -> "TrainOutput":
         """
         Prepends an initial condition to the existing stepped data.
@@ -500,10 +499,10 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
 class SingleModuleStepper(
     StepperABC[
-        PrognosticState[CurrentDevice],
-        BatchData[CurrentDevice],
-        BatchData[CurrentDevice],
-        PairedData[CurrentDevice],
+        PrognosticState,
+        BatchData,
+        BatchData,
+        PairedData,
         TrainOutput,
     ],
 ):
@@ -596,15 +595,15 @@ class SingleModuleStepper(
         self.out_names = config.out_names
 
         _1: PredictFunction[  # for type checking
-            PrognosticState[CurrentDevice],
-            BatchData[CurrentDevice],
-            BatchData[CurrentDevice],
+            PrognosticState,
+            BatchData,
+            BatchData,
         ] = self.predict
 
         _2: PredictFunction[  # for type checking
-            PrognosticState[CurrentDevice],
-            BatchData[CurrentDevice],
-            PairedData[CurrentDevice],
+            PrognosticState,
+            BatchData,
+            PairedData,
         ] = self.predict_paired
 
     @property
@@ -759,10 +758,10 @@ class SingleModuleStepper(
 
     def predict(
         self,
-        initial_condition: PrognosticState[CurrentDevice],
-        forcing: BatchData[CurrentDevice],
+        initial_condition: PrognosticState,
+        forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData[CurrentDevice], PrognosticState[CurrentDevice]]:
+    ) -> Tuple[BatchData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -813,10 +812,10 @@ class SingleModuleStepper(
 
     def predict_paired(
         self,
-        initial_condition: PrognosticState[CurrentDevice],
-        forcing: BatchData[CurrentDevice],
+        initial_condition: PrognosticState,
+        forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[PairedData[CurrentDevice], PrognosticState[CurrentDevice]]:
+    ) -> Tuple[PairedData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -868,7 +867,7 @@ class SingleModuleStepper(
 
     def train_on_batch(
         self,
-        data: BatchData[CurrentDevice],
+        data: BatchData,
         optimization: OptimizationABC,
         keep_initial_condition: bool = False,
     ) -> TrainOutput:
