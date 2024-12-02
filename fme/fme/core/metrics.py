@@ -115,12 +115,11 @@ def root_mean_squared_error(
     dim: Dimension = (),
 ) -> torch.Tensor:
     """
-    Computes the weighted global RMSE over all variables. Namely, for each variable:
+    Compute a weighted root mean square error between truth and predicted.
+
+    Namely:
 
         sqrt((weights * ((xhat - x) ** 2)).mean(dims))
-
-    If you want to compute the RMSE over the time dimension, then pass in
-    `truth.mean(time_dim)` and `predicted.mean(time_dim)` and specify `dims=space_dims`.
 
     Args:
         truth: torch.Tensor whose last dimensions are to be weighted
@@ -129,7 +128,7 @@ def root_mean_squared_error(
         dim: Dimensions to average over.
 
     Returns:
-        a tensor of shape (variable,) of weighted RMSEs.
+        A tensor of weighted RMSEs.
     """
     assert (
         truth.shape == predicted.shape
@@ -158,7 +157,8 @@ def gradient_magnitude_percent_diff(
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Compute the percent difference of the weighted mean gradient magnitude across
-    the specified dimensions."""
+    the specified dimensions.
+    """
     truth_grad_mag = weighted_mean_gradient_magnitude(truth, weights, dim)
     predicted_grad_mag = weighted_mean_gradient_magnitude(predicted, weights, dim)
     return 100 * (predicted_grad_mag - truth_grad_mag) / truth_grad_mag
@@ -235,7 +235,6 @@ def surface_pressure_due_to_dry_air(
     Returns:
         The surface pressure due to dry air mass only. (Pa)
     """
-
     total_water_path = sigma_coordinate.vertical_integral(
         specific_total_water, surface_pressure
     )

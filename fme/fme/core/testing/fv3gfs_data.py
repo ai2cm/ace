@@ -75,6 +75,7 @@ def save_nd_netcdf(
         filename: The filename to save the netcdf file to.
         dim_sizes: The dimensions of the data.
         variable_names: The names of the variables to save.
+        timestep_days: The number of days between each time step.
         time_varying_values: If not None, the values to use for each time step.
         save_vertical_coordinate: If True, save vertical coordinate variables.
     """

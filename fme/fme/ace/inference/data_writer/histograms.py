@@ -129,9 +129,11 @@ class HistogramDataWriter:
     ):
         """
         Args:
-            path: Path to write netCDF file(s).
+            path: The directory within which to write the file.
             n_timesteps: Number of timesteps to write to the file.
+            filename: Name of the file to write.
             variable_metadata: Metadata for each variable to be written to the file.
+            save_names: Names of variables to save. If None, all variables are saved.
         """
         self.path = path
         self._metrics_filename = str(Path(path) / filename)
@@ -148,8 +150,7 @@ class HistogramDataWriter:
         Append a batch of data to the file.
 
         Args:
-            target: Target data.
-            prediction: Prediction data.
+            data: The data to write.
             start_timestep: Timestep at which to start writing.
             batch_times: Time coordinates for each sample in the batch.
         """

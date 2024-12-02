@@ -5,9 +5,8 @@ def to_flat_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Converts any nested dictionaries to a flat version with
     the nested keys joined with a '.', e.g., {a: {b: 1}} ->
-    {a.b: 1}
+    {a.b: 1}.
     """
-
     new_flat = {}
     for k, v in d.items():
         if isinstance(v, dict):
@@ -23,9 +22,8 @@ def to_flat_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
 def to_nested_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
     """
     Converts a flat dictionary with '.' joined keys back into
-    a nested dictionary, e.g., {a.b: 1} -> {a: {b: 1}}
+    a nested dictionary, e.g., {a.b: 1} -> {a: {b: 1}}.
     """
-
     new_config: Dict[str, Any] = {}
 
     for k, v in d.items():

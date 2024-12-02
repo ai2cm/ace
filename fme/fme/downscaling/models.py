@@ -335,7 +335,7 @@ class DiffusionModel:
             downscale_factor: The factor by which the data is downscaled from
                 coarse to fine.
             sigma_data: The standard deviation of the data, used for diffusion
-                model preconditioning
+                model preconditioning.
         """
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
@@ -358,7 +358,6 @@ class DiffusionModel:
         optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
-
         channel_axis = -3
         coarse, fine = (
             _tensor_mapping_to_device(batch.coarse, get_device()),

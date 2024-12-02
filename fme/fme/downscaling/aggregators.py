@@ -56,6 +56,7 @@ class Mean:
         Records the metric values of a batch.
 
         Args:
+            data: the data to record.
         """
         data = _detach_and_to_cpu(data)
         metric = self._mapped_metric(data)
@@ -113,10 +114,8 @@ class MeanComparison:
         Records the metric values of a batch.
 
         Args:
-            *values: The metric values of the batch. Arguments could be for
-                example, truth and prediction data, and should correspond to the
-                `torch.Tensor` arguments of the `metric` used to initialize this
-                object.
+            target: the 'truth' target values.
+            prediction: the predicted values.
         """
         target = _detach_and_to_cpu(target)
         prediction = _detach_and_to_cpu(prediction)
@@ -539,12 +538,9 @@ class Aggregator:
         """
         Records a batch of target and prediction tensors for metric computation.
 
-        Takes target data starting with dimensions [batch_member], and prediction
-        data starting with dimensions [batch_member, sample_realization].
-
         Args:
-            target: Ground truth
-            pred: Model outputs
+            outputs: the model predictions and target data.
+            coarse: the coarse data used as input for downscaling.
         """
         for _, prob_comparison_aggregator in self._probabilistic_comparisons.items():
             prob_comparison_aggregator.record_batch(outputs.target, outputs.prediction)

@@ -66,7 +66,7 @@ class ZonalMeanAggregator:
         """
         Args:
             n_timesteps: Number of timesteps of inference that will be run.
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
         self._n_timesteps = n_timesteps

@@ -70,7 +70,6 @@ class CoupledBatchData(Generic[DeviceType]):
         each of the two components.
 
         """
-
         ocean_data = BatchData.from_sample_tuples(
             [x.ocean for x in samples], sample_dim_name=sample_dim_name
         )
