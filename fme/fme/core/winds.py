@@ -26,7 +26,6 @@ def u_v_to_x_y_z_wind(
         wy: y wind component
         wz: z wind component
     """
-
     # for a graphical proof of the equations used here, see
     # https://github.com/ai2cm/full-model/pull/355#issuecomment-1729773301
 

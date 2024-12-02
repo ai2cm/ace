@@ -53,7 +53,7 @@ class SphericalPowerSpectrumAggregator:
 
 
 class PairedSphericalPowerSpectrumAggregator:
-    """Record batches and return plots for paired prediction and target data"""
+    """Record batches and return plots for paired prediction and target data."""
 
     def __init__(self, nlat: int, nlon: int, grid: str = "legendre-gauss"):
         self._gen_aggregator = SphericalPowerSpectrumAggregator(nlat, nlon, grid)

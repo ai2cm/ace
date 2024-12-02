@@ -41,7 +41,8 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
 
 class ClimateData:
     """Container for climate data for accessing variables and providing
-    torch.Tensor views on data with multiple vertical levels."""
+    torch.Tensor views on data with multiple vertical levels.
+    """
 
     def __init__(
         self,
@@ -95,13 +96,15 @@ class ClimateData:
     @property
     def air_temperature(self) -> torch.Tensor:
         """Returns all vertical levels of air_temperature, e.g. a tensor of
-        shape `(..., vertical_level)`."""
+        shape `(..., vertical_level)`.
+        """
         return self._stacker("air_temperature", self.data)
 
     @property
     def specific_total_water(self) -> torch.Tensor:
         """Returns all vertical levels of specific total water, e.g. a tensor of
-        shape `(..., vertical_level)`."""
+        shape `(..., vertical_level)`.
+        """
         return self._stacker("specific_total_water", self.data)
 
     @property
@@ -222,7 +225,7 @@ class ClimateData:
         self, sigma_coordinates: SigmaCoordinates
     ) -> torch.Tensor:
         """
-        Compute vertical height at layer log midpoints
+        Compute vertical height at layer log midpoints.
         """
         interface_pressure = sigma_coordinates.interface_pressure(self.surface_pressure)
         layer_thickness = _layer_thickness(
@@ -256,7 +259,7 @@ def compute_dry_air_absolute_differences(
 
     Args:
         climate_data: ClimateData object.
-        area: Area of each grid cell as a [lat, lon] tensor, in m^2.
+        area_weighted_mean: Function which returns an area-weighted mean.
         sigma_coordinates: The sigma coordinates of the model.
 
     Returns:

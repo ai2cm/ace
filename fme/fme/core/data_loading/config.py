@@ -63,7 +63,6 @@ def _convert_interval_to_int(
     timestep: timedelta,
 ):
     """Convert interval to integer number of timesteps."""
-
     if interval % timestep != timedelta(0):
         raise ValueError(
             f"Requested interval length {interval} is not a "
@@ -162,6 +161,7 @@ class RepeatedInterval:
 @dataclasses.dataclass
 class OverwriteConfig:
     """Configuration to overwrite field values in XarrayDataset.
+
     Attributes:
         constant: Fill field with constant value.
         multiply_scalar: Multiply field by scalar value.
@@ -221,7 +221,7 @@ class XarrayDataConfig:
             required that 'torch.{dtype}' is a valid dtype.
         overwrite: Optional OverwriteConfig to overwrite loaded field values. If this is
             configured for a renamed field, the key should be the final updated name.
-        renamed_variables: Optional mapping of {old_name: new_name} to rename variables
+        renamed_variables: Optional mapping of {old_name: new_name} to rename variables.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be

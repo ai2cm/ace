@@ -150,7 +150,8 @@ class Corrector(CorrectorABC):
             forcing_data: The forcing data for the same time step as gen_data.
 
         Returns:
-            The corrected data."""
+            The corrected data.
+        """
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.

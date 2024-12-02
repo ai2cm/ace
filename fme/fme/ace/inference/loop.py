@@ -72,7 +72,8 @@ class Looper(Generic[PS, FD, SD]):
 
     def __next__(self) -> SD:
         """Return predictions for the time period corresponding to the next batch
-        of forcing data."""
+        of forcing data. Also returns the forcing data.
+        """
         timer = GlobalTimer.get_instance()
         with timer.context("data_loading"):
             try:

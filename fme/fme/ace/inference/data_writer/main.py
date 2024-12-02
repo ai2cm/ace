@@ -162,6 +162,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            timestep: Timestep of the model.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
                 containing the predictions and target values.
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
@@ -170,6 +171,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 containing video metrics.
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
+            prognostic_names: Names of variables to save for restart.
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
@@ -298,7 +300,7 @@ def _save_initial_condition(
     the timestep dimension.
 
     Args:
-        batch: Batch data containing the initial condition.
+        ic_data: Batch data containing the initial condition.
         path: Directory to write the netCDF file as initial_condition.nc.
         prognostic_names: Names of prognostic variables to save.
         variable_metadata: Metadata for each variable to be written to the file.
@@ -367,6 +369,7 @@ class DataWriter(WriterABC[PrognosticState[CurrentDevice], BatchData[CurrentDevi
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
+            prognostic_names: Names of variables to save for restart.
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
         self._writers: List[Subwriter] = []
@@ -461,7 +464,6 @@ class DataWriter(WriterABC[PrognosticState[CurrentDevice], BatchData[CurrentDevi
 
 
 class NullDataWriter(WriterABC[Any, Any]):
-
     """
     Null pattern for DataWriter, which does nothing.
     """

@@ -246,7 +246,7 @@ class TimeMeanEvaluatorAggregator:
             horizontal_dims: Names of the horizontal dimensions.
             target: Whether to compute metrics on the normalized or denormalized data,
                 defaults to "denorm".
-            metadata: Mapping of variable names their metadata that will
+            variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             reference_means: Dataset containing reference time-mean values
                 for bias computation.

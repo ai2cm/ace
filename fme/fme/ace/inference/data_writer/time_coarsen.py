@@ -66,7 +66,7 @@ class TimeCoarsenConfig:
         )
 
     def n_coarsened_timesteps(self, n_timesteps: int) -> int:
-        """Assumes initial condition is NOT in n_timesteps"""
+        """Assumes initial condition is NOT in n_timesteps."""
         return (n_timesteps) // self.coarsen_factor
 
 

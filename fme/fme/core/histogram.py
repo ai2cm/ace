@@ -171,7 +171,8 @@ _Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
 
 class ComparedDynamicHistograms:
     """Wrapper of DynamicHistogram for multiple histograms, two histograms per
-    variable plotted on the same axis."""
+    variable plotted on the same axis.
+    """
 
     def __init__(self, n_bins: int, percentiles: Optional[List[float]] = None) -> None:
         self.n_bins = n_bins

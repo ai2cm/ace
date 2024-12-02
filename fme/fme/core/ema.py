@@ -1,5 +1,5 @@
 """
-Exponential Moving Average (EMA) module
+Exponential Moving Average (EMA) module.
 
 Copied from https://github.com/CompVis/latent-diffusion/blob/main/ldm/modules/ema.py
 and modified.

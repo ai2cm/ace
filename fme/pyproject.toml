@@ -35,8 +35,13 @@ optional-dependencies.deploy = { file = "deploy-requirements.txt" }
 find = {}
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E203", "W293", "F541", "E402"]
+select = ["D", "E", "F", "I", "W"]
+ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]
 
 [tool.ruff.lint.per-file-ignores]
 "*/__init__.py" = ["F401"]
+"scripts/*" = ["D"]
+"test_*.py" = ["D"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
