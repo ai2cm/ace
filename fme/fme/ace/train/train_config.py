@@ -160,6 +160,11 @@ class TrainBuilders:
     def __init__(self, config: TrainConfig):
         self.config = config
 
+    def _get_train_window_data_requirements(self) -> DataRequirements:
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            self.config.n_forward_steps
+        )
+
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:
         return self.config.stepper.get_evaluation_window_data_requirements(
             self.config.inference.forward_steps_in_memory
@@ -171,7 +176,7 @@ class TrainBuilders:
         return self.config.stepper.get_prognostic_state_data_requirements()
 
     def get_train_data(self) -> GriddedData:
-        data_requirements = self._get_evaluation_window_data_requirements()
+        data_requirements = self._get_train_window_data_requirements()
         return get_data_loader(
             self.config.train_loader,
             requirements=data_requirements,
@@ -179,7 +184,7 @@ class TrainBuilders:
         )
 
     def get_validation_data(self) -> GriddedData:
-        data_requirements = self._get_evaluation_window_data_requirements()
+        data_requirements = self._get_train_window_data_requirements()
         return get_data_loader(
             self.config.validation_loader,
             requirements=data_requirements,
