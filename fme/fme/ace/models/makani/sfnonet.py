@@ -425,9 +425,7 @@ class SphericalFourierNeuralOperatorNet(nn.Module):
                 torch.zeros(1, embed_dim, self.inp_shape_loc[0], self.inp_shape_loc[1])
             )
             # information about how tensors are shared / sharded across ranks
-            self.pos_embed.is_shared_mp = (
-                []
-            )  # no reduction required since pos_embed is already serial
+            self.pos_embed.is_shared_mp = []  # no reduction required since pos_embed is already serial
             self.pos_embed.sharded_dims_mp = [None, None, "h", "w"]
             self.pos_embed.type = "direct"
             with torch.no_grad():

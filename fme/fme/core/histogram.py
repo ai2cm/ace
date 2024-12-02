@@ -210,9 +210,9 @@ class ComparedDynamicHistograms:
     ) -> Dict[str, Dict[Literal["target", "prediction"], _Histogram]]:
         if self.target_histograms is None or self.prediction_histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return_dict: Dict[
-            str, Dict[Literal["target", "prediction"], _Histogram]
-        ] = collections.defaultdict(dict)
+        return_dict: Dict[str, Dict[Literal["target", "prediction"], _Histogram]] = (
+            collections.defaultdict(dict)
+        )
         for k in self.target_histograms:
             counts, bin_edges = trim_zero_bins(
                 self.target_histograms[k].counts.squeeze(self._time_dim),
@@ -314,9 +314,9 @@ class ComparedDynamicHistograms:
                     np.zeros_like(target_dataset[missing_prediction_name]),
                     dims=("bin",),
                 )
-                prediction_dataset[
-                    f"{missing_prediction_name}_bin_edges"
-                ] = target_dataset[f"{missing_prediction_name}_bin_edges"]
+                prediction_dataset[f"{missing_prediction_name}_bin_edges"] = (
+                    target_dataset[f"{missing_prediction_name}_bin_edges"]
+                )
         ds = xr.concat([target_dataset, prediction_dataset], dim="source")
         ds["source"] = ["target", "prediction"]
         return ds

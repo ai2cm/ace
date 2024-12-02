@@ -90,10 +90,10 @@ class EnsoCoefficientEvaluatorAggregator:
         gridded_operations: GriddedOperations,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ):
-        self._sample_index_series: List[
-            Optional[xr.DataArray]
-        ] = get_sample_index_series(
-            self.enso_index, initial_times, n_forward_timesteps, timestep
+        self._sample_index_series: List[Optional[xr.DataArray]] = (
+            get_sample_index_series(
+                self.enso_index, initial_times, n_forward_timesteps, timestep
+            )
         )
         self._ops = gridded_operations
         if variable_metadata is not None:
@@ -139,21 +139,19 @@ class EnsoCoefficientEvaluatorAggregator:
                     device=get_device(),
                     dtype=torch.float32,
                 )
-                self._index_variance[i_sample] += (
-                    sample_index_series_window**2
-                ).sum()
+                self._index_variance[i_sample] += (sample_index_series_window**2).sum()
                 for name, data in target_data.items():
                     if name not in self._target_covariances[i_sample]:
-                        self._target_covariances[i_sample][
-                            name
-                        ] = data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                        self._target_covariances[i_sample][name] = (
+                            data_index_covariance(
+                                data[i_sample, :], sample_index_series_window
+                            )
                         )
                     else:
-                        self._target_covariances[i_sample][
-                            name
-                        ] += data_index_covariance(
-                            data[i_sample, :], sample_index_series_window
+                        self._target_covariances[i_sample][name] += (
+                            data_index_covariance(
+                                data[i_sample, :], sample_index_series_window
+                            )
                         )
                 for name, data in gen_data.items():
                     if name not in self._gen_covariances[i_sample]:

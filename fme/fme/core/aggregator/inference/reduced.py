@@ -70,8 +70,7 @@ class AreaWeightedFunction(Protocol):
         self,
         truth: torch.Tensor,
         predicted: torch.Tensor,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 class AreaWeightedSingleTargetFunction(Protocol):
@@ -82,8 +81,7 @@ class AreaWeightedSingleTargetFunction(Protocol):
     def __call__(
         self,
         tensor: torch.Tensor,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 def compute_metric_on(

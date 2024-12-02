@@ -13,8 +13,7 @@ class CorrectorConfigProtocol(Protocol):
         gridded_operations: GriddedOperations,
         sigma_coordinates: SigmaCoordinates,
         timestep: datetime.timedelta,
-    ) -> "CorrectorABC":
-        ...
+    ) -> "CorrectorABC": ...
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "CorrectorConfigProtocol":
@@ -32,5 +31,4 @@ class CorrectorABC(abc.ABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorMapping:
-        ...
+    ) -> TensorMapping: ...

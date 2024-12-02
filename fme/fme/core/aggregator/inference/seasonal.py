@@ -159,9 +159,7 @@ class SeasonalAggregator:
             rmse = float(
                 # must compute area mean and then mean across seasons
                 # before sqrt, so we can't use metrics.root_mean_squared_error
-                mse_tensor.mean()
-                .sqrt()
-                .numpy()
+                mse_tensor.mean().sqrt().numpy()
             )
             metric_logs[f"time-mean-rmse/{name}"] = rmse
 

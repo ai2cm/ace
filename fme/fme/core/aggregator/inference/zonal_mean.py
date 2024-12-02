@@ -80,9 +80,7 @@ class ZonalMeanAggregator:
         self._gen_data: Optional[TensorDict] = None
         self._n_batches = torch.zeros(
             n_timesteps, dtype=torch.int32, device=get_device()
-        )[
-            None, :, None
-        ]  # sample, time, lat
+        )[None, :, None]  # sample, time, lat
 
     def record_batch(
         self,

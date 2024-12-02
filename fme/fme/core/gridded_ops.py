@@ -11,8 +11,7 @@ class GriddedOperations(abc.ABC):
     @abc.abstractmethod
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
     def area_weighted_mean_bias(
         self, truth: torch.Tensor, predicted: torch.Tensor
@@ -33,8 +32,7 @@ class GriddedOperations(abc.ABC):
     @abc.abstractmethod
     def area_weighted_gradient_magnitude_percent_diff(
         self, truth: torch.Tensor, predicted: torch.Tensor
-    ):
-        ...
+    ): ...
 
     def to_state(self) -> Dict[str, Any]:
         return {

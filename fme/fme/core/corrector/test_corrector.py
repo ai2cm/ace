@@ -183,9 +183,7 @@ def test_force_conserve_moisture(
         ClimateData(data),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
-    )[
-        :, 1
-    ]  # no meaning for initial value data, want first timestep
+    )[:, 1]  # no meaning for initial value data, want first timestep
     if global_only:
         original_budget_residual = ops.area_weighted_mean(
             original_budget_residual, keepdim=True
@@ -215,9 +213,7 @@ def test_force_conserve_moisture(
         ClimateData(new_data),
         sigma_coordinates=sigma_coordinates,
         timestep=TIMESTEP,
-    )[
-        :, 1
-    ]  # no meaning for initial value data, want first timestep
+    )[:, 1]  # no meaning for initial value data, want first timestep
     new_dry_air = (
         ClimateData(data)
         .surface_pressure_due_to_dry_air(sigma_coordinates)
