@@ -57,6 +57,8 @@ def _get_sigma_coordinates(
 
     Args:
         ds: Dataset to get sigma coordinates from.
+        dtype: Data type of the returned tensors. If None, the dtype is not
+            changed from the original in ds.
     """
     ak_mapping = {
         int(v[3:]): torch.as_tensor(ds[v].values)
@@ -306,7 +308,8 @@ class XarrayDataset(Dataset):
 
     For example, if the file(s) have the time coordinate
     (t0, t1, t2, t3, t4) and requirements.n_timesteps=3, then this dataset will
-    provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4)."""
+    provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4).
+    """
 
     def __init__(
         self,
@@ -379,7 +382,7 @@ class XarrayDataset(Dataset):
 
     @property
     def all_times(self) -> xr.CFTimeIndex:
-        """Time index of all available times in the data"""
+        """Time index of all available times in the data."""
         return self._all_times
 
     def _get_variable_metadata(self, ds):
@@ -427,7 +430,8 @@ class XarrayDataset(Dataset):
     def _group_variable_names_by_time_type(self) -> VariableNames:
         """Returns lists of time-dependent variable names, time-independent
         variable names, and variables which are only present as an initial
-        condition."""
+        condition.
+        """
         (
             time_dependent_names,
             time_invariant_names,
@@ -631,7 +635,8 @@ def as_index_selection(
     subset: Union[Slice, TimeSlice, RepeatedInterval], dataset: XarrayDataset
 ) -> Union[slice, np.ndarray]:
     """Converts a subset defined either as a Slice or TimeSlice into an index slice
-    based on time coordinate in provided dataset."""
+    based on time coordinate in provided dataset.
+    """
     if isinstance(subset, Slice):
         index_selection = subset.slice
     elif isinstance(subset, TimeSlice):

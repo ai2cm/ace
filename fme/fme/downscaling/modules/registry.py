@@ -1,5 +1,6 @@
 """Registry for downscaling modules. Note that all modules should accept and
-return tensors of shape (batch, channel, height, width)."""
+return tensors of shape (batch, channel, height, width).
+"""
 
 import dataclasses
 from typing import (
@@ -76,7 +77,8 @@ class SwinirConfig:
 
 def compute_unet_padding_size(value: int, divisor: int) -> int:
     """Compute the padding size so that `value + padding_size` is divisible by
-    `divisor`."""
+    `divisor`.
+    """
     remainder = value % divisor
     if remainder == 0:
         return 0

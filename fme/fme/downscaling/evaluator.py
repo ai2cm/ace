@@ -132,7 +132,8 @@ class InterpolateModelConfig:
 def clean_checkpoint_dict(checkpoint: Mapping[str, Any]) -> Mapping[str, Any]:
     """Handle the breaking rename change from high to fine and low to coarse in
     the checkpoint dict. This should be deleted in the future.
-    Today is 2024-04-12."""
+    Today is 2024-04-12.
+    """
     if "highres" in checkpoint["model"]["config"]["normalization"]:
         config = dict(checkpoint["model"]["config"])
         config["normalization"] = {

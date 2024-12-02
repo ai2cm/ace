@@ -27,7 +27,7 @@ class DimSize:
 class SigmaCoordinates:
     """
     Defines pressure at interface levels according to the following formula:
-        p(k) = a(k) + b(k)*ps
+        p(k) = a(k) + b(k)*ps.
 
     where ps is the surface pressure, a and b are the sigma coordinates.
 
@@ -55,7 +55,7 @@ class SigmaCoordinates:
             )
 
     def __len__(self):
-        """The number of vertical layer interfaces"""
+        """The number of vertical layer interfaces."""
         return len(self.ak)
 
     @property
@@ -152,25 +152,25 @@ class HorizontalCoordinates(abc.ABC):
     @property
     @abc.abstractmethod
     def dims(self) -> List[str]:
-        """names of model horizontal dimensions"""
+        """Names of model horizontal dimensions."""
         pass
 
     @property
     @abc.abstractmethod
     def loaded_dims(self) -> List[str]:
-        """names of horizontal dimensions as loaded from training dataset"""
+        """Names of horizontal dimensions as loaded from training dataset."""
         pass
 
     @property
     @abc.abstractmethod
     def loaded_sizes(self) -> List[DimSize]:
-        """sizes of horizontal dimensions as loaded from training dataset"""
+        """Sizes of horizontal dimensions as loaded from training dataset."""
         pass
 
     @property
     @abc.abstractmethod
     def loaded_default_sizes(self) -> List[DimSize]:
-        """default sizes of horizontal data dimensions, used by testing code"""
+        """Default sizes of horizontal data dimensions, used by testing code."""
         pass
 
     @property
@@ -198,7 +198,7 @@ class HorizontalCoordinates(abc.ABC):
     @property
     @abc.abstractmethod
     def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """meshgrids of latitudes and longitudes, respectively."""
+        """Meshgrids of latitudes and longitudes, respectively."""
         pass
 
 

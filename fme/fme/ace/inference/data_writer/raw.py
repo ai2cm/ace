@@ -95,12 +95,13 @@ class RawDataWriter:
     ):
         """
         Args:
-            filename: Path to write netCDF file(s).
+            path: Directory within which to write the file.
+            label: Name of the file to write.
             n_initial_conditions: Number of initial conditions / timeseries
                 to write to the file.
             save_names: Names of variables to save in the output file.
                 If None, all provided variables will be saved.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         filename = str(Path(path) / label)

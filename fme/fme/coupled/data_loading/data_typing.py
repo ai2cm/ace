@@ -65,10 +65,10 @@ class CoupledDataset(Dataset):
     ):
         """
         Args:
-            ocean: ocean dataset
-            atmosphere: atmosphere dataset
-            ocean_timestep: ocean timestep
-            n_steps_fast: number of atmosphere timesteps per ocean timestep
+            ocean: ocean dataset.
+            atmosphere: atmosphere dataset.
+            properties: the coupled dataset properties.
+            n_steps_fast: number of atmosphere timesteps per ocean timestep.
         """
         self._ocean = ocean
         if properties.ocean.timestep != properties.atmosphere.timestep * n_steps_fast:

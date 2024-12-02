@@ -160,7 +160,7 @@ def get_inference_data(
         config: Parameters for the data loader.
         total_forward_steps: Total number of forward steps to take over the course of
             inference.
-        requirements: Data requirements for the model.
+        window_requirements: Data requirements for the model.
         initial_condition: Initial condition for the inference, or a requirements object
             specifying how to extract the initial condition from the first batch of
             data

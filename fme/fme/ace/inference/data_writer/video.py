@@ -23,7 +23,7 @@ class PairedVideoDataWriter:
     ):
         """
         Args:
-            filename: Path to write netCDF file(s).
+            path: Directory within which to write the file.
             n_samples: Number of samples to write to the file.
             n_timesteps: Number of timesteps to write to the file.
             variable_metadata: Metadata for each variable to be written to the file.

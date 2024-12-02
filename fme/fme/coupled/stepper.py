@@ -447,7 +447,6 @@ class CoupledStepper(
             keep_initial_condition: Whether to keep the initial condition in the output.
 
         """
-
         # we'll use data_ocean and data_atmos to keep track of their respective
         # targets and forcings needed for future steps, removing whatever is
         # already used as we go
