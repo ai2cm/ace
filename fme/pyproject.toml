@@ -34,6 +34,13 @@ optional-dependencies.deploy = { file = "deploy-requirements.txt" }
 [tool.setuptools.packages]
 find = {}
 
+[tool.uv]
+cache-keys = [
+    { file = "requirements.txt" },
+    { file = "dev-requirements.txt" },
+    { file = "docs/requirements.txt" },
+]
+
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W"]
 ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]
