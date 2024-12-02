@@ -1,14 +1,10 @@
 repos:
--   repo: https://github.com/psf/black
-    rev: 23.3.0
-    hooks:
-    - id: black
-      additional_dependencies: ["click==8.0.4"]
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.7.0
+  rev: v0.8.1
   hooks:
     - id: ruff
       args: ["--fix", "--config", "fme/pyproject.toml"]
+    - id: ruff-format
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
