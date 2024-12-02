@@ -32,8 +32,7 @@ class PerturbationConfig(abc.ABC):
         lat: torch.Tensor,
         lon: torch.Tensor,
         ocean_fraction: torch.Tensor,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 PT = TypeVar("PT", bound=Type[PerturbationConfig])

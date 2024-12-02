@@ -57,16 +57,13 @@ class _Aggregator(Protocol):
     def record_batch(
         self,
         data: TensorMapping,
-    ):
-        ...
+    ): ...
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        ...
+    def get_logs(self, label: str): ...
 
     @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset:
-        ...
+    def get_dataset(self) -> xr.Dataset: ...
 
 
 class _EvaluatorAggregator(Protocol):
@@ -78,16 +75,13 @@ class _EvaluatorAggregator(Protocol):
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
         i_time_start: int = 0,
-    ):
-        ...
+    ): ...
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        ...
+    def get_logs(self, label: str): ...
 
     @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset:
-        ...
+    def get_dataset(self) -> xr.Dataset: ...
 
 
 class _TimeDependentAggregator(Protocol):
@@ -96,16 +90,13 @@ class _TimeDependentAggregator(Protocol):
         self,
         time: xr.DataArray,
         data: TensorMapping,
-    ):
-        ...
+    ): ...
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        ...
+    def get_logs(self, label: str): ...
 
     @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset:
-        ...
+    def get_dataset(self) -> xr.Dataset: ...
 
 
 class _TimeDependentEvaluatorAggregator(Protocol):
@@ -115,16 +106,13 @@ class _TimeDependentEvaluatorAggregator(Protocol):
         time: xr.DataArray,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-    ):
-        ...
+    ): ...
 
     @torch.no_grad()
-    def get_logs(self, label: str):
-        ...
+    def get_logs(self, label: str): ...
 
     @torch.no_grad()
-    def get_dataset(self) -> xr.Dataset:
-        ...
+    def get_dataset(self) -> xr.Dataset: ...
 
 
 @dataclasses.dataclass
@@ -306,12 +294,12 @@ class InferenceEvaluatorAggregator(
                     n_timesteps=n_timesteps,
                     variable_metadata=variable_metadata,
                 )
-            self._aggregators[
-                "spherical_power_spectrum"
-            ] = PairedSphericalPowerSpectrumAggregator(
-                horizontal_coordinates.area_weights.shape[-2],
-                horizontal_coordinates.area_weights.shape[-1],
-                horizontal_coordinates.grid,
+            self._aggregators["spherical_power_spectrum"] = (
+                PairedSphericalPowerSpectrumAggregator(
+                    horizontal_coordinates.area_weights.shape[-2],
+                    horizontal_coordinates.area_weights.shape[-1],
+                    horizontal_coordinates.grid,
+                )
             )
             if log_video:
                 self._aggregators["video"] = VideoAggregator(
@@ -346,14 +334,14 @@ class InferenceEvaluatorAggregator(
                 monthly_reference_data=monthly_reference_data,
             )
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
-            self._time_dependent_aggregators[
-                "enso_coefficient"
-            ] = EnsoCoefficientEvaluatorAggregator(
-                initial_times,
-                n_timesteps - 1,
-                timestep,
-                gridded_operations=ops,
-                variable_metadata=variable_metadata,
+            self._time_dependent_aggregators["enso_coefficient"] = (
+                EnsoCoefficientEvaluatorAggregator(
+                    initial_times,
+                    n_timesteps - 1,
+                    timestep,
+                    gridded_operations=ops,
+                    variable_metadata=variable_metadata,
+                )
             )
         self._summary_aggregators = {
             name: agg

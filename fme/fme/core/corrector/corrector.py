@@ -189,8 +189,7 @@ def force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
 
 
 class AreaWeightedMean(Protocol):
-    def __call__(self, data: torch.Tensor, keepdim: bool) -> torch.Tensor:
-        ...
+    def __call__(self, data: torch.Tensor, keepdim: bool) -> torch.Tensor: ...
 
 
 def _force_conserve_dry_air(

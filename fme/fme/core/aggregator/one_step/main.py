@@ -15,8 +15,7 @@ from .snapshot import SnapshotAggregator
 
 
 class _Aggregator(Protocol):
-    def get_logs(self, label: str) -> TensorMapping:
-        ...
+    def get_logs(self, label: str) -> TensorMapping: ...
 
     def record_batch(
         self,
@@ -25,8 +24,7 @@ class _Aggregator(Protocol):
         gen_data: TensorMapping,
         target_data_norm: TensorMapping,
         gen_data_norm: TensorMapping,
-    ) -> None:
-        ...
+    ) -> None: ...
 
 
 class OneStepAggregator(AggregatorABC[TrainOutput]):

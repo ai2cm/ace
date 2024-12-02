@@ -366,8 +366,7 @@ class TrainOutputABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def compute_derived_variables(self: TO) -> TO:
-        ...
+    def compute_derived_variables(self: TO) -> TO: ...
 
     @abc.abstractmethod
     def get_metrics(self) -> TensorDict:
@@ -381,9 +380,9 @@ class TrainOutput(TrainOutputABC):
     target_data: TensorDict
     times: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
-    derive_func: Callable[
-        [TensorMapping, TensorMapping], TensorDict
-    ] = lambda x, _: dict(x)
+    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
+        lambda x, _: dict(x)
+    )
 
     def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
         return TrainOutput(

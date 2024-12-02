@@ -19,8 +19,7 @@ class ModuleConfig(Protocol):
         downscale_factor: int,
         fine_topography: Optional[torch.Tensor],
         sigma_data: float,
-    ) -> torch.nn.Module:
-        ...
+    ) -> torch.nn.Module: ...
 
 
 @dataclasses.dataclass

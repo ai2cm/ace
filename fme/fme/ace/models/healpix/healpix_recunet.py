@@ -334,8 +334,7 @@ class HEALPixRecUNet(nn.Module):
                             inputs[0][
                                 :,
                                 :,
-                                s
-                                * self.input_time_size : (s + 1)
+                                s * self.input_time_size : (s + 1)
                                 * self.input_time_size,
                             ]
                         ]
@@ -349,8 +348,7 @@ class HEALPixRecUNet(nn.Module):
                             inputs[0][
                                 :,
                                 :,
-                                s
-                                * self.input_time_size : (s + 1)
+                                s * self.input_time_size : (s + 1)
                                 * self.input_time_size,
                             ]
                         ]

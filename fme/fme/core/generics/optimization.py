@@ -8,13 +8,11 @@ from torch import nn
 class OptimizationABC(abc.ABC):
     @contextlib.contextmanager
     @abc.abstractmethod
-    def autocast(self):
-        ...
+    def autocast(self): ...
 
     @property
     @abc.abstractmethod
-    def learning_rate(self) -> float:
-        ...
+    def learning_rate(self) -> float: ...
 
     @abc.abstractmethod
     def set_mode(self, module: nn.Module):
@@ -35,8 +33,7 @@ class OptimizationABC(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def step_weights(self, loss: torch.Tensor):
-        ...
+    def step_weights(self, loss: torch.Tensor): ...
 
     @abc.abstractmethod
     def get_state(self):

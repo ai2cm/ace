@@ -216,9 +216,7 @@ class _VarianceVideoData:
         time_slice = slice(i_time_start, i_time_start + window_steps)
         for name, tensor in target_data.items():
             self._target_means[name][time_slice, ...] += tensor.mean(dim=0).cpu()
-            self._target_squares[name][time_slice, ...] += (
-                (tensor**2).mean(dim=0).cpu()
-            )
+            self._target_squares[name][time_slice, ...] += (tensor**2).mean(dim=0).cpu()
         for name, tensor in gen_data.items():
             self._gen_means[name][time_slice, ...] += tensor.mean(dim=0).cpu()
             self._gen_squares[name][time_slice, ...] += (tensor**2).mean(dim=0).cpu()

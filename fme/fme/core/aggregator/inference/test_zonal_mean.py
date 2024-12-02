@@ -56,7 +56,7 @@ def test_zonal_mean_batch_varying():
         assert data is not None
         torch.testing.assert_close(
             data["a"].sum(dim=0)[0, 0],  # sum over batches, then pick a time/lat point
-            torch.arange(n_sample, dtype=torch.float32, device=get_device()).sum()
+            torch.arange(n_sample, dtype=torch.float32, device=get_device()).sum(),
             # should be same as sum over batches
         )
 
