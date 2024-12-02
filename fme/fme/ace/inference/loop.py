@@ -22,7 +22,6 @@ from fme.core.aggregator.inference.main import (
 )
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     PairedData,
     PrognosticState,
 )
@@ -175,12 +174,8 @@ class DeriverABC(abc.ABC):
 
 def run_dataset_comparison(
     aggregator: InferenceAggregatorABC[PairedData, PairedData],
-    prediction_data: InferenceDataABC[
-        PrognosticState[CurrentDevice], BatchData[CurrentDevice]
-    ],
-    target_data: InferenceDataABC[
-        PrognosticState[CurrentDevice], BatchData[CurrentDevice]
-    ],
+    prediction_data: InferenceDataABC[PrognosticState, BatchData],
+    target_data: InferenceDataABC[PrognosticState, BatchData],
     deriver: DeriverABC,
     writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
     record_logs: Optional[Callable[[InferenceLogs], None]] = None,
