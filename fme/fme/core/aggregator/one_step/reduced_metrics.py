@@ -4,6 +4,7 @@ and aggregating them into a single metric value. The functions here mainly exist
 to turn metric functions that may have different APIs into a common API,
 so that they can be iterated over and called in the same way in a loop.
 """
+
 from typing import Protocol
 
 import torch
@@ -19,8 +20,7 @@ class AreaWeightedFunction(Protocol):
         self,
         truth: torch.Tensor,
         predicted: torch.Tensor,
-    ) -> torch.Tensor:
-        ...
+    ) -> torch.Tensor: ...
 
 
 class ReducedMetric(Protocol):

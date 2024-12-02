@@ -48,23 +48,23 @@ class MeanAggregator:
             }
             device = get_device()
             for key in gen_data:
-                self._variable_metrics["weighted_rmse"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    device=device,
-                    compute_metric=self._gridded_operations.area_weighted_rmse,
+                self._variable_metrics["weighted_rmse"][key] = (
+                    AreaWeightedReducedMetric(
+                        device=device,
+                        compute_metric=self._gridded_operations.area_weighted_rmse,
+                    )
                 )
-                self._variable_metrics["weighted_bias"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    device=device,
-                    compute_metric=self._gridded_operations.area_weighted_mean_bias,
+                self._variable_metrics["weighted_bias"][key] = (
+                    AreaWeightedReducedMetric(
+                        device=device,
+                        compute_metric=self._gridded_operations.area_weighted_mean_bias,
+                    )
                 )
-                self._variable_metrics["weighted_grad_mag_percent_diff"][
-                    key
-                ] = AreaWeightedReducedMetric(
-                    device=device,
-                    compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff,  # noqa: E501
+                self._variable_metrics["weighted_grad_mag_percent_diff"][key] = (
+                    AreaWeightedReducedMetric(
+                        device=device,
+                        compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff,  # noqa: E501
+                    )
                 )
 
         return self._variable_metrics

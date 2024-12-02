@@ -167,9 +167,9 @@ class HistogramDataWriter:
         metric_dataset = self._histogram.get_dataset()
         for name in self.variable_metadata:
             try:
-                metric_dataset[f"{name}_bin_edges"].attrs[
-                    "units"
-                ] = self.variable_metadata[name].units
+                metric_dataset[f"{name}_bin_edges"].attrs["units"] = (
+                    self.variable_metadata[name].units
+                )
             except KeyError:
                 logging.info(
                     f"{name} in metadata but not in data written to "
@@ -177,9 +177,9 @@ class HistogramDataWriter:
                 )
         for name in metric_dataset.data_vars:
             if not name.endswith("_bin_edges"):
-                metric_dataset[f"{name}_bin_edges"].attrs[
-                    "long_name"
-                ] = f"{name} bin edges"
+                metric_dataset[f"{name}_bin_edges"].attrs["long_name"] = (
+                    f"{name} bin edges"
+                )
                 metric_dataset[name].attrs["units"] = "count"
                 metric_dataset[name].attrs["long_name"] = f"{name} histogram"
         metric_dataset.to_netcdf(self._metrics_filename)

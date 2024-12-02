@@ -65,7 +65,9 @@ URL_GOOGLE_LATLON = (
 # following dataset was manually generated in https://github.com/ai2cm/explore/blob/master/oliwm/2024-07-31-generate-ERA5-co2.ipynb # noqa: E501
 URL_CO2 = "gs://vcm-ml-raw-flexible-retention/2024-11-11-co2-annual-mean-for-era5.zarr"
 
-URL_NCAR_ERA5 = "gs://vcm-ml-intermediate/2024-05-17-era5-025deg-2D-variables-from-NCAR-as-zarr"  # noqa: E501
+URL_NCAR_ERA5 = (
+    "gs://vcm-ml-intermediate/2024-05-17-era5-025deg-2D-variables-from-NCAR-as-zarr"  # noqa: E501
+)
 URL_INVARIANT = f"{URL_NCAR_ERA5}/e5.oper.invariant.zarr"
 URL_SURFACE_ANALYSIS_LATLON = f"{URL_NCAR_ERA5}/e5.oper.an.sfc.zarr"
 URL_MEAN_FLUX = f"{URL_NCAR_ERA5}/e5.oper.fc.sfc.meanflux.zarr"

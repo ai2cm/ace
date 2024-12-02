@@ -35,7 +35,7 @@ def get_sizes(
         lat=torch.Tensor(np.arange(12)),
         loaded_lat_name=LAT_DIM,
         loaded_lon_name=LON_DIM,
-    )
+    ),
 ):
     spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.loaded_default_sizes)
     spatial_sizes.append(DimSize(TIME_DIM, 3))
@@ -48,7 +48,7 @@ def create_reference_dataset(
         lat=torch.Tensor(np.arange(12)),
         loaded_lat_name=LAT_DIM,
         loaded_lon_name=LON_DIM,
-    )
+    ),
 ):
     dims = [TIME_DIM] + spatial_dims.loaded_dims
     dim_sizes = get_sizes(spatial_dims=spatial_dims)

@@ -133,15 +133,19 @@ def test_time_coarsen(
     ), "times coarsened time dim"
     # check the coarsened data values
     n_samples, _, n_lat, n_lon = dim_sizes
-    torch.testing.assert_close(
-        target_coarsened[VARNAME],
-        torch.tensor(expected_coarsened_data, dtype=torch.float64)
-        .repeat(n_samples, n_lat, n_lon, 1)
-        .movedim(3, 1),
-    ), "target coarsened value"
+    (
+        torch.testing.assert_close(
+            target_coarsened[VARNAME],
+            torch.tensor(expected_coarsened_data, dtype=torch.float64)
+            .repeat(n_samples, n_lat, n_lon, 1)
+            .movedim(3, 1),
+        ),
+        "target coarsened value",
+    )
     # check the coarsened start timestep
     assert coarsened_start_timestep == expected_coarsened_start_timestep
     # check the coarsened data time coordinate values
-    xr.testing.assert_allclose(
-        times_coarsened, expected_coarsened_times
-    ), "times initial condition value"
+    (
+        xr.testing.assert_allclose(times_coarsened, expected_coarsened_times),
+        "times initial condition value",
+    )

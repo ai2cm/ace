@@ -10,8 +10,7 @@ class WriterABC(abc.ABC, Generic[PS, SD]):
     def save_initial_condition(
         self,
         ic_data: PS,
-    ):
-        ...
+    ): ...
 
     @abc.abstractmethod
     def append_batch(

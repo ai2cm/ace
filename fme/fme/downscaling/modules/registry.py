@@ -32,8 +32,7 @@ class ModuleConfig(Protocol):
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         fine_topography: Optional[torch.Tensor],
-    ) -> torch.nn.Module:
-        ...
+    ) -> torch.nn.Module: ...
 
 
 @dataclasses.dataclass

@@ -317,7 +317,8 @@ class DataLoaderConfig:
         )
 
         dataset = PairedDataset(
-            dataset_fine_subset, dataset_coarse_subset  # type: ignore
+            dataset_fine_subset,
+            dataset_coarse_subset,  # type: ignore
         )
 
         sampler: Optional[DistributedSampler] = (

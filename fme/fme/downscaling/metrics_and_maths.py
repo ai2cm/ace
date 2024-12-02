@@ -10,7 +10,7 @@ from . import piq
 
 
 def map_tensor_mapping(
-    fun: Callable[..., torch.Tensor]
+    fun: Callable[..., torch.Tensor],
 ) -> Callable[..., TensorMapping]:
     """
     Closure over a list comprehension that applies the given function `fun` to

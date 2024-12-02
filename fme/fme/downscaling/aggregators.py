@@ -407,11 +407,11 @@ class LatentStepAggregator:
 
 
 class _ComparisonAggregator(Protocol):
-    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
-        ...
+    def record_batch(
+        self, target: TensorMapping, prediction: TensorMapping
+    ) -> None: ...
 
-    def get_wandb(self) -> Mapping[str, Any]:
-        ...
+    def get_wandb(self) -> Mapping[str, Any]: ...
 
 
 def _fold_sample_dim(
