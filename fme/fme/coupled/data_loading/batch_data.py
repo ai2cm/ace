@@ -1,16 +1,13 @@
 import dataclasses
 import datetime
 import logging
-from typing import Generic, List, Literal, Mapping, Optional, Sequence, TypeVar
+from typing import List, Literal, Mapping, Optional, Sequence
 
 import numpy as np
 import torch
 
 from fme.core.data_loading.batch_data import (
-    CPU,
-    AnyDevice,
     BatchData,
-    CurrentDevice,
     GriddedDataABC,
     SizedMap,
 )
@@ -23,35 +20,29 @@ from fme.core.generics.data import DataLoader
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 
-DeviceType = TypeVar("DeviceType", bound=AnyDevice)
-
 
 @dataclasses.dataclass
-class CoupledBatchData(Generic[DeviceType]):
-    ocean_data: BatchData[DeviceType]
-    atmosphere_data: BatchData[DeviceType]
+class CoupledBatchData:
+    ocean_data: BatchData
+    atmosphere_data: BatchData
 
     @classmethod
     def new_on_device(
         cls,
-        ocean_data: BatchData[CurrentDevice],
-        atmosphere_data: BatchData[CurrentDevice],
-    ) -> "CoupledBatchData[CurrentDevice]":
-        return CoupledBatchData[CurrentDevice](
-            ocean_data=ocean_data, atmosphere_data=atmosphere_data
-        )
+        ocean_data: BatchData,
+        atmosphere_data: BatchData,
+    ) -> "CoupledBatchData":
+        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmosphere_data)
 
     @classmethod
     def new_on_cpu(
         cls,
-        ocean_data: BatchData[CPU],
-        atmosphere_data: BatchData[CPU],
-    ) -> "CoupledBatchData[CPU]":
-        return CoupledBatchData[CPU](
-            ocean_data=ocean_data, atmosphere_data=atmosphere_data
-        )
+        ocean_data: BatchData,
+        atmosphere_data: BatchData,
+    ) -> "CoupledBatchData":
+        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmosphere_data)
 
-    def to_device(self) -> "CoupledBatchData[CurrentDevice]":
+    def to_device(self) -> "CoupledBatchData":
         return CoupledBatchData.new_on_device(
             ocean_data=self.ocean_data.to_device(),
             atmosphere_data=self.atmosphere_data.to_device(),
@@ -63,7 +54,7 @@ class CoupledBatchData(Generic[DeviceType]):
         samples: Sequence[CoupledDatasetItem],
         horizontal_dims: List[str],
         sample_dim_name: str = "sample",
-    ) -> "CoupledBatchData[CPU]":
+    ) -> "CoupledBatchData":
         """
         Collate function for use with PyTorch DataLoader. Separates out ocean
         and atmosphere sample tuples and constructs BatchData instances for
@@ -84,7 +75,7 @@ class CoupledBatchData(Generic[DeviceType]):
 class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
-        loader: DataLoader[CoupledBatchData[CPU]],
+        loader: DataLoader[CoupledBatchData],
         variable_metadata: Mapping[str, VariableMetadata],
         sigma_coordinates: SigmaCoordinates,
         horizontal_coordinates: HorizontalCoordinates,
@@ -116,8 +107,8 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         self._batch_size: Optional[int] = None
 
     @property
-    def loader(self) -> DataLoader[CoupledBatchData[CurrentDevice]]:
-        def to_device(x: CoupledBatchData[CPU]) -> CoupledBatchData[CurrentDevice]:
+    def loader(self) -> DataLoader[CoupledBatchData]:
+        def to_device(x: CoupledBatchData) -> CoupledBatchData:
             return x.to_device()
 
         return SizedMap(to_device, self._loader)

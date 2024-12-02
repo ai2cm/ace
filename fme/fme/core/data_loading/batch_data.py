@@ -39,37 +39,7 @@ from fme.core.generics.inference import InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
-
-class AnyDevice:
-    """
-    Indicates the object can be on any device.
-
-    Used in type hints to indicate the device an object is on.
-    """
-
-    pass
-
-
-class CPU(AnyDevice):
-    """
-    Indicates the object must be on the CPU.
-    """
-
-    pass
-
-
-class CurrentDevice(AnyDevice):
-    """
-    Indicates the object must be on the current global device
-    specified by fme.get_device().
-    """
-
-    pass
-
-
 SelfType = TypeVar("SelfType", bound="BatchData")
-
-DeviceType = TypeVar("DeviceType", bound=AnyDevice)
 
 
 def _check_device(data: TensorMapping, device: torch.device):
@@ -78,13 +48,13 @@ def _check_device(data: TensorMapping, device: torch.device):
             raise ValueError(f"data must be on {device}")
 
 
-class PrognosticState(Generic[DeviceType]):
+class PrognosticState:
     """
     Thin typing wrapper around BatchData to indicate that the data is a prognostic
     state, such as an initial condition or final state when evolving forward in time.
     """
 
-    def __init__(self, data: "BatchData[DeviceType]"):
+    def __init__(self, data: "BatchData"):
         """
         Initialize the state.
 
@@ -93,15 +63,15 @@ class PrognosticState(Generic[DeviceType]):
         """
         self._data = data
 
-    def to_device(self) -> "PrognosticState[CurrentDevice]":
+    def to_device(self) -> "PrognosticState":
         return PrognosticState(self._data.to_device())
 
-    def as_batch_data(self) -> "BatchData[DeviceType]":
+    def as_batch_data(self) -> "BatchData":
         return self._data
 
 
 @dataclasses.dataclass
-class BatchData(Generic[DeviceType]):
+class BatchData:
     """A container for the data and time coordinates of a batch.
 
     Attributes:
@@ -125,8 +95,8 @@ class BatchData(Generic[DeviceType]):
     def dims(self) -> List[str]:
         return ["sample", "time"] + self.horizontal_dims
 
-    def to_device(self) -> "BatchData[CurrentDevice]":
-        return self.__class__.new_on_device(
+    def to_device(self) -> "BatchData":
+        return self.__class__(
             data={k: v.to(get_device()) for k, v in self.data.items()},
             times=self.times,
             horizontal_dims=self.horizontal_dims,
@@ -141,29 +111,15 @@ class BatchData(Generic[DeviceType]):
         return kwargs
 
     @classmethod
-    def new(
-        cls,
-        data: TensorMapping,
-        times: xr.DataArray,
-        horizontal_dims: Optional[List[str]] = None,
-    ) -> "BatchData[AnyDevice]":
-        kwargs = cls._get_kwargs(horizontal_dims)
-        return BatchData[AnyDevice](
-            data=data,
-            times=times,
-            **kwargs,
-        )
-
-    @classmethod
     def new_on_cpu(
         cls,
         data: TensorMapping,
         times: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
-    ) -> "BatchData[CPU]":
+    ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
-        return BatchData[CPU](
+        return BatchData(
             data=data,
             times=times,
             **kwargs,
@@ -175,13 +131,13 @@ class BatchData(Generic[DeviceType]):
         data: TensorMapping,
         times: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
-    ) -> "BatchData[CurrentDevice]":
+    ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
         """
         _check_device(data, get_device())
         kwargs = cls._get_kwargs(horizontal_dims)
-        return BatchData[CurrentDevice](
+        return BatchData(
             data=data,
             times=times,
             **kwargs,
@@ -207,7 +163,7 @@ class BatchData(Generic[DeviceType]):
         samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
         horizontal_dims: Optional[List[str]] = None,
-    ) -> "BatchData[CPU]":
+    ) -> "BatchData":
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
         batch_times = xr.concat(sample_times, dim=sample_dim_name)
@@ -265,11 +221,11 @@ class BatchData(Generic[DeviceType]):
 
     def get_start(
         self: SelfType, prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> PrognosticState[DeviceType]:
+    ) -> PrognosticState:
         """
         Get the initial condition state.
         """
-        return PrognosticState[DeviceType](
+        return PrognosticState(
             self.subset_names(prognostic_names).select_time_slice(
                 slice(0, n_ic_timesteps)
             )
@@ -277,11 +233,11 @@ class BatchData(Generic[DeviceType]):
 
     def get_end(
         self: SelfType, prognostic_names: Collection[str], n_ic_timesteps: int
-    ) -> PrognosticState[DeviceType]:
+    ) -> PrognosticState:
         """
         Get the final state which can be used as a new initial condition.
         """
-        return PrognosticState[DeviceType](
+        return PrognosticState(
             self.subset_names(prognostic_names).select_time_slice(
                 slice(-n_ic_timesteps, None)
             )
@@ -297,9 +253,7 @@ class BatchData(Generic[DeviceType]):
             horizontal_dims=self.horizontal_dims,
         )
 
-    def prepend(
-        self: SelfType, initial_condition: PrognosticState[DeviceType]
-    ) -> SelfType:
+    def prepend(self: SelfType, initial_condition: PrognosticState) -> SelfType:
         """
         Prepend the initial condition to the data.
         """
@@ -320,11 +274,8 @@ class BatchData(Generic[DeviceType]):
         )
 
 
-DeviceArgType = TypeVar("DeviceArgType", bound=AnyDevice)
-
-
 @dataclasses.dataclass
-class PairedData(Generic[DeviceType]):
+class PairedData:
     """A container for the data and time coordinates of a batch, with paired
     prediction and target data.
     """
@@ -336,9 +287,9 @@ class PairedData(Generic[DeviceType]):
     @classmethod
     def from_batch_data(
         cls,
-        prediction: BatchData[DeviceArgType],
-        target: BatchData[DeviceArgType],
-    ) -> "PairedData[DeviceArgType]":
+        prediction: BatchData,
+        target: BatchData,
+    ) -> "PairedData":
         if not np.all(prediction.times.values == target.times.values):
             raise ValueError("Prediction and target times must be the same.")
         return PairedData(prediction.data, target.data, prediction.times)
@@ -349,7 +300,7 @@ class PairedData(Generic[DeviceType]):
         prediction: TensorMapping,
         target: TensorMapping,
         times: xr.DataArray,
-    ) -> "PairedData[CurrentDevice]":
+    ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
         _check_device(target, device)
@@ -361,7 +312,7 @@ class PairedData(Generic[DeviceType]):
         prediction: TensorMapping,
         target: TensorMapping,
         times: xr.DataArray,
-    ) -> "PairedData[CPU]":
+    ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(target, torch.device("cpu"))
         return PairedData(prediction, target, times)
@@ -421,7 +372,7 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
 def get_initial_condition(
     loader: DataLoader[BatchData],
     requirements: PrognosticStateDataRequirements,
-) -> PrognosticState[CurrentDevice]:
+) -> PrognosticState:
     for batch in loader:
         return batch.to_device().get_start(
             prognostic_names=requirements.names,
@@ -430,19 +381,17 @@ def get_initial_condition(
     raise ValueError("No initial condition found in loader")
 
 
-class InferenceGriddedData(
-    InferenceDataABC[PrognosticState[CurrentDevice], BatchData[CurrentDevice]]
-):
+class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     """
     Data as required for inference.
+
+    All data exposed from this class is on the current device.
     """
 
     def __init__(
         self,
-        loader: DataLoader[BatchData[CPU]],
-        initial_condition: Union[
-            PrognosticState[AnyDevice], PrognosticStateDataRequirements
-        ],
+        loader: DataLoader[BatchData],
+        initial_condition: Union[PrognosticState, PrognosticStateDataRequirements],
         properties: DatasetProperties,
     ):
         """
@@ -451,25 +400,30 @@ class InferenceGriddedData(
                 TensorMapping where keys indicate variable name.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+                Data can be on any device (but will typically be on CPU).
             initial_condition: Initial condition for the inference, or a requirements
                 object specifying how to extract the initial condition from the first
-                batch of data.
+                batch of data. Data can be on any device.
             properties: Batch-constant properties for the dataset, such as variable
-                metadata and coordinate information.
+                metadata and coordinate information. Data can be on any device.
+
+        Note:
+            While input data can be on any device, all data exposed from this class
+            will be on the current device.
         """
         self._loader = loader
         self._properties = properties.to_device()
         self._n_initial_conditions: Optional[int] = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
-            self._initial_condition: PrognosticState[
-                CurrentDevice
-            ] = get_initial_condition(loader, initial_condition)
+            self._initial_condition: PrognosticState = get_initial_condition(
+                loader, initial_condition
+            )
         else:
             self._initial_condition = initial_condition.to_device()
 
     @property
-    def loader(self) -> DataLoader[BatchData[CurrentDevice]]:
-        def on_device(batch: BatchData[CPU]) -> BatchData[CurrentDevice]:
+    def loader(self) -> DataLoader[BatchData]:
+        def on_device(batch: BatchData) -> BatchData:
             return batch.to_device()
 
         return SizedMap(on_device, self._loader)
@@ -526,7 +480,7 @@ class InferenceGriddedData(
         return self._n_initial_conditions
 
     @property
-    def initial_condition(self) -> PrognosticState[CurrentDevice]:
+    def initial_condition(self) -> PrognosticState:
         return self._initial_condition
 
     def log_info(self, name: str):
@@ -537,17 +491,19 @@ class InferenceGriddedData(
         logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
 
-class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
+class GriddedData(GriddedDataABC[BatchData]):
     """
     Data as required for pytorch training.
 
     The data is assumed to be gridded, and attributes are included for
     performing operations on gridded data.
+
+    All data exposed from this class is on the current device.
     """
 
     def __init__(
         self,
-        loader: DataLoader[BatchData[CPU]],
+        loader: DataLoader[BatchData],
         properties: DatasetProperties,
         sampler: Optional[torch.utils.data.Sampler] = None,
     ):
@@ -557,10 +513,15 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
                 TensorMapping where keys indicate variable name.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+                Data can be on any device (but will typically be on CPU).
             properties: Batch-constant properties for the dataset, such as variable
-                metadata and coordinate information.
+                metadata and coordinate information. Data can be on any device.
             sampler: Optional sampler for the data loader. Provided to allow support for
                 distributed training.
+
+        Note:
+            While input data can be on any device, all data exposed from this class
+            will be on the current device.
         """
         self._loader = loader
         self._properties = properties.to_device()
@@ -568,8 +529,8 @@ class GriddedData(GriddedDataABC[BatchData[CurrentDevice]]):
         self._batch_size: Optional[int] = None
 
     @property
-    def loader(self) -> DataLoader[BatchData[CurrentDevice]]:
-        def on_device(batch: BatchData[CPU]) -> BatchData[CurrentDevice]:
+    def loader(self) -> DataLoader[BatchData]:
+        def on_device(batch: BatchData) -> BatchData:
             return batch.to_device()
 
         return SizedMap(on_device, self._loader)

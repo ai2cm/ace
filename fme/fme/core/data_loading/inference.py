@@ -9,7 +9,7 @@ import torch
 import xarray as xr
 
 from fme.core.data_loading._xarray import DatasetProperties, XarrayDataset
-from fme.core.data_loading.batch_data import CPU, BatchData
+from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
 from fme.core.data_loading.data_typing import (
     LatLonCoordinates,
@@ -214,16 +214,14 @@ class InferenceDataset(torch.utils.data.Dataset):
                 SST perturbations require an ocean configuration."
             )
 
-        self._persistence_data: Optional[BatchData[CPU]]
+        self._persistence_data: Optional[BatchData] = None
         if config.persistence_names is not None:
             first_sample = self._get_batch_data(0)
             self._persistence_data = first_sample.subset_names(
                 config.persistence_names
             ).select_time_slice(slice(0, 1))
-        else:
-            self._persistence_data = None
 
-    def _get_batch_data(self, index) -> BatchData[CPU]:
+    def _get_batch_data(self, index) -> BatchData:
         dist = Distributed.get_instance()
         i_start = index * self._forward_steps_in_memory
         sample_tuples = []
@@ -264,7 +262,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
         )
 
-    def __getitem__(self, index) -> BatchData[CPU]:
+    def __getitem__(self, index) -> BatchData:
         dist = Distributed.get_instance()
         result = self._get_batch_data(index)
         if self._persistence_data is not None:

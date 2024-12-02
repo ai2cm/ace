@@ -17,7 +17,6 @@ from fme.ace.inference.loop import (
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.data_loading.batch_data import (
     BatchData,
-    CurrentDevice,
     PairedData,
     PrognosticState,
 )
@@ -82,7 +81,7 @@ class MockLoader(torch.utils.data.DataLoader):
     def __len__(self) -> int:
         return self._n_windows
 
-    def __next__(self) -> BatchData[CurrentDevice]:
+    def __next__(self) -> BatchData:
         if self._current_window < self._n_windows:
             self._current_window += 1
             return BatchData.new_on_device(
@@ -310,17 +309,17 @@ class PlusOneStepper:
         else:
             self.derive_func = derive_func
         _: PredictFunction[  # for type checking
-            PrognosticState[CurrentDevice],
-            BatchData[CurrentDevice],
-            BatchData[CurrentDevice],
+            PrognosticState,
+            BatchData,
+            BatchData,
         ] = self.predict
 
     def predict(
         self,
-        initial_condition: PrognosticState[CurrentDevice],
-        forcing: BatchData[CurrentDevice],
+        initial_condition: PrognosticState,
+        forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData[CurrentDevice], PrognosticState[CurrentDevice]]:
+    ) -> Tuple[BatchData, PrognosticState]:
         ic_state = initial_condition.as_batch_data()
         n_forward_steps = forcing.times.shape[1] - self.n_ic_timesteps
         out_tensor = torch.zeros(
@@ -345,9 +344,9 @@ class PlusOneStepper:
 
     def get_forward_data(
         self,
-        forcing: BatchData[CurrentDevice],
+        forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> BatchData[CurrentDevice]:
+    ) -> BatchData:
         if compute_derived_variables:
             forcing = forcing.compute_derived_variables(
                 derive_func=self.derive_func, forcing_data=forcing
@@ -410,7 +409,7 @@ def get_mock_aggregator(
     i = n_ic_timesteps
 
     def record_batch_side_effect(
-        data: PairedData[CurrentDevice],
+        data: PairedData,
     ):
         nonlocal i
         ret = [{"step": j} for j in range(i, i + data.times.shape[1])]
