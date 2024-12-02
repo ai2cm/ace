@@ -163,13 +163,11 @@ class DeriverABC(abc.ABC):
     @abc.abstractmethod
     def get_forward_data(
         self, data: BatchData, compute_derived_variables: bool = False
-    ) -> BatchData:
-        ...
+    ) -> BatchData: ...
 
     @property
     @abc.abstractmethod
-    def n_ic_timesteps(self) -> int:
-        ...
+    def n_ic_timesteps(self) -> int: ...
 
 
 def run_dataset_comparison(

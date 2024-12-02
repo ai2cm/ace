@@ -14,20 +14,17 @@ class PredictFunction(Protocol, Generic[PS, FD, SD]):
         initial_condition: PS,
         forcing: FD,
         compute_derived_variables: bool = False,
-    ) -> Tuple[SD, PS]:
-        ...
+    ) -> Tuple[SD, PS]: ...
 
 
 class InferenceDataABC(abc.ABC, Generic[PS, FD]):
     @property
     @abc.abstractmethod
-    def initial_condition(self) -> PS:
-        ...
+    def initial_condition(self) -> PS: ...
 
     @property
     @abc.abstractmethod
-    def loader(self) -> DataLoader[FD]:
-        ...
+    def loader(self) -> DataLoader[FD]: ...
 
 
 class SimpleInferenceData(InferenceDataABC[PS, FD]):

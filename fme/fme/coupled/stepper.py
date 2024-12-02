@@ -389,9 +389,9 @@ class CoupledStepper(
         }
         # rename the ocean surface temperature variable using the corresponding
         # name in the atmosphere
-        forcings_from_ocean[
-            self._config.atmosphere_surface_temperature_name
-        ] = forcings_from_ocean.pop(self._config.ocean_surface_temperature_name)
+        forcings_from_ocean[self._config.atmosphere_surface_temperature_name] = (
+            forcings_from_ocean.pop(self._config.ocean_surface_temperature_name)
+        )
         forcing_data.update(forcings_from_ocean)
         return BatchData(forcing_data, times=times[:, : self.n_inner_steps + 1])
 

@@ -132,8 +132,7 @@ class _ChunkingConfig(abc.ABC):
     time_dim: int = 160
 
     @abc.abstractmethod
-    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
-        ...
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]: ...
 
 
 @dataclasses.dataclass

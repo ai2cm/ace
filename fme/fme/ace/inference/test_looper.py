@@ -303,9 +303,9 @@ class PlusOneStepper:
     ):
         self.n_ic_timesteps = n_ic_timesteps
         if derive_func is None:
-            self.derive_func: Callable[
-                [TensorMapping, TensorMapping], TensorDict
-            ] = unittest.mock.MagicMock(side_effect=lambda x, y=None: dict(x))
+            self.derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
+                unittest.mock.MagicMock(side_effect=lambda x, y=None: dict(x))
+            )
         else:
             self.derive_func = derive_func
         _: PredictFunction[  # for type checking

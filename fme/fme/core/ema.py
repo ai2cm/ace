@@ -37,8 +37,7 @@ from torch import nn
 class HasNamedParameters(Protocol):
     def named_parameters(
         self, recurse: bool = True
-    ) -> Iterator[Tuple[str, nn.Parameter]]:
-        ...
+    ) -> Iterator[Tuple[str, nn.Parameter]]: ...
 
 
 @dataclasses.dataclass
