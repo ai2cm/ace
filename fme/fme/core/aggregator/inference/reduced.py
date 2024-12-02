@@ -331,6 +331,7 @@ def data_to_table(data: Dict[str, np.ndarray], init_step: int = 0) -> Table:
     Convert a dictionary of 1-dimensional timeseries data to a wandb Table.
 
     Args:
+        data: dictionary of timeseries data.
         init_step: initial step corresponding to the first row's "forecast_step"
     """
     keys = sorted(list(data.keys()))

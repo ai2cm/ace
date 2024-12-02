@@ -12,7 +12,7 @@ from fme.core.registry.registry import Registry
 @dataclasses.dataclass
 class PerturbationConfig(abc.ABC):
     """
-    Returns a perturbation function config class
+    Returns a perturbation function config class.
     """
 
     @classmethod

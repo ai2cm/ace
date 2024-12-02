@@ -528,8 +528,7 @@ class SingleModuleStepper(
         Args:
             config: The configuration.
             img_shape: Shape of domain as (n_lat, n_lon).
-            area: (n_lat, n_lon) array containing relative gridcell area,
-                in any units including unitless.
+            gridded_operations: The gridded operations, e.g. for area weighting.
             sigma_coordinates: The sigma coordinates.
             derive_func: Function to compute derived variables.
             timestep: Timestep of the model.
@@ -633,7 +632,7 @@ class SingleModuleStepper(
         """
         Effective loss scalings used to normalize outputs before computing loss.
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i
+        where loss_scaling_i = loss_normalizer_std_i / weight_i.
         """
         custom_weights = self._config.loss.weights
         loss_normalizer_stds = self.loss_normalizer.stds
@@ -645,6 +644,7 @@ class SingleModuleStepper(
     def replace_ocean(self, ocean: Ocean):
         """
         Replace the ocean model with a new one.
+
         Args:
             ocean: The new ocean model.
         """

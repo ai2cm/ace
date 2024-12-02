@@ -180,7 +180,6 @@ class Distributed:
             A list of tensors of consistent shape, where the i-th element is the tensor
                 from the i-th process.
         """
-
         return gather_irregular(
             tensor,
             self.reduce_max,
@@ -245,7 +244,6 @@ def gather_irregular(
     Returns:
         A list of tensors, where the i-th element is the tensor from the i-th process.
     """
-
     output_tensor_size = []
     tensor_size = list(tensor.size())
     for dim_len in tensor_size:
@@ -282,7 +280,7 @@ def pad_tensor_at_end(
     fill_value: Union[float, int] = 0.0,
 ):
     """Pad tensor by specified amount at end of each dimension.
-    Note that `pad` format is in reverse dimension order
+    Note that `pad` format is in reverse dimension order.
 
     Args:
         tensor: The tensor to pad
@@ -312,7 +310,7 @@ def pad_tensor_at_end(
 def unpad_tensor_at_end(
     tensor: torch.Tensor, dimension_difference: torch.Tensor
 ) -> torch.Tensor:
-    """Remove padding from tensor
+    """Remove padding from tensor.
 
     Args:
         tensor: The tensor to remove padding from

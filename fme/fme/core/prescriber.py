@@ -77,7 +77,7 @@ class Prescriber:
     ) -> TensorDict:
         """
         Args:
-            data: Dictionary of data containing the mask variable.
+            mask_data: Dictionary of data containing the mask variable.
             gen: Dictionary of data to use outside of mask region.
             target: Dictionary of data to use in mask region.
 

@@ -90,7 +90,7 @@ def compute_crps(
     sample_dim: int = 1,
 ):
     """
-    CRPS is defined for one-dimensional random variables as
+    CRPS is defined for one-dimensional random variables as.
 
         CRPS(F, x) = integral_z (F(z) - H(z - x))^2 dz
 
@@ -154,6 +154,8 @@ def compute_mae_error(
     sample_dim: int = 1,
 ):
     """
+    Compute mae_error.
+
     Computes the following metric, which is like CRPS but goes
     to zero for a perfect forecast:
 
@@ -200,7 +202,7 @@ def compute_ssim(
     target: torch.Tensor,
     add_channel_dim: bool,
     *args,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     """Normalize data to unit range and compute piq.ssim.
 
@@ -210,6 +212,8 @@ def compute_ssim(
         target: tensor of shape (batch, channel, height, width)
             or (batch, height, width)
         add_channel_dim: Add a channel dim if it is missing.
+        *args: Additional positional arguments to pass to piq.ssim.
+        **kwargs: Additional keyword arguments to pass to piq.ssim.
     """
     prediction_norm, target_norm = _normalize_tensors(prediction, target)
     if add_channel_dim:

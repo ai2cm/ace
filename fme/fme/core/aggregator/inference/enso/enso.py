@@ -27,6 +27,7 @@ def index_data_array(
 
     Args:
         index_data: List of (time, index) tuples.
+        calendar: Calendar for the time coordinate.
 
     Returns:
         ENSO index data as an xarray DataArray.

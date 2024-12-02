@@ -52,7 +52,6 @@ def _construct_weight_tensor(
         n_dim: number of dimensions of the output tensor
         channel_dim: the channel dimension of the output tensor
     """
-
     missing_keys = set(weights.keys()) - set(out_names)
     if len(missing_keys) > 0:
         raise KeyError(
@@ -170,7 +169,7 @@ class GlobalMean(torch.nn.Module):
         """
         Args:
             x: A tensor with spatial dimensions in shape (n_samples, n_timesteps,
-             n_channels, n_lat, n_lon)
+             n_channels, n_lat, n_lon).
         """
         return self._area_weighted_mean(x)
 
@@ -181,6 +180,7 @@ class VariableWeightingLoss(torch.nn.Module):
         Args:
             weights: A tensor of shape (n_samples, n_channels, n_lat, n_lon)
                 containing the weights to apply to each channel.
+            loss: A loss function which takes two tensors.
         """
         super().__init__()
         self.loss = loss
