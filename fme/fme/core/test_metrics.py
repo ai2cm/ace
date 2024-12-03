@@ -4,7 +4,7 @@ import torch
 import torch_harmonics
 
 import fme
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.metrics import (
     net_surface_energy_flux,
     quantile,
@@ -260,7 +260,7 @@ def test_dry_air_shapes():
     water = torch.rand(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     assert dry_air.shape == (nlat, nlon)
 
@@ -277,7 +277,7 @@ def test_single_level_dry_air_no_water():
     water = torch.zeros(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_allclose(dry_air.cpu().numpy(), pressure.cpu().numpy())
 
@@ -288,7 +288,7 @@ def test_single_level_dry_air_all_water():
     water = torch.ones(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_almost_equal(dry_air.cpu().numpy(), 0.0, decimal=6)
 
@@ -300,7 +300,7 @@ def test_single_level_dry_air_some_water():
     pressure = torch.rand(nlat, nlon)
     ak, bk = single_level_ak_bk()
     target_dry_air = pressure * (1.0 - water[:, :, 0])
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     dry_air = surface_pressure_due_to_dry_air(water, pressure, coords)
     np.testing.assert_allclose(
         dry_air.cpu().numpy(), target_dry_air.cpu().numpy(), rtol=1e-5

@@ -15,7 +15,7 @@ from fme.core.data_loading.batch_data import (
     BatchData,
     PrognosticState,
 )
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
@@ -32,7 +32,7 @@ from fme.core.stepper import (
 )
 from fme.core.typing_ import TensorDict
 
-SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
+SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
 TIMESTEP = datetime.timedelta(hours=6)
 DEVICE = fme.get_device()
 
@@ -46,7 +46,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
         data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
     area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
     ak, bk = torch.arange(nz), torch.arange(nz)
-    sigma_coords = SigmaCoordinates(ak, bk)
+    vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     data = BatchData.new_on_device(
         data=data_dict,
         times=xr.DataArray(
@@ -54,7 +54,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
             dims=["sample", "time"],
         ),
     )
-    return SphericalData(data, area_weights, sigma_coords)
+    return SphericalData(data, area_weights, vertical_coord)
 
 
 def get_scalar_data(names, value):
@@ -109,7 +109,9 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     normalization_config = NormalizationConfig(
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 1.0),
@@ -122,7 +124,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper(
-        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
@@ -135,7 +137,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
         stds=get_scalar_data(["a", "b"], 3.0),
     )
     stepper = config.get_stepper(
-        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped_double_std = stepper.train_on_batch(data=data, optimization=MagicMock())
     assert torch.allclose(
@@ -167,7 +169,9 @@ def test_run_on_batch_addition_series():
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
         in_names=["a", "b"],
@@ -179,7 +183,7 @@ def test_run_on_batch_addition_series():
         loss=WeightedMappingLossConfig(type="MSE"),
     )
     stepper = config.get_stepper(
-        (5, 5), gridded_operations, sigma_coordinates, TIMESTEP
+        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=MagicMock())
     # output of run_on_batch does not include the initial condition
@@ -222,7 +226,9 @@ def test_run_on_batch_with_prescribed_ocean():
     }
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
         in_names=["a", "b"],
@@ -234,7 +240,7 @@ def test_run_on_batch_with_prescribed_ocean():
         ocean=OceanConfig("b", "mask"),
     )
     stepper = config.get_stepper(
-        area.shape, gridded_operations, sigma_coordinates, TIMESTEP
+        area.shape, gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data, optimization=MagicMock())
     for i in range(n_steps - 1):
@@ -274,11 +280,13 @@ def test_reloaded_stepper_gives_same_prediction():
         "b": (1, 2, 5, 5),
     }
     area = torch.ones((5, 5), device=DEVICE)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
@@ -339,7 +347,9 @@ def _setup_and_run_on_batch(
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
     area = torch.ones((5, 5), device=DEVICE)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": module}),
         in_names=in_names,
@@ -351,7 +361,7 @@ def _setup_and_run_on_batch(
         ocean=ocean_config,
     )
     stepper = config.get_stepper(
-        area.shape, LatLonOperations(area), sigma_coordinates, TIMESTEP
+        area.shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
     return stepper.train_on_batch(data, optimization=optimization)
 
@@ -427,7 +437,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
             size=(3, n_forward_steps + 1, 5, 5)
         ),
     }
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     ).to(device)
     area_weights = 1.0 + torch.rand(size=(5, 5)).to(device)
@@ -471,7 +481,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     stepper = stepper_config.get_stepper(
         img_shape=data["PRESsfc"].shape[2:],
         gridded_operations=LatLonOperations(area_weights),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     times = xr.DataArray(
@@ -533,7 +543,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     dry_air = (
         metrics.weighted_mean(
             ClimateData(stepped.gen_data).surface_pressure_due_to_dry_air(
-                sigma_coordinates
+                vertical_coordinate
             ),
             weights=area_weights,
             dim=[-2, -1],
@@ -586,7 +596,9 @@ def _get_stepper(
 
     all_names = list(set(in_names + out_names))
     area = torch.ones((5, 5))
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config=module_config),
         in_names=in_names,
@@ -599,7 +611,7 @@ def _get_stepper(
         **kwargs,
     )
     return config.get_stepper(
-        (5, 5), LatLonOperations(area), sigma_coordinates, TIMESTEP
+        (5, 5), LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
 
 
@@ -855,11 +867,13 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         "diagnostic": (1, 1, 5, 5),
     }
     area = torch.ones((5, 5), device=DEVICE)
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     orig_stepper = config.get_stepper(
         img_shape=shapes["a"][-2:],
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())

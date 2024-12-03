@@ -135,7 +135,7 @@ def get_coupled_data_loader(
         loader=dataloader,
         variable_metadata=properties.variable_metadata,
         sampler=sampler,
-        sigma_coordinates=properties.sigma_coordinates,
+        vertical_coordinate=properties.vertical_coordinate,
         timestep=requirements.ocean_timestep,
         horizontal_coordinates=properties.horizontal_coordinates,
     )
