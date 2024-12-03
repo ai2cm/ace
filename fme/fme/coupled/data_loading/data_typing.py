@@ -8,7 +8,7 @@ from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.data_typing import (
     Dataset,
     HorizontalCoordinates,
-    SigmaCoordinates,
+    HybridSigmaPressureCoordinate,
     VariableMetadata,
 )
 from fme.core.typing_ import TensorDict
@@ -20,8 +20,8 @@ class CoupledProperties:
         self.atmosphere = atmosphere
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self.atmosphere.sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self.atmosphere.vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -39,8 +39,8 @@ class CoupledProperties:
         return self.ocean.is_remote or self.atmosphere.is_remote
 
     def update(self, other: "CoupledProperties"):
-        if self.sigma_coordinates != other.sigma_coordinates:
-            raise ValueError("Sigma coordinates must be the same for both datasets.")
+        if self.vertical_coordinate != other.vertical_coordinate:
+            raise ValueError("Vertical coordinates must be the same for both datasets.")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError(
                 "Horizontal coordinates must be the same for both datasets."
@@ -87,8 +87,8 @@ class CoupledDataset(Dataset):
         return self._properties.variable_metadata
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._properties.sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._properties.vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:

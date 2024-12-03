@@ -6,7 +6,7 @@ import torch
 
 import fme
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -359,12 +359,14 @@ def test_train_on_batch_integration(mock_coupled_data, keep_initial_condition):
         ),
     )
     gridded_operations = LatLonOperations(torch.ones((5, 5), device=DEVICE))
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
 
     coupler = config.get_stepper(
         img_shape=(5, 5),
         gridded_operations=gridded_operations,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
     )
 
     # get the data loader

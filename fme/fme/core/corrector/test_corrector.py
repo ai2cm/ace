@@ -9,7 +9,7 @@ from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
 from fme.core.climate_data import compute_dry_air_absolute_differences
 from fme.core.corrector.ocean import OceanCorrector
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping
@@ -27,7 +27,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 def get_dry_air_nonconservation(
     data: TensorMapping,
     area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
 ):
     """
     Computes the time-average one-step absolute difference in surface pressure due to
@@ -39,12 +39,12 @@ def get_dry_air_nonconservation(
             and surface_pressure in Pa must be present.
         area_weighted_mean: Computes the area-weighted mean of a tensor, removing the
             horizontal dimensions.
-        sigma_coordinates: The sigma coordinates of the model.
+        vertical_coordinate: The vertical coordinates of the model.
     """
     return compute_dry_air_absolute_differences(
         ClimateData(data),
         area_weighted_mean=area_weighted_mean,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
     ).mean()
 
 
@@ -87,7 +87,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
         "specific_total_water_0": torch.rand(size=size),
         "specific_total_water_1": torch.rand(size=size),
     }
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     if use_area:
@@ -102,7 +102,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
         gridded_operations = HEALPixOperations()
     original_nonconservation = get_dry_air_nonconservation(
         data,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     assert original_nonconservation > 0.0
@@ -111,7 +111,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
     fixed_out_data = _force_conserve_dry_air(
         in_data,
         out_data,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     new_data = {
@@ -119,7 +119,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
     }
     new_nonconservation = get_dry_air_nonconservation(
         new_data,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         area_weighted_mean=gridded_operations.area_weighted_mean,
     )
     assert new_nonconservation < original_nonconservation
@@ -169,7 +169,7 @@ def test_force_conserve_moisture(
             "LHFLX": torch.rand(size=size),
             "tendency_of_total_water_path_due_to_advection": torch.rand(size=size),
         }
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     if use_area:
@@ -181,7 +181,7 @@ def test_force_conserve_moisture(
     )
     original_budget_residual = total_water_path_budget_residual(
         ClimateData(data),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
     if global_only:
@@ -191,7 +191,7 @@ def test_force_conserve_moisture(
     original_budget_residual = original_budget_residual.cpu().numpy()
     original_dry_air = (
         ClimateData(data)
-        .surface_pressure_due_to_dry_air(sigma_coordinates)
+        .surface_pressure_due_to_dry_air(vertical_coordinate)
         .cpu()
         .numpy()
     )
@@ -201,7 +201,7 @@ def test_force_conserve_moisture(
     fixed_out_data = _force_conserve_moisture(
         in_data,
         out_data,
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         area_weighted_mean=ops.area_weighted_mean,
         timestep=TIMESTEP,
         terms_to_modify=terms_to_modify,
@@ -211,12 +211,12 @@ def test_force_conserve_moisture(
     }
     new_budget_residual = total_water_path_budget_residual(
         ClimateData(new_data),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
     new_dry_air = (
         ClimateData(data)
-        .surface_pressure_due_to_dry_air(sigma_coordinates)
+        .surface_pressure_due_to_dry_air(vertical_coordinate)
         .cpu()
         .numpy()
     )
@@ -253,8 +253,8 @@ def test_corrector_selector():
         config={"masking": {"mask_name": "mask", "mask_value": 1}},
     )
     ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
-    sigma: SigmaCoordinates = SigmaCoordinates(
+    vertical: HybridSigmaPressureCoordinate = HybridSigmaPressureCoordinate(
         ak=torch.tensor([1.0, 0.5, 0.0]), bk=torch.tensor([0.0, 0.5, 1.0])
     )
-    corrector = selector.build(ops, sigma, TIMESTEP)
+    corrector = selector.build(ops, vertical, TIMESTEP)
     assert isinstance(corrector, OceanCorrector)

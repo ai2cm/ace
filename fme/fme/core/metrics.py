@@ -6,7 +6,7 @@ import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
@@ -223,19 +223,19 @@ def time_and_global_mean_bias(
 def surface_pressure_due_to_dry_air(
     specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
-    sigma_coordinate: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
 ) -> torch.Tensor:
     """Computes the dry air (Pa).
 
     Args:
         specific_total_water: last dimension is vertical level (kg/kg)
         surface_pressure: the surface preessure in Pa.
-        sigma_coordinate: the vertical coordinate for computing vertical integral.
+        vertical_coordinate: the vertical coordinate for computing vertical integral.
 
     Returns:
         The surface pressure due to dry air mass only. (Pa)
     """
-    total_water_path = sigma_coordinate.vertical_integral(
+    total_water_path = vertical_coordinate.vertical_integral(
         specific_total_water, surface_pressure
     )
     dry_air = surface_pressure - GRAVITY * total_water_path

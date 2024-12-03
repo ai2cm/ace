@@ -16,7 +16,7 @@ from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
@@ -196,12 +196,14 @@ def test_hpx_init(shape):
         ),
     }
     area = th.ones((1, 16, 32)).to(device)
-    sigma_coordinates = SigmaCoordinates(ak=th.arange(7), bk=th.arange(7)).to(device)
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=th.arange(7), bk=th.arange(7)
+    ).to(device)
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=shape,
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     assert type(stepper.module.module) is HEALPixRecUNet

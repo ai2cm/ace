@@ -5,7 +5,7 @@ from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
 import dacite
 
 from fme.core.corrector.registry import CorrectorConfigProtocol
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 
 from .registry import Registry
@@ -51,13 +51,13 @@ class CorrectorSelector:
     def build(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ):
         instance = self.registry.from_dict(self.get_state())
         return instance.build(
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
 

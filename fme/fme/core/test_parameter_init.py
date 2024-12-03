@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from fme.core import parameter_init
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
@@ -38,14 +38,14 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=(16, 32),
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     torch.save(
@@ -72,7 +72,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     ).get_stepper(
         img_shape=(16, 32),
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     assert_same_state(
@@ -144,7 +144,7 @@ def test_builder_with_weights_sfno_init(
     """
     Integration test for the BuilderWithWeights stepper with a SFNO.
     """
-    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
         loaded_shape, extra_built_layer, tmpdir
     )
     if expect_exception:
@@ -154,7 +154,7 @@ def test_builder_with_weights_sfno_init(
             ).get_stepper(
                 img_shape=built_shape,
                 gridded_operations=LatLonOperations(area),
-                sigma_coordinates=sigma_coordinates,
+                vertical_coordinate=vertical_coordinate,
                 timestep=TIMESTEP,
             )
     else:
@@ -163,7 +163,7 @@ def test_builder_with_weights_sfno_init(
         ).get_stepper(
             img_shape=built_shape,
             gridded_operations=LatLonOperations(area),
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         )
         if extra_built_layer:
@@ -205,14 +205,14 @@ def get_config(
         },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=loaded_shape,
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     built_sfno_config_data = copy.deepcopy(sfno_config_data)
@@ -237,12 +237,12 @@ def get_config(
             "stds": {"x": np.random.randn(1).item()},
         },
     }
-    return with_builder_stepper_config_data, area, sigma_coordinates, stepper
+    return with_builder_stepper_config_data, area, vertical_coordinate, stepper
 
 
 def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     img_shape = (16, 32)
-    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
         loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
     )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
@@ -250,7 +250,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     ).get_stepper(
         img_shape=img_shape,
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     stepper_state = with_builder_stepper.get_state()

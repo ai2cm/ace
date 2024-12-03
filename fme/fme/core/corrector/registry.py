@@ -2,7 +2,7 @@ import abc
 import datetime
 from typing import Any, Mapping, Protocol
 
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
@@ -11,7 +11,7 @@ class CorrectorConfigProtocol(Protocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ) -> "CorrectorABC": ...
 

@@ -29,7 +29,7 @@ from torch.utils.data import default_collate
 from fme.core.data_loading._xarray import DatasetProperties
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
-    SigmaCoordinates,
+    HybridSigmaPressureCoordinate,
     VariableMetadata,
 )
 from fme.core.data_loading.requirements import PrognosticStateDataRequirements
@@ -428,8 +428,8 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._properties.sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._properties.vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -443,7 +443,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
-            **self.sigma_coordinates.coords,
+            **self.vertical_coordinate.coords,
         }
 
     @property
@@ -535,8 +535,8 @@ class GriddedData(GriddedDataABC[BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._properties.sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._properties.vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -550,7 +550,7 @@ class GriddedData(GriddedDataABC[BatchData]):
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
-            **self.sigma_coordinates.coords,
+            **self.vertical_coordinate.coords,
         }
 
     @property

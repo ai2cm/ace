@@ -10,7 +10,7 @@ from fme.core.corrector.registry import (
     CorrectorABC,
     CorrectorConfigProtocol,
 )
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -106,13 +106,13 @@ class CorrectorConfig(CorrectorConfigProtocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ) -> "Corrector":
         return Corrector(
             config=self,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
 
@@ -128,12 +128,12 @@ class Corrector(CorrectorABC):
         self,
         config: CorrectorConfig,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ):
         self._config = config
         self._gridded_operations = gridded_operations
-        self._sigma_coordinates = sigma_coordinates
+        self._vertical_coordinates = vertical_coordinate
         self._timestep = timestep
 
     def __call__(
@@ -161,7 +161,7 @@ class Corrector(CorrectorABC):
                 input_data=input_data,
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                sigma_coordinates=self._sigma_coordinates,
+                vertical_coordinate=self._vertical_coordinates,
             )
         if self._config.zero_global_mean_moisture_advection:
             gen_data = _force_zero_global_mean_moisture_advection(
@@ -173,7 +173,7 @@ class Corrector(CorrectorABC):
                 input_data=input_data,
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                sigma_coordinates=self._sigma_coordinates,
+                vertical_coordinate=self._vertical_coordinates,
                 timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
@@ -196,7 +196,7 @@ def _force_conserve_dry_air(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
 ) -> TensorDict:
     """
     Update the generated data to conserve dry air.
@@ -227,10 +227,10 @@ def _force_conserve_dry_air(
     if input.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
     gen = ClimateData(gen_data)
-    gen_dry_air = gen.surface_pressure_due_to_dry_air(sigma_coordinates)
+    gen_dry_air = gen.surface_pressure_due_to_dry_air(vertical_coordinate)
     global_gen_dry_air = area_weighted_mean(gen_dry_air.to(torch.float64), keepdim=True)
     global_target_gen_dry_air = area_weighted_mean(
-        input.surface_pressure_due_to_dry_air(sigma_coordinates).to(torch.float64),
+        input.surface_pressure_due_to_dry_air(vertical_coordinate).to(torch.float64),
         keepdim=True,
     )
     error = global_gen_dry_air - global_target_gen_dry_air
@@ -239,8 +239,8 @@ def _force_conserve_dry_air(
         wat = gen.specific_total_water.to(torch.float64)
     except KeyError:
         raise ValueError("specific_total_water is required for conservation")
-    ak_diff = sigma_coordinates.ak.diff().to(torch.float64)
-    bk_diff = sigma_coordinates.bk.diff().to(torch.float64)
+    ak_diff = vertical_coordinate.ak.diff().to(torch.float64)
+    bk_diff = vertical_coordinate.bk.diff().to(torch.float64)
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
@@ -278,7 +278,7 @@ def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
     terms_to_modify: Literal[
         "precipitation",
@@ -301,7 +301,7 @@ def _force_conserve_moisture(
         gen_data: The generated data one timestep after the input data.
         area_weighted_mean: Computes an area-weighted mean,
             removing horizontal dimensions.
-        sigma_coordinates: The sigma coordinates.
+        vertical_coordinate: The sigma coordinates.
         timestep: Timestep of the model.
         terms_to_modify: Which terms to modify, in addition to modifying surface
             pressure to conserve dry air mass. One of:
@@ -313,10 +313,10 @@ def _force_conserve_moisture(
     input = ClimateData(input_data)
     gen = ClimateData(gen_data)
 
-    gen_total_water_path = gen.total_water_path(sigma_coordinates)
+    gen_total_water_path = gen.total_water_path(vertical_coordinate)
     timestep_seconds = timestep / datetime.timedelta(seconds=1)
     twp_total_tendency = (
-        gen_total_water_path - input.total_water_path(sigma_coordinates)
+        gen_total_water_path - input.total_water_path(vertical_coordinate)
     ) / timestep_seconds
     twp_tendency_global_mean = area_weighted_mean(twp_total_tendency, keepdim=True)
     evaporation_global_mean = area_weighted_mean(gen.evaporation_rate, keepdim=True)
