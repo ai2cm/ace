@@ -211,8 +211,8 @@ class HorizontalSubsetDataset(Dataset):
         return self._horizontal_coordinates
 
     @property
-    def sigma_coordinates(self):
-        return self._properties.sigma_coordinates
+    def vertical_coordinate(self):
+        return self._properties.vertical_coordinate
 
     @property
     def is_remote(self) -> bool:

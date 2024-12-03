@@ -10,7 +10,7 @@ import xarray as xr
 from torch import nn
 
 from fme.core.data_loading.batch_data import BatchData, PairedData
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.data_loading.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -193,12 +193,12 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
     ) -> SingleModuleStepper:
         return self.ocean.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=self.ocean_timestep,
         )
 
@@ -206,12 +206,12 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
     ) -> SingleModuleStepper:
         return self.atmosphere.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=self.atmosphere_timestep,
         )
 
@@ -219,7 +219,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
     ):
         logging.info("Initializing coupler")
         return CoupledStepper(
@@ -227,12 +227,12 @@ class CoupledStepperConfig:
             ocean=self._get_ocean_stepper(
                 img_shape=img_shape,
                 gridded_operations=gridded_operations,
-                sigma_coordinates=sigma_coordinates,
+                vertical_coordinate=vertical_coordinate,
             ),
             atmosphere=self._get_atmosphere_stepper(
                 img_shape=img_shape,
                 gridded_operations=gridded_operations,
-                sigma_coordinates=sigma_coordinates,
+                vertical_coordinate=vertical_coordinate,
             ),
         )
 
@@ -329,8 +329,8 @@ class CoupledStepper(
         return 1
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self.atmosphere.sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self.atmosphere.vertical_coordinate
 
     @property
     def timestep(self) -> datetime.timedelta:

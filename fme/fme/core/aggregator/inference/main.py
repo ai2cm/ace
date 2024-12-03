@@ -23,8 +23,8 @@ from fme.core.data_loading.batch_data import (
 )
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
+    HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    SigmaCoordinates,
     VariableMetadata,
 )
 from fme.core.generics.aggregator import (
@@ -147,7 +147,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -179,7 +179,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             horizontal_coordinates=horizontal_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
@@ -215,7 +215,7 @@ class InferenceEvaluatorAggregator(
 
     def __init__(
         self,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -236,7 +236,7 @@ class InferenceEvaluatorAggregator(
     ):
         """
         Args:
-            sigma_coordinates: Data sigma coordinates
+            vertical_coordinate: Data vertical coordinate.
             horizontal_coordinates: Data horizontal coordinates
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.

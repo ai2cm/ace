@@ -6,11 +6,11 @@ import torch
 
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 
 DerivedVariableFunc = Callable[
-    [ClimateData, SigmaCoordinates, datetime.timedelta], torch.Tensor
+    [ClimateData, HybridSigmaPressureCoordinate, datetime.timedelta], torch.Tensor
 ]
 
 
@@ -28,23 +28,23 @@ def register(func: DerivedVariableFunc):
 @register
 def surface_pressure_due_to_dry_air(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return metrics.surface_pressure_due_to_dry_air(
         data.specific_total_water,
         data.surface_pressure,
-        sigma_coordinates,
+        vertical_coordinate,
     )
 
 
 @register
 def surface_pressure_due_to_dry_air_absolute_tendency(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    ps_dry = surface_pressure_due_to_dry_air(data, sigma_coordinates, timestep)
+    ps_dry = surface_pressure_due_to_dry_air(data, vertical_coordinate, timestep)
     abs_ps_dry_tendency = torch.zeros_like(ps_dry)
     abs_ps_dry_tendency[:, 1:] = torch.diff(ps_dry, n=1, dim=1).abs()
     return abs_ps_dry_tendency
@@ -53,10 +53,10 @@ def surface_pressure_due_to_dry_air_absolute_tendency(
 @register
 def total_water_path(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    return sigma_coordinates.vertical_integral(
+    return vertical_coordinate.vertical_integral(
         data.specific_total_water,
         data.surface_pressure,
     )
@@ -65,10 +65,10 @@ def total_water_path(
 @register
 def total_water_path_budget_residual(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    total_water_path = sigma_coordinates.vertical_integral(
+    total_water_path = vertical_coordinate.vertical_integral(
         data.specific_total_water,
         data.surface_pressure,
     )
@@ -88,7 +88,7 @@ def total_water_path_budget_residual(
 @register
 def net_energy_flux_toa_into_atmosphere(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     return (
@@ -101,7 +101,7 @@ def net_energy_flux_toa_into_atmosphere(
 @register
 def net_energy_flux_sfc_into_atmosphere(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     # property is defined as positive into surface, but want to compare to
@@ -112,22 +112,22 @@ def net_energy_flux_sfc_into_atmosphere(
 @register
 def net_energy_flux_into_atmospheric_column(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     return net_energy_flux_sfc_into_atmosphere(
-        data, sigma_coordinates, timestep
-    ) + net_energy_flux_toa_into_atmosphere(data, sigma_coordinates, timestep)
+        data, vertical_coordinate, timestep
+    ) + net_energy_flux_toa_into_atmosphere(data, vertical_coordinate, timestep)
 
 
 @register
 def column_moist_static_energy(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    return sigma_coordinates.vertical_integral(
-        data.moist_static_energy(sigma_coordinates),
+    return vertical_coordinate.vertical_integral(
+        data.moist_static_energy(vertical_coordinate),
         data.surface_pressure,
     )
 
@@ -135,10 +135,10 @@ def column_moist_static_energy(
 @register
 def column_moist_static_energy_tendency(
     data: ClimateData,
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    mse = column_moist_static_energy(data, sigma_coordinates, timestep)
+    mse = column_moist_static_energy(data, vertical_coordinate, timestep)
     diff = torch.diff(mse, n=1, dim=1)
     # Only the very first timestep in series is filled with nan; subsequent batches
     # drop the first step as it's the initial condition.
@@ -152,7 +152,7 @@ def column_moist_static_energy_tendency(
 
 def _compute_derived_variable(
     data: Dict[str, torch.Tensor],
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: DerivedVariableFunc,
@@ -167,7 +167,7 @@ def _compute_derived_variable(
 
     Args:
         data: dictionary of data add the derived variable to.
-        sigma_coordinates: the vertical coordinate.
+        vertical_coordinate: the vertical coordinate.
         timestep: Timestep of the model.
         label: the name of the derived variable.
         derived_variable_func: derived variable function to compute.
@@ -192,7 +192,7 @@ def _compute_derived_variable(
     climate_data = ClimateData(data)
 
     try:
-        output = derived_variable_func(climate_data, sigma_coordinates, timestep)
+        output = derived_variable_func(climate_data, vertical_coordinate, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
@@ -202,7 +202,7 @@ def _compute_derived_variable(
 
 def compute_derived_quantities(
     data: Dict[str, torch.Tensor],
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
@@ -210,7 +210,7 @@ def compute_derived_quantities(
     for label, func in _DERIVED_VARIABLE_REGISTRY.items():
         data = _compute_derived_variable(
             data,
-            sigma_coordinates,
+            vertical_coordinate,
             timestep,
             label,
             func,

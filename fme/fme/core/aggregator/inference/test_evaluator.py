@@ -7,7 +7,10 @@ import xarray as xr
 
 from fme.core.aggregator.inference import InferenceEvaluatorAggregator
 from fme.core.data_loading.batch_data import BatchData, PairedData
-from fme.core.data_loading.data_typing import LatLonCoordinates, SigmaCoordinates
+from fme.core.data_loading.data_typing import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.device import get_device
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -23,7 +26,9 @@ def test_logs_labels_exist():
     nx = 2
     ny = 2
     nz = 3
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        torch.arange(nz + 1), torch.arange(nz + 1)
+    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -33,7 +38,7 @@ def test_logs_labels_exist():
     initial_times = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
@@ -108,7 +113,9 @@ def test_inference_logs_labels_exist():
     nx = 2
     ny = 2
     nz = 3
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        torch.arange(nz + 1), torch.arange(nz + 1)
+    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -117,7 +124,7 @@ def test_inference_logs_labels_exist():
     )
     initial_times = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
@@ -167,7 +174,9 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     """
     nz = 3
     nx, ny = 4, 4
-    sigma_coordinates = SigmaCoordinates(torch.arange(nz + 1), torch.arange(nz + 1))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        torch.arange(nz + 1), torch.arange(nz + 1)
+    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -176,7 +185,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     )
     initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=window_len * n_windows,

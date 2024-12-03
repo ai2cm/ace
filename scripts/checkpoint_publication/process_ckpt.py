@@ -24,8 +24,8 @@ if __name__ == "__main__":
     if args.cast_coords_to_float32:
         if "area" in checkpoint["stepper"]:
             checkpoint["stepper"]["area"] = checkpoint["stepper"]["area"].float()
-        if "sigma_coordinates" in checkpoint["stepper"]:
-            coords = checkpoint["stepper"]["sigma_coordinates"]
+        if "vertical_coordinate" in checkpoint["stepper"]:
+            coords = checkpoint["stepper"]["vertical_coordinate"]
             coords["ak"] = coords["ak"].float()
             coords["bk"] = coords["bk"].float()
     torch.save(checkpoint, args.output_path)

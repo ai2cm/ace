@@ -11,7 +11,7 @@ from fme.core.constants import (
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
 )
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -150,16 +150,18 @@ class ClimateData:
         self._set("toa_up_lw_radiative_flux", value)
 
     def surface_pressure_due_to_dry_air(
-        self, sigma_coordinates: SigmaCoordinates
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
     ) -> torch.Tensor:
         return metrics.surface_pressure_due_to_dry_air(
             self.specific_total_water,
             self.surface_pressure,
-            sigma_coordinates,
+            vertical_coordinate,
         )
 
-    def total_water_path(self, sigma_coordinates: SigmaCoordinates) -> torch.Tensor:
-        return sigma_coordinates.vertical_integral(
+    def total_water_path(
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
+    ) -> torch.Tensor:
+        return vertical_coordinate.vertical_integral(
             self.specific_total_water,
             self.surface_pressure,
         )
@@ -222,12 +224,14 @@ class ClimateData:
         self._set("tendency_of_total_water_path_due_to_advection", value)
 
     def height_at_log_midpoint(
-        self, sigma_coordinates: SigmaCoordinates
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
     ) -> torch.Tensor:
         """
         Compute vertical height at layer log midpoints.
         """
-        interface_pressure = sigma_coordinates.interface_pressure(self.surface_pressure)
+        interface_pressure = vertical_coordinate.interface_pressure(
+            self.surface_pressure
+        )
         layer_thickness = _layer_thickness(
             pressure_at_interface=interface_pressure,
             air_temperature=self.air_temperature,
@@ -236,7 +240,9 @@ class ClimateData:
         height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
         return (height_at_interface[..., :-1] * height_at_interface[..., 1:]) ** 0.5
 
-    def moist_static_energy(self, sigma_coordinates: SigmaCoordinates) -> torch.Tensor:
+    def moist_static_energy(
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
+    ) -> torch.Tensor:
         """
         Compute moist static energy.
         """
@@ -245,14 +251,14 @@ class ClimateData:
         return (
             self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE
             + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
-            + self.height_at_log_midpoint(sigma_coordinates) * GRAVITY
+            + self.height_at_log_midpoint(vertical_coordinate) * GRAVITY
         )
 
 
 def compute_dry_air_absolute_differences(
     climate_data: ClimateData,
     area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-    sigma_coordinates: SigmaCoordinates,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
 ) -> torch.Tensor:
     """
     Computes the absolute value of the dry air tendency of each time step.
@@ -260,7 +266,7 @@ def compute_dry_air_absolute_differences(
     Args:
         climate_data: ClimateData object.
         area_weighted_mean: Function which returns an area-weighted mean.
-        sigma_coordinates: The sigma coordinates of the model.
+        vertical_coordinate: The vertical coordinate of the model.
 
     Returns:
         A tensor of shape (time,) of the absolute value of the dry air tendency
@@ -271,7 +277,9 @@ def compute_dry_air_absolute_differences(
         pressure = climate_data.surface_pressure
     except KeyError:
         return torch.tensor([torch.nan])
-    ps_dry = metrics.surface_pressure_due_to_dry_air(water, pressure, sigma_coordinates)
+    ps_dry = metrics.surface_pressure_due_to_dry_air(
+        water, pressure, vertical_coordinate
+    )
     ps_dry_mean = area_weighted_mean(ps_dry)
     return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 

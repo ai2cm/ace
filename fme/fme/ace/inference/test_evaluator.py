@@ -17,7 +17,7 @@ from fme.ace.registry import ModuleSelector
 from fme.core import metrics
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import DimSize, SigmaCoordinates
+from fme.core.data_loading.data_typing import DimSize, HybridSigmaPressureCoordinate
 from fme.core.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -66,13 +66,13 @@ def save_plus_one_stepper(
         ),
     )
     area = torch.ones(data_shape[-2:], device=get_device())
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
     )
     stepper = config.get_stepper(
         img_shape=(data_shape[-2], data_shape[-1]),
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )
     torch.save({"stepper": stepper.get_state()}, path)
@@ -597,7 +597,7 @@ def test_compute_derived_quantities(has_required_fields):
             for var in vars
         }
 
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.linspace(0, 1, nz + 1, device=get_device()),
         bk=torch.linspace(0, 1, nz + 1, device=get_device()),
     )
@@ -605,7 +605,7 @@ def test_compute_derived_quantities(has_required_fields):
     def derive_func(data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         updated = compute_derived_quantities(
             dict(data),
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
             forcing_data=dict(forcing_data),
         )

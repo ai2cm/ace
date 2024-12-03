@@ -20,7 +20,10 @@ from fme.core.data_loading.batch_data import (
     PairedData,
     PrognosticState,
 )
-from fme.core.data_loading.data_typing import LatLonOperations, SigmaCoordinates
+from fme.core.data_loading.data_typing import (
+    HybridSigmaPressureCoordinate,
+    LatLonOperations,
+)
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction, SimpleInferenceData
 from fme.core.loss import WeightedMappingLossConfig
@@ -30,7 +33,7 @@ from fme.core.stepper import SingleModuleStepperConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
-SphericalData = namedtuple("SphericalData", ["data", "area_weights", "sigma_coords"])
+SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
 
 
 def get_data(
@@ -46,8 +49,8 @@ def get_data(
         data[name] = torch.rand(*shape_without_z, device=fme.get_device())
     area_weights = fme.spherical_area_weights(lats, n_lon).to(fme.get_device())
     ak, bk = torch.arange(nz), torch.arange(nz)
-    sigma_coords = SigmaCoordinates(ak, bk)
-    return SphericalData(data, area_weights, sigma_coords)
+    vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
+    return SphericalData(data, area_weights, vertical_coord)
 
 
 def get_scalar_data(names, value):
@@ -118,7 +121,7 @@ def _get_stepper():
 
     img_shape = spherical_data.data[in_names[0]].shape[2:]
     gridded_operations = LatLonOperations(spherical_data.area_weights)
-    sigma_coordinates = spherical_data.sigma_coords
+    vertical_coordinate = spherical_data.vertical_coord
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": ChannelSum()}),
         in_names=in_names,
@@ -130,7 +133,10 @@ def _get_stepper():
         loss=WeightedMappingLossConfig(),
     )
     stepper = config.get_stepper(
-        img_shape, gridded_operations, sigma_coordinates, datetime.timedelta(seconds=1)
+        img_shape,
+        gridded_operations,
+        vertical_coordinate,
+        datetime.timedelta(seconds=1),
     )
     return stepper, spherical_data, time, in_names, out_names
 

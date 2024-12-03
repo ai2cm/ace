@@ -21,8 +21,8 @@ from .data_typing import (
     Dataset,
     HEALPixCoordinates,
     HorizontalCoordinates,
+    HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    SigmaCoordinates,
     VariableMetadata,
 )
 from .requirements import DataRequirements
@@ -46,17 +46,17 @@ VariableNames = namedtuple(
 )
 
 
-def _get_sigma_coordinates(
+def _get_vertical_coordinates(
     ds: xr.Dataset, dtype: Optional[torch.dtype]
-) -> SigmaCoordinates:
+) -> HybridSigmaPressureCoordinate:
     """
-    Get sigma coordinates from a dataset.
+    Get hybrid sigma-pressure coordinates from a dataset.
 
     Assumes that the dataset contains variables named `ak_N` and `bk_N` where
     `N` is the level number. The returned tensors are sorted by level number.
 
     Args:
-        ds: Dataset to get sigma coordinates from.
+        ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
     """
@@ -75,12 +75,12 @@ def _get_sigma_coordinates(
 
     if len(ak_list) == 0 or len(bk_list) == 0:
         logger.warning("Dataset does not contain ak and bk coordinates.")
-        return SigmaCoordinates(
+        return HybridSigmaPressureCoordinate(
             ak=torch.tensor([]),
             bk=torch.tensor([]),
         )
 
-    return SigmaCoordinates(
+    return HybridSigmaPressureCoordinate(
         ak=torch.as_tensor(ak_list, dtype=dtype),
         bk=torch.as_tensor(bk_list, dtype=dtype),
     )
@@ -258,13 +258,13 @@ class DatasetProperties:
     def __init__(
         self,
         variable_metadata: Mapping[str, VariableMetadata],
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         is_remote: bool,
     ):
         self.variable_metadata = variable_metadata
-        self.sigma_coordinates = sigma_coordinates
+        self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.timestep = timestep
         self.is_remote = is_remote
@@ -273,7 +273,7 @@ class DatasetProperties:
         device = get_device()
         return DatasetProperties(
             self.variable_metadata,
-            self.sigma_coordinates.to(device),
+            self.vertical_coordinate.to(device),
             self.horizontal_coordinates.to(device),
             self.timestep,
             self.is_remote,
@@ -285,8 +285,8 @@ class DatasetProperties:
             raise ValueError("Inconsistent timesteps between datasets")
         if self.variable_metadata != other.variable_metadata:
             raise ValueError("Inconsistent metadata between datasets")
-        if self.sigma_coordinates != other.sigma_coordinates:
-            raise ValueError("Inconsistent sigma coordinates between datasets")
+        if self.vertical_coordinate != other.vertical_coordinate:
+            raise ValueError("Inconsistent vertical coordinates between datasets")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
 
@@ -349,14 +349,16 @@ class XarrayDataset(Dataset):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._sigma_coordinates = _get_sigma_coordinates(first_dataset, self.dtype)
+        self._vertical_coordinates = _get_vertical_coordinates(
+            first_dataset, self.dtype
+        )
         self.overwrite = config.overwrite
 
     @property
     def properties(self) -> DatasetProperties:
         return DatasetProperties(
             self._variable_metadata,
-            self._sigma_coordinates,
+            self._vertical_coordinates,
             self._horizontal_coordinates,
             self.timestep,
             self.is_remote,
@@ -514,8 +516,8 @@ class XarrayDataset(Dataset):
         return self._variable_metadata
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._vertical_coordinates
 
     @property
     def timestep(self) -> datetime.timedelta:

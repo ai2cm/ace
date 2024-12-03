@@ -13,7 +13,7 @@ from fme.core.data_loading.batch_data import (
 )
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
-    SigmaCoordinates,
+    HybridSigmaPressureCoordinate,
     VariableMetadata,
 )
 from fme.core.generics.data import DataLoader
@@ -77,7 +77,7 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         self,
         loader: DataLoader[CoupledBatchData],
         variable_metadata: Mapping[str, VariableMetadata],
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         sampler: Optional[torch.utils.data.Sampler] = None,
@@ -91,8 +91,8 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
             variable_metadata: Metadata for each variable.
             area_weights: Weights for each grid cell, used for computing area-weighted
                 averages. Has shape [n_x_coord, n_y_coord].
-            sigma_coordinates: Sigma coordinates for each grid cell, used for computing
-                pressure levels.
+            vertical_coordinate: Vertical coordinate for each grid cell, used for
+                computing pressure levels.
             horizontal_coordinates: horizontal coordinates for the data.
             timestep: Timestep of the model.
             sampler: Optional sampler for the data loader. Provided to allow support for
@@ -100,7 +100,7 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         """
         self._loader = loader
         self._variable_metadata = variable_metadata
-        self._sigma_coordinates = sigma_coordinates
+        self._vertical_coordinates = vertical_coordinate
         self._horizontal_coordinates = horizontal_coordinates
         self._timestep = timestep
         self._sampler = sampler
@@ -118,8 +118,8 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
         return self._variable_metadata
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._vertical_coordinates
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -133,7 +133,7 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
-            **self.sigma_coordinates.coords,
+            **self.vertical_coordinate.coords,
         }
 
     @property
