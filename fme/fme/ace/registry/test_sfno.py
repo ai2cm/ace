@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
@@ -42,14 +42,14 @@ def test_sfno_init(shape):
         ),
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=shape,
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     assert len(stepper.module.module.blocks) == num_layers

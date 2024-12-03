@@ -15,7 +15,7 @@ import xarray as xr
 import fme
 from fme.core.data_loading.batch_data import BatchData, PrognosticState
 from fme.core.data_loading.config import DataLoaderConfig, Slice, XarrayDataConfig
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.data_loading.getters import (
     get_data_loader,
     get_forcing_data,
@@ -127,7 +127,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
     data = get_data_loader(config, True, requirements)
     assert data.n_batches == samples_per_member * num_ensemble_members
-    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
 def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1):
@@ -158,11 +158,11 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 
     data = get_data_loader(config, True, requirements)
     assert data.n_batches == n_samples * num_ensemble_members
-    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
+    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
 def test_xarray_loader(tmp_path):
-    """Checks that sigma coordinates are present."""
+    """Checks that vertical coordinates are present."""
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
         [XarrayDataConfig(data_path=tmp_path, n_repeats=1)],
@@ -172,12 +172,12 @@ def test_xarray_loader(tmp_path):
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(config, True, requirements)  # type: ignore
-    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
-    assert data.sigma_coordinates.ak.device == fme.get_device()
+    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data.vertical_coordinate.ak.device == fme.get_device()
 
 
 def test_xarray_loader_hpx(tmp_path):
-    """Checks that sigma coordinates are present."""
+    """Checks that vertical coordinates are present."""
     n_times = 3
     data_dim_sizes = {"time": n_times, "face": 12, "width": 16, "height": 16}
     _create_dataset_on_disk(tmp_path, data_dim_sizes=data_dim_sizes, n_times=n_times)
@@ -198,8 +198,8 @@ def test_xarray_loader_hpx(tmp_path):
         # expect healpix shape
         assert batch.data["foo"].shape == (1, window_timesteps, 12, 16, 16)
         break
-    assert isinstance(data.sigma_coordinates, SigmaCoordinates)
-    assert data.sigma_coordinates.ak.device == fme.get_device()
+    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data.vertical_coordinate.ak.device == fme.get_device()
 
 
 def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
@@ -257,7 +257,7 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.times.dt.calendar == "proleptic_gregorian"
     assert data._n_batches == 2
-    assert data.sigma_coordinates.ak.device == fme.get_device()
+    assert data.vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
     assert isinstance(initial_condition, BatchData)
     assert "bar" not in initial_condition.data

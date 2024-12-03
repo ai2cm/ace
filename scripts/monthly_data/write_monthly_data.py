@@ -131,7 +131,7 @@ class Config:
         n_months = months_for_timesteps(data.n_timesteps, data.properties.timestep)
         coords = {
             **data.properties.horizontal_coordinates.coords,
-            **data.properties.sigma_coordinates.coords,
+            **data.properties.vertical_coordinate.coords,
         }
         return MonthlyDataWriter(
             path=self.experiment_dir,
@@ -174,7 +174,7 @@ def run(config: Config):
     writer = config.get_data_writer(data)
 
     derive_func = AtmosphericDeriveFn(
-        sigma_coordinates=data.properties.sigma_coordinates,
+        vertical_coordinate=data.properties.vertical_coordinate,
         timestep=data.properties.timestep,
     )
 

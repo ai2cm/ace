@@ -406,8 +406,8 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     assert isinstance(dataset.horizontal_coordinates, LatLonCoordinates)
     assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
     assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
-    assert dataset.sigma_coordinates.ak.dtype == torch.bfloat16
-    assert dataset.sigma_coordinates.bk.dtype == torch.bfloat16
+    assert dataset.vertical_coordinate.ak.dtype == torch.bfloat16
+    assert dataset.vertical_coordinate.bk.dtype == torch.bfloat16
     data, _ = dataset[0]
     for tensor in data.values():
         assert tensor.dtype == torch.bfloat16

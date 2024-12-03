@@ -11,7 +11,7 @@ from fme.core.data_loading.batch_data import (
     InferenceGriddedData,
 )
 from fme.core.data_loading.config import DataLoaderConfig, Slice
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.data_loading.getters import get_data_loader, get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.data_loading.requirements import (
@@ -207,13 +207,13 @@ class TrainBuilders:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ) -> SingleModuleStepper:
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
 

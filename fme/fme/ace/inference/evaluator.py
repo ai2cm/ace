@@ -254,7 +254,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         initial_times = batch.times.isel(time=0)
         break
     aggregator = aggregator_config.build(
-        sigma_coordinates=data.sigma_coordinates,
+        vertical_coordinate=data.vertical_coordinate,
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,

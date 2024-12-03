@@ -24,12 +24,12 @@ class DimSize:
 
 
 @dataclasses.dataclass
-class SigmaCoordinates:
+class HybridSigmaPressureCoordinate:
     """
     Defines pressure at interface levels according to the following formula:
         p(k) = a(k) + b(k)*ps.
 
-    where ps is the surface pressure, a and b are the sigma coordinates.
+    where ps is the surface pressure, a and b are the sigma-pressure coordinates.
 
     Attributes:
         ak: a(k) coefficients as a 1-dimensional tensor
@@ -62,14 +62,14 @@ class SigmaCoordinates:
     def coords(self) -> Mapping[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
 
-    def to(self, device: str) -> "SigmaCoordinates":
-        return SigmaCoordinates(
+    def to(self, device: str) -> "HybridSigmaPressureCoordinate":
+        return HybridSigmaPressureCoordinate(
             ak=self.ak.to(device),
             bk=self.bk.to(device),
         )
 
     def __eq__(self, other) -> bool:
-        if not isinstance(other, SigmaCoordinates):
+        if not isinstance(other, HybridSigmaPressureCoordinate):
             return False
         return torch.allclose(self.ak, other.ak) and torch.allclose(self.bk, other.bk)
 

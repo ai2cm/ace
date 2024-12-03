@@ -24,8 +24,8 @@ from fme.ace.registry import ModuleSelector
 from fme.core.data_loading.batch_data import PrognosticState
 from fme.core.data_loading.data_typing import (
     DimSize,
+    HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    SigmaCoordinates,
 )
 from fme.core.data_loading.inference import (
     ExplicitIndices,
@@ -67,11 +67,13 @@ def save_stepper(
         ),
     )
     area = torch.ones(data_shape[-2:], device=fme.get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     stepper = config.get_stepper(
         img_shape=(data_shape[-2], data_shape[-1]),
         gridded_operations=LatLonOperations(area),
-        sigma_coordinates=sigma_coordinates,
+        vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )
     torch.save({"stepper": stepper.get_state()}, path)

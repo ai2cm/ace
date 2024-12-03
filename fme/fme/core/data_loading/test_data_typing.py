@@ -3,8 +3,8 @@ import torch
 
 from fme.core.data_loading.data_typing import (
     HEALPixCoordinates,
+    HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    SigmaCoordinates,
 )
 
 
@@ -12,8 +12,12 @@ from fme.core.data_loading.data_typing import (
     "first, second",
     [
         (
-            SigmaCoordinates(ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])),
-            SigmaCoordinates(ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])),
+            HybridSigmaPressureCoordinate(
+                ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])
+            ),
+            HybridSigmaPressureCoordinate(
+                ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])
+            ),
         ),
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
@@ -41,8 +45,12 @@ def test_equality(first, second):
     "first, second",
     [
         (
-            SigmaCoordinates(ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])),
-            SigmaCoordinates(ak=torch.tensor([1, 2, 3]), bk=torch.tensor([5, 6, 7])),
+            HybridSigmaPressureCoordinate(
+                ak=torch.tensor([1, 2, 3]), bk=torch.tensor([4, 5, 6])
+            ),
+            HybridSigmaPressureCoordinate(
+                ak=torch.tensor([1, 2, 3]), bk=torch.tensor([5, 6, 7])
+            ),
         ),
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
@@ -79,20 +87,20 @@ def test_vertical_integral_shape():
     water = torch.rand(nlat, nlon, nz)
     pressure = torch.rand(nlat, nlon)
     ak, bk = torch.arange(nz + 1), torch.arange(nz + 1)
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     water_path = coords.vertical_integral(water, pressure)
     assert water_path.shape == (nlat, nlon)
 
 
-def test_sigma_coordinates_raises_value_error():
+def test_vertical_coordinates_raises_value_error():
     ak, bk = torch.arange(3), torch.arange(4)
     with pytest.raises(ValueError):
-        SigmaCoordinates(ak, bk)
+        HybridSigmaPressureCoordinate(ak, bk)
 
 
-def test_sigma_coordinates_len():
+def test_vertical_coordinates_len():
     ak, bk = torch.arange(3), torch.arange(3)
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     assert len(coords) == 3
 
 
@@ -100,7 +108,7 @@ def test_interface_pressure():
     ak = torch.tensor([2.0, 0.5, 0.0])
     bk = torch.tensor([0.0, 0.5, 1.0])
     psfc = torch.tensor([[1, 1], [2, 2]])
-    coords = SigmaCoordinates(ak, bk)
+    coords = HybridSigmaPressureCoordinate(ak, bk)
     pinterface = coords.interface_pressure(psfc)
     assert pinterface.shape == (2, 2, 3)
     assert pinterface[0, 0, 0] == ak[0]

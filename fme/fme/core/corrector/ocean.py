@@ -6,7 +6,7 @@ from typing import Any, List, Mapping, Optional
 import dacite
 
 from fme.core.corrector import CorrectorABC, CorrectorConfigProtocol, force_positive
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.masking import MaskingConfig
 from fme.core.registry.corrector import CorrectorSelector
@@ -33,13 +33,13 @@ class OceanCorrectorConfig(CorrectorConfigProtocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ):
         return OceanCorrector(
             config=self,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
 
@@ -55,12 +55,12 @@ class OceanCorrector(CorrectorABC):
         self,
         config: OceanCorrectorConfig,
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ):
         self._config = config
         self._gridded_operations = gridded_operations
-        self._sigma_coordinates = sigma_coordinates
+        self._vertical_coordinates = vertical_coordinate
         self._timestep = timestep
 
         if config.masking is not None:

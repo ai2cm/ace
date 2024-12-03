@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from fme.core.climate_data import ClimateData
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -20,7 +20,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 def test_compute_derived_variable():
     fake_data = {"PRESsfc": torch.tensor([1.0]), "PRATEsfc": torch.tensor([2.0])}
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
     )
 
@@ -28,14 +28,14 @@ def test_compute_derived_variable():
         return data.surface_pressure + data.precipitation_rate
 
     output_data = _compute_derived_variable(
-        fake_data, sigma_coordinates, TIMESTEP, "c", _derived_variable_func
+        fake_data, vertical_coordinate, TIMESTEP, "c", _derived_variable_func
     )
     torch.testing.assert_close(output_data["c"], torch.tensor([3.0]))
 
 
 def test_compute_derived_variable_raises_value_error_when_overwriting():
     fake_data = {"PRESsfc": torch.tensor([1.0]), "PRATEsfc": torch.tensor([2.0])}
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
     )
 
@@ -45,7 +45,7 @@ def test_compute_derived_variable_raises_value_error_when_overwriting():
     derived_variable_func = add_surface_pressure_and_precipitation
     with pytest.raises(ValueError):
         _compute_derived_variable(
-            fake_data, sigma_coordinates, TIMESTEP, "PRATEsfc", derived_variable_func
+            fake_data, vertical_coordinate, TIMESTEP, "PRATEsfc", derived_variable_func
         )
 
 
@@ -83,7 +83,7 @@ def test_compute_derived_quantities(dataset: str):
         gen_data = fake_data.copy()
         del gen_data["SOLIN"]
 
-    sigma_coordinates = SigmaCoordinates(
+    vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.tensor([0.0, 0.5, 0.0]),
         bk=torch.tensor([0.0, 0.5, 1.0]),
     )
@@ -91,7 +91,7 @@ def test_compute_derived_quantities(dataset: str):
     def derive_func(data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         updated = compute_derived_quantities(
             dict(data),
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
             forcing_data=dict(forcing_data),
         )

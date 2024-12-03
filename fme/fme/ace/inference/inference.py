@@ -185,10 +185,6 @@ class InferenceConfig:
         self.logging.clean_wandb(self.experiment_dir)
 
     def load_stepper(self) -> SingleModuleStepper:
-        """
-        Args:
-            sigma_coordinates: The sigma coordinates of the model.
-        """
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
         return stepper

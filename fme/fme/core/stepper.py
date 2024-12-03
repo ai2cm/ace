@@ -29,7 +29,7 @@ from fme.core.data_loading.batch_data import (
     PairedData,
     PrognosticState,
 )
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.data_loading.requirements import (
     DataRequirements,
     PrognosticStateDataRequirements,
@@ -56,9 +56,11 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 class AtmosphericDeriveFn:
     def __init__(
-        self, sigma_coordinates: SigmaCoordinates, timestep: datetime.timedelta
+        self,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
+        timestep: datetime.timedelta,
     ):
-        self.sigma_coordinates = sigma_coordinates.to(
+        self.vertical_coordinate = vertical_coordinate.to(
             "cpu"
         )  # must be on cpu for multiprocessing fork context
         self.timestep = timestep
@@ -66,7 +68,7 @@ class AtmosphericDeriveFn:
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         return compute_derived_quantities(
             dict(data),
-            sigma_coordinates=self.sigma_coordinates.to(get_device()),
+            vertical_coordinate=self.vertical_coordinate.to(get_device()),
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
         )
@@ -187,16 +189,16 @@ class SingleModuleStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         timestep: datetime.timedelta,
     ):
         logging.info("Initializing stepper from provided config")
-        derive_func = AtmosphericDeriveFn(sigma_coordinates, timestep)
+        derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
             derive_func=derive_func,
         )
@@ -328,7 +330,7 @@ class ExistingStepperConfig:
     def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
         return self._stepper_config.get_base_weights()
 
-    def get_stepper(self, img_shape, gridded_operations, sigma_coordinates, timestep):
+    def get_stepper(self, img_shape, gridded_operations, vertical_coordinate, timestep):
         del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"])
@@ -482,7 +484,7 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
     @property
     @abc.abstractmethod
-    def sigma_coordinates(self) -> SigmaCoordinates:
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
         pass
 
     @property
@@ -517,7 +519,7 @@ class SingleModuleStepper(
         config: SingleModuleStepperConfig,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        sigma_coordinates: SigmaCoordinates,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -527,7 +529,7 @@ class SingleModuleStepper(
             config: The configuration.
             img_shape: Shape of domain as (n_lat, n_lon).
             gridded_operations: The gridded operations, e.g. for area weighting.
-            sigma_coordinates: The sigma coordinates.
+            vertical_coordinate: The vertical coordinate.
             derive_func: Function to compute derived variables.
             timestep: Timestep of the model.
             init_weights: Whether to initialize the weights. Should pass False if
@@ -563,7 +565,7 @@ class SingleModuleStepper(
         self._is_distributed = dist.is_distributed()
         self.module = dist.wrap_module(self.module)
 
-        self._sigma_coordinates = sigma_coordinates.to(get_device())
+        self._vertical_coordinates = vertical_coordinate.to(get_device())
         self._timestep = timestep
 
         self.loss_obj = config.loss.build(
@@ -572,7 +574,7 @@ class SingleModuleStepper(
 
         self._corrector = config.corrector.build(
             gridded_operations=gridded_operations,
-            sigma_coordinates=self.sigma_coordinates,
+            vertical_coordinate=self.vertical_coordinate,
             timestep=timestep,
         )
         if config.loss_normalization is not None:
@@ -606,8 +608,8 @@ class SingleModuleStepper(
         ] = self.predict_paired
 
     @property
-    def sigma_coordinates(self) -> SigmaCoordinates:
-        return self._sigma_coordinates
+    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+        return self._vertical_coordinates
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -948,7 +950,7 @@ class SingleModuleStepper(
             "img_shape": self._img_shape,
             "config": self._config.get_state(),
             "gridded_operations": self._gridded_operations.to_state(),
-            "sigma_coordinates": self.sigma_coordinates.as_dict(),
+            "vertical_coordinate": self.vertical_coordinate.as_dict(),
             "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
         }
@@ -998,17 +1000,21 @@ class SingleModuleStepper(
                 state["gridded_operations"]
             )
 
-        sigma_coordinates = dacite.from_dict(
-            data_class=SigmaCoordinates,
-            data=state["sigma_coordinates"],
+        if "sigma_coordinates" in state:
+            # for backwards compatibility with old checkpoints
+            state["vertical_coordinate"] = state["sigma_coordinates"]
+
+        vertical_coordinate = dacite.from_dict(
+            data_class=HybridSigmaPressureCoordinate,
+            data=state["vertical_coordinate"],
             config=dacite.Config(strict=True),
         )
         # for backwards compatibility with original ACE checkpoint which
         # serialized vertical coordinates as float64
-        if sigma_coordinates.ak.dtype == torch.float64:
-            sigma_coordinates.ak = sigma_coordinates.ak.to(dtype=torch.float32)
-        if sigma_coordinates.bk.dtype == torch.float64:
-            sigma_coordinates.bk = sigma_coordinates.bk.to(dtype=torch.float32)
+        if vertical_coordinate.ak.dtype == torch.float64:
+            vertical_coordinate.ak = vertical_coordinate.ak.to(dtype=torch.float32)
+        if vertical_coordinate.bk.dtype == torch.float64:
+            vertical_coordinate.bk = vertical_coordinate.bk.to(dtype=torch.float32)
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
         if "img_shape" in state:
@@ -1018,12 +1024,12 @@ class SingleModuleStepper(
             for v in state["data_shapes"].values():
                 img_shape = v[-2:]
                 break
-        derive_func = AtmosphericDeriveFn(sigma_coordinates, timestep)
+        derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
         stepper = cls(
             config=SingleModuleStepperConfig.from_state(config),
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            sigma_coordinates=sigma_coordinates,
+            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
             derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
