@@ -4,7 +4,7 @@ import torch
 
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
-from fme.core.wandb import Image, WandB
+from fme.core.wandb import Image
 
 from ..plotting import plot_paneled_data
 
@@ -17,11 +17,11 @@ class SnapshotAggregator:
     _captions = {
         "full-field": (
             "{name} one step full field for last sample; "
-            "(left) generated and (right) target [{units}]"
+            "(top) generated and (bottom) target [{units}]"
         ),
         "residual": (
             "{name} one step residual (prediction - previous time) for last sample; "
-            "(left) generated and (right) target [{units}]"
+            "(top) generated and (bottom) target [{units}]"
         ),
         "error": (
             "{name} one step full field error (generated - target) "
@@ -67,7 +67,6 @@ class SnapshotAggregator:
         input_time = 0
         target_time = 1
         image_logs = {}
-        wandb = WandB.get_instance()
         for name in self._gen_data.keys():
             # use first sample in batch
             gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0].cpu()
@@ -87,8 +86,7 @@ class SnapshotAggregator:
                 else:
                     diverging = False
                 caption = self._get_caption(key, name)
-                fig = plot_paneled_data(data, diverging=diverging, caption=caption)
-                wandb_image = wandb.Image(fig, caption=caption)
+                wandb_image = plot_paneled_data(data, diverging, caption=caption)
                 image_logs[f"image-{key}/{name}"] = wandb_image
         image_logs = {f"{label}/{key}": image_logs[key] for key in image_logs}
         return image_logs
