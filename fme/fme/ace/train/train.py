@@ -80,11 +80,7 @@ from fme.core.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
 )
-from fme.core.data_loading.batch_data import (
-    GriddedDataABC,
-    PairedData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import GriddedDataABC, PairedData, PrognosticState
 from fme.core.data_loading.config import Slice
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
@@ -425,6 +421,7 @@ class Trainer:
         """Train for one epoch and return logs from TrainAggregator."""
         wandb = WandB.get_instance()
         aggregator = self._aggregator_builder.get_train_aggregator()
+        n_samples_seen_since_logging = 0
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
             with torch.no_grad():
@@ -451,6 +448,7 @@ class Trainer:
             self._end_of_batch_ops()
             self._ema(model=self.stepper.modules)
             self.num_batches_seen += 1
+            n_samples_seen_since_logging += self.train_data.batch_size
             if (
                 self.config.log_train_every_n_batches > 0
                 and self.num_batches_seen % self.config.log_train_every_n_batches == 0
@@ -462,12 +460,10 @@ class Trainer:
                     }
                 duration = time.time() - current_time
                 current_time = time.time()
-                n_samples = (
-                    self.train_data.batch_size * self.config.log_train_every_n_batches
-                )
-                samples_per_second = n_samples / duration
-                metrics["training_samples_per_second"] = samples_per_second
+                samples_per_second = n_samples_seen_since_logging / duration
+                metrics["training_samples_per_second_on_rank_0"] = samples_per_second
                 wandb.log(metrics, step=self.num_batches_seen)
+                n_samples_seen_since_logging = 0
         self._model_epoch += 1
 
         return aggregator.get_logs(label="train")
