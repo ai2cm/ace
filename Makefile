@@ -6,7 +6,7 @@ USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 
 build_docker_image:
-	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
+	docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
 
 push_shifter_image: build_docker_image
 	docker tag $(IMAGE):$(VERSION) $(REGISTRY)/$(IMAGE):$(VERSION)
