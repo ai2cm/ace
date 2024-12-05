@@ -179,6 +179,34 @@ fv3gfs_AMIP_stats_beaker_dataset: enable_coldline_check
 
 # TODO: Add AMIP baseline C48 dataset processing when available
 
+.PHONY: shield_som_spin_up_c96_dataset
+shield_som_c96_spin_up_dataset:
+	./compute_dataset.sh --config configs/shield-som-spin-up-c96-1deg-$(LAYERS).yaml
+
+.PHONY: shield_som_ensemble_c96_dataset
+shield_som_ensemble_c96_dataset:
+	./compute_dataset.sh --config configs/shield-som-ensemble-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_som_abrupt_co2_increase_c96_dataset
+shield_som_abrupt_co2_increase_c96_dataset:
+	./compute_dataset.sh --config configs/shield-som-abrupt-co2-increase-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_som_increasing_co2_c96_dataset
+shield_som_c96_increasing_co2_dataset:
+	./compute_dataset.sh --config configs/shield-som-increasing-co2-c96-$(RESOLUTION)-$(LAYERS).yaml
+
+.PHONY: shield_som_c96_radiation_multi_call_dataset
+shield_som_c96_radiation_multi_call_dataset:
+	./compute_dataset.sh --config configs/shield-som-radiation-multi-call-c96-1deg-$(LAYERS).yaml
+
+.PHONY: shield_som_c24_dataset
+shield_som_c24_dataset:
+	./compute_dataset.sh --config configs/shield-som-c24-4deg-$(LAYERS).yaml
+
+.PHONY: shield_som_c24_tuned_cdmbgwd_dataset
+shield_som_c24_tuned_cdmbgwd_dataset:
+	./compute_dataset.sh --config configs/shield-som-c24-tuned-cdmbgwd-4deg-$(LAYERS).yaml
+
 # In total (not including full_field stats), this took 7 hours 15 minutes to
 # complete using a single Perlmutter CPU node.
 
