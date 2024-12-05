@@ -26,7 +26,7 @@ class TimestampList:
     """
     Configuration for a list of timestamps.
 
-    Attributes:
+    Parameters:
         times: List of timestamps.
         timestamp_format: Format of the timestamps.
     """
@@ -60,7 +60,7 @@ class InferenceInitialConditionIndices:
     """
     Configuration of the indices for initial conditions during inference.
 
-    Attributes:
+    Parameters:
         n_initial_conditions: Number of initial conditions to use.
         first: Index of the first initial condition.
         interval: Interval between initial conditions.
@@ -84,7 +84,7 @@ class ExplicitIndices:
     """
     Configure indices providing them explicitly.
 
-    Attributes:
+    Parameters:
         list: List of integer indices.
     """
 
@@ -107,7 +107,7 @@ class InferenceDataLoaderConfig:
     constraints. During inference, we have only one batch, so the number of
     samples directly determines the size of that batch.
 
-    Attributes:
+    Parameters:
         dataset: Configuration to define the dataset.
         start_indices: Configuration of the indices for initial conditions
             during inference. This can be a list of timestamps, a list of
@@ -144,7 +144,7 @@ class ForcingDataLoaderConfig:
     """
     Configuration for the forcing data.
 
-    Attributes:
+    Parameters:
         dataset: Configuration to define the dataset.
         num_data_workers: Number of parallel workers to use for data loading.
         perturbations: Configuration for SST perturbations

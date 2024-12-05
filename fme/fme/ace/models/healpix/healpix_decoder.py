@@ -29,7 +29,7 @@ class UNetDecoderConfig:
     """
     Configuration for the UNet Decoder.
 
-    Attributes:
+    Parameters:
         conv_block: Configuration for the convolutional block.
         up_sampling_block: Configuration for the up-sampling block.
         output_layer: Configuration for the output layer block.

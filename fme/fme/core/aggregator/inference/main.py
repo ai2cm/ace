@@ -120,7 +120,7 @@ class InferenceEvaluatorAggregatorConfig:
     """
     Configuration for inference evaluator aggregator.
 
-    Attributes:
+    Parameters:
         log_histograms: Whether to log histograms of the targets and predictions.
         log_video: Whether to log videos of the state evolution.
         log_extended_video: Whether to log wandb videos of the predictions with
@@ -533,7 +533,7 @@ class InferenceAggregatorConfig:
     """
     Configuration for inference aggregator.
 
-    Attributes:
+    Parameters:
         time_mean_reference_data: Path to reference time means to compare against.
         log_global_mean_time_series: Whether to log global mean time series metrics.
     """

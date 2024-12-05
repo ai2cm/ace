@@ -45,7 +45,7 @@ class EMAConfig:
     """
     Configuration for exponential moving average of model weights.
 
-    Attributes:
+    Parameters:
         decay: decay rate for the moving average
     """
 

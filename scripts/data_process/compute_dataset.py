@@ -173,7 +173,7 @@ class DLWPChunkingConfig(_ChunkingConfig):
 class DatasetComputationConfig:
     """Configuration of computation details for an FME reference dataset.
 
-    Attributes:
+    Parameters:
         reference_vertical_coordinate_file: path to netCDF file containing
             vertical coordinate definition for the reference simulation.
         vertical_coarsening_indices: list of tuples defining the ranges of
@@ -212,7 +212,7 @@ class DatasetComputationConfig:
 class DatasetConfig:
     """Dataset provenance for a set of reference simulations.
 
-    Attributes:
+    Parameters:
         runs: mapping of short names to full paths of reference datasets.
         output_directory: path to place output of computation script.
         dataset_computation: configuration details for dataset

@@ -51,7 +51,7 @@ Let's define a training configuration ``TrainConfig`` containing an ``OptimizerC
         """
         Configuration for an optimizer.
 
-        Attributes:
+        Parameters:
             optimizer_type: The type of optimizer to use.
             lr: The learning rate.
             kwargs: Additional keyword arguments to pass to the optimizer.

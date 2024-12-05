@@ -32,8 +32,8 @@ class ModuleConfig(abc.ABC):
         Args:
             n_in_channels: number of input channels
             n_out_channels: number of output channels
-            img_shape: last two dimensions of data, corresponding to lat and
-                lon when using FourCastNet conventions
+            img_shape: shape of last two dimensions of data, e.g. latitude and
+                longitude.
 
         Returns:
             a nn.Module
@@ -68,7 +68,7 @@ class ModuleSelector:
     used to represent any ModuleConfig, whereas ModuleConfig is a protocol
     that can be implemented by many different classes.
 
-    Attributes:
+    Parameters:
         type: the type of the ModuleConfig
         config: data for a ModuleConfig instance of the indicated type
     """

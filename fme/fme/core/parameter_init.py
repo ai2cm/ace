@@ -23,7 +23,7 @@ class FrozenParameterConfig:
 
     An exception is raised if a parameter is included by both lists.
 
-    Attributes:
+    Parameters:
         include: list of parameter names to freeze (set requires_grad = False)
         exclude: list of parameter names to ignore
     """
@@ -70,7 +70,7 @@ class ParameterInitializationConfig:
     pre-trained model. If the built model has larger weights than the
     pre-trained model, only the initial slice of the weights is overwritten.
 
-    Attributes:
+    Parameters:
         weight_path: path to a SingleModuleStepper checkpoint
             containing weights to load
         exclude_parameters: list of parameter names to exclude from the loaded

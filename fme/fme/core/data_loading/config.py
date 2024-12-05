@@ -18,7 +18,7 @@ class Slice:
 
     Required because `slice` cannot be initialized directly by dacite.
 
-    Attributes:
+    Parameters:
         start: Start index of the slice.
         stop: Stop index of the slice.
         step: Step of the slice.
@@ -41,7 +41,7 @@ class TimeSlice:
     Note: start_time and stop_time may be provided as partial time strings and the
         stop_time will be included in the slice. See more details in `Xarray docs`_.
 
-    Attributes:
+    Parameters:
         start_time: Start time of the slice.
         stop_time: Stop time of the slice.
         step: Step of the slice.
@@ -79,7 +79,7 @@ class RepeatedInterval:
     is used to generate a boolean mask for a dataset that will return values
     within the interval and repeat that throughout the dataset.
 
-    Attributes:
+    Parameters:
         interval_length: Length of the interval to return values from
         start: Start position of the interval within the repeat block.
         block_length: Total length of the block to be repeated over the length of
@@ -162,7 +162,7 @@ class RepeatedInterval:
 class OverwriteConfig:
     """Configuration to overwrite field values in XarrayDataset.
 
-    Attributes:
+    Parameters:
         constant: Fill field with constant value.
         multiply_scalar: Multiply field by scalar value.
     """
@@ -199,7 +199,7 @@ class OverwriteConfig:
 @dataclasses.dataclass
 class XarrayDataConfig:
     """
-    Attributes:
+    Parameters:
         data_path: Path to the data.
         file_pattern: Glob pattern to match files in the data_path.
         n_repeats: Number of times to repeat the dataset (in time). It is up
@@ -290,7 +290,7 @@ class XarrayDataConfig:
 @dataclasses.dataclass
 class DataLoaderConfig:
     """
-    Attributes:
+    Parameters:
         dataset: A sequence of configurations each defining a dataset
             to be loaded. This sequence of datasets will be concatenated.
         batch_size: Number of samples per batch.

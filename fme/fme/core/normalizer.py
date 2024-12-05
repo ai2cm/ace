@@ -18,7 +18,7 @@ class NormalizationConfig:
     Either global_means_path and global_stds_path or explicit means and stds
     must be provided.
 
-    Attributes:
+    Parameters:
         global_means_path: Path to a netCDF file containing global means.
         global_stds_path: Path to a netCDF file containing global stds.
         means: Mapping from variable names to means.

@@ -15,7 +15,7 @@ The following module types are available:
 
 .. include:: available_modules.rst
 
-.. autofunction:: fme.ace.get_available_module_types
+.. autofunction:: fme.core.registry.ModuleSelector.get_available_types
 
 The following module builders are available:
 
