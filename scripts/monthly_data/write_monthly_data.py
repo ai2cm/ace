@@ -88,7 +88,7 @@ class Config:
     """
     Configuration for applying the MonthlyDataWriter to a dataset.
 
-    Attributes:
+    Parameters:
         experiment_dir: Directory to save results to.
         dataset: Configuration for the dataset to load.
         num_data_workers: Number of parallel workers to use for data loading.
