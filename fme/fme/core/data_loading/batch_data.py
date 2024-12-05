@@ -34,8 +34,7 @@ from fme.core.data_loading.data_typing import (
 )
 from fme.core.data_loading.requirements import PrognosticStateDataRequirements
 from fme.core.device import get_device
-from fme.core.generics.data import DataLoader
-from fme.core.generics.inference import InferenceDataABC
+from fme.core.generics.data import DataLoader, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 
