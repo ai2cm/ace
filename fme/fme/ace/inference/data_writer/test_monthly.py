@@ -51,7 +51,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
             month_data = {"x": x_window}
             initial_time = cftime.DatetimeProlepticGregorian(year, month, 1, 0, 0, 0)
             for i_write in range(n_writes):
-                times = xr.DataArray(
+                time = xr.DataArray(
                     [
                         [
                             initial_time + datetime.timedelta(hours=6 * i_write)
@@ -61,10 +61,8 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     ],
                     dims=["sample", "time"],
                 )
-                assert times.shape == (n_samples, window_size)
-                writer.append_batch(
-                    data=month_data, start_timestep=0, batch_times=times
-                )
+                assert time.shape == (n_samples, window_size)
+                writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
     writer.flush()
     written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)

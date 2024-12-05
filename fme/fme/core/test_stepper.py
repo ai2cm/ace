@@ -11,10 +11,7 @@ import xarray as xr
 
 import fme
 from fme.core import ClimateData, metrics
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import BatchData, PrognosticState
 from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -49,7 +46,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     data = BatchData.new_on_device(
         data=data_dict,
-        times=xr.DataArray(
+        time=xr.DataArray(
             np.zeros((n_samples, n_time)),
             dims=["sample", "time"],
         ),
@@ -484,7 +481,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    times = xr.DataArray(
+    time = xr.DataArray(
         [
             [
                 cftime.DatetimeProlepticGregorian(
@@ -498,7 +495,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     )
     batch_data = BatchData.new_on_cpu(
         data=data,
-        times=times,
+        time=time,
     ).to_device()
     # run the stepper on the data
     with torch.no_grad():
@@ -665,7 +662,7 @@ def get_data_for_predict(
     n_samples = 3
     input_data = BatchData.new_on_device(
         data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
-        times=xr.DataArray(
+        time=xr.DataArray(
             np.zeros((n_samples, 1)),
             dims=["sample", "time"],
         ),
@@ -677,7 +674,7 @@ def get_data_for_predict(
         data={
             name: torch.rand(3, n_steps + 1, 5, 5).to(DEVICE) for name in forcing_names
         },
-        times=xr.DataArray(
+        time=xr.DataArray(
             np.zeros((n_samples, n_steps + 1)),
             dims=["sample", "time"],
         ),
@@ -691,7 +688,7 @@ def test_predict():
     input_data, forcing_data = get_data_for_predict(n_steps, forcing_names=[])
     forcing_data.data = {}
     output, new_input_data = stepper.predict(input_data, forcing_data)
-    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
+    xr.testing.assert_allclose(forcing_data.time[:, 1:], output.time)
     variable = "a"
     assert output.data[variable].size(dim=1) == n_steps
     torch.testing.assert_close(
@@ -704,7 +701,7 @@ def test_predict():
     torch.testing.assert_close(
         new_input_state.data[variable][:, 0], output.data[variable][:, -1]
     )
-    assert new_input_state.times.equals(output.times[:, -1:])
+    assert new_input_state.time.equals(output.time[:, -1:])
 
 
 def test_predict_with_forcing():
@@ -714,7 +711,7 @@ def test_predict_with_forcing():
     output, new_input_data = stepper.predict(input_data, forcing_data)
     assert "b" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
-    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
+    xr.testing.assert_allclose(forcing_data.time[:, 1:], output.time)
     torch.testing.assert_close(
         output.data["a"][:, 0],
         input_data.as_batch_data().data["a"][:, 0] + forcing_data.data["b"][:, 0],
@@ -727,8 +724,8 @@ def test_predict_with_forcing():
     for n in range(1, n_steps):
         expected_a_output = output.data["a"][:, n - 1] + forcing_data.data["b"][:, n]
         torch.testing.assert_close(output.data["a"][:, n], expected_a_output)
-    xr.testing.assert_equal(output.times, forcing_data.times[:, 1:])
-    assert new_input_state.times.equals(output.times[:, -1:])
+    xr.testing.assert_equal(output.time, forcing_data.time[:, 1:])
+    assert new_input_state.time.equals(output.time[:, -1:])
 
 
 def test_predict_with_ocean():
@@ -738,7 +735,7 @@ def test_predict_with_ocean():
         n_steps, forcing_names=["a", "mask"]
     )
     output, new_input_data = stepper.predict(input_data, forcing_data)
-    xr.testing.assert_allclose(forcing_data.times[:, 1:], output.times)
+    xr.testing.assert_allclose(forcing_data.time[:, 1:], output.time)
     assert "mask" not in output.data
     assert output.data["a"].size(dim=1) == n_steps
     for n in range(n_steps):
@@ -757,7 +754,7 @@ def test_predict_with_ocean():
     new_input_state = new_input_data.as_batch_data()
     assert isinstance(new_input_state, BatchData)
     torch.testing.assert_close(new_input_state.data["a"][:, 0], output.data["a"][:, -1])
-    assert new_input_state.times.equals(output.times[:, -1:])
+    assert new_input_state.time.equals(output.time[:, -1:])
 
 
 def test_next_step_forcing_names():
@@ -788,7 +785,7 @@ def test_prepend_initial_condition():
     stepped = TrainOutput(
         gen_data={"a": x, "b": x + 1},
         target_data={"a": x + 2, "b": x + 3},
-        times=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
         metrics={"loss": torch.tensor(0.0)},
         normalize=normalize,
     )
@@ -798,7 +795,7 @@ def test_prepend_initial_condition():
     }
     ic = BatchData.new_on_device(
         data=ic_data,
-        times=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
     ).get_start(
         prognostic_names=["a", "b"],
         n_ic_timesteps=1,

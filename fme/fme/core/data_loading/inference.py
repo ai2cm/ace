@@ -11,13 +11,9 @@ import xarray as xr
 from fme.core.data_loading._xarray import DatasetProperties, XarrayDataset
 from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import Slice, XarrayDataConfig
-from fme.core.data_loading.data_typing import (
-    LatLonCoordinates,
-)
+from fme.core.data_loading.data_typing import LatLonCoordinates
 from fme.core.data_loading.perturbation import SSTPerturbation
-from fme.core.data_loading.requirements import (
-    DataRequirements,
-)
+from fme.core.data_loading.requirements import DataRequirements
 from fme.core.distributed import Distributed
 
 
@@ -238,7 +234,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                     self._total_forward_steps + self._start_indices[i_member] + 1
                 )
             window_time_slice = slice(i_window_start, i_window_end)
-            tensors, times = self._dataset.get_sample_by_time_slice(window_time_slice)
+            tensors, time = self._dataset.get_sample_by_time_slice(window_time_slice)
             if self._perturbations is not None:
                 if (
                     self._surface_temperature_name is None
@@ -256,7 +252,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                         self._lons,
                         tensors[self._ocean_fraction_name],
                     )
-            sample_tuples.append((tensors, times))
+            sample_tuples.append((tensors, time))
         return BatchData.from_sample_tuples(
             sample_tuples,
             horizontal_dims=list(self.properties.horizontal_coordinates.dims),
@@ -270,7 +266,7 @@ class InferenceDataset(torch.utils.data.Dataset):
             for key, value in self._persistence_data.data.items():
                 updated_data[key] = value.expand_as(result.data[key])
             result.data = {**result.data, **updated_data}
-        assert result.times.shape[0] == self._n_initial_conditions // dist.world_size
+        assert result.time.shape[0] == self._n_initial_conditions // dist.world_size
         return result
 
     def __len__(self) -> int:

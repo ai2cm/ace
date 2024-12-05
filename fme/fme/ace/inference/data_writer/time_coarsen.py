@@ -14,7 +14,7 @@ class _PairedDataWriter(Protocol):
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         pass
 
@@ -27,7 +27,7 @@ class _DataWriter(Protocol):
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         pass
 
@@ -86,13 +86,13 @@ class PairedTimeCoarsen:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         (target_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
-            target, start_timestep, batch_times, self._coarsen_factor
+            target, start_timestep, batch_time, self._coarsen_factor
         )
         (prediction_coarsened, _, _) = coarsen_batch(
-            prediction, start_timestep, batch_times, self._coarsen_factor
+            prediction, start_timestep, batch_time, self._coarsen_factor
         )
         self._data_writer.append_batch(
             target_coarsened,
@@ -120,10 +120,10 @@ class TimeCoarsen:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         (data_coarsened, start_timestep, batch_times_coarsened) = coarsen_batch(
-            data, start_timestep, batch_times, self._coarsen_factor
+            data, start_timestep, batch_time, self._coarsen_factor
         )
         self._data_writer.append_batch(
             data_coarsened,
@@ -138,13 +138,13 @@ class TimeCoarsen:
 def coarsen_batch(
     data: Dict[str, torch.Tensor],
     start_timestep: int,
-    batch_times: xr.DataArray,
+    batch_time: xr.DataArray,
     coarsen_factor: int,
 ) -> Tuple[Dict[str, torch.Tensor], int, xr.DataArray]:
     data_coarsened = _coarsen_tensor_dict(data, coarsen_factor)
     start_timestep = start_timestep // coarsen_factor
-    batch_times_coarsened = batch_times.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
-    return data_coarsened, start_timestep, batch_times_coarsened
+    batch_time_coarsened = batch_time.coarsen({TIME_DIM_NAME: coarsen_factor}).mean()
+    return data_coarsened, start_timestep, batch_time_coarsened
 
 
 def _coarsen_tensor_dict(
