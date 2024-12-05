@@ -105,9 +105,7 @@ def get_initial_condition(
                 f"(n_samples, n_lat, n_lon). Got shape {ds[name].shape}."
             )
         n_samples = ds[name].shape[0]
-        initial_condition[name] = (
-            torch.tensor(ds[name].values).unsqueeze(dim=1).to(fme.get_device())
-        )
+        initial_condition[name] = torch.tensor(ds[name].values).unsqueeze(dim=1)
     if "time" not in ds:
         raise ValueError("Initial condition dataset must have a 'time' variable.")
     initial_times = xr.DataArray(
@@ -121,7 +119,7 @@ def get_initial_condition(
             f"and {n_samples}."
         )
 
-    batch_data = BatchData.new_on_device(
+    batch_data = BatchData.new_on_cpu(
         data=initial_condition,
         times=initial_times,
         horizontal_dims=["lat", "lon"],

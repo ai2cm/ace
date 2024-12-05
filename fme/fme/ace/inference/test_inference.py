@@ -235,7 +235,6 @@ def test_get_initial_condition():
     np.testing.assert_allclose(
         batch_data.data["prog"].squeeze(dim=1).cpu().numpy(), data["prog"].values
     )
-    assert batch_data.data["prog"].device == fme.get_device()
     assert batch_data.times.isel(time=0).equals(initial_times)
 
 
