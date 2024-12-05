@@ -133,16 +133,16 @@ def test_coupled_data_loader(tmp_path):
         atmosphere_data = batch.atmosphere_data
         assert isinstance(ocean_data, BatchData)
         assert isinstance(atmosphere_data, BatchData)
-        assert len(ocean_data.times.isel(sample=0).values) == 2  # IC + 1 forward step
+        assert len(ocean_data.time.isel(sample=0).values) == 2  # IC + 1 forward step
         assert (
-            len(atmosphere_data.times.isel(sample=0).values) == 3
+            len(atmosphere_data.time.isel(sample=0).values) == 3
         )  # IC + 2 forward steps
         assert set(ocean_data.data.keys()) == set(ocean_names)
         assert set(atmosphere_data.data.keys()) == set(atmos_names)
         # initial condition times should match:
-        assert ocean_data.times.isel(time=0) == atmosphere_data.times.isel(time=0)
+        assert ocean_data.time.isel(time=0) == atmosphere_data.time.isel(time=0)
         # final step times should match:
-        assert ocean_data.times.isel(time=-1) == atmosphere_data.times.isel(time=-1)
+        assert ocean_data.time.isel(time=-1) == atmosphere_data.time.isel(time=-1)
         # check data matches expectations
         assert ocean_data.data["bar"].shape[1] == 2
         assert atmosphere_data.data["foo"].shape[1] == 3

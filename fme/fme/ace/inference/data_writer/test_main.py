@@ -17,7 +17,7 @@ def test_save_initial_condition_single_timestep():
     n_time = 1
     batch = BatchData.new_on_cpu(
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
-        times=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
+        time=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -39,7 +39,7 @@ def test_save_initial_condition_single_timestep():
             assert ds.air_temperature.shape == (n_samples, n_lat, n_lon)
             assert ds.time.shape == (n_samples,)
             assert ds.air_temperature.dims == ("sample", "lat", "lon")
-            xr.testing.assert_allclose(ds.time, batch.times.isel(time=0))
+            xr.testing.assert_allclose(ds.time, batch.time.isel(time=0))
             np.testing.assert_allclose(
                 ds.air_temperature.values,
                 batch.data["air_temperature"].squeeze(dim=1).cpu().numpy(),
@@ -57,7 +57,7 @@ def test_save_initial_condition_multiple_timesteps():
     n_time = 2
     batch = BatchData.new_on_cpu(
         data={"air_temperature": torch.rand((n_samples, n_time, n_lat, n_lon))},
-        times=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
+        time=xr.DataArray(np.random.rand(n_samples, n_time), dims=["sample", "time"]),
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -79,7 +79,7 @@ def test_save_initial_condition_multiple_timesteps():
             assert ds.air_temperature.shape == (n_samples, n_time, n_lat, n_lon)
             assert ds.time.shape == (n_samples, n_time)
             assert ds.air_temperature.dims == ("sample", "time", "lat", "lon")
-            np.testing.assert_allclose(ds.time.values, batch.times.values)
+            np.testing.assert_allclose(ds.time.values, batch.time.values)
             np.testing.assert_allclose(
                 ds.air_temperature.values, batch.data["air_temperature"].cpu().numpy()
             )

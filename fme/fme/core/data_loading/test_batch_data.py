@@ -27,7 +27,7 @@ def get_batch_data(
             name: torch.randn(n_samples, n_times, n_lat, n_lon, device=device)
             for name in names
         },
-        times=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
+        time=xr.DataArray(np.random.rand(n_samples, n_times), dims=["sample", "time"]),
         horizontal_dims=horizontal_dims,
     )
 
@@ -57,7 +57,7 @@ def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps
     )
     start = batch_data.get_start(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(start, batch_data)
-    assert start.times.equals(batch_data.times.isel(time=slice(0, n_ic_timesteps)))
+    assert start.time.equals(batch_data.time.isel(time=slice(0, n_ic_timesteps)))
     assert set(start.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
         assert start.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
@@ -92,7 +92,7 @@ def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: 
     )
     end = batch_data.get_end(prognostic_names, n_ic_timesteps).as_batch_data()
     assert_metadata_equal(end, batch_data)
-    assert end.times.equals(batch_data.times.isel(time=slice(-n_ic_timesteps, None)))
+    assert end.time.equals(batch_data.time.isel(time=slice(-n_ic_timesteps, None)))
     assert set(end.data.keys()) == set(prognostic_names)
     for name in prognostic_names:
         assert end.data[name].shape == (n_samples, n_ic_timesteps, n_lat, n_lon)
@@ -128,9 +128,7 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
     prepended = batch_data.prepend(start_data)
     start_batch_data = start_data.as_batch_data()
     assert_metadata_equal(prepended, batch_data)
-    assert prepended.times.isel(time=slice(n_ic_timesteps, None)).equals(
-        batch_data.times
-    )
+    assert prepended.time.isel(time=slice(n_ic_timesteps, None)).equals(batch_data.time)
     assert set(prepended.data.keys()) == set(names)
     for name in names:
         np.testing.assert_allclose(
@@ -142,7 +140,7 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
             prepended.data[name][:, :n_ic_timesteps, ...].cpu().numpy(),
             start_batch_data.data[name].cpu().numpy(),
         )
-    assert prepended.times.shape == (n_samples, n_times + n_ic_timesteps)
+    assert prepended.time.shape == (n_samples, n_times + n_ic_timesteps)
     for name in set(names) - set(prepend_names):
         assert np.all(
             np.isnan(prepended.data[name][:, :n_ic_timesteps, ...].cpu().numpy())

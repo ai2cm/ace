@@ -18,7 +18,7 @@ from fme.core.data_loading._xarray import (
     get_file_local_index,
     get_raw_times,
     get_timestep,
-    repeat_and_increment_times,
+    repeat_and_increment_time,
 )
 from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.config import (
@@ -113,15 +113,15 @@ def _get_data(
             last = start_times[i + 1]
         else:
             last = obs_times[-1] + obs_delta
-        times = xr.cftime_range(
+        time = xr.cftime_range(
             first, last, freq=step_freq, calendar=calendar, inclusive="left"
         )
         data_vars: Dict[str, Union[float, xr.DataArray]] = {**ak, **bk}
         for var_name in var_names:
-            data = np.random.randn(len(times), n_lat, n_lon).astype(np.float32)
+            data = np.random.randn(len(time), n_lat, n_lon).astype(np.float32)
             data_vars[var_name] = xr.DataArray(data, dims=("time", "lat", "lon"))
 
-        data_varying_scalar = np.random.randn(len(times)).astype(np.float32)
+        data_varying_scalar = np.random.randn(len(time)).astype(np.float32)
         data_vars["varying_scalar_var"] = xr.DataArray(
             data_varying_scalar, dims=("time",)
         )
@@ -130,7 +130,7 @@ def _get_data(
         data_vars["constant_scalar_var"] = constant_scalar_var
 
         coords = {
-            "time": xr.DataArray(times, dims=("time",)),
+            "time": xr.DataArray(time, dims=("time",)),
             "lat": xr.DataArray(np.arange(n_lat, dtype=np.float32), dims=("lat",)),
             "lon": xr.DataArray(np.arange(n_lon, dtype=np.float32), dims=("lon",)),
         }
@@ -254,7 +254,7 @@ def _test_monthly_values(
         expected_n_samples = len(mock_data.obs_times) - 1
 
     assert len(dataset) == expected_n_samples
-    arrays, times = dataset[global_idx]
+    arrays, time = dataset[global_idx]
     with xr.open_mfdataset(
         mock_data.tmpdir.glob(file_pattern),
         engine=engine,
@@ -263,7 +263,7 @@ def _test_monthly_values(
         coords="minimal",
     ) as ds:
         target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
-        xr.testing.assert_equal(times, target_times)
+        xr.testing.assert_equal(time, target_times)
         lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
         dims = ("time", str(lat_dim), str(lon_dim))
         shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
@@ -391,11 +391,11 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
                 target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
                     "time"
                 )
-                data, times = dataset[global_idx]
+                data, time = dataset[global_idx]
                 data_tensor = data[var_name]
                 assert data_tensor.shape[0] == n_steps
                 assert torch.equal(data_tensor, target_data)
-                xr.testing.assert_equal(times, target_times)
+                xr.testing.assert_equal(time, target_times)
 
 
 def test_dataset_dtype_casting(mock_monthly_netcdfs):
@@ -498,7 +498,7 @@ def test_time_index(mock_monthly_netcdfs):
     )
     last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
     obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
-    assert dataset.sample_start_times.equals(xr.CFTimeIndex(obs_times))
+    assert dataset.sample_start_time.equals(xr.CFTimeIndex(obs_times))
 
 
 @pytest.mark.parametrize("infer_timestep", [True, False])
@@ -578,7 +578,7 @@ def test_repeat_and_increment_times(n_repeats):
     raw_periods = [periods_a, periods_b]
     raw_total_periods = sum(raw_periods)
 
-    result = repeat_and_increment_times(raw_times, n_repeats, delta)
+    result = repeat_and_increment_time(raw_times, n_repeats, delta)
     full_periods = [len(times) for times in result]
     full_total_periods = sum(full_periods)
 

@@ -22,10 +22,7 @@ from fme.ace.inference.loop import (
 from fme.ace.inference.timing import GlobalTimer
 from fme.core import SingleModuleStepper
 from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    InferenceGriddedData,
-)
+from fme.core.data_loading.batch_data import BatchData, InferenceGriddedData
 from fme.core.data_loading.getters import get_inference_data
 from fme.core.data_loading.inference import InferenceDataLoaderConfig
 from fme.core.dicts import to_flat_dict
@@ -251,7 +248,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:
-        initial_times = batch.times.isel(time=0)
+        initial_time = batch.time.isel(time=0)
         break
     aggregator = aggregator_config.build(
         vertical_coordinate=data.vertical_coordinate,
@@ -260,7 +257,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
         variable_metadata=data.variable_metadata,
-        initial_times=initial_times,
+        initial_time=initial_time,
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,
     )

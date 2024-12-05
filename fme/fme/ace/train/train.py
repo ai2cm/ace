@@ -94,11 +94,7 @@ from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
 from fme.core.generics.data import InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
-from fme.core.stepper import (
-    TrainOutput,
-    TrainOutputABC,
-    TrainStepperABC,
-)
+from fme.core.stepper import TrainOutput, TrainOutputABC, TrainStepperABC
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
@@ -138,7 +134,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
     for batch in inference_data.loader:
-        initial_inference_times = batch.times.isel(time=0)
+        initial_inference_times = batch.time.isel(time=0)
         break
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
@@ -146,7 +142,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         vertical_coordinate=train_data.vertical_coordinate,
         horizontal_coordinates=train_data.horizontal_coordinates,
         timestep=train_data.timestep,
-        initial_inference_times=initial_inference_times,
+        initial_inference_time=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
         n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
         variable_metadata=train_data.variable_metadata,
@@ -227,7 +223,7 @@ class AggregatorBuilder(
         vertical_coordinate: HybridSigmaPressureCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
-        initial_inference_times: xr.DataArray,
+        initial_inference_time: xr.DataArray,
         record_step_20: bool,
         n_timesteps: int,
         normalize: Callable[[TensorMapping], TensorDict],
@@ -240,7 +236,7 @@ class AggregatorBuilder(
         self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.timestep = timestep
-        self.initial_inference_times = initial_inference_times
+        self.initial_inference_time = initial_inference_time
         self.record_step_20 = record_step_20
         self.n_timesteps = n_timesteps
         self.variable_metadata = variable_metadata
@@ -265,7 +261,7 @@ class AggregatorBuilder(
             vertical_coordinate=self.vertical_coordinate,
             horizontal_coordinates=self.horizontal_coordinates,
             timestep=self.timestep,
-            initial_times=self.initial_inference_times,
+            initial_time=self.initial_inference_time,
             record_step_20=self.record_step_20,
             n_timesteps=self.n_timesteps,
             variable_metadata=self.variable_metadata,

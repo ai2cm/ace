@@ -96,17 +96,17 @@ class PairedHistogramDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
         self._prediction_writer.append_batch(
             data=prediction,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
 
     def flush(self):
@@ -144,7 +144,7 @@ class HistogramDataWriter:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -152,9 +152,9 @@ class HistogramDataWriter:
         Args:
             data: The data to write.
             start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch_time: Time coordinate for each sample in the batch.
         """
-        del batch_times
+        del batch_time
         self._histogram.record_batch(
             data=data,
             i_time_start=start_timestep,

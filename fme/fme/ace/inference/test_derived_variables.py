@@ -10,10 +10,7 @@ from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.stepper import TrainOutput
 from fme.core.typing_ import TensorDict, TensorMapping
 
-from .derived_variables import (
-    _compute_derived_variable,
-    compute_derived_quantities,
-)
+from .derived_variables import _compute_derived_variable, compute_derived_quantities
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -101,7 +98,7 @@ def test_compute_derived_quantities(dataset: str):
         metrics={"loss": torch.tensor(0.0)},
         gen_data=gen_data,
         target_data=fake_data,
-        times=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((2, 3)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )

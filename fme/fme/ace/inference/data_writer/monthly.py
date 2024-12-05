@@ -73,13 +73,13 @@ class PairedMonthlyDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
-            data=target, start_timestep=start_timestep, batch_times=batch_times
+            data=target, start_timestep=start_timestep, batch_time=batch_time
         )
         self._prediction_writer.append_batch(
-            data=prediction, start_timestep=start_timestep, batch_times=batch_times
+            data=prediction, start_timestep=start_timestep, batch_time=batch_time
         )
 
     def flush(self):
@@ -169,7 +169,7 @@ class MonthlyDataWriter:
             self.dataset.variables[VALID_TIME][:, :] = days_since_reference + 14
         return (self._init_years, self._init_months)
 
-    def _get_month_indices(self, batch_times: xr.DataArray) -> np.ndarray:
+    def _get_month_indices(self, batch_time: xr.DataArray) -> np.ndarray:
         """
         Get the month indices for the batch of data.
 
@@ -178,16 +178,16 @@ class MonthlyDataWriter:
         indices in this and future calls.
 
         Args:
-            batch_times: Time coordinates for each sample in the batch, of shape
+            batch_time: Time coordinate for each sample in the batch, of shape
                 [ensemble_member, lead_time].
 
         Returns:
             Month indices for the batch of data.
         """
-        calendar = batch_times.dt.calendar
-        years = batch_times.dt.year.values
+        calendar = batch_time.dt.calendar
+        years = batch_time.dt.year.values
         # datetime months are 1-indexed, we want 0-indexed
-        months = batch_times.dt.month.values - 1
+        months = batch_time.dt.month.values - 1
         init_years, init_months = self._get_initial_year_and_month(
             years=years[:, 0], months=months[:, 0], calendar=calendar
         )
@@ -202,7 +202,7 @@ class MonthlyDataWriter:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -210,22 +210,22 @@ class MonthlyDataWriter:
         Args:
             data: Values to store.
             start_timestep: Timestep index for the start of the batch, unused.
-            batch_times: Time coordinates for each sample in the batch.
+            batch_time: Time coordinate for each sample in the batch.
         """
         del start_timestep  # unused
         n_samples_data = list(data.values())[0].shape[0]
-        n_samples_time = batch_times.sizes["sample"]
+        n_samples_time = batch_time.sizes["sample"]
         if n_samples_data != n_samples_time:
             raise ValueError(
                 f"Batch size mismatch, data has {n_samples_data} samples "
-                f"and times has {n_samples_time} samples."
+                f"and batch_time has {n_samples_time} samples."
             )
         n_times_data = list(data.values())[0].shape[1]
-        n_times_time = batch_times.sizes["time"]
+        n_times_time = batch_time.sizes["time"]
         if n_times_data != n_times_time:
             raise ValueError(
                 f"Batch time dimension mismatch, data has {n_times_data} times "
-                f"and times has {n_times_time} times."
+                f"and batch_time has {n_times_time} times."
             )
 
         if not self._dataset_dims_created:
@@ -242,7 +242,7 @@ class MonthlyDataWriter:
             self._dataset_dims_created = True
 
         save_names = self._get_variable_names_to_save(data.keys())
-        months = self._get_month_indices(batch_times)
+        months = self._get_month_indices(batch_time)
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
         count_data = self.dataset.variables[COUNTS][

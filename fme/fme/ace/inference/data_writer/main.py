@@ -8,11 +8,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    PairedData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
@@ -274,9 +270,9 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 target=dict(batch.target),
                 prediction=dict(batch.prediction),
                 start_timestep=self._n_timesteps_seen,
-                batch_times=batch.times,
+                batch_time=batch.time,
             )
-        self._n_timesteps_seen += batch.times.shape[1]
+        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """
@@ -305,21 +301,21 @@ def _save_initial_condition(
         variable_metadata: Metadata for each variable to be written to the file.
         coords: Coordinate data to be written to the file.
     """
-    if ic_data.times.sizes["time"] == 1:
+    if ic_data.time.sizes["time"] == 1:
         time_dim = ic_data.dims.index("time")
         snapshot_dims = ic_data.dims[:time_dim] + ic_data.dims[time_dim + 1 :]
 
         def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
             return x.squeeze(dim=time_dim)
 
-        time_array = ic_data.times.isel(time=0)
+        time_array = ic_data.time.isel(time=0)
     else:
         snapshot_dims = ic_data.dims
 
         def maybe_squeeze(x):
             return x
 
-        time_array = ic_data.times
+        time_array = ic_data.time
 
     data_arrays = {}
     for name in prognostic_names:
@@ -438,9 +434,9 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
             writer.append_batch(
                 data=dict(batch.data),
                 start_timestep=self._n_timesteps_seen,
-                batch_times=batch.times,
+                batch_time=batch.time,
             )
-        self._n_timesteps_seen += batch.times.shape[1]
+        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """

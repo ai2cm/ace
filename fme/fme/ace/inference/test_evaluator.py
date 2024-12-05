@@ -27,10 +27,7 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.stepper import (
-    SingleModuleStepperConfig,
-    TrainOutput,
-)
+from fme.core.stepper import SingleModuleStepperConfig, TrainOutput
 from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -617,7 +614,7 @@ def test_compute_derived_quantities(has_required_fields):
         metrics,
         fake_data["gen_data"],
         fake_data["target_data"],
-        times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )
