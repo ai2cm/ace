@@ -41,7 +41,7 @@ class Distributed:
     variables without having to pass them around, and lets us put the initialization
     for this global state in the same place as the routines that use it.
 
-    Attributes:
+    Parameters:
         world_size: The number of processes in the distributed training job.
         rank: The global rank of the current process.
         local_rank: The node-local rank of the current process.

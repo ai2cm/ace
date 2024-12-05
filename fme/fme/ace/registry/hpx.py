@@ -15,7 +15,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
     """
     Configuration for the HEALPixRecUNet architecture used in DLWP.
 
-    Attributes:
+    Parameters:
         presteps: Number of pre-steps, by default 1.
         input_time_size: Input time dimension, by default 0.
         output_time_size: Output time dimension, by default 0.

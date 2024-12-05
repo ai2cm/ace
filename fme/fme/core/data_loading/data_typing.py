@@ -31,7 +31,7 @@ class HybridSigmaPressureCoordinate:
 
     where ps is the surface pressure, a and b are the sigma-pressure coordinates.
 
-    Attributes:
+    Parameters:
         ak: a(k) coefficients as a 1-dimensional tensor
         bk: b(k) coefficients as a 1-dimensional tensor
     """
@@ -207,7 +207,7 @@ class LatLonCoordinates(HorizontalCoordinates):
     """
     Defines a (latitude, longitude) grid.
 
-    Attributes:
+    Parameters:
         lat: 1-dimensional tensor of latitudes
         lon: 1-dimensional tensor of longitudes
         loaded_lat_name: name of the latitude dimension
@@ -308,7 +308,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
     Defines a HEALPix (face, height, width) grid. See https://healpix.jpl.nasa.gov/ for
     more information.
 
-    Attributes:
+    Parameters:
         face: 1-dimensional tensor of faces
         height: 1-dimensional tensor of heights
         width: 1-dimensional tensor of widths

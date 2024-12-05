@@ -65,7 +65,7 @@ class CorrectorConfig(CorrectorConfigProtocol):
     advection is zero. Therefore ``zero_global_mean_moisture_advection`` must be
     True if using a ``moisture_budget_correction`` option other than ``None``.
 
-    Attributes:
+    Parameters:
         conserve_dry_air: If True, force the generated data to conserve dry air
             by subtracting a constant offset from the surface pressure of each
             column. This can cause changes in per-mass values such as total water
@@ -75,19 +75,21 @@ class CorrectorConfig(CorrectorConfigProtocol):
             offset from the moisture advection tendency of each column.
         moisture_budget_correction: If not "None", force the generated data to
             conserve global or column-local moisture by modifying budget fields.
-            Options include:
-                - "precipitation": multiply precipitation by a scale factor
-                    to close the global moisture budget.
-                - "evaporation": multiply evaporation by a scale factor
-                    to close the global moisture budget.
-                - "advection_and_precipitation": after applying the "precipitation"
-                    global-mean correction above, recompute the column-integrated
-                    advective tendency as the budget residual,
-                    ensuring column budget closure.
-                - "advection_and_evaporation": after applying the "evaporation"
-                    global-mean correction above, recompute the column-integrated
-                    advective tendency as the budget residual,
-                    ensuring column budget closure.
+            Options are:
+
+            - ``precipitation``: multiply precipitation by a scale factor
+              to close the global moisture budget.
+            - ``evaporation``: multiply evaporation by a scale factor
+              to close the global moisture budget.
+            - ``advection_and_precipitation``: after applying the "precipitation"
+              global-mean correction above, recompute the column-integrated
+              advective tendency as the budget residual,
+              ensuring column budget closure.
+            - ``advection_and_evaporation``: after applying the "evaporation"
+              global-mean correction above, recompute the column-integrated
+              advective tendency as the budget residual,
+              ensuring column budget closure.
+
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero. This is useful for fields like precipitation.
     """

@@ -54,7 +54,7 @@ class InitialConditionConfig:
         leading sample dimension. Specific times can be selected from the dataset
         by using ``start_indices``.
 
-    Attributes:
+    Parameters:
         path: The path to the initial conditions dataset.
         engine: The engine used to open the dataset.
         start_indices: optional specification of the subset of
@@ -132,7 +132,7 @@ class InferenceConfig:
     """
     Configuration for running inference.
 
-    Attributes:
+    Parameters:
         experiment_dir: Directory to save results to.
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
