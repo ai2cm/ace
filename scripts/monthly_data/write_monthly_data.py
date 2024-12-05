@@ -15,10 +15,7 @@ from fme.ace.inference.data_writer.monthly import (
     months_for_timesteps,
 )
 from fme.core.data_loading._xarray import DatasetProperties
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    default_collate,
-)
+from fme.core.data_loading.batch_data import BatchData, default_collate
 from fme.core.data_loading.config import DataLoaderConfig
 from fme.core.data_loading.getters import get_datasets
 from fme.core.data_loading.requirements import DataRequirements
@@ -36,12 +33,12 @@ class CollateFn:
     def __call__(
         self, samples: Sequence[Tuple[TensorMapping, xr.DataArray]]
     ) -> "BatchData":
-        sample_data, sample_times = zip(*samples)
+        sample_data, sample_time = zip(*samples)
         batch_data = default_collate(sample_data)
-        batch_times = xr.concat(sample_times, dim="sample")
+        batch_time = xr.concat(sample_time, dim="sample")
         return BatchData(
             data=batch_data,
-            times=batch_times,
+            time=batch_time,
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -155,14 +152,14 @@ def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
     window_batch_data_list: List[BatchData]
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
-        times = [item.times for item in window_batch_data_list]
+        time = [item.time for item in window_batch_data_list]
         window_batch_data = {
             k: torch.concat([d[k] for d in tensors]) for k in tensors[0].keys()
         }
-        times = xr.concat(times, dim="sample")
+        time = xr.concat(time, dim="sample")
         yield BatchData(
             data=window_batch_data,
-            times=times,
+            time=time,
         )
 
 
@@ -191,7 +188,7 @@ def run(config: Config):
         writer.append_batch(
             data=window_batch_data.data,
             start_timestep=-1,  # ignored
-            batch_times=window_batch_data.times,
+            batch_time=window_batch_data.time,
         )
         if i % 10 == 0:
             logging.info(f"Writing batch {i+1} of {n_batches}.")
