@@ -1,10 +1,10 @@
 runs:
-  ic_0001: gs://vcm-ml-raw-flexible-retention/2024-06-29-C24-SHiELD-AMIP/regridded-zarrs/gaussian_grid_45_by_90/ic_0001
-  ic_0002: gs://vcm-ml-raw-flexible-retention/2024-06-29-C24-SHiELD-AMIP/regridded-zarrs/gaussian_grid_45_by_90/ic_0002
-data_output_directory: gs://vcm-ml-intermediate/2024-07-24-vertically-resolved-c24-4deg-shield-amip-ensemble-dataset
+  ic_0001: gs://vcm-ml-raw-flexible-retention/2024-11-11-C24-SHiELD-AMIP-tuned-cdmbgwd/regridded-zarrs/gaussian_grid_45_by_90/ic_0001
+  ic_0002: gs://vcm-ml-raw-flexible-retention/2024-11-11-C24-SHiELD-AMIP-tuned-cdmbgwd/regridded-zarrs/gaussian_grid_45_by_90/ic_0002
+data_output_directory: gs://vcm-ml-intermediate/2024-11-11-vertically-resolved-c24-4deg-shield-amip-tuned-cdmbgwd-ensemble-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2024-07-24-vertically-resolved-c24-4deg-shield-amip-ensemble-dataset-stats
-  beaker_dataset: 2024-07-24-vertically-resolved-c24-4deg-shield-amip-ensemble-dataset-stats
+  output_directory: gs://vcm-ml-intermediate/2024-11-11-vertically-resolved-c24-4deg-shield-amip-tuned-cdmbgwd-ensemble-dataset-stats
+  beaker_dataset: 2024-11-11-vertically-resolved-c24-4deg-shield-amip-tuned-cdmbgwd-ensemble-dataset-stats
   start_date: "1940-01-01"
   end_date: "2021-12-31"
   data_type: FV3GFS
