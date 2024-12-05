@@ -29,10 +29,8 @@ from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLogs,
 )
-from fme.core.generics.inference import (
-    InferenceDataABC,
-    PredictFunction,
-)
+from fme.core.generics.data import InferenceDataABC
+from fme.core.generics.inference import PredictFunction
 from fme.core.generics.writer import WriterABC
 from fme.core.wandb import WandB
 

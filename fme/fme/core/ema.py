@@ -197,7 +197,7 @@ class EMATracker:
         Returns:
             The EMA tracker.
         """
-        ema = cls(model, state["decay"], state["faster_decay_at_start"])
+        ema = cls(model, float(state["decay"]), state["faster_decay_at_start"])
         ema.num_updates = state["num_updates"]
         ema._module_name_to_ema_name = state["module_name_to_ema_name"]
         return ema

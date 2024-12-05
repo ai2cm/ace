@@ -12,6 +12,7 @@ from typing import (
     Mapping,
     Optional,
     Tuple,
+    Type,
     TypeVar,
     Union,
 )
@@ -360,17 +361,6 @@ TO = TypeVar("TO", bound="TrainOutputABC")  # train output
 
 class TrainOutputABC(abc.ABC):
     @abc.abstractmethod
-    def remove_initial_condition(self: TO, n_ic_timesteps: int) -> TO:
-        pass
-
-    @abc.abstractmethod
-    def copy(self: TO) -> TO:
-        pass
-
-    @abc.abstractmethod
-    def compute_derived_variables(self: TO) -> TO: ...
-
-    @abc.abstractmethod
     def get_metrics(self) -> TensorDict:
         pass
 
@@ -454,13 +444,15 @@ FD = TypeVar("FD")  # forcing data
 SD = TypeVar("SD")  # stepped data
 
 
-class StepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
+class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
+    SelfType = TypeVar("SelfType", bound="TrainStepperABC")
+
     @abc.abstractmethod
     def train_on_batch(
         self,
         data: BD,
         optimization: OptimizationABC,
-        keep_initial_condition: bool = False,
+        compute_derived_variables: bool = False,
     ) -> TO:
         pass
 
@@ -477,19 +469,14 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     def load_state(self, state: Dict[str, Any]) -> None:
         pass
 
+    @classmethod
+    @abc.abstractmethod
+    def from_state(cls: Type[SelfType], state: Dict[str, Any]) -> SelfType:
+        pass
+
     @property
     @abc.abstractmethod
     def n_ic_timesteps(self) -> int:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def timestep(self) -> datetime.timedelta:
         pass
 
     @property
@@ -499,7 +486,7 @@ class StepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
 
 
 class SingleModuleStepper(
-    StepperABC[
+    TrainStepperABC[
         PrognosticState,
         BatchData,
         BatchData,
@@ -870,7 +857,7 @@ class SingleModuleStepper(
         self,
         data: BatchData,
         optimization: OptimizationABC,
-        keep_initial_condition: bool = False,
+        compute_derived_variables: bool = False,
     ) -> TrainOutput:
         """
         Step the model forward multiple steps on a batch of data.
@@ -880,8 +867,8 @@ class SingleModuleStepper(
                 [n_sample, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
             optimization: The optimization class to use for updating the module.
                 Use `NullOptimization` to disable training.
-            keep_initial_condition: Whether to keep the initial condition in the output.
-                By default the returned TrainOutput only includes output steps.
+            compute_derived_variables: Whether to compute derived variables for the
+                prediction and target data.
 
         Returns:
             The loss metrics, the generated data, the normalized generated data,
@@ -932,11 +919,15 @@ class SingleModuleStepper(
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
         )
-        if keep_initial_condition:
+        if compute_derived_variables:
             ic = data.get_start(
                 set(data.data.keys()), self.n_ic_timesteps
             )  # full data and not just prognostic get prepended
-            return stepped.prepend_initial_condition(ic)
+            stepped = (
+                stepped.prepend_initial_condition(ic)
+                .compute_derived_variables()
+                .remove_initial_condition(self.n_ic_timesteps)
+            )
         return stepped
 
     def get_state(self):
