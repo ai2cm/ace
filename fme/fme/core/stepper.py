@@ -80,7 +80,7 @@ class SingleModuleStepperConfig:
     """
     Configuration for a single module stepper.
 
-    Attributes:
+    Parameters:
         builder: The module builder.
         in_names: Names of input variables.
         out_names: Names of output variables.
@@ -297,7 +297,7 @@ class ExistingStepperConfig:
     a serialized stepper checkpoint for loading, e.g., in the case of training
     resumption.
 
-    Attributes:
+    Parameters:
         checkpoint_path: The path to the serialized checkpoint.
     """
 

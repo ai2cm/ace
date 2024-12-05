@@ -76,7 +76,7 @@ class SSTPerturbation:
     applied to initial condition and forcing data.
     Currently, this is strictly applied to both.
 
-    Attributes:
+    Parameters:
         sst: List of perturbation selectors for SST perturbations.
     """
 
@@ -119,7 +119,7 @@ class GreensFunctionConfig(PerturbationConfig):
     Configuration for a single sinusoidal patch of a Green's function perturbation.
     See equation 1 in Bloch‐Johnson, J., et al. (2024).
 
-    Attributes:
+    Parameters:
         amplitude: The amplitude of the perturbation,
             maximum is reached at (lat_center, lon_center).
         lat_center: The latitude at the center of the patch in degrees.

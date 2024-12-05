@@ -31,7 +31,7 @@ class CoupledComponentConfig:
     """Configuration for one of the components (ocean or atmosphere) within a
     CoupledStepper.
 
-    Attributes:
+    Parameters:
         timedelta: An ISO 8601 Duration string specifying the size of this component's
             stepper step.
         stepper: The single module stepper configuration for this component.
@@ -51,7 +51,7 @@ class CoupledStepperConfig:
     """
     Configuration for a coupled stepper.
 
-    Attributes:
+    Parameters:
         ocean: The ocean component configuration.
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.

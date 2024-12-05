@@ -34,7 +34,7 @@ from fme.core.weight_ops import CopyWeightsConfig
 @dataclasses.dataclass
 class InlineInferenceConfig:
     """
-    Attributes:
+    Parameters:
         loader: configuration for the data loader used during inference
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
@@ -83,7 +83,7 @@ class TrainConfig:
     """
     Configuration for training a model.
 
-    Attributes:
+    Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
         stepper: Configuration for the stepper.

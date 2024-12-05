@@ -30,7 +30,7 @@ class UNetEncoderConfig:
     """
     Configuration for the UNet Encoder.
 
-    Attributes:
+    Parameters:
         conv_block: Configuration for the convolutional block.
         down_sampling_block: Configuration for the down-sampling block.
         input_channels: Number of input channels, by default 3.

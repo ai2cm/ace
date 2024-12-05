@@ -7,7 +7,7 @@ class DataRequirements:
     """
     The requirements for batches (time windows) of loaded data.
 
-    Attributes:
+    Parameters:
         names: Names of the variables to load.
         n_timesteps: Number of timesteps to load in each batch window.
     """
@@ -21,7 +21,7 @@ class PrognosticStateDataRequirements:
     """
     The requirements for the model's prognostic state.
 
-    Attributes:
+    Parameters:
         names: Names of prognostic variables.
         n_timesteps: Number of consecutive timesteps that must be stored.
     """

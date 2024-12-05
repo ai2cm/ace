@@ -16,7 +16,7 @@ class SlabOceanConfig:
     """
     Configuration for a slab ocean model.
 
-    Attributes:
+    Parameters:
         mixed_layer_depth_name: Name of the mixed layer depth field.
         q_flux_name: Name of the heat flux field.
     """
@@ -34,7 +34,7 @@ class OceanConfig:
     """
     Configuration for determining sea surface temperature from an ocean model.
 
-    Attributes:
+    Parameters:
         surface_temperature_name: Name of the sea surface temperature field.
         ocean_fraction_name: Name of the ocean fraction field.
         interpolate: If True, interpolate between ML-predicted surface temperature and

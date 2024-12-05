@@ -40,7 +40,7 @@ class DataWriterConfig:
     """
     Configuration for inference data writers.
 
-    Attributes:
+    Parameters:
         log_extended_video_netcdfs: Whether to enable writing of netCDF files
             containing video metrics.
         save_prediction_files: Whether to enable writing of netCDF files

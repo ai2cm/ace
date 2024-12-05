@@ -33,7 +33,7 @@ class RecurrentBlockConfig:
     """
     Configuration for the recurrent block.
 
-    Attributes:
+    Parameters:
         in_channels: Number of input channels, default is 3.
         kernel_size: Size of the kernel, default is 1.
         enable_nhwc: Flag to enable NHWC data format, default is False.
@@ -78,7 +78,7 @@ class ConvBlockConfig:
     """
     Configuration for the convolutional block.
 
-    Attributes:
+    Parameters:
         in_channels: Number of input channels, default is 3.
         out_channels: Number of output channels, default is 1.
         kernel_size: Size of the kernel, default is 3.
@@ -448,7 +448,7 @@ class ConvNeXtBlock(nn.Module):
     This block consists of a series of convolutional layers with optional activation functions,
     and a residual connection.
 
-    Attributes:
+    Parameters:
         skip_module: A module to align the input and output channels for the residual connection.
         convblock: A sequential container of convolutional layers with optional activation functions.
     """
@@ -551,7 +551,7 @@ class ConvNeXtBlock(nn.Module):
 class DoubleConvNeXtBlock(nn.Module):
     """A variant of the ConvNeXt block that includes two sequential ConvNeXt blocks within a single module.
 
-    Attributes:
+    Parameters:
         skip_module1: A module to align the input and intermediate channels for the first residual connection.
         skip_module2: A module to align the intermediate and output channels for the second residual connection.
         convblock1: A sequential container of convolutional layers for the first ConvNeXt block.
@@ -722,7 +722,7 @@ class SymmetricConvNeXtBlock(nn.Module):
     """A symmetric variant of the ConvNeXt block, with convolutional layers mirrored
     around a central axis for symmetric feature extraction.
 
-    Attributes:
+    Parameters:
         skip_module1: A module to align the input and intermediate channels for the first residual connection.
         skip_module2: A module to align the intermediate and output channels for the second residual connection.
         convblock1: A sequential container of convolutional layers for the symmetric ConvNeXt block.

@@ -16,7 +16,7 @@ class PrescriberConfig:
     target value at 1 based on the mask variable, and it is assumed the mask variable
     lies in the range from 0 to 1.
 
-    Attributes:
+    Parameters:
         prescribed_name: Name of the variable to be overwritten.
         mask_name: Name of the mask variable.
         mask_value: Value of the mask variable in the region to be overwritten.

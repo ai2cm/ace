@@ -8,7 +8,7 @@ from fme.core.distributed import Distributed
 @dataclasses.dataclass
 class CoupledDataConfig:
     """
-    Attributes:
+    Parameters:
         ocean: Configuration for the ocean dataset.
         atmosphere: Configuration for the atmosphere dataset.
     """
@@ -24,7 +24,7 @@ class CoupledDataConfig:
 @dataclasses.dataclass
 class CoupledDataLoaderConfig:
     """
-    Attributes:
+    Parameters:
         dataset: A sequence of configurations each defining a coupled dataset
             to be loaded. This sequence of datasets will be concatenated.
         batch_size: Number of samples per batch.

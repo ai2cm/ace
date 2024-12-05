@@ -34,7 +34,7 @@ class MaskingConfig:
     """
     Configuration for applying masking to the generated output.
 
-    Attributes:
+    Parameters:
         mask_name: The standard name of the mask. May be a prefix (for a 3D masking
             variable) or a full name (for a 2D masking variable).
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.

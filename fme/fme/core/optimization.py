@@ -116,7 +116,7 @@ class OptimizationConfig:
     """
     Configuration for optimization.
 
-    Attributes:
+    Parameters:
         optimizer_type: The type of optimizer to use.
         lr: The learning rate.
         kwargs: Additional keyword arguments to pass to the optimizer.

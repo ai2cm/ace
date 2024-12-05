@@ -214,7 +214,7 @@ class DiffusionModelConfig:
 
     .. _EDM: https://arxiv.org/abs/2206.00364
 
-    Attributes:
+    Parameters:
         module: The module registry selector for the diffusion model.
         loss:  The loss configuration for the diffusion model.
         in_names: The input variable names for the diffusion model.

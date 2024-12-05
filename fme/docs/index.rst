@@ -1,5 +1,8 @@
-Welcome to full-model's documentation!
+fme: Full Model Emulation
 ======================================
+
+**fme** ("full model emulation") is a python package for training and running
+climate model emulators, such as the Ai2 Climate Emulator.
 
 .. toctree::
    :maxdepth: 1
