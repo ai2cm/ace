@@ -88,7 +88,7 @@ class InferenceEvaluatorConfig:
     """
     Configuration for running inference including comparison to reference data.
 
-    Attributes:
+    Parameters:
         experiment_dir: Directory to save results to.
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.

@@ -30,7 +30,7 @@ class CorrectorSelector:
     CorrectorConfigProtocol is a protocol that can be implemented by many
     different classes.
 
-    Attributes:
+    Parameters:
         type: the type of the CorrectorConfigProtocol
         config: data for a CorrectorConfigProtocol instance of the indicated type
 

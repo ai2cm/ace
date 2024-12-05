@@ -73,7 +73,7 @@ class PrognosticState:
 class BatchData:
     """A container for the data and time coordinates of a batch.
 
-    Attributes:
+    Parameters:
         data: Data for each variable in each sample of shape (sample, time, ...),
             concatenated along samples to make a batch. To be used directly in training,
             validation, and inference.

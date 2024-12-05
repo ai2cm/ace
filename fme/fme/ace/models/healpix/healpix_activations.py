@@ -110,7 +110,7 @@ class DownsamplingBlockConfig:
     Configuration for the downsampling block.
     Generally, either a pooling block or a striding conv block.
 
-    Attributes:
+    Parameters:
         block_type: Type of recurrent block, either "MaxPool" or "AvgPool"
         pooling: Pooling size
         enable_nhwc: Flag to enable NHWC data format, default is False.
@@ -152,7 +152,7 @@ class CappedGELUConfig:
     """
     Configuration for the CappedGELU activation function.
 
-    Attributes:
+    Parameters:
         cap_value: Cap value for the GELU function, default is 10.
         enable_nhwc: Flag to enable NHWC data format, default is False.
         enable_healpixpad: Flag to enable HEALPix padding, default is False.

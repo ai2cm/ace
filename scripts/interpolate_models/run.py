@@ -37,7 +37,7 @@ class LinearFitConfig:
     """
     Configuration for the linear fit.
 
-    Attributes:
+    Parameters:
         i_start: The start index of the linear fit. By default
             this is the first index.
         i_end: The end index of the linear fit (non-inclusive). By default
@@ -53,7 +53,7 @@ class Config:
     """
     Configuration for the analysis.
 
-    Attributes:
+    Parameters:
         name: The name of the configuration.
         weights: The interpolant weights for each dataset.
         beaker_datasets: The names of the Beaker datasets to download.
