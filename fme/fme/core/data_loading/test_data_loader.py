@@ -561,8 +561,8 @@ def test_inference_persistence_names(tmp_path):
     first_item = dataset[0].data
     second_item = dataset[1].data
     # ensure first and second time steps are the same
-    torch.testing.assert_allclose(first_item["foo"][:, 0], first_item["foo"][:, 1])
+    torch.testing.assert_close(first_item["foo"][:, 0], first_item["foo"][:, 1])
     # ensure the entire first and second returned items
-    torch.testing.assert_allclose(first_item["foo"], second_item["foo"])
+    torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
