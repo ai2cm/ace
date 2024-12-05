@@ -91,14 +91,13 @@ from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import AggregatorABC, InferenceAggregatorABC
-from fme.core.generics.inference import InferenceDataABC
+from fme.core.generics.data import InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.stepper import (
-    SingleModuleStepper,
-    StepperABC,
     TrainOutput,
     TrainOutputABC,
+    TrainStepperABC,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
@@ -155,6 +154,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,
     )
+    do_gc_collect = fme.get_device() != torch.device("cpu")
     return Trainer(
         train_data=train_data,
         validation_data=validation_data,
@@ -165,6 +165,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         config=config,
         aggregator_builder=aggregator_builder,
         end_of_batch_callback=end_of_batch_ops,
+        do_gc_collect=do_gc_collect,
     )
 
 
@@ -279,12 +280,13 @@ class Trainer:
         train_data: GriddedDataABC[BD],
         validation_data: GriddedDataABC[BD],
         inference_data: InferenceDataABC[PS, FD],
-        stepper: StepperABC[PS, BD, FD, SD, TO],
+        stepper: TrainStepperABC[PS, BD, FD, SD, TO],
         build_optimization: Callable[[torch.nn.ModuleList], Optimization],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         config: TrainConfigProtocol,
         aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
+        do_gc_collect: bool = True,
     ):
         logging.info(f"Current device is {fme.get_device()}")
         self.dist = Distributed.get_instance()
@@ -337,6 +339,7 @@ class Trainer:
 
         self._inference_data = inference_data
         self._ema = build_ema(stepper.modules)
+        self._do_gc_collect = do_gc_collect
 
     def switch_off_grad(self, model: torch.nn.Module):
         for param in model.parameters():
@@ -356,9 +359,10 @@ class Trainer:
         # "epoch" describes the loop, self._model_epoch describes model weights
         # needed so we can describe the loop even after weights are updated
         for epoch in range(self._start_epoch, segment_max_epochs):
-            # garbage collect to avoid CUDA error in some contexts
-            # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
-            gc.collect()
+            if self._do_gc_collect:
+                # garbage collect to avoid CUDA error in some contexts
+                # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
+                gc.collect()
             logging.info(f"Epoch: {epoch+1}")
             self.train_data.set_epoch(epoch)
 
@@ -501,10 +505,8 @@ class Trainer:
                 stepped = self.stepper.train_on_batch(
                     batch,
                     optimization=NullOptimization(),
-                    keep_initial_condition=True,
+                    compute_derived_variables=True,
                 )
-
-                stepped = stepped.compute_derived_variables()
                 aggregator.record_batch(
                     batch=stepped,
                 )
@@ -558,31 +560,19 @@ class Trainer:
         )
 
     def save_all_checkpoints(self, valid_loss: float, inference_error: Optional[float]):
-        logging.info(f"Saving latest checkpoint to {self.paths.latest_checkpoint_path}")
-        self.save_checkpoint(self.paths.latest_checkpoint_path)
-        if self._epoch_checkpoint_enabled(self._model_epoch):
-            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(self._model_epoch)
-            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
-            self.save_checkpoint(epoch_checkpoint_path)
-        if self._ema_epoch_checkpoint_enabled(self._model_epoch):
-            ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
-                self._model_epoch
-            )
-            logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
-            with self._ema_context():
-                self.save_checkpoint(ema_epoch_checkpoint_path)
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
             best_checkpoint_context = contextlib.nullcontext  # type: ignore
         with best_checkpoint_context():
+            save_best_checkpoint = False
             if valid_loss <= self._best_validation_loss:
                 logging.info(
                     "Saving lowest validation loss checkpoint to "
                     f"{self.paths.best_checkpoint_path}"
                 )
                 self._best_validation_loss = valid_loss
-                self.save_checkpoint(self.paths.best_checkpoint_path)
+                save_best_checkpoint = True  # wait until inference error is updated
             if inference_error is not None and (
                 inference_error <= self._best_inference_error
             ):
@@ -596,11 +586,27 @@ class Trainer:
                 )
                 self._best_inference_error = inference_error
                 self.save_checkpoint(self.paths.best_inference_checkpoint_path)
+            if save_best_checkpoint:
+                self.save_checkpoint(self.paths.best_checkpoint_path)
+
+        logging.info(f"Saving latest checkpoint to {self.paths.latest_checkpoint_path}")
+        self.save_checkpoint(self.paths.latest_checkpoint_path)
         with self._ema_context():
             logging.info(
                 f"Saving latest EMA checkpoint to {self.paths.ema_checkpoint_path}"
             )
             self.save_checkpoint(self.paths.ema_checkpoint_path)
+        if self._epoch_checkpoint_enabled(self._model_epoch):
+            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(self._model_epoch)
+            logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
+            self.save_checkpoint(epoch_checkpoint_path)
+        if self._ema_epoch_checkpoint_enabled(self._model_epoch):
+            ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
+                self._model_epoch
+            )
+            logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
+            with self._ema_context():
+                self.save_checkpoint(ema_epoch_checkpoint_path)
 
 
 def epoch_checkpoint_enabled(
@@ -624,7 +630,7 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
     ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
-    ema_stepper: SingleModuleStepper = SingleModuleStepper.from_state(
+    ema_stepper: TrainStepperABC = type(trainer.stepper).from_state(
         ema_checkpoint["stepper"]
     )
     trainer._ema = EMATracker.from_state(checkpoint["ema"], ema_stepper.modules)

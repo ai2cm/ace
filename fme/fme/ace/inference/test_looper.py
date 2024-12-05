@@ -25,7 +25,8 @@ from fme.core.data_loading.data_typing import (
     LatLonOperations,
 )
 from fme.core.device import get_device
-from fme.core.generics.inference import PredictFunction, SimpleInferenceData
+from fme.core.generics.data import SimpleInferenceData
+from fme.core.generics.inference import PredictFunction
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
