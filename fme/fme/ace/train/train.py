@@ -428,7 +428,7 @@ class Trainer:
         n_samples_seen_since_logging = 0
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
-            with torch.no_grad():
+            with torch.no_grad(), GlobalTimer():
                 batch = next(iter(self.train_data.loader))
                 stepped = self.stepper.train_on_batch(
                     batch,
@@ -444,10 +444,8 @@ class Trainer:
                     wandb.log(metrics, step=self.num_batches_seen)
         current_time = time.time()
         for batch in self.train_data.loader:
-            stepped = self.stepper.train_on_batch(
-                batch,
-                self.optimization,
-            )
+            with GlobalTimer():
+                stepped = self.stepper.train_on_batch(batch, self.optimization)
             aggregator.record_batch(stepped)
             self._end_of_batch_ops()
             self._ema(model=self.stepper.modules)
@@ -500,7 +498,7 @@ class Trainer:
 
     def validate_one_epoch(self):
         aggregator = self._aggregator_builder.get_validation_aggregator()
-        with torch.no_grad(), self._validation_context():
+        with torch.no_grad(), self._validation_context(), GlobalTimer():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.train_on_batch(
                     batch,
