@@ -5,6 +5,7 @@ from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol
 import dacite
 import torch
 
+import fme
 from fme.core.climate_data import ClimateData
 from fme.core.corrector.registry import (
     CorrectorABC,
@@ -135,6 +136,10 @@ class Corrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._vertical_coordinates = vertical_coordinate
         self._timestep = timestep
+        if fme.get_device() == torch.device("mps", 0):
+            self._dry_air_precision = torch.float32
+        else:
+            self._dry_air_precision = torch.float64
 
     def __call__(
         self,
@@ -162,6 +167,7 @@ class Corrector(CorrectorABC):
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinates,
+                precision=self._dry_air_precision,
             )
         if self._config.zero_global_mean_moisture_advection:
             gen_data = _force_zero_global_mean_moisture_advection(
@@ -197,6 +203,7 @@ def _force_conserve_dry_air(
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HybridSigmaPressureCoordinate,
+    precision: torch.dtype = torch.float64,
 ) -> TensorDict:
     """
     Update the generated data to conserve dry air.
@@ -228,19 +235,19 @@ def _force_conserve_dry_air(
         raise ValueError("surface_pressure is required to force dry air conservation")
     gen = ClimateData(gen_data)
     gen_dry_air = gen.surface_pressure_due_to_dry_air(vertical_coordinate)
-    global_gen_dry_air = area_weighted_mean(gen_dry_air.to(torch.float64), keepdim=True)
+    global_gen_dry_air = area_weighted_mean(gen_dry_air.to(precision), keepdim=True)
     global_target_gen_dry_air = area_weighted_mean(
-        input.surface_pressure_due_to_dry_air(vertical_coordinate).to(torch.float64),
+        input.surface_pressure_due_to_dry_air(vertical_coordinate).to(precision),
         keepdim=True,
     )
     error = global_gen_dry_air - global_target_gen_dry_air
-    new_gen_dry_air = gen_dry_air.to(torch.float64) - error
+    new_gen_dry_air = gen_dry_air.to(precision) - error
     try:
-        wat = gen.specific_total_water.to(torch.float64)
+        wat = gen.specific_total_water.to(precision)
     except KeyError:
         raise ValueError("specific_total_water is required for conservation")
-    ak_diff = vertical_coordinate.ak.diff().to(torch.float64)
-    bk_diff = vertical_coordinate.bk.diff().to(torch.float64)
+    ak_diff = vertical_coordinate.ak.diff().to(precision)
+    bk_diff = vertical_coordinate.bk.diff().to(precision)
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
