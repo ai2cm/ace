@@ -18,7 +18,7 @@ def get_device() -> torch.device:
     else:
         mps_available = torch.backends.mps.is_available()
         if mps_available and os.environ.get("FME_USE_MPS", "0") == "1":
-            return torch.device("mps")
+            return torch.device("mps", 0)
         else:
             return torch.device("cpu")
 
