@@ -75,7 +75,7 @@ class EnsoCoefficientEvaluatorAggregator:
     data are time-aggregated.
 
     Args:
-        initial_times: Initial times for each sample.
+        initial_time: Initial time for each sample.
         n_forward_timesteps: Number of timesteps for each sample.
         timestep: Timestep duration.
         gridded_operations: GriddedOperations instance for area-weighted RMSE.
@@ -84,7 +84,7 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def __init__(
         self,
-        initial_times: xr.DataArray,
+        initial_time: xr.DataArray,
         n_forward_timesteps: int,
         timestep: datetime.timedelta,
         gridded_operations: GriddedOperations,
@@ -92,7 +92,7 @@ class EnsoCoefficientEvaluatorAggregator:
     ):
         self._sample_index_series: List[Optional[xr.DataArray]] = (
             get_sample_index_series(
-                self.enso_index, initial_times, n_forward_timesteps, timestep
+                self.enso_index, initial_time, n_forward_timesteps, timestep
             )
         )
         self._ops = gridded_operations
@@ -336,7 +336,7 @@ class EnsoCoefficientEvaluatorAggregator:
 
 def get_sample_index_series(
     index_data: xr.DataArray,
-    initial_times: xr.DataArray,
+    initial_time: xr.DataArray,
     n_forward_timesteps: int,
     timestep: datetime.timedelta,
     overlap_threshold: float = OVERLAP_THRESHOLD,
@@ -346,7 +346,7 @@ def get_sample_index_series(
 
     Args:
         index_data: ENSO index data with a time coordinate.
-        initial_times: Initial times for each sample.
+        initial_time: Initial time for each sample.
         n_forward_timesteps: Number of forward timesteps for each sample.
         timestep: Timestep duration.
         overlap_threshold: Required overlap of reference index with inference period.
@@ -355,16 +355,16 @@ def get_sample_index_series(
         List of zero-mean index series for each sample, or None if the sample does
         not overlap sufficiently with the reference index.
     """
-    data_calendar = initial_times.dt.calendar
+    data_calendar = initial_time.dt.calendar
     index_calendar = index_data.time.dt.calendar
     if data_calendar != index_calendar:
         index_data = index_data.convert_calendar(
             calendar=data_calendar, dim="time", use_cftime=True
         )
     sample_index_series: List[Optional[xr.DataArray]] = []
-    for initial_time in initial_times:
+    for initial_time_sample in initial_time:
         duration = n_forward_timesteps * timestep
-        end_time = initial_time + duration
+        end_time = initial_time_sample + duration
         # select index data that overlaps with the inference period, plus a
         # half-timestep buffer since we will later reindex with nearest neighbor
         index_timestep_seconds = (
@@ -373,28 +373,29 @@ def get_sample_index_series(
         half_index_timestep = datetime.timedelta(seconds=index_timestep_seconds / 2)
         sample_index_data_selection = index_data.sel(
             time=slice(
-                initial_time - half_index_timestep, end_time + half_index_timestep
+                initial_time_sample - half_index_timestep,
+                end_time + half_index_timestep,
             )
         )
         if sample_index_data_selection.sizes["time"] == 0:
             # no overlap
             sample_index_series.append(None)
         else:
-            sample_times = xr.cftime_range(
-                start=initial_time.item(),
+            sample_time = xr.cftime_range(
+                start=initial_time_sample.item(),
                 end=end_time.item(),
                 freq=f"{int(timestep.total_seconds())}s",
                 calendar=data_calendar,
             )
-            valid_sample_times = sample_times.where(
+            valid_sample_time = sample_time.where(
                 np.logical_and(
-                    sample_times >= sample_index_data_selection.time[0],
-                    sample_times <= sample_index_data_selection.time[-1],
+                    sample_time >= sample_index_data_selection.time[0],
+                    sample_time <= sample_index_data_selection.time[-1],
                 ),
             ).dropna()
-            if len(valid_sample_times) > len(sample_times) * overlap_threshold:
+            if len(valid_sample_time) > len(sample_time) * overlap_threshold:
                 reindexed_series = sample_index_data_selection.reindex(
-                    time=sample_times, method="nearest"
+                    time=sample_time, method="nearest"
                 )
                 reindexed_series_zero_mean = reindexed_series - reindexed_series.mean(
                     "time"

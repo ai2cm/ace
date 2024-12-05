@@ -226,8 +226,8 @@ def test_get_initial_condition():
     initial_condition = get_initial_condition(data, ["prog"])
     assert isinstance(initial_condition, PrognosticState)
     batch_data = initial_condition.as_batch_data()
-    assert batch_data.times.shape == (2, 1)
-    initial_times = batch_data.times.isel(time=0)
+    assert batch_data.time.shape == (2, 1)
+    initial_times = batch_data.time.isel(time=0)
     assert initial_times.shape == (2,)
     assert initial_times[0] == 0
     assert initial_times[1] == 5
@@ -235,7 +235,7 @@ def test_get_initial_condition():
     np.testing.assert_allclose(
         batch_data.data["prog"].squeeze(dim=1).cpu().numpy(), data["prog"].values
     )
-    assert batch_data.times.isel(time=0).equals(initial_times)
+    assert batch_data.time.isel(time=0).equals(initial_times)
 
 
 def test_get_initial_condition_raises_bad_variable_shape():

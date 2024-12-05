@@ -121,7 +121,7 @@ def get_initial_condition(
 
     batch_data = BatchData.new_on_cpu(
         data=initial_condition,
-        times=initial_times,
+        time=initial_times,
         horizontal_dims=["lat", "lon"],
     )
     return batch_data.get_start(prognostic_names, n_ic_timesteps=1)

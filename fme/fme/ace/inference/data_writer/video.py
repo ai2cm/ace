@@ -46,7 +46,7 @@ class PairedVideoDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -55,7 +55,7 @@ class PairedVideoDataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch. Unused.
+            batch_time: Time coordinate for each sample in the batch. Unused.
         """
         self._video.record_batch(
             target_data=target,

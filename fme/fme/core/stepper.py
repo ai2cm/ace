@@ -25,11 +25,7 @@ from torch import nn
 from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.inference.timing import GlobalTimer
 from fme.core.corrector.corrector import CorrectorConfig
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    PairedData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.data_loading.requirements import (
     DataRequirements,
@@ -370,7 +366,7 @@ class TrainOutput(TrainOutputABC):
     metrics: TensorDict
     gen_data: TensorDict
     target_data: TensorDict
-    times: xr.DataArray
+    time: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
     derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
         lambda x, _: dict(x)
@@ -381,7 +377,7 @@ class TrainOutput(TrainOutputABC):
             metrics=self.metrics,
             gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
             target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
-            times=self.times[:, n_ic_timesteps:],
+            time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
         )
 
@@ -391,7 +387,7 @@ class TrainOutput(TrainOutputABC):
             metrics=self.metrics,
             gen_data={k: v for k, v in self.gen_data.items()},
             target_data={k: v for k, v in self.target_data.items()},
-            times=self.times,
+            time=self.time,
             normalize=self.normalize,
         )
 
@@ -416,7 +412,7 @@ class TrainOutput(TrainOutputABC):
                 self.target_data,
                 batch_data.data,
             ),
-            times=xr.concat([batch_data.times, self.times], dim="time"),
+            time=xr.concat([batch_data.time, self.time], dim="time"),
             normalize=self.normalize,
         )
 
@@ -429,7 +425,7 @@ class TrainOutput(TrainOutputABC):
             metrics=self.metrics,
             gen_data=gen_data,
             target_data=target_data,
-            times=self.times,
+            time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
         )
@@ -772,18 +768,18 @@ class SingleModuleStepper(
         with timer.context("forward_prediction"):
             forcing_data = forcing.subset_names(self._forcing_names())
             initial_condition_state = initial_condition.as_batch_data()
-            if initial_condition_state.times.shape[1] != self.n_ic_timesteps:
+            if initial_condition_state.time.shape[1] != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
-                    f"{initial_condition_state.times.shape[1]}."
+                    f"{initial_condition_state.time.shape[1]}."
                 )
-            n_forward_steps = forcing_data.times.shape[1] - self.n_ic_timesteps
+            n_forward_steps = forcing_data.time.shape[1] - self.n_ic_timesteps
             output_timeseries = self._predict(
                 initial_condition_state.data, forcing_data.data, n_forward_steps
             )
             data = BatchData.new_on_device(
                 output_timeseries,
-                forcing_data.times[:, self.n_ic_timesteps :],
+                forcing_data.time[:, self.n_ic_timesteps :],
                 horizontal_dims=forcing_data.horizontal_dims,
             )
         if compute_derived_variables:
@@ -889,7 +885,7 @@ class SingleModuleStepper(
             )
             gen_data = output.prediction
             target_data = output.target
-            n_forward_steps = output.times.shape[1]
+            n_forward_steps = output.time.shape[1]
 
             # compute loss for each timestep
             for step in range(n_forward_steps):
@@ -915,7 +911,7 @@ class SingleModuleStepper(
             metrics=metrics,
             gen_data=dict(gen_data),
             target_data=dict(target_data),
-            times=output.times,
+            time=output.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
         )

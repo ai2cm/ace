@@ -27,18 +27,18 @@ def test_restart_saves_last_step(tmpdir):
         "a": torch.randn(n_sample, n_time, n_lat, n_lon),
         "b": torch.randn(n_sample, n_time, n_lat, n_lon),
     }
-    batch_times = xr.DataArray(
+    batch_time = xr.DataArray(
         data=np.random.uniform(size=(n_sample, n_time)),
         dims=(
             "sample",
             "time",
         ),
     )
-    writer.append_batch(data, 0, batch_times)
+    writer.append_batch(data, 0, batch_time)
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
     np.testing.assert_allclose(ds.a.values, data["a"][:, -1].cpu().numpy())
     np.testing.assert_allclose(ds.b.values, data["b"][:, -1].cpu().numpy())
-    np.testing.assert_allclose(ds.time.values, batch_times[:, -1].values)
+    np.testing.assert_allclose(ds.time.values, batch_time[:, -1].values)
     assert len(ds.b.attrs) == 0
     assert len(ds.a.attrs) == 2
     assert ds.a.attrs["long_name"] == "var_a"
@@ -71,14 +71,14 @@ def test_restart_saves_configured_step(tmpdir):
         "a": torch.randn(n_sample, n_time, n_lat, n_lon),
         "b": torch.randn(n_sample, n_time, n_lat, n_lon),
     }
-    batch_times = xr.DataArray(
+    batch_time2 = xr.DataArray(
         data=np.random.uniform(size=(n_sample, n_time)),
         dims=(
             "sample",
             "time",
         ),
     )
-    writer.append_batch(data, i_time_start, batch_times)
+    writer.append_batch(data, i_time_start, batch_time2)
     ds = xr.open_dataset(str(tmpdir / "restart.nc"))
     np.testing.assert_allclose(
         ds.a.values, data["a"][:, i_time_target - i_time_start].cpu().numpy()
@@ -87,7 +87,7 @@ def test_restart_saves_configured_step(tmpdir):
         ds.b.values, data["b"][:, i_time_target - i_time_start].cpu().numpy()
     )
     np.testing.assert_allclose(
-        ds.time.values, batch_times[:, i_time_target - i_time_start].values
+        ds.time.values, batch_time2[:, i_time_target - i_time_start].values
     )
     assert len(ds.b.attrs) == 0
     assert len(ds.a.attrs) == 2
@@ -119,12 +119,12 @@ def test_restart_does_not_save(tmpdir):
         "a": torch.randn(n_sample, n_time, n_lat, n_lon),
         "b": torch.randn(n_sample, n_time, n_lat, n_lon),
     }
-    batch_times = xr.DataArray(
+    batch_time = xr.DataArray(
         data=np.random.uniform(size=(n_sample, n_time)),
         dims=(
             "sample",
             "time",
         ),
     )
-    writer.append_batch(data, 0, batch_times)
+    writer.append_batch(data, 0, batch_time)
     assert not (tmpdir / "restart.nc").exists()
