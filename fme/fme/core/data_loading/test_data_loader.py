@@ -251,11 +251,11 @@ def test_inference_data_loader(tmp_path):
             16,
             32,
         )
-    assert isinstance(batch_data.times, xr.DataArray)
-    assert list(batch_data.times.dims) == ["sample", "time"]
-    assert batch_data.times.sizes["sample"] == batch_size
-    assert batch_data.times.sizes["time"] == n_forward_steps_in_memory + 1
-    assert batch_data.times.dt.calendar == "proleptic_gregorian"
+    assert isinstance(batch_data.time, xr.DataArray)
+    assert list(batch_data.time.dims) == ["sample", "time"]
+    assert batch_data.time.sizes["sample"] == batch_size
+    assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
+    assert batch_data.time.dt.calendar == "proleptic_gregorian"
     assert data._n_batches == 2
     assert data.vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
@@ -292,11 +292,11 @@ def test_data_loader_outputs(tmp_path, calendar):
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
     assert batch_data.data["foo"].shape[0] == n_samples
-    assert isinstance(batch_data.times, xr.DataArray)
-    assert list(batch_data.times.dims) == ["sample", "time"]
-    assert batch_data.times.sizes["sample"] == n_samples
-    assert batch_data.times.sizes["time"] == window_timesteps
-    assert batch_data.times.dt.calendar == calendar
+    assert isinstance(batch_data.time, xr.DataArray)
+    assert list(batch_data.time.dims) == ["sample", "time"]
+    assert batch_data.time.sizes["sample"] == n_samples
+    assert batch_data.time.sizes["time"] == window_timesteps
+    assert batch_data.time.dt.calendar == calendar
 
 
 @pytest.mark.parametrize(
@@ -409,7 +409,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     ]
     initial_condition = BatchData.new_on_cpu(
         data={"foo": torch.randn(n_initial_conditions, 1, 1, 1)},
-        times=xr.DataArray(time_values, dims=["sample", "time"]),
+        time=xr.DataArray(time_values, dims=["sample", "time"]),
     )
     data = get_forcing_data(
         config,
@@ -424,12 +424,12 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     assert set(batch_data.data.keys()) == {"foo"}
     assert batch_data.data["foo"].shape[0] == len(time_values)
     assert batch_data.data["foo"].shape[1] == forward_steps_in_memory + 1
-    assert list(batch_data.times.dims) == ["sample", "time"]
-    xr.testing.assert_allclose(batch_data.times[:, 0], initial_condition.times[:, 0])
-    assert batch_data.times.dt.calendar == calendar
+    assert list(batch_data.time.dims) == ["sample", "time"]
+    xr.testing.assert_allclose(batch_data.time[:, 0], initial_condition.time[:, 0])
+    assert batch_data.time.dt.calendar == calendar
     xr.testing.assert_equal(
-        data.initial_condition.as_batch_data().times,
-        initial_condition.times,
+        data.initial_condition.as_batch_data().time,
+        initial_condition.time,
     )
     np.testing.assert_allclose(
         data.initial_condition.as_batch_data().data["foo"].cpu().numpy(),

@@ -61,17 +61,17 @@ class PairedRawDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
         self._prediction_writer.append_batch(
             data=prediction,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
 
     def flush(self):
@@ -128,7 +128,7 @@ class RawDataWriter:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -136,23 +136,23 @@ class RawDataWriter:
         Args:
             data: Data to be written to file.
             start_timestep: Timestep (lead time dim) at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch_time: Time coordinate for each sample in the batch.
         """
         if self.dataset is None:
             return
         n_samples_data = list(data.values())[0].shape[0]
-        n_samples_time = batch_times.sizes["sample"]
+        n_samples_time = batch_time.sizes["sample"]
         if n_samples_data != n_samples_time:
             raise ValueError(
                 f"Batch size mismatch, data has {n_samples_data} samples "
                 f"and times has {n_samples_time} samples."
             )
         n_times_data = list(data.values())[0].shape[1]
-        n_times_time = batch_times.sizes["time"]
+        n_times_time = batch_time.sizes["time"]
         if n_times_data != n_times_time:
             raise ValueError(
                 f"Batch time dimension mismatch, data has {n_times_data} times "
-                f"and times has {n_times_time} times."
+                f"and time has {n_times_time} times."
             )
 
         if not self._dataset_dims_created:
@@ -199,12 +199,12 @@ class RawDataWriter:
 
         # handle time dimensions
         if not hasattr(self.dataset.variables[INIT_TIME], "calendar"):
-            self.dataset.variables[INIT_TIME].calendar = batch_times.dt.calendar
+            self.dataset.variables[INIT_TIME].calendar = batch_time.dt.calendar
         if not hasattr(self.dataset.variables[VALID_TIME], "calendar"):
-            self.dataset.variables[VALID_TIME].calendar = batch_times.dt.calendar
+            self.dataset.variables[VALID_TIME].calendar = batch_time.dt.calendar
 
         if start_timestep == 0:
-            init_times: np.ndarray = batch_times.isel(time=0).values
+            init_times: np.ndarray = batch_time.isel(time=0).values
             init_times_numeric: np.ndarray = cftime.date2num(
                 init_times,
                 units=self.dataset.variables[INIT_TIME].units,
@@ -221,22 +221,22 @@ class RawDataWriter:
                 units=self.dataset.variables[INIT_TIME].units,
                 calendar=self.dataset.variables[INIT_TIME].calendar,
             )
-        lead_times_microseconds = get_batch_lead_times_microseconds(
+        lead_time_microseconds = get_batch_lead_time_microseconds(
             init_times,
-            batch_times.values,
+            batch_time.values,
         )
         self.dataset.variables[LEAD_TIME_DIM][
-            start_timestep : start_timestep + lead_times_microseconds.shape[0]
-        ] = lead_times_microseconds
+            start_timestep : start_timestep + lead_time_microseconds.shape[0]
+        ] = lead_time_microseconds
 
         valid_times_numeric: np.ndarray = cftime.date2num(
-            batch_times.values,
+            batch_time.values,
             units=self.dataset.variables[VALID_TIME].units,
             calendar=self.dataset.variables[VALID_TIME].calendar,
         )
         self.dataset.variables[VALID_TIME][
             :,
-            start_timestep : start_timestep + lead_times_microseconds.shape[0],
+            start_timestep : start_timestep + lead_time_microseconds.shape[0],
         ] = valid_times_numeric
 
         self.dataset.sync()  # Flush the data to disk
@@ -248,24 +248,24 @@ class RawDataWriter:
         self.dataset.sync()
 
 
-def get_batch_lead_times_microseconds(
-    init_times: npt.NDArray[cftime.datetime], batch_times: npt.NDArray[cftime.datetime]
+def get_batch_lead_time_microseconds(
+    init_time: npt.NDArray[cftime.datetime], batch_time: npt.NDArray[cftime.datetime]
 ) -> npt.NDArray[np.int64]:
     """
-    Get the lead times in seconds for the batch.
+    Get the lead time in seconds for the batch.
     Assert that they are the same for each sample.
 
     Args:
-        init_times: Initialization time for each sample in the batch.
-        batch_times: Full array of times for each sample in the batch.
+        init_time: Initialization time for each sample in the batch.
+        batch_time: Array of time coordinates for each sample in the batch.
 
     Returns:
-        Lead times in microseconds for the batch
+        Lead time in microseconds for the batch
     """
-    if init_times.shape[0] != batch_times.shape[0]:
+    if init_time.shape[0] != batch_time.shape[0]:
         raise ValueError(
-            f"Number of init times ({len(init_times)}) must "
-            f"match number of batch times ({len(batch_times)})"
+            f"Number of init times ({len(init_time)}) must "
+            f"match number of batch times ({len(batch_time)})"
         )
     # Carry out timedelta arithmetic in NumPy arrays to avoid xarray's automatic
     # casting of datetime.timedelta objects to timedelta64[ns] values, which would
@@ -273,12 +273,12 @@ def get_batch_lead_times_microseconds(
     # ~292 years. See
     # https://numpy.org/doc/stable/reference/arrays.datetime.html#datetime-units
     # for more details on the limits of various precision timedeltas.
-    lead_times: npt.NDArray[datetime.timedelta] = (  # type: ignore
-        batch_times - init_times[:, None]
+    lead_time: npt.NDArray[datetime.timedelta] = (  # type: ignore
+        batch_time - init_time[:, None]
     )
-    lead_times_microseconds: npt.NDArray[np.int64] = (
-        lead_times // datetime.timedelta(microseconds=1)
+    lead_time_microseconds: npt.NDArray[np.int64] = (
+        lead_time // datetime.timedelta(microseconds=1)
     ).astype(np.int64)
-    if not np.all(lead_times_microseconds == lead_times_microseconds[0, :]):
+    if not np.all(lead_time_microseconds == lead_time_microseconds[0, :]):
         raise ValueError("Lead times are not the same for each sample in the batch.")
-    return lead_times_microseconds[0, :]
+    return lead_time_microseconds[0, :]

@@ -11,26 +11,15 @@ from fme.core.data_loading.config import DataLoaderConfig, XarrayDataConfig
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import (
-    DatasetProperties,
-    XarrayDataset,
-    get_xarray_dataset,
-)
-from .batch_data import (
-    GriddedData,
-    InferenceGriddedData,
-    PrognosticState,
-)
+from ._xarray import DatasetProperties, XarrayDataset, get_xarray_dataset
+from .batch_data import GriddedData, InferenceGriddedData, PrognosticState
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
-from .requirements import (
-    DataRequirements,
-    PrognosticStateDataRequirements,
-)
+from .requirements import DataRequirements, PrognosticStateDataRequirements
 
 logger = logging.getLogger(__name__)
 
@@ -217,7 +206,7 @@ def get_forcing_data(
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial
-    times in the provided initial condition.
+    time in the provided initial condition.
 
     Args:
         config: Parameters for the forcing data loader.
@@ -233,12 +222,12 @@ def get_forcing_data(
     Returns:
         A data loader for forcing data with coordinates and metadata.
     """
-    initial_times = initial_condition.as_batch_data().times
-    if initial_times.shape[1] != 1:
-        raise NotImplementedError("code assumes initial times only has 1 timestep")
+    initial_time = initial_condition.as_batch_data().time
+    if initial_time.shape[1] != 1:
+        raise NotImplementedError("code assumes initial time only has 1 timestep")
     available_times = XarrayDataset(config.dataset, window_requirements).all_times
     start_time_indices = []
-    for time in initial_times.values[:, 0]:
+    for time in initial_time.values[:, 0]:
         start_time_indices.append(available_times.get_loc(time))
     inference_config = config.build_inference_config(
         start_indices=ExplicitIndices(start_time_indices)

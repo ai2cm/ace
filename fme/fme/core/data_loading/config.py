@@ -54,8 +54,8 @@ class TimeSlice:
     stop_time: Optional[str] = None
     step: Optional[int] = None
 
-    def slice(self, times: xr.CFTimeIndex) -> slice:
-        return times.slice_indexer(self.start_time, self.stop_time, self.step)
+    def slice(self, time: xr.CFTimeIndex) -> slice:
+        return time.slice_indexer(self.start_time, self.stop_time, self.step)
 
 
 def _convert_interval_to_int(

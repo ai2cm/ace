@@ -16,11 +16,7 @@ from typing import (
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    PairedData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.data_loading.data_typing import (
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
@@ -151,7 +147,7 @@ class InferenceEvaluatorAggregatorConfig:
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
-        initial_times: xr.DataArray,
+        initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         record_step_20: bool = False,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
@@ -183,7 +179,7 @@ class InferenceEvaluatorAggregatorConfig:
             horizontal_coordinates=horizontal_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
-            initial_times=initial_times,
+            initial_time=initial_time,
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
@@ -219,7 +215,7 @@ class InferenceEvaluatorAggregator(
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
-        initial_times: xr.DataArray,
+        initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         record_step_20: bool = False,
         log_video: bool = False,
@@ -240,7 +236,7 @@ class InferenceEvaluatorAggregator(
             horizontal_coordinates: Data horizontal coordinates
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
-            initial_times: Initial times for each sample.
+            initial_time: Initial time for each sample.
             normalize: Normalization function to use.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
@@ -336,7 +332,7 @@ class InferenceEvaluatorAggregator(
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             self._time_dependent_aggregators["enso_coefficient"] = (
                 EnsoCoefficientEvaluatorAggregator(
-                    initial_times,
+                    initial_time,
                     n_timesteps - 1,
                     timestep,
                     gridded_operations=ops,
@@ -378,11 +374,11 @@ class InferenceEvaluatorAggregator(
             )
         for time_dependent_aggregator in self._time_dependent_aggregators.values():
             time_dependent_aggregator.record_batch(
-                time=data.times,
+                time=data.time,
                 target_data=target_data,
                 gen_data=data.prediction,
             )
-        n_times = data.times.shape[1]
+        n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
         )
@@ -403,14 +399,14 @@ class InferenceEvaluatorAggregator(
             target_data_norm = self._normalize(target_data)
             gen_data = initial_condition.prediction
             gen_data_norm = self._normalize(gen_data)
-            n_times = initial_condition.times.shape[1]
+            n_times = initial_condition.time.shape[1]
         else:
             batch_data = initial_condition.as_batch_data()
             target_data = batch_data.data
             target_data_norm = self._normalize(target_data)
             gen_data = target_data
             gen_data_norm = target_data_norm
-            n_times = batch_data.times.shape[1]
+            n_times = batch_data.time.shape[1]
         for aggregator_name in ["mean", "mean_norm"]:
             aggregator = self._aggregators.get(aggregator_name)
             if aggregator is not None:
@@ -628,7 +624,7 @@ class InferenceAggregator(
                 data=data.data,
                 i_time_start=self._n_timesteps_seen,
             )
-        n_times = data.times.shape[1]
+        n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
         )
@@ -650,7 +646,7 @@ class InferenceAggregator(
                 data=batch_data.data,
                 i_time_start=0,
             )
-        n_times = batch_data.times.shape[1]
+        n_times = batch_data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),
         )

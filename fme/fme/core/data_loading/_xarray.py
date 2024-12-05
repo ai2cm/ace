@@ -94,26 +94,26 @@ def get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
     return times
 
 
-def repeat_and_increment_times(
+def repeat_and_increment_time(
     raw_times: List[np.ndarray], n_repeats: int, timestep: datetime.timedelta
 ) -> List[np.ndarray]:
     """Repeats and increments a collection of arrays of evenly spaced times."""
     n_timesteps = sum(len(times) for times in raw_times)
     timespan = timestep * n_timesteps
 
-    repeated_and_incremented_times = []
+    repeated_and_incremented_time = []
     for repeats in range(n_repeats):
         increment = repeats * timespan
-        for times in raw_times:
-            incremented_times = times + increment
-            repeated_and_incremented_times.append(incremented_times)
-    return repeated_and_incremented_times
+        for time in raw_times:
+            incremented_time = time + increment
+            repeated_and_incremented_time.append(incremented_time)
+    return repeated_and_incremented_time
 
 
-def get_cumulative_timesteps(times: List[np.ndarray]) -> np.ndarray:
-    """Returns a list of cumulative timesteps for each item in times."""
+def get_cumulative_timesteps(time: List[np.ndarray]) -> np.ndarray:
+    """Returns a list of cumulative timesteps for each item in a time coordinate."""
     num_timesteps_per_file = [0]
-    for time_coord in times:
+    for time_coord in time:
         num_timesteps_per_file.append(len(time_coord))
     return np.array(num_timesteps_per_file).cumsum()
 
@@ -406,23 +406,21 @@ class XarrayDataset(Dataset):
         self._timestep: Optional[datetime.timedelta]
         if infer_timestep:
             self._timestep = get_timestep(np.concatenate(raw_times))
-            time_coords = repeat_and_increment_times(
-                raw_times, n_repeats, self.timestep
-            )
+            time_coord = repeat_and_increment_time(raw_times, n_repeats, self.timestep)
         else:
             self._timestep = None
-            time_coords = raw_times
+            time_coord = raw_times
 
-        cum_num_timesteps = get_cumulative_timesteps(time_coords)
+        cum_num_timesteps = get_cumulative_timesteps(time_coord)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
         self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
-        self._sample_start_times = xr.CFTimeIndex(
-            np.concatenate(time_coords)[: self._n_initial_conditions]
+        self._sample_start_time = xr.CFTimeIndex(
+            np.concatenate(time_coord)[: self._n_initial_conditions]
         )
-        self._all_times = xr.CFTimeIndex(np.concatenate(time_coords))
+        self._all_times = xr.CFTimeIndex(np.concatenate(time_coord))
 
-        del cum_num_timesteps, time_coords
+        del cum_num_timesteps, time_coord
 
         ds = self._open_file(0)
         self._get_variable_metadata(ds)
@@ -538,9 +536,9 @@ class XarrayDataset(Dataset):
         return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
 
     @property
-    def sample_start_times(self) -> xr.CFTimeIndex:
+    def sample_start_time(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
-        return self._sample_start_times
+        return self._sample_start_time
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
@@ -621,9 +619,9 @@ class XarrayDataset(Dataset):
 
         # Create a DataArray of times to return corresponding to the slice that
         # is valid even when n_repeats > 1.
-        times = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
+        time = xr.DataArray(self.all_times[time_slice].values, dims=["time"])
 
-        return tensors, times
+        return tensors, time
 
     def subset(self, subset: Union[slice, torch.Tensor]) -> Dataset:
         """Returns a subset of the dataset and propagates other properties."""
@@ -642,7 +640,7 @@ def as_index_selection(
     if isinstance(subset, Slice):
         index_selection = subset.slice
     elif isinstance(subset, TimeSlice):
-        index_selection = subset.slice(dataset.sample_start_times)
+        index_selection = subset.slice(dataset.sample_start_time)
     elif isinstance(subset, RepeatedInterval):
         try:
             index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
@@ -653,16 +651,16 @@ def as_index_selection(
     return index_selection
 
 
-def get_timestep(times: np.ndarray) -> datetime.timedelta:
-    """Computes the timestep of an array of times.
+def get_timestep(time: np.ndarray) -> datetime.timedelta:
+    """Computes the timestep of an array of a time coordinate array.
 
     Raises an error if the times are not separated by a positive constant
     interval, or if the array has one or fewer times.
     """
-    assert len(times.shape) == 1, "times must be a 1D array"
+    assert len(time.shape) == 1, "times must be a 1D array"
 
-    if len(times) > 1:
-        timesteps = np.diff(times)
+    if len(time) > 1:
+        timesteps = np.diff(time)
         timestep = timesteps[0]
 
         if not (timestep > datetime.timedelta(days=0)):

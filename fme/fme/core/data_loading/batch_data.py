@@ -77,15 +77,15 @@ class BatchData:
         data: Data for each variable in each sample of shape (sample, time, ...),
             concatenated along samples to make a batch. To be used directly in training,
             validation, and inference.
-        times: An array of times for each sample in the batch, concatenated along
-            samples to make a batch. To be used in writing out inference
-            predictions with time coordinates, not directly in ML.
+        time: An array representing time coordinates for each sample in the batch,
+            concatenated along samples to make a batch. To be used in writing out
+            inference predictions with time coordinates, not directly in ML.
         horizontal_dims: Horizontal dimensions of the data. Used for writing to
             netCDF files.
     """
 
     data: TensorMapping
-    times: xr.DataArray
+    time: xr.DataArray
     horizontal_dims: List[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
@@ -97,7 +97,7 @@ class BatchData:
     def to_device(self) -> "BatchData":
         return self.__class__(
             data={k: v.to(get_device()) for k, v in self.data.items()},
-            times=self.times,
+            time=self.time,
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -113,14 +113,14 @@ class BatchData:
     def new_on_cpu(
         cls,
         data: TensorMapping,
-        times: xr.DataArray,
+        time: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
         return BatchData(
             data=data,
-            times=times,
+            time=time,
             **kwargs,
         )
 
@@ -128,7 +128,7 @@ class BatchData:
     def new_on_device(
         cls,
         data: TensorMapping,
-        times: xr.DataArray,
+        time: xr.DataArray,
         horizontal_dims: Optional[List[str]] = None,
     ) -> "BatchData":
         """
@@ -138,22 +138,22 @@ class BatchData:
         kwargs = cls._get_kwargs(horizontal_dims)
         return BatchData(
             data=data,
-            times=times,
+            time=time,
             **kwargs,
         )
 
     def __post_init__(self):
-        if len(self.times.shape) != 2:
+        if len(self.time.shape) != 2:
             raise ValueError(
-                "Expected times to have shape (n_samples, n_times), got shape "
-                f"{self.times.shape}."
+                "Expected time to have shape (n_samples, n_times), got shape "
+                f"{self.time.shape}."
             )
         for k, v in self.data.items():
-            if v.shape[:2] != self.times.shape[:2]:
+            if v.shape[:2] != self.time.shape[:2]:
                 raise ValueError(
                     f"Data for variable {k} has shape {v.shape}, expected shape "
-                    f"(n_samples, n_times) for times but got shape "
-                    f"{self.times.shape}."
+                    f"(n_samples, n_times) for time but got shape "
+                    f"{self.time.shape}."
                 )
 
     @classmethod
@@ -165,10 +165,10 @@ class BatchData:
     ) -> "BatchData":
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)
-        batch_times = xr.concat(sample_times, dim=sample_dim_name)
+        batch_time = xr.concat(sample_times, dim=sample_dim_name)
         return BatchData.new_on_cpu(
             data=batch_data,
-            times=batch_times,
+            time=batch_time,
             horizontal_dims=horizontal_dims,
         )
 
@@ -180,19 +180,21 @@ class BatchData:
         """
         Compute derived variables from the data and forcing data.
 
-        The forcing data must have the same times as the batch data.
+        The forcing data must have the same time coordinate as the batch data.
 
         Args:
             derive_func: A function that takes the data and forcing data and returns a
                 dictionary of derived variables.
             forcing_data: The forcing data to compute derived variables from.
         """
-        if not np.all(forcing_data.times.values == self.times.values):
-            raise ValueError("Forcing data must have the same times as the batch data.")
+        if not np.all(forcing_data.time.values == self.time.values):
+            raise ValueError(
+                "Forcing data must have the same time coordinate as the batch data."
+            )
         derived_data = derive_func(self.data, forcing_data.data)
         return self.__class__(
             data={**self.data, **derived_data},
-            times=self.times,
+            time=self.time,
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -204,7 +206,7 @@ class BatchData:
             raise RuntimeError("No initial condition timesteps to remove.")
         return self.__class__(
             {k: v[:, n_ic_timesteps:] for k, v in self.data.items()},
-            times=self.times.isel(time=slice(n_ic_timesteps, None)),
+            time=self.time.isel(time=slice(n_ic_timesteps, None)),
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -214,7 +216,7 @@ class BatchData:
         """
         return self.__class__(
             {k: v for k, v in self.data.items() if k in names},
-            times=self.times,
+            time=self.time,
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -248,7 +250,7 @@ class BatchData:
         """
         return self.__class__(
             {k: v[:, time_slice] for k, v in self.data.items()},
-            times=self.times[:, time_slice],
+            time=self.time[:, time_slice],
             horizontal_dims=self.horizontal_dims,
         )
 
@@ -268,20 +270,20 @@ class BatchData:
                 k: torch.cat([filled_data[k].to(state_data_device), v], dim=1)
                 for k, v in self.data.items()
             },
-            times=xr.concat([initial_batch_data.times, self.times], dim="time"),
+            time=xr.concat([initial_batch_data.time, self.time], dim="time"),
             horizontal_dims=self.horizontal_dims,
         )
 
 
 @dataclasses.dataclass
 class PairedData:
-    """A container for the data and time coordinates of a batch, with paired
+    """A container for the data and time coordinate of a batch, with paired
     prediction and target data.
     """
 
     prediction: TensorMapping
     target: TensorMapping
-    times: xr.DataArray
+    time: xr.DataArray
 
     @classmethod
     def from_batch_data(
@@ -289,32 +291,32 @@ class PairedData:
         prediction: BatchData,
         target: BatchData,
     ) -> "PairedData":
-        if not np.all(prediction.times.values == target.times.values):
-            raise ValueError("Prediction and target times must be the same.")
-        return PairedData(prediction.data, target.data, prediction.times)
+        if not np.all(prediction.time.values == target.time.values):
+            raise ValueError("Prediction and target time coordinate must be the same.")
+        return PairedData(prediction.data, target.data, prediction.time)
 
     @classmethod
     def new_on_device(
         cls,
         prediction: TensorMapping,
         target: TensorMapping,
-        times: xr.DataArray,
+        time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
         _check_device(target, device)
-        return PairedData(prediction, target, times)
+        return PairedData(prediction, target, time)
 
     @classmethod
     def new_on_cpu(
         cls,
         prediction: TensorMapping,
         target: TensorMapping,
-        times: xr.DataArray,
+        time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
         _check_device(target, torch.device("cpu"))
-        return PairedData(prediction, target, times)
+        return PairedData(prediction, target, time)
 
 
 T = TypeVar("T", covariant=True)

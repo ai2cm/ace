@@ -40,14 +40,14 @@ def _get_data(
     n_lon: int,
     calendar: str = "julian",
 ):
-    times = xr.cftime_range(
+    time = xr.cftime_range(
         start="2000-01-01",
         periods=n_times,
         freq="6h",
         calendar=calendar,
     )
     enso_index = xr.DataArray(
-        _data_generator(scale, n_times), dims=["time"], coords={"time": times}
+        _data_generator(scale, n_times), dims=["time"], coords={"time": time}
     )
     target_data = {  # make target data perfectly correlated
         "a": torch.tile(
@@ -61,17 +61,17 @@ def _get_data(
             [n_samples, 1, n_lat, n_lon],
         ).to(device=get_device()),
     }
-    sample_times = xr.concat(
+    sample_time = xr.concat(
         [
             xr.DataArray(
-                times.values,
+                time.values,
                 dims=["time"],
             )
             for _ in range(n_samples)
         ],
         dim="sample",
     )
-    return enso_index, sample_times, target_data, gen_data
+    return enso_index, sample_time, target_data, gen_data
 
 
 @pytest.mark.parametrize("scaling", [0.5, 1.0, 2.0])
@@ -99,12 +99,12 @@ def test_enso_coefficient_aggregator_values(scaling):
     scale = 3
     area_weights = torch.ones([n_lat, n_lon], device=get_device())
     # get data that doesn't vary in space, but varies in time with the ENSO index
-    enso_index, sample_times, target_data, gen_data = _get_data(
+    enso_index, sample_time, target_data, gen_data = _get_data(
         scale, n_samples, n_times, n_lat, n_lon
     )
     with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
         enso_agg = EnsoCoefficientEvaluatorAggregator(
-            initial_times=sample_times.isel(time=0),
+            initial_time=sample_time.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
             gridded_operations=LatLonOperations(area_weights),
@@ -116,8 +116,8 @@ def test_enso_coefficient_aggregator_values(scaling):
         assert np.isclose(index_values.mean().item(), 0.0)
     target_data["a"] *= scaling
     gen_data["a"] *= scaling
-    enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
-    enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
+    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
+    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
     coefficients = enso_agg._get_coefficients()
     target_coefficients, gen_coefficients = coefficients
     assert target_coefficients is not None
@@ -153,21 +153,21 @@ def test_enso_index_inference_overlap(shift):
     n_samples, n_times, n_lat, n_lon = 2, 28, 3, 3
     data_scale = 3
     area_weights = torch.ones([n_lat, n_lon])
-    enso_index, sample_times, target_data, gen_data = _get_data(
+    enso_index, sample_time, target_data, gen_data = _get_data(
         data_scale, n_samples, n_times, n_lat, n_lon
     )
     # shift the sample times so they only partially overlap the reference index
     index_duration = enso_index.time[-1].item() - enso_index.time[0].item()
     offset_seconds = shift * index_duration.total_seconds()
-    sample_times += datetime.timedelta(seconds=offset_seconds)
+    sample_time += datetime.timedelta(seconds=offset_seconds)
     with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
         enso_agg = EnsoCoefficientEvaluatorAggregator(
-            initial_times=sample_times.isel(time=0),
+            initial_time=sample_time.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
             gridded_operations=LatLonOperations(area_weights),
         )
-    enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
+    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
     overlap = max(1.0 - shift, 0.0)
     if overlap < OVERLAP_THRESHOLD:  # should be empty dict
@@ -197,17 +197,17 @@ def test_enso_agg_calendar(calendar):
     n_samples, n_times, n_lat, n_lon = 2, 28, 3, 3
     data_scale = 3
     area_weights = torch.ones([n_lat, n_lon])
-    enso_index, sample_times, target_data, gen_data = _get_data(
+    enso_index, sample_time, target_data, gen_data = _get_data(
         data_scale, n_samples, n_times, n_lat, n_lon, calendar=calendar
     )
     enso_index = enso_index.convert_calendar("julian", dim="time", use_cftime=True)
     with change_aggregator_enso_index(EnsoCoefficientEvaluatorAggregator, enso_index):
         enso_agg = EnsoCoefficientEvaluatorAggregator(
-            initial_times=sample_times.isel(time=0),
+            initial_time=sample_time.isel(time=0),
             n_forward_timesteps=(n_times - 1),
             timestep=datetime.timedelta(hours=6),
             gridded_operations=LatLonOperations(area_weights),
         )
-    enso_agg.record_batch(time=sample_times, target_data=target_data, gen_data=gen_data)
+    enso_agg.record_batch(time=sample_time, target_data=target_data, gen_data=gen_data)
     target_coefficients, gen_coefficients = enso_agg._get_coefficients()
     assert (target_coefficients is not None) and (gen_coefficients is not None)

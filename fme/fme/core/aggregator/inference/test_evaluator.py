@@ -35,20 +35,20 @@ def test_logs_labels_exist():
         loaded_lon_name="lon",
         loaded_lat_name="lat",
     )
-    initial_times = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
         vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
-        initial_times=initial_times,
+        initial_time=initial_time,
         record_step_20=True,
         log_video=True,
         log_zonal_mean_images=True,
         normalize=lambda x: dict(x),
     )
-    times = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+    time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
 
     logs = agg.record_batch(
         data=PairedData(
@@ -56,7 +56,7 @@ def test_logs_labels_exist():
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-            times=times,
+            time=time,
         ),
     )
     assert len(logs) == n_time
@@ -122,13 +122,13 @@ def test_inference_logs_labels_exist():
         loaded_lon_name="lon",
         loaded_lat_name="lat",
     )
-    initial_times = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
+    initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
-        initial_times=initial_times,
+        initial_time=initial_time,
         record_step_20=True,
         log_video=True,
         normalize=lambda x: dict(x),
@@ -139,7 +139,7 @@ def test_inference_logs_labels_exist():
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
-            times=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
         ),
     )
     assert isinstance(logs, list)
@@ -183,18 +183,18 @@ def test_inference_logs_length(window_len: int, n_windows: int):
         loaded_lon_name="lon",
         loaded_lat_name="lat",
     )
-    initial_times = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
+    initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
         vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=window_len * n_windows,
-        initial_times=initial_times,
+        initial_time=initial_time,
         normalize=lambda x: dict(x),
     )
     target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
-        times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+        time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
     )
     i_start = 0
     for i in range(n_windows):
@@ -204,7 +204,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
         paired_data = PairedData.new_on_device(
             prediction=sample_data,
             target=target_data.data,
-            times=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
+            time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
         logs = agg.record_batch(
             data=paired_data,

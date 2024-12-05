@@ -252,9 +252,9 @@ def _concat_list_of_paired_data(
     target_list = [paired_data.target for paired_data in paired_data_list]
     data_concat = _concat_list_of_dicts(data_list, dim=dim)
     target_concat = _concat_list_of_dicts(target_list, dim=dim)
-    times_list = [paired_data.times for paired_data in paired_data_list]
+    times_list = [paired_data.time for paired_data in paired_data_list]
     times_concat = xr.concat(times_list, dim="time")
-    return PairedData(prediction=data_concat, target=target_concat, times=times_concat)
+    return PairedData(prediction=data_concat, target=target_concat, time=times_concat)
 
 
 @dataclasses.dataclass
@@ -393,7 +393,7 @@ class CoupledStepper(
             forcings_from_ocean.pop(self._config.ocean_surface_temperature_name)
         )
         forcing_data.update(forcings_from_ocean)
-        return BatchData(forcing_data, times=times[:, : self.n_inner_steps + 1])
+        return BatchData(forcing_data, time=times[:, : self.n_inner_steps + 1])
 
     def _get_ocean_forcings(
         self, data: TensorMapping, times: xr.DataArray
@@ -416,7 +416,7 @@ class CoupledStepper(
             for k, v in forcings_from_atmosphere.items()
         }
         forcing_data.update(forcings_from_atmosphere)
-        return BatchData(forcing_data, times=times[:, : 1 + self.ocean.n_ic_timesteps])
+        return BatchData(forcing_data, time=times[:, : 1 + self.ocean.n_ic_timesteps])
 
     def _get_step_loss(
         self,
@@ -468,7 +468,7 @@ class CoupledStepper(
         )
         # get initial condition atmosphere forcing variables
         atmos_forcings = self._get_atmosphere_forcings(
-            {**data_atmos, **data_ocean}, times=data.atmosphere_data.times
+            {**data_atmos, **data_ocean}, times=data.atmosphere_data.time
         )
         n_outer_steps = list(data_ocean.values())[0].shape[1] - self.n_ic_timesteps
 
@@ -502,7 +502,7 @@ class CoupledStepper(
                 # sequence of n_inner_steps for time averaging the atmosphere
                 # over the ocean's timestep
                 ocean_forcings = self._get_ocean_forcings(
-                    {**data_ocean, **gen_data.prediction}, times=gen_data.times
+                    {**data_ocean, **gen_data.prediction}, times=gen_data.time
                 )
                 # ocean always predicts forward one step at a time
                 gen_data, ocean_prognostic = self.ocean.predict_paired(
@@ -520,7 +520,7 @@ class CoupledStepper(
                 # get generated ocean-to-atmosphere forcings for next iter
                 if step < n_outer_steps - 1:
                     atmos_forcings = self._get_atmosphere_forcings(
-                        {**data_atmos, **gen_data.prediction}, times=gen_data.times
+                        {**data_atmos, **gen_data.prediction}, times=gen_data.time
                     )
 
         gen_ocean = _concat_list_of_paired_data(gen_data_ocean, dim=self.ocean.TIME_DIM)
@@ -535,7 +535,7 @@ class CoupledStepper(
             metrics={},
             gen_data=dict(gen_ocean.prediction),
             target_data=dict(gen_ocean.target),
-            times=gen_ocean.times,
+            time=gen_ocean.time,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
         )
@@ -543,7 +543,7 @@ class CoupledStepper(
             metrics={},
             gen_data=dict(gen_atmos.prediction),
             target_data=dict(gen_atmos.target),
-            times=gen_atmos.times,
+            time=gen_atmos.time,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,
         )

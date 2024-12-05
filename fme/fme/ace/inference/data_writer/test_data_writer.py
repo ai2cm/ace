@@ -13,7 +13,7 @@ from fme.ace.inference.data_writer.main import (
     DataWriterConfig,
     PairedDataWriter,
 )
-from fme.ace.inference.data_writer.raw import get_batch_lead_times_microseconds
+from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.core.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
@@ -63,13 +63,13 @@ class TestDataWriter:
         """
         return request.param
 
-    def get_batch_times(
+    def get_batch_time(
         self, start_time, end_time, freq, n_initial_conditions, calendar="julian"
     ):
         datetime_class = CALENDAR_CFTIME[calendar]
         start_time = datetime_class(*start_time)
         end_time = datetime_class(*end_time)
-        batch_times = xr.DataArray(
+        batch_time = xr.DataArray(
             xr.cftime_range(
                 start_time,
                 end_time,
@@ -79,7 +79,7 @@ class TestDataWriter:
             dims="time",
         )
         return xr.concat(
-            [batch_times for _ in range(n_initial_conditions)], dim="sample"
+            [batch_time for _ in range(n_initial_conditions)], dim="sample"
         )
 
     @pytest.fixture
@@ -165,7 +165,7 @@ class TestDataWriter:
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time,
             end_time=end_time,
             freq="6h",
@@ -176,12 +176,12 @@ class TestDataWriter:
             batch=PairedData(
                 prediction=sample_prediction_data,
                 target=sample_target_data,
-                times=batch_times,
+                time=batch_time,
             ),
         )
         start_time_2 = (2020, 1, 1, 18, 0, 0)
         end_time_2 = (2020, 1, 2, 6, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time_2,
             end_time=end_time_2,
             freq="6h",
@@ -192,7 +192,7 @@ class TestDataWriter:
             batch=PairedData(
                 prediction=sample_prediction_data,
                 target=sample_target_data,
-                times=batch_times,
+                time=batch_time,
             ),
         )
         writer.flush()
@@ -324,7 +324,7 @@ class TestDataWriter:
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time,
             end_time=end_time,
             freq="6h",
@@ -334,7 +334,7 @@ class TestDataWriter:
             batch=PairedData(
                 prediction=sample_prediction_data,
                 target=sample_target_data,
-                times=batch_times,
+                time=batch_time,
             ),
         )
         writer.flush()
@@ -394,7 +394,7 @@ class TestDataWriter:
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time,
             end_time=end_time,
             freq="6h",
@@ -405,7 +405,7 @@ class TestDataWriter:
                 batch=PairedData(
                     prediction=sample_prediction_data,
                     target=sample_target_data,
-                    times=batch_times,
+                    time=batch_time,
                 ),
             )
 
@@ -437,7 +437,7 @@ class TestDataWriter:
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 18, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time,
             end_time=end_time,
             freq="6h",
@@ -447,12 +447,12 @@ class TestDataWriter:
         writer.append_batch(
             batch=BatchData(
                 data=prediction_data,
-                times=batch_times,
+                time=batch_time,
             ),
         )
         start_time_2 = (2020, 1, 2, 0, 0, 0)
         end_time_2 = (2020, 1, 2, 18, 0, 0)
-        batch_times = self.get_batch_times(
+        batch_time = self.get_batch_time(
             start_time=start_time_2,
             end_time=end_time_2,
             freq="6h",
@@ -462,7 +462,7 @@ class TestDataWriter:
         writer.append_batch(
             batch=BatchData(
                 data=prediction_data,
-                times=batch_times,
+                time=batch_time,
             ),
         )
         writer.flush()
@@ -485,7 +485,7 @@ class TestDataWriter:
 
 
 @pytest.mark.parametrize(
-    ["init_times", "batch_times", "expected"],
+    ["init_times", "batch_time", "expected"],
     [
         pytest.param(
             np.array([cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0) for _ in range(3)]),
@@ -553,17 +553,17 @@ class TestDataWriter:
         ),
     ],
 )
-def test_get_batch_lead_times_microseconds(init_times, batch_times, expected):
-    lead_time_seconds = get_batch_lead_times_microseconds(init_times, batch_times)
+def test_get_batch_lead_times_microseconds(init_times, batch_time, expected):
+    lead_time_seconds = get_batch_lead_time_microseconds(init_times, batch_time)
     assert lead_time_seconds.shape == expected.shape
     np.testing.assert_equal(lead_time_seconds, expected)
 
 
-def test_get_batch_lead_times_microseconds_length_mismatch():
+def test_get_batch_lead_time_microseconds_length_mismatch():
     init_times = np.array(
         [cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0) for i in range(3)]
     )
-    batch_times = np.array(
+    batch_time = np.array(
         [
             xr.cftime_range(
                 cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
@@ -574,14 +574,14 @@ def test_get_batch_lead_times_microseconds_length_mismatch():
         ],
     )
     with pytest.raises(ValueError):
-        get_batch_lead_times_microseconds(init_times, batch_times)
+        get_batch_lead_time_microseconds(init_times, batch_time)
 
 
-def test_get_batch_lead_times_microseconds_inconsistent_samples():
+def test_get_batch_lead_time_microseconds_inconsistent_samples():
     init_times = np.array(
         [cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0) for _ in range(2)]
     )
-    batch_times = np.array(
+    batch_time = np.array(
         [
             xr.cftime_range(
                 cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0),
@@ -596,7 +596,7 @@ def test_get_batch_lead_times_microseconds_inconsistent_samples():
         ]
     )
     with pytest.raises(ValueError):
-        get_batch_lead_times_microseconds(init_times, batch_times)
+        get_batch_lead_time_microseconds(init_times, batch_time)
 
 
 @pytest.mark.parametrize(
@@ -607,17 +607,17 @@ def test_get_batch_lead_times_microseconds_inconsistent_samples():
         pytest.param(1e6, True, id="1_000_000_years_fails"),
     ],
 )
-def test_get_batch_lead_times_microseconds_overflow(years_ahead, overflow):
+def test_get_batch_lead_time_microseconds_overflow(years_ahead, overflow):
     init_times = np.array([cftime.DatetimeNoLeap(2020, 1, 1)])
-    batch_times = np.array([cftime.DatetimeNoLeap(2020 + years_ahead, 1, 1)])[:, None]
+    batch_time = np.array([cftime.DatetimeNoLeap(2020 + years_ahead, 1, 1)])[:, None]
     days_per_year_noleap = 365
     seconds_per_day = 86400
     expected_lead_time_microseconds = (
         MICROSECONDS_PER_SECOND * seconds_per_day * days_per_year_noleap * years_ahead
     )
     if not overflow:
-        lead_time = get_batch_lead_times_microseconds(init_times, batch_times)
+        lead_time = get_batch_lead_time_microseconds(init_times, batch_time)
         assert lead_time.item() == expected_lead_time_microseconds
     else:
         with pytest.raises(OverflowError):
-            get_batch_lead_times_microseconds(init_times, batch_times)
+            get_batch_lead_time_microseconds(init_times, batch_time)

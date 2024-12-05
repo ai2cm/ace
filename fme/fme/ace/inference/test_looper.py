@@ -9,17 +9,9 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.inference.loop import (
-    Looper,
-    get_record_to_wandb,
-    run_inference,
-)
+from fme.ace.inference.loop import Looper, get_record_to_wandb, run_inference
 from fme.ace.inference.timing import GlobalTimer
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    PairedData,
-    PrognosticState,
-)
+from fme.core.data_loading.batch_data import BatchData, PrognosticState
 from fme.core.data_loading.data_typing import (
     HybridSigmaPressureCoordinate,
     LatLonOperations,
@@ -90,7 +82,7 @@ class MockLoader(torch.utils.data.DataLoader):
             self._current_window += 1
             return BatchData.new_on_device(
                 data=self._data,
-                times=self._time
+                time=self._time
                 + (self._current_window - 1) * (self._time.shape[1] - 1),
             )
         else:
@@ -148,7 +140,7 @@ def test_looper():
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
-        times=time[:, 0:1],
+        time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
@@ -172,7 +164,7 @@ def test_looper_paired():
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
-        times=time[:, 0:1],
+        time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
@@ -210,7 +202,7 @@ def test_looper_paired_with_derived_variables():
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         {n: spherical_data.data[n][:, :1] for n in spherical_data.data},
-        times=time[:, 0:1],
+        time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
@@ -233,7 +225,7 @@ def test_looper_paired_with_target_data():
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
-        times=time[:, 0:1],
+        time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
@@ -259,7 +251,7 @@ def test_looper_paired_with_target_data_and_derived_variables():
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
         data={n: spherical_data.data[n][:, :1] for n in spherical_data.data},
-        times=time[:, 0:1],
+        time=time[:, 0:1],
     ).get_start(
         prognostic_names=stepper.prognostic_names,
         n_ic_timesteps=1,
@@ -289,14 +281,14 @@ def get_batch_data(
     time_axis = torch.broadcast_to(
         start_time + torch.arange(n_timesteps)[None, :], (n_samples, n_timesteps)
     )
-    times = xr.DataArray(time_axis, dims=["sample", "time"])
+    time = xr.DataArray(time_axis, dims=["sample", "time"])
     return BatchData.new_on_device(
         data={
             "var": torch.broadcast_to(
                 time_values, (n_samples, n_timesteps, n_lat, n_lon)
             )
         },
-        times=times,
+        time=time,
     )
 
 
@@ -328,7 +320,7 @@ class PlusOneStepper:
         compute_derived_variables: bool = False,
     ) -> Tuple[BatchData, PrognosticState]:
         ic_state = initial_condition.as_batch_data()
-        n_forward_steps = forcing.times.shape[1] - self.n_ic_timesteps
+        n_forward_steps = forcing.time.shape[1] - self.n_ic_timesteps
         out_tensor = torch.zeros(
             ic_state.data["var"].shape[0],
             n_forward_steps,
@@ -341,7 +333,7 @@ class PlusOneStepper:
             out_tensor[:, i, ...] = out_tensor[:, i - 1, ...] + 1
         data = BatchData.new_on_device(
             data={"var": out_tensor},
-            times=forcing.times[:, self.n_ic_timesteps :],
+            time=forcing.time[:, self.n_ic_timesteps :],
         )
         if compute_derived_variables:
             data = data.compute_derived_variables(
@@ -392,7 +384,7 @@ def test_looper_simple_batch_data():
                 data=SimpleInferenceData(initial_condition, loader),
             )
             for i, batch in enumerate(looper):
-                for j in range(batch.times.shape[1]):
+                for j in range(batch.time.shape[1]):
                     assert torch.allclose(
                         batch.data["var"][:, j, ...],
                         torch.as_tensor(n_ic_timesteps + i * n_forward_steps + j),
@@ -416,11 +408,11 @@ def get_mock_aggregator(
     i = n_ic_timesteps
 
     def record_batch_side_effect(
-        data: PairedData,
+        data: BatchData,
     ):
         nonlocal i
-        ret = [{"step": j} for j in range(i, i + data.times.shape[1])]
-        i += data.times.shape[1]
+        ret = [{"step": j} for j in range(i, i + data.time.shape[1])]
+        i += data.time.shape[1]
         return ret
 
     mock_aggregator = unittest.mock.MagicMock()
