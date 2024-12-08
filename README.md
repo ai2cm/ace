@@ -4,7 +4,11 @@
 <img src="ACE-logo.png" alt="Logo for the ACE Project" style="width: auto; height: 50px;">
 
 # Ai2 Climate Emulator
-This repo contains code accompanying "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)) and "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([JGR-ML](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136)).
+This repo contains code accompanying four papers describing ACE models:
+- ([arxiv:2310.02074](https://arxiv.org/abs/2310.02074)) "ACE: A fast, skillful learned global atmospheric model for climate prediction" 
+- ([JGR-ML:2024JH000136](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136)) "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity"
+- ([arxiv:2411.11268](https://arxiv.org/abs/2411.11268)) "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses"
+- ([arxiv:2412.04418](https://arxiv.org/abs/2412.04418)) "ACE2-SOM: Coupling to a slab ocean and learning the sensitivity of climate to changes in CO2"
 
 ## Installation
 
@@ -30,8 +34,13 @@ gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeati
 The `zarr` format is convenient for ad-hoc analysis. The netCDF version contains our
 train/validation split which was used for training and inference.
 
-The datasets used in the forthcoming ACE2 paper are available at:
+The datasets used in the [ACE2 paper](https://arxiv.org/abs/2411.11268) are available at:
 ```
 gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/c96-1deg-shield/
 gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/era5-1deg-1940-2022.zarr/
+```
+
+The dataset used in the [ACE2-SOM paper](https://arxiv.org/abs/2412.04418) is available at:
+```
+gs://ai2cm-public-requester-pays/2024-12-05-ai2-climate-emulator-v2-som/SHiELD-SOM-C96
 ```
