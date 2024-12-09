@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.core.stepper &mdash; ACE 2024.9.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                2024.9.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.core.stepper</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.core.stepper</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">from</span> <span class="nn">copy</span> <span class="kn">import</span> <span class="n">copy</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Mapping</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Tuple</span><span class="p">,</span> <span class="n">Union</span>
+
+<span class="kn">import</span> <span class="nn">dacite</span>
+<span class="kn">import</span> <span class="nn">torch</span>
+<span class="kn">from</span> <span class="nn">torch</span> <span class="kn">import</span> <span class="n">nn</span>
+
+<span class="kn">from</span> <span class="nn">fme.core.corrector</span> <span class="kn">import</span> <span class="n">CorrectorConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.data_typing</span> <span class="kn">import</span> <span class="n">SigmaCoordinates</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.requirements</span> <span class="kn">import</span> <span class="n">DataRequirements</span>
+<span class="kn">from</span> <span class="nn">fme.core.data_loading.utils</span> <span class="kn">import</span> <span class="n">decode_timestep</span><span class="p">,</span> <span class="n">encode_timestep</span>
+<span class="kn">from</span> <span class="nn">fme.core.device</span> <span class="kn">import</span> <span class="n">get_device</span>
+<span class="kn">from</span> <span class="nn">fme.core.distributed</span> <span class="kn">import</span> <span class="n">Distributed</span>
+<span class="kn">from</span> <span class="nn">fme.core.loss</span> <span class="kn">import</span> <span class="n">WeightedMappingLossConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.normalizer</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">FromStateNormalizer</span><span class="p">,</span>
+    <span class="n">NormalizationConfig</span><span class="p">,</span>
+    <span class="n">StandardNormalizer</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span> <span class="nn">fme.core.ocean</span> <span class="kn">import</span> <span class="n">Ocean</span><span class="p">,</span> <span class="n">OceanConfig</span>
+<span class="kn">from</span> <span class="nn">fme.core.packer</span> <span class="kn">import</span> <span class="n">Packer</span>
+<span class="kn">from</span> <span class="nn">fme.core.registry</span> <span class="kn">import</span> <span class="n">ModuleSelector</span>
+
+<span class="kn">from</span> <span class="nn">.optimization</span> <span class="kn">import</span> <span class="n">NullOptimization</span><span class="p">,</span> <span class="n">Optimization</span>
+<span class="kn">from</span> <span class="nn">.parameter_init</span> <span class="kn">import</span> <span class="n">ParameterInitializationConfig</span>
+<span class="kn">from</span> <span class="nn">.typing_</span> <span class="kn">import</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">TensorMapping</span>
+
+<span class="n">DEFAULT_TIMESTEP</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="mi">6</span><span class="p">)</span>
+<span class="n">DEFAULT_ENCODED_TIMESTEP</span> <span class="o">=</span> <span class="n">encode_timestep</span><span class="p">(</span><span class="n">DEFAULT_TIMESTEP</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="SingleModuleStepperConfig"><a class="viewcode-back" href="../../../training_config.html#fme.ace.SingleModuleStepperConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">SingleModuleStepperConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for a single module stepper.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        builder: The module builder.</span>
+<span class="sd">        in_names: Names of input variables.</span>
+<span class="sd">        out_names: Names of output variables.</span>
+<span class="sd">        normalization: The normalization configuration.</span>
+<span class="sd">        parameter_init: The parameter initialization configuration.</span>
+<span class="sd">        ocean: The ocean configuration.</span>
+<span class="sd">        loss: The loss configuration.</span>
+<span class="sd">        corrector: The corrector configuration.</span>
+<span class="sd">        next_step_forcing_names: Names of forcing variables for the next timestep.</span>
+<span class="sd">        loss_normalization: The normalization configuration for the loss.</span>
+<span class="sd">        residual_normalization: Optional alternative to configure loss normalization.</span>
+<span class="sd">            If provided, it will be used for all *prognostic* variables in loss scaling.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">builder</span><span class="p">:</span> <span class="n">ModuleSelector</span>
+    <span class="n">in_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">out_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span>
+    <span class="n">normalization</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">NormalizationConfig</span><span class="p">,</span> <span class="n">FromStateNormalizer</span><span class="p">]</span>
+    <span class="n">parameter_init</span><span class="p">:</span> <span class="n">ParameterInitializationConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">ParameterInitializationConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">ocean</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">OceanConfig</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">loss</span><span class="p">:</span> <span class="n">WeightedMappingLossConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">WeightedMappingLossConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">corrector</span><span class="p">:</span> <span class="n">CorrectorConfig</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span>
+        <span class="n">default_factory</span><span class="o">=</span><span class="k">lambda</span><span class="p">:</span> <span class="n">CorrectorConfig</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">next_step_forcing_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">field</span><span class="p">(</span><span class="n">default_factory</span><span class="o">=</span><span class="nb">list</span><span class="p">)</span>
+    <span class="n">loss_normalization</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Union</span><span class="p">[</span><span class="n">NormalizationConfig</span><span class="p">,</span> <span class="n">FromStateNormalizer</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="n">residual_normalization</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span>
+        <span class="n">Union</span><span class="p">[</span><span class="n">NormalizationConfig</span><span class="p">,</span> <span class="n">FromStateNormalizer</span><span class="p">]</span>
+    <span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">__post_init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">next_step_forcing_names</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;next_step_forcing_name &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; not in in_names: </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+            <span class="k">if</span> <span class="n">name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">out_names</span><span class="p">:</span>
+                <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;next_step_forcing_name is an output variable: &#39;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39;&quot;</span>
+                <span class="p">)</span>
+        <span class="k">if</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">residual_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+        <span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;Only one of residual_normalization, loss_normalization can &quot;</span>
+                <span class="s2">&quot;be provided.&quot;</span>
+                <span class="s2">&quot;If residual_normalization is provided, it will be used for all &quot;</span>
+                <span class="s2">&quot;*prognostic* variables in loss scalng. &quot;</span>
+                <span class="s2">&quot;If loss_normalization is provided, it will be used for all variables &quot;</span>
+                <span class="s2">&quot;in loss scaling.&quot;</span>
+            <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">DataRequirements</span><span class="p">(</span>
+            <span class="n">names</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">all_names</span><span class="p">,</span>
+            <span class="n">n_timesteps</span><span class="o">=</span><span class="n">n_forward_steps</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_forcing_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">forcing_names</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">forcing_names</span><span class="p">)</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="o">.</span><span class="n">forcing_names</span><span class="p">))</span>
+
+        <span class="k">return</span> <span class="n">DataRequirements</span><span class="p">(</span><span class="n">names</span><span class="o">=</span><span class="n">names</span><span class="p">,</span> <span class="n">n_timesteps</span><span class="o">=</span><span class="n">n_forward_steps</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_state</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">dataclasses</span><span class="o">.</span><span class="n">asdict</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+
+<div class="viewcode-block" id="SingleModuleStepperConfig.get_base_weights"><a class="viewcode-back" href="../../../api.html#fme.ace.SingleModuleStepperConfig.get_base_weights">[docs]</a>    <span class="k">def</span> <span class="nf">get_base_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        If the model is being initialized from another model&#39;s weights for fine-tuning,</span>
+<span class="sd">        returns those weights. Otherwise, returns None.</span>
+
+<span class="sd">        The list mirrors the order of `modules` in the `SingleModuleStepper` class.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">base_weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">parameter_init</span><span class="o">.</span><span class="n">get_base_weights</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">base_weights</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[</span><span class="n">base_weights</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">None</span></div>
+
+    <span class="k">def</span> <span class="nf">get_stepper</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">img_shape</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+        <span class="n">area</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">],</span>
+        <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+        <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+    <span class="p">):</span>
+        <span class="k">return</span> <span class="n">SingleModuleStepper</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span>
+            <span class="n">img_shape</span><span class="o">=</span><span class="n">img_shape</span><span class="p">,</span>
+            <span class="n">area</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+            <span class="n">timestep</span><span class="o">=</span><span class="n">timestep</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">from_state</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">state</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SingleModuleStepperConfig&quot;</span><span class="p">:</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="bp">cls</span><span class="o">.</span><span class="n">remove_deprecated_keys</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">dacite</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span>
+            <span class="n">data_class</span><span class="o">=</span><span class="bp">cls</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">state</span><span class="p">,</span> <span class="n">config</span><span class="o">=</span><span class="n">dacite</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span><span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">all_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Names of all variables required, including auxiliary ones.&quot;&quot;&quot;</span>
+        <span class="n">extra_names</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">extra_names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="o">.</span><span class="n">forcing_names</span><span class="p">)</span>
+        <span class="n">all_names</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="p">)</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">out_names</span><span class="p">)</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="n">extra_names</span><span class="p">))</span>
+        <span class="k">return</span> <span class="n">all_names</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">normalize_names</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Names of variables which require normalization. I.e. inputs/outputs.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="p">)</span><span class="o">.</span><span class="n">union</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">out_names</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">forcing_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Names of variables which are inputs only.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="p">)</span> <span class="o">-</span> <span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">out_names</span><span class="p">))</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">prognostic_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Names of variables which both inputs and outputs.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">out_names</span><span class="p">)</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">in_names</span><span class="p">))</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">remove_deprecated_keys</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">state</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="n">_unsupported_key_defaults</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;conserve_dry_air&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+            <span class="s2">&quot;optimization&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;conservation_loss&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;dry_air_penalty&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">},</span>
+        <span class="p">}</span>
+        <span class="n">state_copy</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">default</span> <span class="ow">in</span> <span class="n">_unsupported_key_defaults</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">key</span> <span class="ow">in</span> <span class="n">state_copy</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">state_copy</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">==</span> <span class="n">default</span> <span class="ow">or</span> <span class="n">state_copy</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">del</span> <span class="n">state_copy</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                        <span class="sa">f</span><span class="s2">&quot;The stepper config option </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2"> is deprecated and the setting&quot;</span>
+                        <span class="sa">f</span><span class="s2">&quot; provided, </span><span class="si">{</span><span class="n">state_copy</span><span class="p">[</span><span class="n">key</span><span class="p">]</span><span class="si">}</span><span class="s2">, is no longer implemented. The &quot;</span>
+                        <span class="s2">&quot;SingleModuleStepper being loaded from state cannot be run by &quot;</span>
+                        <span class="s2">&quot;this version of the code.&quot;</span>
+                    <span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;prescriber&quot;</span> <span class="ow">in</span> <span class="n">state_copy</span><span class="p">:</span>
+            <span class="c1"># want to maintain backwards compatibility for this particular feature</span>
+            <span class="k">if</span> <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;prescriber&quot;</span><span class="p">]</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">state_copy</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;ocean&quot;</span><span class="p">)</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Cannot specify both prescriber and ocean.&quot;</span><span class="p">)</span>
+                <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;ocean&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s2">&quot;surface_temperature_name&quot;</span><span class="p">:</span> <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;prescriber&quot;</span><span class="p">][</span>
+                        <span class="s2">&quot;prescribed_name&quot;</span>
+                    <span class="p">],</span>
+                    <span class="s2">&quot;ocean_fraction_name&quot;</span><span class="p">:</span> <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;prescriber&quot;</span><span class="p">][</span><span class="s2">&quot;mask_name&quot;</span><span class="p">],</span>
+                    <span class="s2">&quot;interpolate&quot;</span><span class="p">:</span> <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;prescriber&quot;</span><span class="p">][</span><span class="s2">&quot;interpolate&quot;</span><span class="p">],</span>
+                <span class="p">}</span>
+            <span class="k">del</span> <span class="n">state_copy</span><span class="p">[</span><span class="s2">&quot;prescriber&quot;</span><span class="p">]</span>
+        <span class="k">return</span> <span class="n">state_copy</span></div>
+
+
+<div class="viewcode-block" id="ExistingStepperConfig"><a class="viewcode-back" href="../../../training_config.html#fme.ace.ExistingStepperConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">ExistingStepperConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for an existing stepper. This is only designed to point to</span>
+<span class="sd">    a serialized stepper checkpoint for loading, e.g., in the case of training</span>
+<span class="sd">    resumption.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        checkpoint_path: The path to the serialized checkpoint.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">checkpoint_path</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="k">def</span> <span class="nf">_load_checkpoint</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="n">torch</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">checkpoint_path</span><span class="p">,</span> <span class="n">map_location</span><span class="o">=</span><span class="n">get_device</span><span class="p">())</span>
+
+    <span class="k">def</span> <span class="nf">get_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">SingleModuleStepperConfig</span><span class="o">.</span><span class="n">from_state</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_load_checkpoint</span><span class="p">()[</span><span class="s2">&quot;stepper&quot;</span><span class="p">][</span><span class="s2">&quot;config&quot;</span><span class="p">]</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">get_data_requirements</span><span class="p">(</span><span class="n">n_forward_steps</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_base_weights</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">List</span><span class="p">[</span><span class="n">Mapping</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]]:</span>
+        <span class="k">return</span> <span class="n">SingleModuleStepperConfig</span><span class="o">.</span><span class="n">from_state</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_load_checkpoint</span><span class="p">()[</span><span class="s2">&quot;stepper&quot;</span><span class="p">][</span><span class="s2">&quot;config&quot;</span><span class="p">]</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">get_base_weights</span><span class="p">()</span>
+
+    <span class="k">def</span> <span class="nf">get_stepper</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">img_shape</span><span class="p">,</span> <span class="n">area</span><span class="p">,</span> <span class="n">sigma_coordinates</span><span class="p">,</span> <span class="n">timestep</span><span class="p">):</span>
+        <span class="k">del</span> <span class="n">img_shape</span>  <span class="c1"># unused</span>
+        <span class="k">return</span> <span class="n">SingleModuleStepper</span><span class="o">.</span><span class="n">from_state</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_load_checkpoint</span><span class="p">()[</span><span class="s2">&quot;stepper&quot;</span><span class="p">],</span>
+            <span class="n">area</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<span class="k">def</span> <span class="nf">_combine_normalizers</span><span class="p">(</span>
+    <span class="n">residual_normalizer</span><span class="p">:</span> <span class="n">StandardNormalizer</span><span class="p">,</span>
+    <span class="n">model_normalizer</span><span class="p">:</span> <span class="n">StandardNormalizer</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">StandardNormalizer</span><span class="p">:</span>
+    <span class="c1"># Combine residual and model normalizers by overwriting the model normalizer</span>
+    <span class="c1"># values that are present in residual normalizer. The residual normalizer</span>
+    <span class="c1"># is assumed to have a subset of prognostic keys only.</span>
+    <span class="n">means</span><span class="p">,</span> <span class="n">stds</span> <span class="o">=</span> <span class="n">copy</span><span class="p">(</span><span class="n">model_normalizer</span><span class="o">.</span><span class="n">means</span><span class="p">),</span> <span class="n">copy</span><span class="p">(</span><span class="n">model_normalizer</span><span class="o">.</span><span class="n">stds</span><span class="p">)</span>
+    <span class="n">means</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">residual_normalizer</span><span class="o">.</span><span class="n">means</span><span class="p">)</span>
+    <span class="n">stds</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">residual_normalizer</span><span class="o">.</span><span class="n">stds</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">StandardNormalizer</span><span class="p">(</span><span class="n">means</span><span class="o">=</span><span class="n">means</span><span class="p">,</span> <span class="n">stds</span><span class="o">=</span><span class="n">stds</span><span class="p">)</span>
+
+
+<span class="k">def</span> <span class="nf">_cast_tensordict</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">dtype</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">torch</span><span class="o">.</span><span class="n">dtype</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+    <span class="n">device</span> <span class="o">=</span> <span class="n">get_device</span><span class="p">()</span>
+    <span class="k">return</span> <span class="p">{</span><span class="n">name</span><span class="p">:</span> <span class="n">value</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">device</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">dtype</span><span class="p">)</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+
+
+<span class="k">def</span> <span class="nf">_prepend_timestep</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">timestep</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">time_dim</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="n">k</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">cat</span><span class="p">([</span><span class="n">timestep</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">unsqueeze</span><span class="p">(</span><span class="n">time_dim</span><span class="p">),</span> <span class="n">v</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="n">time_dim</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+    <span class="p">}</span>
+
+
+<span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">SteppedData</span><span class="p">:</span>
+    <span class="n">metrics</span><span class="p">:</span> <span class="n">TensorDict</span>
+    <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorDict</span>
+    <span class="n">target_data</span><span class="p">:</span> <span class="n">TensorDict</span>
+    <span class="n">gen_data_norm</span><span class="p">:</span> <span class="n">TensorDict</span>
+    <span class="n">target_data_norm</span><span class="p">:</span> <span class="n">TensorDict</span>
+
+    <span class="k">def</span> <span class="nf">remove_initial_condition</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SteppedData&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">SteppedData</span><span class="p">(</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">,</span>
+            <span class="n">gen_data</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gen_data</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">target_data</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">target_data</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">gen_data_norm</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gen_data_norm</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">target_data_norm</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="p">[:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">target_data_norm</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">copy</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SteppedData&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Creates new dictionaries for the data but with the same tensors.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">SteppedData</span><span class="p">(</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">,</span>
+            <span class="n">gen_data</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gen_data</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">target_data</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">target_data</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">gen_data_norm</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">gen_data_norm</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+            <span class="n">target_data_norm</span><span class="o">=</span><span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">target_data_norm</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">prepend_initial_condition</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">initial_condition</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span>
+        <span class="n">normalized_initial_condition</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SteppedData&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Prepends an initial condition to the existing stepped data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">initial_condition</span> <span class="o">=</span> <span class="n">_cast_tensordict</span><span class="p">(</span><span class="n">initial_condition</span><span class="p">)</span>
+        <span class="n">normalized_initial_condition</span> <span class="o">=</span> <span class="n">_cast_tensordict</span><span class="p">(</span><span class="n">normalized_initial_condition</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">SteppedData</span><span class="p">(</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">metrics</span><span class="p">,</span>
+            <span class="n">gen_data</span><span class="o">=</span><span class="n">_prepend_timestep</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">gen_data</span><span class="p">,</span> <span class="n">initial_condition</span><span class="p">),</span>
+            <span class="n">target_data</span><span class="o">=</span><span class="n">_prepend_timestep</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">target_data</span><span class="p">,</span> <span class="n">initial_condition</span><span class="p">),</span>
+            <span class="n">gen_data_norm</span><span class="o">=</span><span class="n">_prepend_timestep</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">gen_data_norm</span><span class="p">,</span> <span class="n">normalized_initial_condition</span>
+            <span class="p">),</span>
+            <span class="n">target_data_norm</span><span class="o">=</span><span class="n">_prepend_timestep</span><span class="p">(</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">target_data_norm</span><span class="p">,</span> <span class="n">normalized_initial_condition</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+
+
+<span class="k">class</span> <span class="nc">SingleModuleStepper</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Stepper class for a single pytorch module.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">TIME_DIM</span> <span class="o">=</span> <span class="mi">1</span>
+    <span class="n">CHANNEL_DIM</span> <span class="o">=</span> <span class="o">-</span><span class="mi">3</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">config</span><span class="p">:</span> <span class="n">SingleModuleStepperConfig</span><span class="p">,</span>
+        <span class="n">img_shape</span><span class="p">:</span> <span class="n">Tuple</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="nb">int</span><span class="p">],</span>
+        <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+        <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+        <span class="n">init_weights</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            config: The configuration.</span>
+<span class="sd">            img_shape: Shape of domain as (n_lat, n_lon).</span>
+<span class="sd">            area: (n_lat, n_lon) array containing relative gridcell area,</span>
+<span class="sd">                in any units including unitless.</span>
+<span class="sd">            sigma_coordinates: The sigma coordinates.</span>
+<span class="sd">            timestep: Timestep of the model.</span>
+<span class="sd">            init_weights: Whether to initialize the weights. Should pass False if</span>
+<span class="sd">                the weights are about to be overwritten by a checkpoint.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">n_in_channels</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">in_names</span><span class="p">)</span>
+        <span class="n">n_out_channels</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">out_names</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">in_packer</span> <span class="o">=</span> <span class="n">Packer</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">in_names</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">out_packer</span> <span class="o">=</span> <span class="n">Packer</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">out_names</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">normalization</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">normalize_names</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Ocean</span><span class="p">]</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">ocean</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+                <span class="n">config</span><span class="o">.</span><span class="n">in_names</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">out_names</span><span class="p">,</span> <span class="n">timestep</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="o">=</span> <span class="kc">None</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">module</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">builder</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+            <span class="n">n_in_channels</span><span class="o">=</span><span class="n">n_in_channels</span><span class="p">,</span>
+            <span class="n">n_out_channels</span><span class="o">=</span><span class="n">n_out_channels</span><span class="p">,</span>
+            <span class="n">img_shape</span><span class="o">=</span><span class="n">img_shape</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">module</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">_l2_sp_tuning_regularizer</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">parameter_init</span><span class="o">.</span><span class="n">apply</span><span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="p">,</span> <span class="n">init_weights</span><span class="o">=</span><span class="n">init_weights</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">module</span> <span class="o">=</span> <span class="n">module</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">get_device</span><span class="p">())</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_img_shape</span> <span class="o">=</span> <span class="n">img_shape</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_config</span> <span class="o">=</span> <span class="n">config</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_no_optimization</span> <span class="o">=</span> <span class="n">NullOptimization</span><span class="p">()</span>
+
+        <span class="n">dist</span> <span class="o">=</span> <span class="n">Distributed</span><span class="o">.</span><span class="n">get_instance</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_is_distributed</span> <span class="o">=</span> <span class="n">dist</span><span class="o">.</span><span class="n">is_distributed</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">module</span> <span class="o">=</span> <span class="n">dist</span><span class="o">.</span><span class="n">wrap_module</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">area</span> <span class="o">=</span> <span class="n">area</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">get_device</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">sigma_coordinates</span> <span class="o">=</span> <span class="n">sigma_coordinates</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">get_device</span><span class="p">())</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timestep</span> <span class="o">=</span> <span class="n">timestep</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">loss_obj</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">loss</span><span class="o">.</span><span class="n">build</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">area</span><span class="p">,</span> <span class="n">config</span><span class="o">.</span><span class="n">out_names</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">CHANNEL_DIM</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">_corrector</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">corrector</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+            <span class="n">area</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+            <span class="n">timestep</span><span class="o">=</span><span class="n">timestep</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">loss_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">loss_normalization</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+                <span class="n">names</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">normalize_names</span>
+            <span class="p">)</span>
+        <span class="k">elif</span> <span class="n">config</span><span class="o">.</span><span class="n">residual_normalization</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># Use residual norm for prognostic variables and input/output</span>
+            <span class="c1"># normalizer for diagnostic variables in loss</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span> <span class="o">=</span> <span class="n">_combine_normalizers</span><span class="p">(</span>
+                <span class="n">residual_normalizer</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">residual_normalization</span><span class="o">.</span><span class="n">build</span><span class="p">(</span>
+                    <span class="n">config</span><span class="o">.</span><span class="n">prognostic_names</span>
+                <span class="p">),</span>
+                <span class="n">model_normalizer</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span>
+
+    <span class="k">def</span> <span class="nf">get_data_requirements</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">DataRequirements</span><span class="p">:</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">get_data_requirements</span><span class="p">(</span><span class="n">n_forward_steps</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">effective_loss_scaling</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorMapping</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Effective loss scalings used to normalize outputs before computing loss.</span>
+<span class="sd">        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i</span>
+<span class="sd">        where loss_scaling_i = loss_normalizer_std_i / weight_i</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">custom_weights</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">loss</span><span class="o">.</span><span class="n">weights</span>
+        <span class="n">loss_normalizer_stds</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span><span class="o">.</span><span class="n">stds</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">loss_normalizer_stds</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="o">/</span> <span class="n">custom_weights</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">k</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">out_names</span>
+        <span class="p">}</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">prognostic_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="nb">sorted</span><span class="p">(</span>
+            <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">out_packer</span><span class="o">.</span><span class="n">names</span><span class="p">)</span><span class="o">.</span><span class="n">intersection</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">in_packer</span><span class="o">.</span><span class="n">names</span><span class="p">))</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">modules</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">nn</span><span class="o">.</span><span class="n">ModuleList</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            A list of modules being trained.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">nn</span><span class="o">.</span><span class="n">ModuleList</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="p">])</span>
+
+    <span class="k">def</span> <span class="nf">step</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="nb">input</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">ocean_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Step the model forward one timestep given input data.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            input: Mapping from variable name to tensor of shape</span>
+<span class="sd">                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`</span>
+<span class="sd">                and is assumed to contain all input variables and be denormalized.</span>
+<span class="sd">            ocean_data: Mapping from variable name to tensor of shape</span>
+<span class="sd">                [n_batch, n_lat, n_lon]. This must contain the necessary data at the</span>
+<span class="sd">                output timestep for the ocean model (e.g. surface temperature,</span>
+<span class="sd">                mixed-layer depth etc.).</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The denormalized output data at the next time step.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">input_norm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="nb">input</span><span class="p">)</span>
+        <span class="n">input_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">in_packer</span><span class="o">.</span><span class="n">pack</span><span class="p">(</span><span class="n">input_norm</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">CHANNEL_DIM</span><span class="p">)</span>
+        <span class="n">output_tensor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="p">(</span><span class="n">input_tensor</span><span class="p">)</span>
+        <span class="n">output_norm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">out_packer</span><span class="o">.</span><span class="n">unpack</span><span class="p">(</span><span class="n">output_tensor</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">CHANNEL_DIM</span><span class="p">)</span>
+        <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">denormalize</span><span class="p">(</span><span class="n">output_norm</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_corrector</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_corrector</span><span class="p">(</span><span class="nb">input</span><span class="p">,</span> <span class="n">output</span><span class="p">)</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="p">(</span><span class="n">ocean_data</span><span class="p">,</span> <span class="nb">input</span><span class="p">,</span> <span class="n">output</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">output</span>
+
+    <span class="k">def</span> <span class="nf">predict</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">initial_condition</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">forcing_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Predict multiple steps forward given initial condition and forcing data.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            initial_condition: Mapping from variable name to tensors of shape</span>
+<span class="sd">                [n_batch, n_lat, n_lon]. This data is assumed to contain all prognostic</span>
+<span class="sd">                variables and be denormalized.</span>
+<span class="sd">            forcing_data: Mapping from variable name to tensors of shape</span>
+<span class="sd">                [n_batch, n_forward_steps + 1, n_lat, n_lon]. This contains the forcing</span>
+<span class="sd">                and ocean data for the initial condition and all subsequent timesteps.</span>
+<span class="sd">            n_forward_steps: The number of timesteps to run the model forward for.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The denormalized output data for all the forward timesteps. Shape of</span>
+<span class="sd">            each tensor will be [n_batch, n_forward_steps, n_lat, n_lon].</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">output_list</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">state</span> <span class="o">=</span> <span class="n">initial_condition</span>
+        <span class="n">forcing_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">forcing_names</span>
+        <span class="n">ocean_forcing_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="o">.</span><span class="n">forcing_names</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_forward_steps</span><span class="p">):</span>
+            <span class="n">current_step_forcing</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">k</span><span class="p">:</span> <span class="p">(</span>
+                    <span class="n">forcing_data</span><span class="p">[</span><span class="n">k</span><span class="p">][:,</span> <span class="n">step</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="n">k</span> <span class="ow">not</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">next_step_forcing_names</span>
+                    <span class="k">else</span> <span class="n">forcing_data</span><span class="p">[</span><span class="n">k</span><span class="p">][:,</span> <span class="n">step</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span>
+                <span class="p">)</span>
+                <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">forcing_names</span>
+            <span class="p">}</span>
+            <span class="n">next_step_ocean_data</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="n">k</span><span class="p">:</span> <span class="n">forcing_data</span><span class="p">[</span><span class="n">k</span><span class="p">][:,</span> <span class="n">step</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">ocean_forcing_names</span>
+            <span class="p">}</span>
+            <span class="n">input_data</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">,</span> <span class="o">**</span><span class="n">current_step_forcing</span><span class="p">}</span>
+            <span class="n">state</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">step</span><span class="p">(</span><span class="n">input_data</span><span class="p">,</span> <span class="n">next_step_ocean_data</span><span class="p">)</span>
+            <span class="n">output_list</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+        <span class="n">output_timeseries</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">state</span><span class="p">:</span>
+            <span class="n">output_timeseries</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">stack</span><span class="p">(</span>
+                <span class="p">[</span><span class="n">x</span><span class="p">[</span><span class="n">name</span><span class="p">]</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">output_list</span><span class="p">],</span> <span class="n">dim</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">TIME_DIM</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">output_timeseries</span>
+
+    <span class="k">def</span> <span class="nf">get_initial_condition</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Tuple</span><span class="p">[</span><span class="n">TensorDict</span><span class="p">,</span> <span class="n">TensorDict</span><span class="p">]:</span>
+        <span class="n">ic</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">TIME_DIM</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+        <span class="k">return</span> <span class="n">ic</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">ic</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">run_on_batch</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">data</span><span class="p">:</span> <span class="n">TensorDict</span><span class="p">,</span>
+        <span class="n">optimization</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="n">Optimization</span><span class="p">,</span> <span class="n">NullOptimization</span><span class="p">],</span>
+        <span class="n">n_forward_steps</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">SteppedData</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Step the model forward multiple steps on a batch of data.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            data: The batch data where each tensor has shape</span>
+<span class="sd">                [n_sample, n_forward_steps + 1, n_lat, n_lon].</span>
+<span class="sd">            optimization: The optimization class to use for updating the module.</span>
+<span class="sd">                Use `NullOptimization` to disable training.</span>
+<span class="sd">            n_forward_steps: The number of timesteps to run the model for.</span>
+<span class="sd">            aggregator: The data aggregator.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The loss metrics, the generated data, the normalized generated data,</span>
+<span class="sd">                and the normalized batch data.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="n">_cast_tensordict</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">torch</span><span class="o">.</span><span class="n">float</span><span class="p">)</span>
+        <span class="n">time_dim</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">TIME_DIM</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">forcing_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">forcing_names</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">forcing_names</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">forcing_names</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">ocean</span><span class="o">.</span><span class="n">forcing_names</span>
+        <span class="n">forcing_data</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="n">k</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">forcing_names</span><span class="p">}</span>
+
+        <span class="n">loss</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">tensor</span><span class="p">(</span><span class="mf">0.0</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="n">get_device</span><span class="p">())</span>
+        <span class="n">metrics</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="n">input_data</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="n">k</span><span class="p">]</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">time_dim</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">prognostic_names</span>
+        <span class="p">}</span>
+        <span class="c1"># Remove the initial condition from target data</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">data</span><span class="p">[</span><span class="n">k</span><span class="p">][:,</span> <span class="mi">1</span><span class="p">:]</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">data</span><span class="p">}</span>
+
+        <span class="n">optimization</span><span class="o">.</span><span class="n">set_mode</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="p">)</span>
+        <span class="k">with</span> <span class="n">optimization</span><span class="o">.</span><span class="n">autocast</span><span class="p">():</span>
+            <span class="c1"># output from self.predict does not include initial condition</span>
+            <span class="n">gen_data</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">input_data</span><span class="p">,</span> <span class="n">forcing_data</span><span class="p">,</span> <span class="n">n_forward_steps</span><span class="p">)</span>
+
+            <span class="c1"># compute loss for each timestep</span>
+            <span class="k">for</span> <span class="n">step</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_forward_steps</span><span class="p">):</span>
+                <span class="n">gen_step</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">time_dim</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">gen_data</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+                <span class="n">target_step</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span><span class="o">.</span><span class="n">select</span><span class="p">(</span><span class="n">time_dim</span><span class="p">,</span> <span class="n">step</span><span class="p">)</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">data</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+                <span class="n">gen_norm_step</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">gen_step</span><span class="p">)</span>
+                <span class="n">target_norm_step</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">target_step</span><span class="p">)</span>
+
+                <span class="n">step_loss</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_obj</span><span class="p">(</span><span class="n">gen_norm_step</span><span class="p">,</span> <span class="n">target_norm_step</span><span class="p">)</span>
+                <span class="n">loss</span> <span class="o">+=</span> <span class="n">step_loss</span>
+                <span class="n">metrics</span><span class="p">[</span><span class="sa">f</span><span class="s2">&quot;loss_step_</span><span class="si">{</span><span class="n">step</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">step_loss</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+
+        <span class="n">loss</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_l2_sp_tuning_regularizer</span><span class="p">()</span>
+
+        <span class="n">metrics</span><span class="p">[</span><span class="s2">&quot;loss&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">loss</span><span class="o">.</span><span class="n">detach</span><span class="p">()</span>
+        <span class="n">optimization</span><span class="o">.</span><span class="n">step_weights</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span>
+
+        <span class="n">gen_data_norm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">gen_data</span><span class="p">)</span>
+        <span class="n">full_data_norm</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">normalize</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">SteppedData</span><span class="p">(</span>
+            <span class="n">metrics</span><span class="o">=</span><span class="n">metrics</span><span class="p">,</span>
+            <span class="n">gen_data</span><span class="o">=</span><span class="n">gen_data</span><span class="p">,</span>
+            <span class="n">target_data</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+            <span class="n">gen_data_norm</span><span class="o">=</span><span class="n">gen_data_norm</span><span class="p">,</span>
+            <span class="n">target_data_norm</span><span class="o">=</span><span class="n">full_data_norm</span><span class="p">,</span>
+        <span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_state</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Returns:</span>
+<span class="sd">            The state of the stepper.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;module&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="o">.</span><span class="n">state_dict</span><span class="p">(),</span>
+            <span class="s2">&quot;normalizer&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">normalizer</span><span class="o">.</span><span class="n">get_state</span><span class="p">(),</span>
+            <span class="s2">&quot;img_shape&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_img_shape</span><span class="p">,</span>
+            <span class="s2">&quot;config&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_config</span><span class="o">.</span><span class="n">get_state</span><span class="p">(),</span>
+            <span class="s2">&quot;area&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">area</span><span class="p">,</span>
+            <span class="s2">&quot;sigma_coordinates&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">sigma_coordinates</span><span class="o">.</span><span class="n">as_dict</span><span class="p">(),</span>
+            <span class="s2">&quot;encoded_timestep&quot;</span><span class="p">:</span> <span class="n">encode_timestep</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">timestep</span><span class="p">),</span>
+            <span class="s2">&quot;loss_normalizer&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">loss_normalizer</span><span class="o">.</span><span class="n">get_state</span><span class="p">(),</span>
+        <span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">load_state</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">state</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Load the state of the stepper.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            state: The state to load.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="s2">&quot;module&quot;</span> <span class="ow">in</span> <span class="n">state</span><span class="p">:</span>
+            <span class="n">module</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;module&quot;</span><span class="p">]</span>
+            <span class="k">if</span> <span class="s2">&quot;module.device_buffer&quot;</span> <span class="ow">in</span> <span class="n">module</span><span class="p">:</span>
+                <span class="c1"># for backwards compatibility with old checkpoints</span>
+                <span class="k">del</span> <span class="n">module</span><span class="p">[</span><span class="s2">&quot;module.device_buffer&quot;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">module</span><span class="o">.</span><span class="n">load_state_dict</span><span class="p">(</span><span class="n">module</span><span class="p">)</span>
+
+    <span class="nd">@classmethod</span>
+    <span class="k">def</span> <span class="nf">from_state</span><span class="p">(</span>
+        <span class="bp">cls</span><span class="p">,</span>
+        <span class="n">state</span><span class="p">,</span>
+        <span class="n">area</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+        <span class="n">sigma_coordinates</span><span class="p">:</span> <span class="n">SigmaCoordinates</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;SingleModuleStepper&quot;</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Load the state of the stepper.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            state: The state to load.</span>
+<span class="sd">            area: (n_lat, n_lon) array containing relative gridcell area, in any</span>
+<span class="sd">                units including unitless.</span>
+<span class="sd">            sigma_coordinates: The sigma coordinates.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            The stepper.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="p">{</span><span class="o">**</span><span class="n">state</span><span class="p">[</span><span class="s2">&quot;config&quot;</span><span class="p">]}</span>  <span class="c1"># make a copy to avoid mutating input</span>
+        <span class="n">config</span><span class="p">[</span><span class="s2">&quot;normalization&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">FromStateNormalizer</span><span class="p">(</span><span class="n">state</span><span class="p">[</span><span class="s2">&quot;normalizer&quot;</span><span class="p">])</span>
+
+        <span class="c1"># for backwards compatibility with previous steppers created w/o</span>
+        <span class="c1"># loss_normalization or residual_normalization</span>
+        <span class="n">loss_normalizer_state</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;loss_normalizer&quot;</span><span class="p">,</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;normalizer&quot;</span><span class="p">])</span>
+        <span class="n">config</span><span class="p">[</span><span class="s2">&quot;loss_normalization&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">FromStateNormalizer</span><span class="p">(</span><span class="n">loss_normalizer_state</span><span class="p">)</span>
+        <span class="c1"># Overwrite the residual_normalization key if it exists, since the combined</span>
+        <span class="c1"># loss scalings are saved in initial training as the loss_normalization</span>
+        <span class="n">config</span><span class="p">[</span><span class="s2">&quot;residual_normalization&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="n">area</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;area&quot;</span><span class="p">,</span> <span class="n">area</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;sigma_coordinates&quot;</span> <span class="ow">in</span> <span class="n">state</span><span class="p">:</span>
+            <span class="n">sigma_coordinates</span> <span class="o">=</span> <span class="n">dacite</span><span class="o">.</span><span class="n">from_dict</span><span class="p">(</span>
+                <span class="n">data_class</span><span class="o">=</span><span class="n">SigmaCoordinates</span><span class="p">,</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">state</span><span class="p">[</span><span class="s2">&quot;sigma_coordinates&quot;</span><span class="p">],</span>
+                <span class="n">config</span><span class="o">=</span><span class="n">dacite</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span><span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
+            <span class="p">)</span>
+        <span class="n">encoded_timestep</span> <span class="o">=</span> <span class="n">state</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;encoded_timestep&quot;</span><span class="p">,</span> <span class="n">DEFAULT_ENCODED_TIMESTEP</span><span class="p">)</span>
+        <span class="n">timestep</span> <span class="o">=</span> <span class="n">decode_timestep</span><span class="p">(</span><span class="n">encoded_timestep</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;img_shape&quot;</span> <span class="ow">in</span> <span class="n">state</span><span class="p">:</span>
+            <span class="n">img_shape</span> <span class="o">=</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;img_shape&quot;</span><span class="p">]</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="c1"># this is for backwards compatibility with old checkpoints</span>
+            <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">state</span><span class="p">[</span><span class="s2">&quot;data_shapes&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+                <span class="n">img_shape</span> <span class="o">=</span> <span class="n">v</span><span class="p">[</span><span class="o">-</span><span class="mi">2</span><span class="p">:]</span>
+                <span class="k">break</span>
+        <span class="n">stepper</span> <span class="o">=</span> <span class="bp">cls</span><span class="p">(</span>
+            <span class="n">config</span><span class="o">=</span><span class="n">SingleModuleStepperConfig</span><span class="o">.</span><span class="n">from_state</span><span class="p">(</span><span class="n">config</span><span class="p">),</span>
+            <span class="n">img_shape</span><span class="o">=</span><span class="n">img_shape</span><span class="p">,</span>
+            <span class="n">area</span><span class="o">=</span><span class="n">area</span><span class="p">,</span>
+            <span class="n">sigma_coordinates</span><span class="o">=</span><span class="n">sigma_coordinates</span><span class="p">,</span>
+            <span class="n">timestep</span><span class="o">=</span><span class="n">timestep</span><span class="p">,</span>
+            <span class="c1"># don&#39;t need to initialize weights, we&#39;re about to load_state</span>
+            <span class="n">init_weights</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">stepper</span><span class="o">.</span><span class="n">load_state</span><span class="p">(</span><span class="n">state</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">stepper</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

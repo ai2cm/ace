@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>fme.core.ocean &mdash; ACE 2024.9.0 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css" />
+
+  
+  <!--[if lt IE 9]>
+    <script src="../../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+        <script src="../../../_static/jquery.js"></script>
+        <script src="../../../_static/_sphinx_javascript_frameworks_compat.js"></script>
+        <script data-url_root="../../../" id="documentation_options" src="../../../_static/documentation_options.js"></script>
+        <script src="../../../_static/doctools.js"></script>
+        <script src="../../../_static/sphinx_highlight.js"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            ACE
+          </a>
+              <div class="version">
+                2024.9.0
+              </div>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../training_config.html">Training Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../inference_config.html">Inference Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../evaluator_config.html">Evaluator Config</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../builder.html">The Builder Pattern: Modern Namelists</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../modules.html">Modules</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">ACE</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">fme.core.ocean</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for fme.core.ocean</h1><div class="highlight"><pre>
+<span></span><span class="kn">import</span> <span class="nn">dataclasses</span>
+<span class="kn">import</span> <span class="nn">datetime</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">import</span> <span class="nn">torch</span>
+
+<span class="kn">from</span> <span class="nn">fme.core.typing_</span> <span class="kn">import</span> <span class="n">TensorDict</span><span class="p">,</span> <span class="n">TensorMapping</span>
+
+<span class="kn">from</span> <span class="nn">.climate_data</span> <span class="kn">import</span> <span class="n">ClimateData</span>
+<span class="kn">from</span> <span class="nn">.constants</span> <span class="kn">import</span> <span class="n">DENSITY_OF_WATER</span><span class="p">,</span> <span class="n">SPECIFIC_HEAT_OF_WATER</span>
+<span class="kn">from</span> <span class="nn">.prescriber</span> <span class="kn">import</span> <span class="n">Prescriber</span>
+
+
+<div class="viewcode-block" id="SlabOceanConfig"><a class="viewcode-back" href="../../../api.html#fme.ace.SlabOceanConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">SlabOceanConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for a slab ocean model.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        mixed_layer_depth_name: Name of the mixed layer depth field.</span>
+<span class="sd">        q_flux_name: Name of the heat flux field.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">mixed_layer_depth_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">q_flux_name</span><span class="p">:</span> <span class="nb">str</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="k">return</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">mixed_layer_depth_name</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">q_flux_name</span><span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="OceanConfig"><a class="viewcode-back" href="../../../inference_config.html#fme.ace.OceanConfig">[docs]</a><span class="nd">@dataclasses</span><span class="o">.</span><span class="n">dataclass</span>
+<span class="k">class</span> <span class="nc">OceanConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Configuration for determining sea surface temperature from an ocean model.</span>
+
+<span class="sd">    Attributes:</span>
+<span class="sd">        surface_temperature_name: Name of the sea surface temperature field.</span>
+<span class="sd">        ocean_fraction_name: Name of the ocean fraction field.</span>
+<span class="sd">        interpolate: If True, interpolate between ML-predicted surface temperature and</span>
+<span class="sd">            ocean-predicted surface temperature according to ocean_fraction. If False,</span>
+<span class="sd">            only use ocean-predicted surface temperature where ocean_fraction&gt;=0.5.</span>
+<span class="sd">        slab: If provided, use a slab ocean model to predict surface temperature.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">surface_temperature_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">ocean_fraction_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">interpolate</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="n">slab</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SlabOceanConfig</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+
+    <span class="k">def</span> <span class="nf">build</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">in_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">out_names</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">],</span>
+        <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="s2">&quot;Ocean&quot;</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span> <span class="ow">in</span> <span class="n">in_names</span>
+            <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span> <span class="ow">in</span> <span class="n">out_names</span>
+        <span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="s2">&quot;To use a surface ocean model, the surface temperature must be present&quot;</span>
+                <span class="sa">f</span><span class="s2">&quot; in_names and out_names, but </span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="si">}</span><span class="s2"> is not.&quot;</span>
+            <span class="p">)</span>
+        <span class="k">return</span> <span class="n">Ocean</span><span class="p">(</span><span class="n">config</span><span class="o">=</span><span class="bp">self</span><span class="p">,</span> <span class="n">timestep</span><span class="o">=</span><span class="n">timestep</span><span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">forcing_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+        <span class="n">names</span> <span class="o">=</span> <span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">ocean_fraction_name</span><span class="p">]</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">slab</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">names</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">slab</span><span class="o">.</span><span class="n">names</span><span class="p">)</span>
+        <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="nb">set</span><span class="p">(</span><span class="n">names</span><span class="p">))</span></div>
+
+
+<span class="k">class</span> <span class="nc">Ocean</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Overwrite sea surface temperature with that predicted from some ocean model.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">OceanConfig</span><span class="p">,</span> <span class="n">timestep</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">timedelta</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            config: Configuration for the surface ocean model.</span>
+<span class="sd">            timestep: Timestep of the model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">surface_temperature_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ocean_fraction_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">ocean_fraction_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">prescriber</span> <span class="o">=</span> <span class="n">Prescriber</span><span class="p">(</span>
+            <span class="n">prescribed_name</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="p">,</span>
+            <span class="n">mask_name</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">ocean_fraction_name</span><span class="p">,</span>
+            <span class="n">mask_value</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span>
+            <span class="n">interpolate</span><span class="o">=</span><span class="n">config</span><span class="o">.</span><span class="n">interpolate</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_forcing_names</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">forcing_names</span>
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">slab</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="s2">&quot;prescribed&quot;</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">=</span> <span class="s2">&quot;slab&quot;</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">mixed_layer_depth_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">slab</span><span class="o">.</span><span class="n">mixed_layer_depth_name</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">q_flux_name</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">slab</span><span class="o">.</span><span class="n">q_flux_name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">timestep</span> <span class="o">=</span> <span class="n">timestep</span>
+
+    <span class="k">def</span> <span class="fm">__call__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">target_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">input_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+        <span class="n">gen_data</span><span class="p">:</span> <span class="n">TensorMapping</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">TensorDict</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Args:</span>
+<span class="sd">            target_data: Denormalized data that includes mask and forcing data. Assumed</span>
+<span class="sd">                to correspond to the same time step as gen_data.</span>
+<span class="sd">            input_data: Denormalized input data for current step.</span>
+<span class="sd">            gen_data: Denormalized output data for current step.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            gen_data with sea surface temperature overwritten by ocean model.</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;prescribed&quot;</span><span class="p">:</span>
+            <span class="n">next_step_temperature</span> <span class="o">=</span> <span class="n">target_data</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="p">]</span>
+        <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">type</span> <span class="o">==</span> <span class="s2">&quot;slab&quot;</span><span class="p">:</span>
+            <span class="n">temperature_tendency</span> <span class="o">=</span> <span class="n">mixed_layer_temperature_tendency</span><span class="p">(</span>
+                <span class="n">ClimateData</span><span class="p">(</span><span class="n">gen_data</span><span class="p">)</span><span class="o">.</span><span class="n">net_surface_energy_flux_without_frozen_precip</span><span class="p">,</span>
+                <span class="n">target_data</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">q_flux_name</span><span class="p">],</span>
+                <span class="n">target_data</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">mixed_layer_depth_name</span><span class="p">],</span>
+            <span class="p">)</span>
+            <span class="n">next_step_temperature</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">input_data</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="p">]</span>
+                <span class="o">+</span> <span class="n">temperature_tendency</span> <span class="o">*</span> <span class="bp">self</span><span class="o">.</span><span class="n">timestep</span><span class="o">.</span><span class="n">total_seconds</span><span class="p">()</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">NotImplementedError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Ocean type=</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">type</span><span class="si">}</span><span class="s2"> is not implemented&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">prescriber</span><span class="p">(</span>
+            <span class="n">target_data</span><span class="p">,</span>
+            <span class="n">gen_data</span><span class="p">,</span>
+            <span class="p">{</span><span class="bp">self</span><span class="o">.</span><span class="n">surface_temperature_name</span><span class="p">:</span> <span class="n">next_step_temperature</span><span class="p">},</span>
+        <span class="p">)</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span> <span class="nf">forcing_names</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;These are the variables required from the forcing data.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_forcing_names</span>
+
+
+<span class="k">def</span> <span class="nf">mixed_layer_temperature_tendency</span><span class="p">(</span>
+    <span class="n">f_net</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">q_flux</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">depth</span><span class="p">:</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">,</span>
+    <span class="n">density</span><span class="o">=</span><span class="n">DENSITY_OF_WATER</span><span class="p">,</span>
+    <span class="n">specific_heat</span><span class="o">=</span><span class="n">SPECIFIC_HEAT_OF_WATER</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">torch</span><span class="o">.</span><span class="n">Tensor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Args:</span>
+<span class="sd">        f_net: Net surface energy flux in W/m^2.</span>
+<span class="sd">        q_flux: Convergence of ocean heat transport in W/m^2.</span>
+<span class="sd">        depth: Mixed layer depth in m.</span>
+<span class="sd">        density (optional): Density of water in kg/m^3.</span>
+<span class="sd">        specific_heat (optional): Specific heat of water in J/kg/K.</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Temperature tendency of mixed layer in K/s.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">f_net</span> <span class="o">+</span> <span class="n">q_flux</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="n">density</span> <span class="o">*</span> <span class="n">depth</span> <span class="o">*</span> <span class="n">specific_heat</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2024, Allen Institute for Artificial Intelligence.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>
