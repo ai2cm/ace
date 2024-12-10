@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional
 
 import dacite
 import torch
@@ -147,15 +147,12 @@ class InferenceEvaluatorConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
-    def get_data_writer(
-        self, data: InferenceGriddedData, prognostic_names: Sequence[str]
-    ) -> PairedDataWriter:
+    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
-            prognostic_names=prognostic_names,
             variable_metadata=data.variable_metadata,
             coords=data.coords,
         )
@@ -262,7 +259,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         normalize=stepper.normalizer.normalize,
     )
 
-    writer = config.get_data_writer(data, stepper.prognostic_names)
+    writer = config.get_data_writer(data)
 
     timer.stop()
     logging.info("Starting inference")

@@ -15,7 +15,6 @@ from fme.core.generics.writer import WriterABC
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
-from .restart import PairedRestartWriter, RestartWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import PairedVideoDataWriter
 
@@ -25,10 +24,9 @@ PairedSubwriter = Union[
     PairedHistogramDataWriter,
     PairedTimeCoarsen,
     PairedMonthlyDataWriter,
-    PairedRestartWriter,
 ]
 
-Subwriter = Union[MonthlyDataWriter, RawDataWriter, RestartWriter, TimeCoarsen]
+Subwriter = Union[MonthlyDataWriter, RawDataWriter, TimeCoarsen]
 
 
 @dataclasses.dataclass
@@ -78,7 +76,6 @@ class DataWriterConfig:
         n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        prognostic_names: Sequence[str],
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "PairedDataWriter":
@@ -93,7 +90,6 @@ class DataWriterConfig:
             enable_monthly_netcdfs=self.save_monthly_files,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
             save_names=self.names,
-            prognostic_names=prognostic_names,
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
         )
@@ -104,7 +100,6 @@ class DataWriterConfig:
         n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        prognostic_names: Sequence[str],
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "DataWriter":
@@ -128,7 +123,6 @@ class DataWriterConfig:
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
             save_names=self.names,
-            prognostic_names=prognostic_names,
             time_coarsen=self.time_coarsen,
         )
 
@@ -146,7 +140,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
         save_names: Optional[Sequence[str]],
-        prognostic_names: Sequence[str],
         enable_histogram_netcdfs: bool,
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
@@ -166,7 +159,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                 containing video metrics.
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
-            prognostic_names: Names of variables to save for restart.
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
@@ -174,7 +166,6 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
-        self.prognostic_names = prognostic_names
 
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
@@ -232,25 +223,19 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     )
                 )
             )
-        self._writers.append(
-            PairedRestartWriter(
-                path=path,
-                is_restart_step=lambda i: i == n_timesteps - 1,
-                prognostic_names=prognostic_names,
-                variable_metadata=variable_metadata,
-                coords=coords,
-            )
-        )
         self._n_timesteps_seen = 0
 
-    def save_initial_condition(
-        self,
-        ic_data: PrognosticState,
-    ):
-        _save_initial_condition(
-            ic_data=ic_data.as_batch_data(),
+    def write(self, data: PrognosticState, filename: str):
+        """Eagerly write data to a single netCDF file.
+
+        Args:
+            data: the data to be written.
+            filename: the filename to use for the netCDF file.
+        """
+        _write(
+            data=data.as_batch_data(),
             path=self.path,
-            prognostic_names=self.prognostic_names,
+            filename=filename,
             variable_metadata=self.variable_metadata,
             coords=self.coords,
         )
@@ -282,49 +267,45 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             writer.flush()
 
 
-def _save_initial_condition(
-    ic_data: BatchData,
+def _write(
+    data: BatchData,
     path: str,
-    prognostic_names: Sequence[str],
+    filename: str,
     variable_metadata: Mapping[str, VariableMetadata],
     coords: Mapping[str, np.ndarray],
 ):
-    """
-    Save the initial condition to a netCDF file.
-    If the initial condition has only one timestep, the data is squeezed to remove
-    the timestep dimension.
+    """Write provided data to a single netCDF at specified path/filename.
+
+    If the data has only one timestep, the data is squeezed to remove
+    the time dimension.
 
     Args:
-        ic_data: Batch data containing the initial condition.
-        path: Directory to write the netCDF file as initial_condition.nc.
-        prognostic_names: Names of prognostic variables to save.
+        data: Batch data to written.
+        path: Directory to write the netCDF file in.
+        filename: filename to use for netCDF.
         variable_metadata: Metadata for each variable to be written to the file.
         coords: Coordinate data to be written to the file.
     """
-    if ic_data.time.sizes["time"] == 1:
-        time_dim = ic_data.dims.index("time")
-        snapshot_dims = ic_data.dims[:time_dim] + ic_data.dims[time_dim + 1 :]
+    if data.time.sizes["time"] == 1:
+        time_dim = data.dims.index("time")
+        dims_to_write = data.dims[:time_dim] + data.dims[time_dim + 1 :]
 
         def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
             return x.squeeze(dim=time_dim)
 
-        time_array = ic_data.time.isel(time=0)
+        time_array = data.time.isel(time=0)
     else:
-        snapshot_dims = ic_data.dims
+        dims_to_write = data.dims
 
         def maybe_squeeze(x):
             return x
 
-        time_array = ic_data.time
+        time_array = data.time
 
     data_arrays = {}
-    for name in prognostic_names:
-        if name not in ic_data.data:
-            raise KeyError(
-                f"Initial condition data missing for prognostic variable {name}."
-            )
-        data = maybe_squeeze(ic_data.data[name]).cpu().numpy()
-        data_arrays[name] = xr.DataArray(data, dims=snapshot_dims)
+    for name in data.data:
+        array = maybe_squeeze(data.data[name]).cpu().numpy()
+        data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
         if name in variable_metadata:
             data_arrays[name].attrs = {
                 "long_name": variable_metadata[name].long_name,
@@ -332,7 +313,7 @@ def _save_initial_condition(
             }
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
-    ds.to_netcdf(str(Path(path) / "initial_condition.nc"))
+    ds.to_netcdf(str(Path(path) / filename))
 
 
 class DataWriter(WriterABC[PrognosticState, BatchData]):
@@ -347,7 +328,6 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         save_names: Optional[Sequence[str]],
-        prognostic_names: Sequence[str],
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
         """
@@ -364,7 +344,6 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
-            prognostic_names: Names of variables to save for restart.
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
         self._writers: List[Subwriter] = []
@@ -405,25 +384,12 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
                 )
             )
 
-        self._writers.append(
-            RestartWriter(
-                path=path,
-                is_restart_step=lambda i: i == n_timesteps - 1,
-                prognostic_names=prognostic_names,
-                variable_metadata=variable_metadata,
-                coords=coords,
-            )
-        )
         self.path = path
-        self.prognostic_names = prognostic_names
         self.variable_metadata = variable_metadata
         self.coords = coords
         self._n_timesteps_seen = 0
 
-    def append_batch(
-        self,
-        batch: BatchData,
-    ):
+    def append_batch(self, batch: BatchData):
         """
         Append prediction data to the file.
 
@@ -445,14 +411,11 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
         for writer in self._writers:
             writer.flush()
 
-    def save_initial_condition(
-        self,
-        ic_data: PrognosticState,
-    ):
-        _save_initial_condition(
-            ic_data=ic_data.as_batch_data(),
+    def write(self, data: PrognosticState, filename: str):
+        _write(
+            data=data.as_batch_data(),
             path=self.path,
-            prognostic_names=self.prognostic_names,
+            filename=filename,
             variable_metadata=self.variable_metadata,
             coords=self.coords,
         )
@@ -475,8 +438,5 @@ class NullDataWriter(WriterABC[Any, Any]):
     def flush(self):
         pass
 
-    def save_initial_condition(
-        self,
-        ic_data: Any,
-    ):
+    def write(self, data: Any, filename: str):
         pass

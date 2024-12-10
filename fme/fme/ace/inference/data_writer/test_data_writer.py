@@ -161,7 +161,6 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             enable_histogram_netcdfs=True,
             save_names=None,
-            prognostic_names=[],
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -320,7 +319,6 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=save_names,
             enable_histogram_netcdfs=True,
-            prognostic_names=save_names or [],
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -390,7 +388,6 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             enable_histogram_netcdfs=True,
-            prognostic_names=[],
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -432,7 +429,6 @@ class TestDataWriter:
             enable_prediction_netcdfs=True,
             enable_monthly_netcdfs=True,
             save_names=None,
-            prognostic_names=["temp"],
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
@@ -480,8 +476,6 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
-
-        xr.open_dataset(tmp_path / "restart.nc")
 
 
 @pytest.mark.parametrize(

@@ -5,12 +5,12 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.inference.data_writer.main import _save_initial_condition
+from fme.ace.inference.data_writer.main import _write
 from fme.core.data_loading.batch_data import BatchData
 from fme.core.data_loading.data_typing import VariableMetadata
 
 
-def test_save_initial_condition_single_timestep():
+def test_write_single_timestep():
     n_samples = 2
     n_lat = 4
     n_lon = 5
@@ -21,10 +21,10 @@ def test_save_initial_condition_single_timestep():
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        _save_initial_condition(
-            ic_data=batch,
+        _write(
+            data=batch,
             path=tmpdir,
-            prognostic_names=["air_temperature"],
+            filename="initial_condition.nc",
             variable_metadata={
                 "air_temperature": VariableMetadata(
                     long_name="Air Temperature", units="K"
@@ -50,7 +50,7 @@ def test_save_initial_condition_single_timestep():
             assert ds.air_temperature.attrs["units"] == "K"
 
 
-def test_save_initial_condition_multiple_timesteps():
+def test_write_multiple_timesteps():
     n_samples = 2
     n_lat = 4
     n_lon = 5
@@ -61,10 +61,10 @@ def test_save_initial_condition_multiple_timesteps():
         horizontal_dims=["lat", "lon"],
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        _save_initial_condition(
-            ic_data=batch,
+        _write(
+            data=batch,
             path=tmpdir,
-            prognostic_names=["air_temperature"],
+            filename="initial_condition.nc",
             variable_metadata={
                 "air_temperature": VariableMetadata(
                     long_name="Air Temperature", units="K"

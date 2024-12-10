@@ -487,7 +487,7 @@ def test_run_inference_simple(
         assert times["wandb_logging"] > 0
         assert times["data_writer"] > 0
         assert times["aggregator"] > 0
-        assert mock_writer.save_initial_condition.call_count == 1
+        assert mock_writer.write.call_count == 2
         assert mock_aggregator.record_initial_condition.call_count == 1
         assert mock_writer.append_batch.call_count == n_iterations
         assert mock_aggregator.record_batch.call_count == n_iterations

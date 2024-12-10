@@ -191,16 +191,13 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
-    def get_data_writer(
-        self, data: InferenceGriddedData, prognostic_names: Sequence[str]
-    ) -> DataWriter:
+    def get_data_writer(self, data: InferenceGriddedData) -> DataWriter:
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
             n_initial_conditions=data.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
-            prognostic_names=prognostic_names,
             variable_metadata=data.variable_metadata,
             coords=data.coords,
         )
@@ -272,7 +269,7 @@ def run_inference_from_config(config: InferenceConfig):
         variable_metadata=data.variable_metadata,
     )
 
-    writer = config.get_data_writer(data, stepper.prognostic_names)
+    writer = config.get_data_writer(data)
 
     timer.stop()
     logging.info("Starting inference")
