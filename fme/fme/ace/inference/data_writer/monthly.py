@@ -9,12 +9,12 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
     DIM_INFO_LATLON,
     get_all_names,
 )
-from fme.core.data_loading.data_typing import VariableMetadata
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "months"

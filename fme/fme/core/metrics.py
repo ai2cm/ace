@@ -6,7 +6,7 @@ import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]

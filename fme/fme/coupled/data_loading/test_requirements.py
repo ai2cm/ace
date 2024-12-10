@@ -2,7 +2,7 @@ import datetime
 
 import pytest
 
-from fme.core.data_loading.requirements import DataRequirements
+from fme.ace.data_loading.requirements import DataRequirements
 from fme.coupled.data_loading.requirements import CoupledDataRequirements
 
 

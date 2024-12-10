@@ -2,14 +2,14 @@ import dataclasses
 import datetime
 import warnings
 from pathlib import Path
-from typing import Any, List, Mapping, Optional, Sequence, Union
+from typing import List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
 from .histograms import PairedHistogramDataWriter
@@ -419,24 +419,3 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
             variable_metadata=self.variable_metadata,
             coords=self.coords,
         )
-
-
-class NullDataWriter(WriterABC[Any, Any]):
-    """
-    Null pattern for DataWriter, which does nothing.
-    """
-
-    def __init__(self):
-        pass
-
-    def append_batch(
-        self,
-        batch: Any,
-    ):
-        pass
-
-    def flush(self):
-        pass
-
-    def write(self, data: Any, filename: str):
-        pass

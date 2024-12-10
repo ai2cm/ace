@@ -1,5 +1,17 @@
 import sys
 
+from fme.ace.data_loading.config import TimeSlice, XarrayDataConfig
+from fme.ace.data_loading.inference import (
+    ExplicitIndices,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
+from fme.ace.data_loading.perturbation import (
+    ConstantConfig,
+    GreensFunctionConfig,
+    PerturbationSelector,
+    SSTPerturbation,
+)
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import (
     DataWriterConfig,
@@ -29,18 +41,6 @@ from fme.ace.registry.hpx import (
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
-from fme.core.data_loading.config import TimeSlice, XarrayDataConfig
-from fme.core.data_loading.inference import (
-    ExplicitIndices,
-    InferenceInitialConditionIndices,
-    TimestampList,
-)
-from fme.core.data_loading.perturbation import (
-    ConstantConfig,
-    GreensFunctionConfig,
-    PerturbationSelector,
-    SSTPerturbation,
-)
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -48,9 +48,8 @@ from fme.core.ocean import SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
 from fme.core.registry.corrector import CorrectorSelector
-from fme.core.registry.module import (
-    ModuleSelector,
-)
+from fme.core.registry.module import ModuleSelector
+from fme.core.typing_ import Slice
 
 from .train.train import run_train
 from .train.train_config import (
@@ -62,7 +61,6 @@ from .train.train_config import (
     LoggingConfig,
     OptimizationConfig,
     SingleModuleStepperConfig,
-    Slice,
     TrainConfig,
 )
 

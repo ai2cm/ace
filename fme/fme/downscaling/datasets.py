@@ -9,20 +9,14 @@ import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+from fme.ace.data_loading._xarray import DatasetProperties
+from fme.ace.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
+from fme.ace.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.data_typing import Dataset, VariableMetadata
+from fme.ace.data_loading.getters import get_dataset
+from fme.ace.data_loading.requirements import DataRequirements as CoreDataRequirements
 from fme.core import metrics
-from fme.core.data_loading._xarray import DatasetProperties
-from fme.core.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
-from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import (
-    Dataset,
-    HorizontalCoordinates,
-    LatLonCoordinates,
-    VariableMetadata,
-)
-from fme.core.data_loading.getters import get_dataset
-from fme.core.data_loading.requirements import (
-    DataRequirements as CoreDataRequirements,
-)
+from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping

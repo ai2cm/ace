@@ -1,8 +1,8 @@
 import pytest
 import torch
 
+from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.core import metrics
-from fme.core.data_loading.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 from fme.downscaling import metrics_and_maths

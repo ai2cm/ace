@@ -8,7 +8,7 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
-from fme.core.data_loading.data_typing import LatLonCoordinates
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig

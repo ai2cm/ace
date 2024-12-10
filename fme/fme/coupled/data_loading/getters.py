@@ -5,7 +5,7 @@ import torch
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
-from fme.core.data_loading.getters import get_xarray_dataset
+from fme.ace.data_loading.getters import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import (

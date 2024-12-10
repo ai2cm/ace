@@ -5,11 +5,11 @@ import numpy as np
 import pytest
 import torch
 
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
-from fme.core.stepper import SingleModuleStepperConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
 
