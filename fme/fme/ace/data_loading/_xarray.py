@@ -323,7 +323,7 @@ class XarrayDataset(Dataset):
         self.engine = config.engine
         self.dtype = config.torch_dtype
         self.spatial_dimensions = config.spatial_dimensions
-
+        self.fill_nans = config.fill_nans
         fs = _get_fs(self.path)
         glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
         self._raw_paths = _preserve_protocol(self.path, glob_paths)
@@ -568,6 +568,8 @@ class XarrayDataset(Dataset):
         total_steps = 0
         for i, file_idx in enumerate(idxs):
             ds = self._open_file(file_idx)
+            if self.fill_nans is not None:
+                ds = ds.fillna(self.fill_nans.value)
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1

@@ -23,6 +23,7 @@ from fme.ace.data_loading._xarray import (
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.config import (
     DataLoaderConfig,
+    FillNaNsConfig,
     OverwriteConfig,
     TimeSlice,
     XarrayDataConfig,
@@ -79,6 +80,7 @@ def _get_data(
     file_freq,
     step_freq,
     calendar,
+    with_nans=False,
 ) -> MockData:
     """Constructs an xarray dataset and saves to disk in netcdf format."""
     obs_times = xr.cftime_range(
@@ -119,6 +121,8 @@ def _get_data(
         data_vars: Dict[str, Union[float, xr.DataArray]] = {**ak, **bk}
         for var_name in var_names:
             data = np.random.randn(len(time), n_lat, n_lon).astype(np.float32)
+            if with_nans:
+                data[0, :, 0] = np.nan
             data_vars[var_name] = xr.DataArray(data, dims=("time", "lat", "lon"))
 
         data_varying_scalar = np.random.randn(len(time)).astype(np.float32)
@@ -155,7 +159,7 @@ def _get_data(
     return MockData(tmpdir, obs_times, start_times, start_indices, variable_names)
 
 
-def get_mock_monthly_netcdfs(tmp_path_factory, dirname) -> MockData:
+def get_mock_monthly_netcdfs(tmp_path_factory, dirname, with_nans=False) -> MockData:
     return _get_data(
         tmp_path_factory,
         dirname,
@@ -164,12 +168,18 @@ def get_mock_monthly_netcdfs(tmp_path_factory, dirname) -> MockData:
         file_freq="MS",
         step_freq=MOCK_DATA_FREQ,
         calendar="standard",
+        with_nans=with_nans,
     )
 
 
 @pytest.fixture(scope="session")
 def mock_monthly_netcdfs(tmp_path_factory) -> MockData:
     return get_mock_monthly_netcdfs(tmp_path_factory, "month")
+
+
+@pytest.fixture(scope="session")
+def mock_monthly_netcdfs_with_nans(tmp_path_factory) -> MockData:
+    return get_mock_monthly_netcdfs(tmp_path_factory, "month_with_nans", with_nans=True)
 
 
 @pytest.fixture(scope="session")
@@ -646,6 +656,29 @@ def test_renaming(mock_monthly_netcdfs):
     data, _ = dataset[0]
     assert "bar_new" in data
     assert "bar" not in data
+
+
+def test_fill_nans(mock_monthly_netcdfs_with_nans):
+    nan_config = FillNaNsConfig()
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_with_nans.tmpdir, fill_nans=nan_config
+    )
+    requirements = DataRequirements(
+        names=mock_monthly_netcdfs_with_nans.var_names.all_names, n_timesteps=2
+    )
+    dataset = XarrayDataset(config, requirements)
+    data, _ = dataset[0]
+    assert torch.all(data["foo"][0, :, 0] == 0)
+
+
+def test_keep_nans(mock_monthly_netcdfs_with_nans):
+    config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
+    requirements = DataRequirements(
+        names=mock_monthly_netcdfs_with_nans.var_names.all_names, n_timesteps=2
+    )
+    dataset = XarrayDataset(config_keep_nan, requirements)
+    data_with_nan, _ = dataset[0]
+    assert torch.all(torch.isnan(data_with_nan["foo"][0, :, 0]))
 
 
 def test_overwrite(mock_monthly_netcdfs):
