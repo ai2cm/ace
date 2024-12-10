@@ -175,6 +175,20 @@ class OverwriteConfig:
 
 
 @dataclasses.dataclass
+class FillNaNsConfig:
+    """
+    Configuration to fill NaNs with a constant value or others.
+
+    Parameters:
+        method: Type of fill operation. Currently only 'constant' is supported.
+        value: Value to fill NaNs with.
+    """
+
+    method: Literal["constant"] = "constant"
+    value: float = 0.0
+
+
+@dataclasses.dataclass
 class XarrayDataConfig:
     """
     Parameters:
@@ -199,7 +213,8 @@ class XarrayDataConfig:
             required that 'torch.{dtype}' is a valid dtype.
         overwrite: Optional OverwriteConfig to overwrite loaded field values. If this is
             configured for a renamed field, the key should be the final updated name.
-        renamed_variables: Optional mapping of {old_name: new_name} to rename variables.
+        renamed_variables: Optional mapping of {old_name: new_name} to rename variables
+        fill_nans: Optional FillNaNsConfig to fill NaNs with a constant value.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -229,6 +244,7 @@ class XarrayDataConfig:
     dtype: Optional[str] = "float32"
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     renamed_variables: Optional[Mapping[str, str]] = None
+    fill_nans: Optional[FillNaNsConfig] = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
