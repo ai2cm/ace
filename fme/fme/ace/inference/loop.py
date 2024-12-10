@@ -84,6 +84,9 @@ class Looper(Generic[PS, FD, SD]):
         )
         return output_data
 
+    def get_prognostic_state(self) -> PS:
+        return self._prognostic_state
+
 
 def get_record_to_wandb(label: str = "") -> Callable[[InferenceLogs], None]:
     wandb = WandB.get_instance()
@@ -133,9 +136,7 @@ def run_inference(
         with timer.context("wandb_logging"):
             record_logs(logs)
         with timer.context("data_writer"):
-            writer.save_initial_condition(
-                data.initial_condition,
-            )
+            writer.write(data.initial_condition, "initial_condition.nc")
         n_windows = len(looper)
         for i, batch in enumerate(looper):
             logging.info(
@@ -151,6 +152,9 @@ def run_inference(
                 )
             with timer.context("wandb_logging"):
                 record_logs(logs)
+        with timer.context("data_writer"):
+            prognostic_state = looper.get_prognostic_state()
+            writer.write(prognostic_state, "restart.nc")
 
 
 class DeriverABC(abc.ABC):
