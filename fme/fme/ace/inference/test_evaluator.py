@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import os
 import pathlib
 from typing import List
 
@@ -280,15 +281,18 @@ def inference_helper(
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
 
-    restart_ds = xr.open_dataset(
-        tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
-    )
-    np.testing.assert_allclose(
-        prediction_ds[var].isel(time=-1).values,
-        restart_ds[var].values,
-    )
+    if use_prediction_data:
+        assert not os.path.exists(tmp_path / "restart.nc")
+        assert not os.path.exists(tmp_path / "initial_condition.nc")
+    else:
+        restart_ds = xr.open_dataset(
+            tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
+        )
+        np.testing.assert_allclose(
+            prediction_ds[var].isel(time=-1).values,
+            restart_ds[var].values,
+        )
 
-    if not use_prediction_data:
         ic_ds = xr.open_dataset(
             tmp_path / "initial_condition.nc",
             decode_timedelta=False,
@@ -883,3 +887,9 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
     # forcings not in
     assert "DSWRFtoa" not in ds
     assert "forcing_var" not in ds
+    # assert only prognostic variables are in initial condition and restart files
+    for filename in ["initial_condition.nc", "restart.nc"]:
+        ds = xr.open_dataset(tmp_path / filename)
+        assert "USWRFtoa" not in ds
+        assert "forcing_var" not in ds
+        assert "prog" in ds
