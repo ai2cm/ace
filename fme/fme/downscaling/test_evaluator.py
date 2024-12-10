@@ -5,7 +5,7 @@ from typing import Any, Dict, Mapping, Tuple, Type, Union
 import pytest
 import yaml
 
-from fme.core.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.config import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig

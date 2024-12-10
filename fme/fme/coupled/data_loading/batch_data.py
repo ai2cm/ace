@@ -6,17 +6,10 @@ from typing import List, Literal, Mapping, Optional, Sequence
 import numpy as np
 import torch
 
-from fme.core.data_loading.batch_data import (
-    BatchData,
-    GriddedDataABC,
-    SizedMap,
-)
-from fme.core.data_loading.data_typing import (
-    HorizontalCoordinates,
-    HybridSigmaPressureCoordinate,
-    VariableMetadata,
-)
-from fme.core.generics.data import DataLoader
+from fme.ace.data_loading.batch_data import BatchData, SizedMap
+from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 

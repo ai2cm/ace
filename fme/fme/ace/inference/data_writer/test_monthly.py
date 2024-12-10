@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     add_data,
@@ -13,7 +14,6 @@ from fme.ace.inference.data_writer.monthly import (
     get_days_since_reference,
     months_for_timesteps,
 )
-from fme.core.data_loading.data_typing import VariableMetadata
 
 TIMESTEP = datetime.timedelta(hours=6)
 

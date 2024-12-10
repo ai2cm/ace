@@ -5,8 +5,9 @@ from typing import Any, List, Mapping, Optional
 
 import dacite
 
-from fme.core.corrector import CorrectorABC, CorrectorConfigProtocol, force_positive
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.corrector.corrector import force_positive
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.masking import MaskingConfig
 from fme.core.registry.corrector import CorrectorSelector

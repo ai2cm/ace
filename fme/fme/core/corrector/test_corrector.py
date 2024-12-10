@@ -8,8 +8,8 @@ import torch
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import ClimateData, metrics
 from fme.core.climate_data import compute_dry_air_absolute_differences
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.ocean import OceanCorrector
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping

@@ -4,7 +4,7 @@ import torch
 import torch_harmonics
 
 import fme
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.metrics import (
     net_surface_energy_flux,
     quantile,

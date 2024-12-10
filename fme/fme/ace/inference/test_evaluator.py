@@ -11,25 +11,26 @@ import torch
 import xarray as xr
 import yaml
 
+from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.inference import (
+    InferenceDataLoaderConfig,
+    InferenceInitialConditionIndices,
+)
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
 from fme.ace.registry import ModuleSelector
+from fme.ace.stepper import SingleModuleStepperConfig, TrainOutput
+from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
-from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import DimSize, HybridSigmaPressureCoordinate
-from fme.core.data_loading.inference import (
-    InferenceDataLoaderConfig,
-    InferenceInitialConditionIndices,
-)
+from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.stepper import SingleModuleStepperConfig, TrainOutput
-from fme.core.testing import DimSizes, FV3GFSData, MonthlyReferenceData, mock_wandb
+from fme.core.testing import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .derived_variables import compute_derived_quantities

@@ -6,7 +6,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 
 DerivedVariableFunc = Callable[

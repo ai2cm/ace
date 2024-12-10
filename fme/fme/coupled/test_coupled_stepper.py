@@ -5,15 +5,15 @@ import pytest
 import torch
 
 import fme
-from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.ace.data_loading.config import XarrayDataConfig
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.test_stepper import get_scalar_data
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.registry.module import ModuleSelector
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.test_stepper import get_scalar_data
 
 from .data_loading.config import CoupledDataConfig, CoupledDataLoaderConfig
 from .data_loading.getters import get_coupled_data_loader

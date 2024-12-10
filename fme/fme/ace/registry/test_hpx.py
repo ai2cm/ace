@@ -16,11 +16,11 @@ from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
-from fme.core.stepper import SingleModuleStepperConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
 logger = logging.getLogger("__name__")
