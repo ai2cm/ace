@@ -6,21 +6,23 @@ Installation
 
 All commands here are run from the top-level directory of the repository, unless otherwise stated.
 
-Experimental release
---------------------
+This is unsupported, pre-alpha software: use at your own risk! We are actively developing this software
+and will be making breaking changes to the API.
 
-There is no stable release. This is unsupported, pre-alpha software: use at your own risk!
+PyPI
+----
 
-To install directly from github, you can run:
+To install the latest release directly from PyPI, use:
 
 .. code-block:: shell
 
-    pip install 'git://github.com/ai2cm/full-model.git#egg=fme&subdirectory=fme'
+    pip install fme
 
 Conda
 -----
 
-To install with Conda, you must retrieve the sources from github:
+For convenience, we provide an easy way to create a conda environment with `fme` installed.
+First, clone the repository:
 
 .. code-block:: shell
 
@@ -41,7 +43,7 @@ This will create an environment named ``fme``. If you would like a different nam
 Development
 -----------
 
-The package is not yet available on PyPI. Before installing, you must retrieve the sources from github:
+To install directly from source for development, clone the repository:
 
 .. code-block:: shell
 
