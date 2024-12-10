@@ -4,8 +4,8 @@ from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
 
 import dacite
 
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.registry import CorrectorConfigProtocol
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 
 from .registry import Registry

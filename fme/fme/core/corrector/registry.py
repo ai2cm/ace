@@ -2,7 +2,7 @@ import abc
 import datetime
 from typing import Any, Mapping, Protocol
 
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 

@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 import torch
 
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core import parameter_init
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
 

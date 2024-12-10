@@ -9,7 +9,6 @@ from .metrics import (
 )
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
-from .stepper import SingleModuleStepper, SingleModuleStepperConfig
 
 __all__ = [
     "spherical_area_weights",
@@ -21,8 +20,6 @@ __all__ = [
     "StandardNormalizer",
     "get_normalizer",
     "Packer",
-    "SingleModuleStepper",
-    "SingleModuleStepperConfig",
     "ClimateData",
     "GriddedOperations",
 ]

@@ -38,3 +38,31 @@ class SimpleInferenceData(InferenceDataABC[PS, FD]):
     @property
     def loader(self) -> DataLoader[FD]:
         return self._loader
+
+
+class GriddedDataABC(abc.ABC, Generic[T]):
+    @property
+    @abc.abstractmethod
+    def loader(self) -> DataLoader[T]: ...
+
+    @property
+    @abc.abstractmethod
+    def n_samples(self) -> int: ...
+
+    @property
+    @abc.abstractmethod
+    def n_batches(self) -> int: ...
+
+    @property
+    @abc.abstractmethod
+    def batch_size(self) -> int: ...
+
+    @abc.abstractmethod
+    def set_epoch(self, epoch: int): ...
+
+    @abc.abstractmethod
+    def log_info(self, name: str):
+        """
+        Report information about the data using logging.info.
+        """
+        ...

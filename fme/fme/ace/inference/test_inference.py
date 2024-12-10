@@ -13,6 +13,13 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.data_loading.batch_data import PrognosticState
+from fme.ace.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
@@ -21,23 +28,17 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.core.data_loading.batch_data import PrognosticState
-from fme.core.data_loading.data_typing import (
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.testing import DimSizes, FV3GFSData
+from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
-from fme.core.data_loading.inference import (
-    ExplicitIndices,
-    ForcingDataLoaderConfig,
-    InferenceInitialConditionIndices,
-    TimestampList,
-)
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.testing import DimSizes, FV3GFSData, mock_wandb
+from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
 

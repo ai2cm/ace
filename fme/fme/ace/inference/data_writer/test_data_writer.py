@@ -8,6 +8,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
@@ -15,7 +16,6 @@ from fme.ace.inference.data_writer.main import (
 )
 from fme.ace.inference.data_writer.raw import get_batch_lead_time_microseconds
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.core.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
 
 CALENDAR_CFTIME = {

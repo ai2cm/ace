@@ -11,31 +11,27 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
-from fme.ace.inference.loop import (
-    get_record_to_wandb,
-    run_inference,
-    write_reduced_metrics,
-)
-from fme.ace.inference.timing import GlobalTimer
-from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference import InferenceAggregatorConfig
-from fme.core.data_loading.batch_data import (
+from fme.ace.aggregator.inference import InferenceAggregatorConfig
+from fme.ace.data_loading.batch_data import (
     BatchData,
     InferenceGriddedData,
     PrognosticState,
 )
-from fme.core.data_loading.getters import get_forcing_data
-from fme.core.data_loading.inference import (
+from fme.ace.data_loading.getters import get_forcing_data
+from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
     InferenceInitialConditionIndices,
     TimestampList,
 )
+from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.loop import write_reduced_metrics
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
-from fme.core.stepper import SingleModuleStepperConfig
+from fme.core.timing import GlobalTimer
 
 from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
 

@@ -1,33 +1,32 @@
 import dataclasses
 import datetime
 import os
-from typing import Any, ClassVar, Dict, List, Optional, Protocol, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import torch
 
-from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import (
-    GriddedData,
-    InferenceGriddedData,
-)
-from fme.core.data_loading.config import DataLoaderConfig, Slice
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
-from fme.core.data_loading.getters import get_data_loader, get_inference_data
-from fme.core.data_loading.inference import InferenceDataLoaderConfig
-from fme.core.data_loading.requirements import (
+from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.batch_data import GriddedData, InferenceGriddedData
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.getters import get_data_loader, get_inference_data
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.data_loading.requirements import (
     DataRequirements,
     PrognosticStateDataRequirements,
 )
-from fme.core.distributed import Distributed
-from fme.core.ema import EMAConfig, EMATracker
-from fme.core.gridded_ops import GriddedOperations
-from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import Optimization, OptimizationConfig
-from fme.core.stepper import (
+from fme.ace.stepper import (
     ExistingStepperConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
 )
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.distributed import Distributed
+from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.gridded_ops import GriddedOperations
+from fme.core.logging_utils import LoggingConfig
+from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 
 
@@ -72,10 +71,6 @@ class InlineInferenceConfig:
             # log_global_mean_norm_time_series must be False for inline inference.
             self.aggregator.log_global_mean_time_series = False
             self.aggregator.log_global_mean_norm_time_series = False
-
-
-class EndOfBatchCallback(Protocol):
-    def __call__(self) -> None: ...
 
 
 @dataclasses.dataclass
@@ -228,38 +223,3 @@ class TrainBuilders:
             copy_after_batch = self.config.copy_weights_after_batch
             return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)
         return lambda: None
-
-
-class TrainConfigProtocol(Protocol):
-    __dataclass_fields__: ClassVar[Dict[str, Any]]
-
-    @property
-    def experiment_dir(self) -> str: ...
-
-    @property
-    def checkpoint_dir(self) -> str: ...
-
-    @property
-    def max_epochs(self) -> int: ...
-
-    @property
-    def save_checkpoint(self) -> bool: ...
-
-    @property
-    def validate_using_ema(self) -> bool: ...
-
-    @property
-    def log_train_every_n_batches(self) -> int: ...
-
-    @property
-    def segment_epochs(self) -> Optional[int]: ...
-
-    @property
-    def checkpoint_save_epochs(self) -> Optional[Slice]: ...
-
-    @property
-    def ema_checkpoint_save_epochs(self) -> Optional[Slice]: ...
-
-    def clean_wandb(self, experiment_dir: str) -> None: ...
-
-    def get_inference_epochs(self) -> List[int]: ...

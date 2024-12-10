@@ -5,9 +5,9 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.stepper import TrainOutput
 from fme.core.climate_data import ClimateData
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
-from fme.core.stepper import TrainOutput
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .derived_variables import _compute_derived_variable, compute_derived_quantities
