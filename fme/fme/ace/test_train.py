@@ -22,25 +22,25 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
-from fme.ace.train.train import (
-    _restore_checkpoint,
-    count_parameters,
-    epoch_checkpoint_enabled,
-)
-from fme.ace.train.train import main as train_main
-from fme.core.data_loading.config import Slice
-from fme.core.data_loading.data_typing import (
-    HEALPixCoordinates,
-    HorizontalCoordinates,
-    LatLonCoordinates,
-)
-from fme.core.testing import (
+from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
     save_nd_netcdf,
     save_scalar_netcdf,
 )
+from fme.ace.train.train import main as train_main
+from fme.core.coordinates import (
+    HEALPixCoordinates,
+    HorizontalCoordinates,
+    LatLonCoordinates,
+)
+from fme.core.generics.trainer import (
+    _restore_checkpoint,
+    count_parameters,
+    epoch_checkpoint_enabled,
+)
 from fme.core.testing.wandb import mock_wandb
+from fme.core.typing_ import Slice
 
 REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
@@ -421,7 +421,7 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
         pytest.skip("Skipping non-fast tests")
 
     mock = unittest.mock.MagicMock(side_effect=_restore_checkpoint)
-    with unittest.mock.patch("fme.ace.train.train._restore_checkpoint", new=mock):
+    with unittest.mock.patch("fme.core.generics.trainer._restore_checkpoint", new=mock):
         train_config, _ = _setup(
             tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )

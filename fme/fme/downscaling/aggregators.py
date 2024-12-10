@@ -7,12 +7,12 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core import metrics
-from fme.core.aggregator.one_step.snapshot import (
+from fme.ace.aggregator.one_step.snapshot import (
     SnapshotAggregator as CoreSnapshotAggregator,
 )
-from fme.core.aggregator.plotting import get_cmap_limits, plot_imshow
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
+from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping

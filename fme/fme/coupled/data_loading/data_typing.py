@@ -4,13 +4,9 @@ from typing import Dict, Mapping, Tuple
 import torch
 import xarray as xr
 
-from fme.core.data_loading._xarray import DatasetProperties
-from fme.core.data_loading.data_typing import (
-    Dataset,
-    HorizontalCoordinates,
-    HybridSigmaPressureCoordinate,
-    VariableMetadata,
-)
+from fme.ace.data_loading._xarray import DatasetProperties
+from fme.ace.data_loading.data_typing import Dataset, VariableMetadata
+from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
 from fme.core.typing_ import TensorDict
 
 

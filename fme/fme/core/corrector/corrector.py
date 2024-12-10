@@ -7,11 +7,8 @@ import torch
 
 import fme
 from fme.core.climate_data import ClimateData
-from fme.core.corrector.registry import (
-    CorrectorABC,
-    CorrectorConfigProtocol,
-)
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping

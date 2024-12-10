@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Optional, Sequence
 
-from fme.core.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.config import XarrayDataConfig
 from fme.core.distributed import Distributed
 
 

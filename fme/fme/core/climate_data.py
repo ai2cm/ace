@@ -11,7 +11,7 @@ from fme.core.constants import (
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
 )
-from fme.core.data_loading.data_typing import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 

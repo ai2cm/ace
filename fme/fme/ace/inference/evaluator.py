@@ -10,25 +10,23 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
+from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.batch_data import BatchData, InferenceGriddedData
+from fme.ace.data_loading.getters import get_inference_data
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.loop import (
     DeriverABC,
-    get_record_to_wandb,
     run_dataset_comparison,
-    run_inference,
     write_reduced_metrics,
 )
-from fme.ace.inference.timing import GlobalTimer
-from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.batch_data import BatchData, InferenceGriddedData
-from fme.core.data_loading.getters import get_inference_data
-from fme.core.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
-from fme.core.stepper import SingleModuleStepperConfig
+from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
 

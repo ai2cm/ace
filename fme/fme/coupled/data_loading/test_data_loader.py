@@ -7,10 +7,10 @@ import cftime
 import numpy as np
 import xarray as xr
 
-from fme.core.data_loading.batch_data import BatchData
-from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.requirements import DataRequirements
-from fme.core.data_loading.test_data_loader import _save_netcdf
+from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.requirements import DataRequirements
+from fme.ace.data_loading.test_data_loader import _save_netcdf
 
 from .config import CoupledDataConfig, CoupledDataLoaderConfig
 from .getters import get_coupled_data_loader

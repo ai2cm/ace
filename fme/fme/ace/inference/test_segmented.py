@@ -16,6 +16,8 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.data_loading.config import XarrayDataConfig
+from fme.ace.data_loading.inference import ForcingDataLoaderConfig, TimestampList
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.inference import (
     InitialConditionConfig,
@@ -23,14 +25,12 @@ from fme.ace.inference.inference import (
     run_segmented_inference,
 )
 from fme.ace.registry import ModuleSelector
-from fme.core.data_loading.config import XarrayDataConfig
-from fme.core.data_loading.data_typing import DimSize, HybridSigmaPressureCoordinate
-from fme.core.data_loading.inference import ForcingDataLoaderConfig, TimestampList
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.testing import DimSizes, FV3GFSData
+from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.testing import DimSizes, FV3GFSData
 
 TIMESTEP = datetime.timedelta(hours=6)
 
