@@ -7,10 +7,9 @@ SD = TypeVar("SD", contravariant=True)  # stepped data
 
 class WriterABC(abc.ABC, Generic[PS, SD]):
     @abc.abstractmethod
-    def save_initial_condition(
-        self,
-        ic_data: PS,
-    ): ...
+    def write(self, data: PS, filename: str):
+        """Eagerly write data to a file at filename."""
+        ...
 
     @abc.abstractmethod
     def append_batch(
@@ -18,7 +17,7 @@ class WriterABC(abc.ABC, Generic[PS, SD]):
         batch: SD,
     ):
         """
-        Append a batch of data to the file.
+        Append a batch of data to the output file(s).
 
         Args:
             batch: Data to be written.
