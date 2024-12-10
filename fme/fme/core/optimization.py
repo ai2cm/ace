@@ -1,18 +1,20 @@
 import contextlib
 import dataclasses
-from typing import Any, Literal, Mapping, Optional
+import itertools
+from typing import Any, Iterable, Literal, Mapping, Optional
 
 import torch
 import torch.cuda.amp as amp
 from torch import nn
 
+from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import SchedulerConfig
 
 
-class Optimization:
+class Optimization(OptimizationABC):
     def __init__(
         self,
-        parameters,
+        parameters: Iterable[torch.nn.Parameter],
         optimizer_type: Literal["Adam", "FusedAdam"],
         lr: float,
         max_epochs: int,
@@ -114,7 +116,7 @@ class OptimizationConfig:
     """
     Configuration for optimization.
 
-    Attributes:
+    Parameters:
         optimizer_type: The type of optimizer to use.
         lr: The learning rate.
         kwargs: Additional keyword arguments to pass to the optimizer.
@@ -132,7 +134,8 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
 
-    def build(self, parameters, max_epochs: int) -> Optimization:
+    def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
+        parameters = itertools.chain(*[module.parameters() for module in modules])
         return Optimization(
             parameters=parameters,
             optimizer_type=self.optimizer_type,
@@ -151,7 +154,7 @@ class OptimizationConfig:
         return cls(**state)
 
 
-class NullOptimization:
+class NullOptimization(OptimizationABC):
     @contextlib.contextmanager
     def autocast(self):
         yield

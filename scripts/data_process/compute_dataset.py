@@ -10,19 +10,24 @@
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
 # it on our GKE cluster.
 
+import abc
 import dataclasses
 import os
-from typing import List, Mapping, MutableMapping, Optional, Sequence, Tuple
+import sys
+from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 import click
 import dacite
 import fsspec
 import numpy as np
 import xarray as xr
-import xpartition  # noqa: 401
+import xpartition  # noqa: F401
 import xtorch_harmonics
 import yaml
 from dask.diagnostics import ProgressBar
+
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from get_stats import StatsConfig
 
 # constants are defined as in FV3GFS model
 # https://github.com/ai2cm/fv3gfs-fortran/blob/master/FMS/constants/constants.F90
@@ -41,6 +46,7 @@ class StandardNameMapping:
     longitude_dim: str = "grid_xt"
     latitude_dim: str = "grid_yt"
     vertical_dim: str = "pfull"
+    vertical_interface_dim: str = "phalf"
     time_dim: str = "time"
     surface_pressure: str = "PRESsfc"
     latent_heat_flux: str = "LHTFLsfc"
@@ -56,6 +62,11 @@ class StandardNameMapping:
     snow_mixing_ratio: str = "snow_mixing_ratio"
     northward_wind: str = "northward_wind"
     eastward_wind: str = "eastward_wind"
+    surface_evaporation_rate: str = "surface_evaporation_rate"
+    land_fraction: str = "land_fraction"
+    ocean_fraction: str = "ocean_fraction"
+    sea_ice_fraction: str = "sea_ice_fraction"
+    hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         self.horizontal_dims: List[str] = [self.longitude_dim, self.latitude_dim]
@@ -64,15 +75,6 @@ class StandardNameMapping:
         self.total_water_path = TOTAL_WATER_PATH
         self.pwat_tendency = f"tendency_of_{self.total_water_path}"
         self.time_derivative_names = [self.total_water_path]
-
-        self.water_species: List[str] = [
-            self.specific_humidity,
-            self.cloud_water_mixing_ratio,
-            self.cloud_ice_mixing_ratio,
-            self.graupel_mixing_ratio,
-            self.rain_mixing_ratio,
-            self.snow_mixing_ratio,
-        ]
 
         self.vertically_resolved: List[str] = [
             self.specific_total_water,
@@ -85,17 +87,60 @@ class StandardNameMapping:
         self.dropped_variables: List[str] = (
             self.water_species
             + self.vertically_resolved
-            + [self.pressure_thickness, self.vertical_dim, self.precipitable_water_path]
+            + [self.pressure_thickness, self.vertical_dim]
         )
+        if self.precipitable_water_path.lower() != "none":
+            self.dropped_variables.append(self.precipitable_water_path)
+
+    @property
+    def water_species(self) -> List[str]:
+        return [
+            item
+            for item in [
+                self.specific_humidity,
+                self.cloud_water_mixing_ratio,
+                self.cloud_ice_mixing_ratio,
+                self.graupel_mixing_ratio,
+                self.rain_mixing_ratio,
+                self.snow_mixing_ratio,
+            ]
+            if item.lower() != "none"
+        ]
 
 
 @dataclasses.dataclass
-class ChunkingConfig:
+class DLWPNameMapping(StandardNameMapping):
+    longitude_dim: str = "longitude"
+    latitude_dim: str = "latitude"
+    face_dim: str = "face"
+    width_dim: str = "width"
+    height_dim: str = "height"
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        self.horizontal_dims: List[str] = [
+            self.face_dim,
+            self.width_dim,
+            self.height_dim,
+        ]
+        self.lat_lon_dims: List[str] = [self.latitude_dim, self.longitude_dim]
+
+
+@dataclasses.dataclass
+class _ChunkingConfig(abc.ABC):
     time_dim: int = 160
+
+    @abc.abstractmethod
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]: ...
+
+
+@dataclasses.dataclass
+class ChunkingConfig(_ChunkingConfig):
     latitude_dim: int = -1
     longitude_dim: int = -1
 
-    def get_chunks(self, standard_names: StandardNameMapping):
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
         return {
             standard_names.time_dim: self.time_dim,
             standard_names.longitude_dim: self.longitude_dim,
@@ -104,10 +149,31 @@ class ChunkingConfig:
 
 
 @dataclasses.dataclass
+class DLWPChunkingConfig(_ChunkingConfig):
+    face_dim: int = -1
+    width_dim: int = -1
+    height_dim: int = -1
+
+    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
+        dlwp_names = standard_names
+        if not isinstance(dlwp_names, DLWPNameMapping):
+            raise TypeError(
+                "Expected DLWPChunkingConfig to be passed type of DLWPNameMapping."
+            )
+        chunks = {
+            dlwp_names.time_dim: self.time_dim,
+            dlwp_names.face_dim: self.face_dim,
+            dlwp_names.width_dim: self.width_dim,
+            dlwp_names.height_dim: self.height_dim,
+        }
+        return chunks
+
+
+@dataclasses.dataclass
 class DatasetComputationConfig:
     """Configuration of computation details for an FME reference dataset.
 
-    Attributes:
+    Parameters:
         reference_vertical_coordinate_file: path to netCDF file containing
             vertical coordinate definition for the reference simulation.
         vertical_coarsening_indices: list of tuples defining the ranges of
@@ -123,6 +189,8 @@ class DatasetComputationConfig:
             names of variables in the dataset.
         chunking: (optional) mapping of standard dimension names to desired
             output chunk sizes
+        time_invariant_dir: (optional) path to directory containing time-invariant data
+            This option is used for E3SMv2 dataset.
     """
 
     reference_vertical_coordinate_file: str
@@ -131,24 +199,31 @@ class DatasetComputationConfig:
     n_split: int = 65
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
-    standard_names: StandardNameMapping = StandardNameMapping()
-    chunking: ChunkingConfig = ChunkingConfig()
+    standard_names: Union[StandardNameMapping, DLWPNameMapping] = dataclasses.field(
+        default_factory=StandardNameMapping
+    )
+    chunking: Union[ChunkingConfig, DLWPChunkingConfig] = dataclasses.field(
+        default_factory=ChunkingConfig
+    )
+    time_invariant_dir: Optional[str] = None
 
 
 @dataclasses.dataclass
 class DatasetConfig:
     """Dataset provenance for a set of reference simulations.
 
-    Attributes:
+    Parameters:
         runs: mapping of short names to full paths of reference datasets.
         output_directory: path to place output of computation script.
         dataset_computation: configuration details for dataset
             computation.
+        stats_config: configuration to retrieve statistics dataset
     """
 
     runs: Mapping[str, str]
     data_output_directory: str
     dataset_computation: DatasetComputationConfig
+    stats: StatsConfig
 
     @classmethod
     def from_file(cls, path: str) -> "DatasetConfig":
@@ -156,7 +231,7 @@ class DatasetConfig:
             data = yaml.safe_load(file)
 
         return dacite.from_dict(
-            data_class=cls, data=data, config=dacite.Config(cast=[tuple])
+            data_class=cls, data=data, config=dacite.Config(cast=[tuple], strict=True)
         )
 
 
@@ -222,14 +297,88 @@ def get_coarse_ak_bk(
     return xr.Dataset(data)
 
 
+def compute_ocean_fraction(
+    ds: xr.Dataset,
+    output_name: str,
+    land_fraction_name: str,
+    sea_ice_fraction_name: str,
+) -> xr.Dataset:
+    """Compute latent heat flux, if needed."""
+    if output_name in ds.data_vars:
+        # if ocean_fraction is already computed, assume that NaNs have been handled
+        return ds
+    ds[sea_ice_fraction_name] = ds[sea_ice_fraction_name].fillna(0.0)
+    ocean_fraction = 1 - ds[sea_ice_fraction_name] - ds[land_fraction_name]
+    negative_ocean = xr.where(ocean_fraction < 0, ocean_fraction, 0)
+    ocean_fraction -= negative_ocean
+    ds["sea_ice_fraction"] += negative_ocean
+    ocean_fraction.attrs["units"] = "unitless"
+    ocean_fraction.attrs["long_name"] = "fraction of grid cell area occupied by ocean"
+    return ds.assign({output_name: ocean_fraction})
+
+
+def compute_latent_heat_flux(
+    ds: xr.Dataset,
+    output_name: str,
+    evaporation_name: Optional[str] = None,
+) -> xr.Dataset:
+    """Compute latent heat flux, if needed."""
+    if output_name in ds.data_vars:
+        return ds
+    assert (
+        evaporation_name is not None
+    ), f"{output_name} not found in ds, evaporation_name must be provided."
+    latent_heat_flux = ds[evaporation_name] * LATENT_HEAT_OF_VAPORIZATION
+    latent_heat_flux.attrs["units"] = "W/m^2"
+    latent_heat_flux.attrs["long_name"] = "Latent heat flux"
+    return ds.assign({output_name: latent_heat_flux}).drop(evaporation_name)
+
+
 def compute_specific_total_water(
     ds: xr.Dataset, water_condensate_names: Sequence[str], output_name: str
 ) -> xr.Dataset:
     """Compute specific total water from individual water species."""
-    specific_total_water = sum([ds[name] for name in water_condensate_names])
+    specific_total_water: xr.DataArray = sum(
+        [ds[name] for name in water_condensate_names]
+    )
     specific_total_water.attrs["units"] = "kg/kg"
     specific_total_water.attrs["long_name"] = output_name.replace("_", " ")
     return ds.assign({output_name: specific_total_water})
+
+
+def compute_pressure_thickness(
+    ds: xr.Dataset,
+    vertical_coordinate_file: str,
+    vertical_dim_name: str,
+    surface_pressure_name: str,
+    output_name: str,
+    z_dim: str = "xaxis_1",
+):
+    if output_name in ds.data_vars:
+        return ds
+
+    with fsspec.open(vertical_coordinate_file) as f:
+        vertical_coordinate = xr.open_dataset(f).load()
+    # squeeze out the singleton time dimension
+    vertical_coord = vertical_coordinate.squeeze(drop=True)
+
+    sfc_pressure = ds[surface_pressure_name].expand_dims(
+        {z_dim: vertical_coord[z_dim]}, axis=3
+    )
+    phalf = sfc_pressure * vertical_coord["bk"] + vertical_coord["ak"]
+
+    thickness = (
+        phalf.diff(dim=z_dim)
+        .rename({z_dim: vertical_dim_name})
+        .rename(output_name)
+        .assign_coords(
+            {vertical_dim_name: (vertical_dim_name, ds[vertical_dim_name].values)}
+        )
+    )
+
+    thickness.attrs["units"] = "Pa"
+    thickness.attrs["long_name"] = output_name.replace("_", " ")
+    return ds.assign({output_name: thickness})
 
 
 def compute_vertical_coarsening(
@@ -325,8 +474,12 @@ def assert_global_dry_air_mass_conservation(
     column_dry_air_mass = (
         ds[surface_pressure_name] - ds[total_water_path_name] * GRAVITY
     )
-    weights = np.cos(np.deg2rad(ds[latitude_dim]))
-    global_dry_air_mass = column_dry_air_mass.weighted(weights).mean(dim=dims)
+    if latitude_dim in dims:
+        weights = np.cos(np.deg2rad(ds[latitude_dim]))
+        global_dry_air_mass = column_dry_air_mass.weighted(weights).mean(dim=dims)
+    else:
+        global_dry_air_mass = column_dry_air_mass.mean(dim=dims)
+
     global_dry_air_mass_tendency = global_dry_air_mass.diff(time_dim)
     print("Mean absolute global dry air pressure tendency [Pa]:")
     print(np.abs(global_dry_air_mass_tendency).mean().values)
@@ -385,10 +538,28 @@ def construct_lazy_dataset(
             lon_dim=standard_names.longitude_dim,
             fraction_modes_kept=config.roundtrip_fraction_kept,
         )
+    ds = compute_ocean_fraction(
+        ds,
+        output_name=standard_names.ocean_fraction,
+        land_fraction_name=standard_names.land_fraction,
+        sea_ice_fraction_name=standard_names.sea_ice_fraction,
+    )
+    ds = compute_latent_heat_flux(
+        ds,
+        output_name=standard_names.latent_heat_flux,
+        evaporation_name=standard_names.surface_evaporation_rate,
+    )
     ds = compute_specific_total_water(
         ds,
         water_condensate_names=standard_names.water_species,
         output_name=standard_names.specific_total_water,
+    )
+    ds = compute_pressure_thickness(
+        ds,
+        vertical_coordinate_file=config.reference_vertical_coordinate_file,
+        vertical_dim_name=standard_names.vertical_dim,
+        surface_pressure_name=standard_names.surface_pressure,
+        output_name=standard_names.pressure_thickness,
     )
     ds = compute_vertical_coarsening(
         ds,
@@ -424,7 +595,7 @@ def construct_lazy_dataset(
     chunks = config.chunking.get_chunks(standard_names)
     ds = ds.chunk(chunks)
     ds.attrs["history"] = (
-        "Dataset computed by ace/scripts/data_process"
+        "Dataset computed by full-model/scripts/data_process"
         "/compute_dataset_fv3gfs.py"
         f" script, using following input zarrs: {urls.values()}."
     )
@@ -473,6 +644,7 @@ def main(
             surface_pressure_name=standard_names.surface_pressure,
             total_water_path_name=standard_names.total_water_path,
             latitude_dim=standard_names.latitude_dim,
+            time_dim=standard_names.time_dim,
         )
         assert_global_moisture_conservation(
             ds,
@@ -482,6 +654,7 @@ def main(
             latent_heat_flux_name=standard_names.latent_heat_flux,
             latent_heat_of_vaporization=LATENT_HEAT_OF_VAPORIZATION,
             precip_rate_name=standard_names.precip_rate,
+            time_dim=standard_names.time_dim,
         )
     ds = ds.drop(standard_names.dropped_variables)
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")

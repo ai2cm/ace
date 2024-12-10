@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 import torch
 
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core import parameter_init
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
-from fme.core.normalizer import FromStateNormalizer
-from fme.core.stepper import SingleModuleStepper, SingleModuleStepperConfig
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
 
@@ -32,22 +32,20 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "builder": sfno_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=(16, 32),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     torch.save(
@@ -64,19 +62,17 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
         img_shape=(16, 32),
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     assert_same_state(
@@ -148,7 +144,7 @@ def test_builder_with_weights_sfno_init(
     """
     Integration test for the BuilderWithWeights stepper with a SFNO.
     """
-    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
         loaded_shape, extra_built_layer, tmpdir
     )
     if expect_exception:
@@ -157,8 +153,8 @@ def test_builder_with_weights_sfno_init(
                 with_builder_stepper_config_data
             ).get_stepper(
                 img_shape=built_shape,
-                area=area,
-                sigma_coordinates=sigma_coordinates,
+                gridded_operations=LatLonOperations(area),
+                vertical_coordinate=vertical_coordinate,
                 timestep=TIMESTEP,
             )
     else:
@@ -166,8 +162,8 @@ def test_builder_with_weights_sfno_init(
             with_builder_stepper_config_data
         ).get_stepper(
             img_shape=built_shape,
-            area=area,
-            sigma_coordinates=sigma_coordinates,
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         )
         if extra_built_layer:
@@ -203,22 +199,20 @@ def get_config(
         "builder": sfno_config_data,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=loaded_shape,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     built_sfno_config_data = copy.deepcopy(sfno_config_data)
@@ -238,35 +232,31 @@ def get_config(
         "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
-        "normalization": FromStateNormalizer(
-            state={
-                "means": {"x": np.random.randn(1)},
-                "stds": {"x": np.random.randn(1)},
-            }
-        ),
+        "normalization": {
+            "means": {"x": np.random.randn(1).item()},
+            "stds": {"x": np.random.randn(1).item()},
+        },
     }
-    return with_builder_stepper_config_data, area, sigma_coordinates, stepper
+    return with_builder_stepper_config_data, area, vertical_coordinate, stepper
 
 
 def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     img_shape = (16, 32)
-    with_builder_stepper_config_data, area, sigma_coordinates, stepper = get_config(
+    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
         loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
     )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
         img_shape=img_shape,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
-    stepper = SingleModuleStepper.from_state(
-        stepper_state, area=area, sigma_coordinates=sigma_coordinates
-    )
+    stepper = SingleModuleStepper.from_state(stepper_state)
     assert isinstance(stepper, SingleModuleStepper)
 
 

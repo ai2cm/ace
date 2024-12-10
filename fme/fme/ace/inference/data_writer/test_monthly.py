@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     add_data,
@@ -13,7 +14,6 @@ from fme.ace.inference.data_writer.monthly import (
     get_days_since_reference,
     months_for_timesteps,
 )
-from fme.core.data_loading.data_typing import VariableMetadata
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -38,7 +38,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         n_samples=n_samples,
         n_months=24,
         save_names=None,
-        metadata={"x": VariableMetadata(units="m", long_name="x_name")},
+        variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
     )
     month_values = []
@@ -51,7 +51,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
             month_data = {"x": x_window}
             initial_time = cftime.DatetimeProlepticGregorian(year, month, 1, 0, 0, 0)
             for i_write in range(n_writes):
-                times = xr.DataArray(
+                time = xr.DataArray(
                     [
                         [
                             initial_time + datetime.timedelta(hours=6 * i_write)
@@ -61,10 +61,8 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                     ],
                     dims=["sample", "time"],
                 )
-                assert times.shape == (n_samples, window_size)
-                writer.append_batch(
-                    data=month_data, start_timestep=0, batch_times=times
-                )
+                assert time.shape == (n_samples, window_size)
+                writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
     writer.flush()
     written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)
@@ -93,21 +91,46 @@ def test_months_for_timesteps(n_timesteps: int, min_expected: int):
     assert months_for_timesteps(n_timesteps, TIMESTEP) >= min_expected
 
 
-def test_get_days_since_reference():
-    years = np.array([2020, 2021])
-    months = np.array([0, 1])  # expects zero-indexed months
-    reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
+@pytest.mark.parametrize("num_years", [2, 500])
+@pytest.mark.parametrize("calendar", ["proleptic_gregorian", "noleap"])
+def test_get_days_since_reference(num_years, calendar):
+    first_year = 2020
+    final_year = first_year + num_years - 1
+    years = np.array([i for i in range(first_year, final_year + 1)])
+    months = np.zeros((num_years,), dtype=int)
+    # For last year set month to 1
+    months[-1] = 1
+    if calendar == "proleptic_gregorian":
+        reference_date = cftime.DatetimeProlepticGregorian(2020, 1, 1)
+    else:
+        reference_date = cftime.DatetimeNoLeap(2020, 1, 1)
     n_months = 3
-    calendar = "proleptic_gregorian"
     days = get_days_since_reference(years, months, reference_date, n_months, calendar)
-    assert days.shape == (2, 3)
-    assert days[0, 0] == 0
-    assert days[0, 1] == 31
-    assert days[0, 2] == 31 + 29
-    # 2020 is a leap year
-    assert days[1, 0] == 366 + 31
-    assert days[1, 1] == 366 + 31 + 28
-    assert days[1, 2] == 366 + 31 + 28 + 31
+    assert days.shape == (num_years, 3)
+    # 2020 is a leap year in proleptic_gregorian
+    if calendar == "proleptic_gregorian":
+        assert days[0, 0] == 0
+        assert days[0, 1] == 31
+        assert days[0, 2] == 31 + 29
+        if num_years == 2:
+            assert days[1, 0] == 366 + 31
+            assert days[1, 1] == 366 + 31 + 28
+            assert days[1, 2] == 366 + 31 + 28 + 31
+        if num_years == 500:
+            # 121 is number of leap days
+            assert days[499, 0] == 182135 + 121 + 31
+            assert days[499, 1] == 182135 + 121 + 31 + 28
+    if calendar == "noleap":
+        assert days[0, 0] == 0
+        assert days[0, 1] == 31
+        assert days[0, 2] == 31 + 28
+        if num_years == 2:
+            assert days[1, 0] == 365 + 31
+            assert days[1, 1] == 365 + 31 + 28
+            assert days[1, 2] == 365 + 31 + 28 + 31
+        if num_years == 500:
+            assert days[499, 0] == 182135 + 31
+            assert days[499, 1] == 182135 + 31 + 28
 
 
 @pytest.mark.parametrize(

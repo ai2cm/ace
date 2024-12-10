@@ -6,27 +6,25 @@ Installation
 
 All commands here are run from the top-level directory of the repository, unless otherwise stated.
 
-This is unsupported, pre-alpha software: use at your own risk! We are actively developing this software
-and will be making breaking changes to the API.
+Experimental release
+--------------------
 
-PyPI
-----
+There is no stable release. This is unsupported, pre-alpha software: use at your own risk!
 
-To install the latest release directly from PyPI, use:
+To install directly from github, you can run:
 
 .. code-block:: shell
 
-    pip install fme
+    pip install 'git://github.com/ai2cm/full-model.git#egg=fme&subdirectory=fme'
 
 Conda
 -----
 
-For convenience, we provide an easy way to create a conda environment with `fme` installed.
-First, clone the repository:
+To install with Conda, you must retrieve the sources from github:
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/ace.git
+    git clone git@github.com:ai2cm/full-model.git
 
 A make target is available to build a conda environment:
 
@@ -34,7 +32,7 @@ A make target is available to build a conda environment:
 
     make create_environment
 
-This will create an environment named ``fme``, and should use the same package versions we have used in development. If you would like a different name, set the ENVIRONMENT_NAME variable:
+This will create an environment named ``fme``. If you would like a different name, set the ENVIRONMENT_NAME variable:
 
 .. code-block:: shell
 
@@ -43,11 +41,11 @@ This will create an environment named ``fme``, and should use the same package v
 Development
 -----------
 
-To install directly from source for development, clone the repository:
+The package is not yet available on PyPI. Before installing, you must retrieve the sources from github:
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/ace.git
+    git clone git@github.com:ai2cm/full-model.git
 
 Once downloaded, you can install the sources in development mode (``-e`` flag) with the extra dependencies for development (``[dev]``) and versions pinned to the ones we use in development (``-c constraints.txt``) with the following command:
 

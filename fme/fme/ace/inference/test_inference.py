@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import List, Tuple
+from typing import List
 
 import cftime
 import numpy as np
@@ -13,6 +13,13 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.data_loading.batch_data import PrognosticState
+from fme.ace.data_loading.inference import (
+    ExplicitIndices,
+    ForcingDataLoaderConfig,
+    InferenceInitialConditionIndices,
+    TimestampList,
+)
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.inference import (
     InferenceConfig,
@@ -21,17 +28,17 @@ from fme.ace.inference.inference import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.core.data_loading.data_typing import SigmaCoordinates
-from fme.core.data_loading.inference import (
-    ExplicitIndices,
-    ForcingDataLoaderConfig,
-    InferenceInitialConditionIndices,
-    TimestampList,
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.testing import DimSizes, FV3GFSData
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
 )
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.normalizer import FromStateNormalizer
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.testing import DimSizes, FV3GFSData
+from fme.core.normalizer import NormalizationConfig
+from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -47,7 +54,7 @@ def save_stepper(
     out_names: List[str],
     mean: float,
     std: float,
-    data_shape: Tuple[int, int, int],
+    data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
@@ -55,19 +62,19 @@ def save_stepper(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
         in_names=in_names,
         out_names=out_names,
-        normalization=FromStateNormalizer(
-            state={
-                "means": {name: mean for name in all_names},
-                "stds": {name: std for name in all_names},
-            }
+        normalization=NormalizationConfig(
+            means={name: mean for name in all_names},
+            stds={name: std for name in all_names},
         ),
     )
     area = torch.ones(data_shape[-2:], device=fme.get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
     stepper = config.get_stepper(
-        img_shape=data_shape[-2:],
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        img_shape=(data_shape[-2], data_shape[-1]),
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )
     torch.save({"stepper": stepper.get_state()}, path)
@@ -75,13 +82,16 @@ def save_stepper(
 
 def test_inference_entrypoint(tmp_path: pathlib.Path):
     forward_steps_in_memory = 2
-    in_names = ["prog", "forcing_var"]
-    out_names = ["prog", "diagnostic_var"]
+    # NOTE: number of inputs and outputs has to be the same for the PlusOne
+    # stepper module to work properly
+    in_names = ["prog", "forcing_var", "DSWRFtoa"]
+    out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
+    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+
     dim_sizes = DimSizes(
         n_time=9,
-        n_lat=16,
-        n_lon=32,
+        horizontal=horizontal,
         nz_interface=4,
     )
     save_stepper(
@@ -90,23 +100,37 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         out_names=out_names,
         mean=0.0,
         std=1.0,
-        data_shape=dim_sizes.shape_2d,
+        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
-        names=["forcing_var"],
+        names=["forcing_var", "DSWRFtoa"],
         dim_sizes=dim_sizes,
         timestep_days=0.25,
+        save_vertical_coordinate=False,
     )
     initial_condition = xr.Dataset(
-        {"prog": xr.DataArray(np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"])}
+        {
+            "prog": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+            "forcing": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+            "DSWRFtoa": xr.DataArray(
+                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+            ),
+        }
     )
 
     initial_condition_path = tmp_path / "init_data" / "ic.nc"
     initial_condition_path.parent.mkdir()
     initial_condition["time"] = xr.DataArray(
-        [cftime.datetime(2000, 1, 1, 6), cftime.datetime(2000, 1, 1, 18)],
-        dims=["sample"],
+        [
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 6),
+            cftime.DatetimeProlepticGregorian(2000, 1, 1, 18),
+        ],
+        dims=["time"],
     )
     initial_condition.to_netcdf(initial_condition_path, mode="w")
     forcing_loader = ForcingDataLoaderConfig(
@@ -122,7 +146,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         logging=LoggingConfig(
             log_to_screen=True,
             log_to_file=False,
-            log_to_wandb=False,
+            log_to_wandb=True,
         ),
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
@@ -131,9 +155,39 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
         yaml.dump(dataclasses.asdict(config), f)
-    main(yaml_config=str(config_filename))
+
+    with mock_wandb() as wandb:
+        wandb.configure(log_to_wandb=True)
+        main(yaml_config=str(config_filename))
+        wandb_logs = wandb.get_logs()
+
+    n_ic_timesteps = 1
+    summary_log_step = 1
+    assert len(wandb_logs) == n_ic_timesteps + config.n_forward_steps + summary_log_step
+    for i, log in enumerate(wandb_logs):
+        for metric, val in log.items():
+            # check that time series metrics match
+            if "inference/mean" in metric:
+                if i > 0:
+                    assert metric in wandb_logs[i]
+                    if np.isnan(val):
+                        assert np.isnan(wandb_logs[i][metric])
+                    else:
+                        assert wandb_logs[i][metric] == val
+                elif not np.isnan(val):  # for IC only valid data is reported to wandb
+                    assert metric in wandb_logs[i]
+                    assert wandb_logs[i][metric] == val
+
     ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    # prognostic in
     assert "prog" in ds
+    # diags in
+    assert "ULWRFtoa" in ds
+    assert "USWRFtoa" in ds
+    # derived in
+    assert "net_energy_flux_toa_into_atmosphere" in ds
+    # forcings not in
+    assert "DSWRFtoa" not in ds
     assert "forcing_var" not in ds
     assert ds["prog"].sizes == {"time": 4, "sample": 2, "lat": 16, "lon": 32}
     np.testing.assert_allclose(
@@ -142,6 +196,26 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     np.testing.assert_allclose(
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
+    saved_data = xr.open_dataset(data.data_filename)
+    ops = LatLonCoordinates(
+        lat=torch.as_tensor(saved_data["grid_yt"].values),
+        lon=torch.as_tensor(saved_data["grid_xt"].values),
+    ).gridded_operations
+    # check that inference logs match raw output
+    for i in range(1, config.n_forward_steps + 1):
+        for log_name in wandb_logs[i]:
+            if "inference/mean/weighted_mean_gen" in log_name:
+                variable_name = log_name.split("/")[-1]
+                # note raw output does not include initial condition, hence
+                # i-1 below. Code uses area from data, not stepper above.
+                raw_variable = ds[variable_name].isel(time=i - 1)
+                raw_global_mean = ops.area_weighted_mean(
+                    torch.as_tensor(raw_variable.values)
+                ).mean()
+                np.testing.assert_allclose(
+                    raw_global_mean, wandb_logs[i][log_name], rtol=1e-6
+                )
+    assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
 def test_get_initial_condition():
@@ -150,13 +224,19 @@ def test_get_initial_condition():
         np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
     )
     data = xr.Dataset({"prog": prognostic_da, "time": time_da})
-    initial_condition, initial_times = get_initial_condition(data, ["prog"])
+    initial_condition = get_initial_condition(data, ["prog"])
+    assert isinstance(initial_condition, PrognosticState)
+    batch_data = initial_condition.as_batch_data()
+    assert batch_data.time.shape == (2, 1)
+    initial_times = batch_data.time.isel(time=0)
     assert initial_times.shape == (2,)
     assert initial_times[0] == 0
     assert initial_times[1] == 5
-    assert initial_condition["prog"].shape == (2, 16, 32)
-    np.testing.assert_allclose(initial_condition["prog"].numpy(), data["prog"].values)
-    assert initial_condition["prog"].device == fme.get_device()
+    assert batch_data.data["prog"].shape == (2, 1, 16, 32)
+    np.testing.assert_allclose(
+        batch_data.data["prog"].squeeze(dim=1).cpu().numpy(), data["prog"].values
+    )
+    assert batch_data.time.isel(time=0).equals(initial_times)
 
 
 def test_get_initial_condition_raises_bad_variable_shape():

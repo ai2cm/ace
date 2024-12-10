@@ -1,46 +1,45 @@
-[![Docs](https://readthedocs.org/projects/ai2-climate-emulator/badge/?version=latest)](https://ai2-climate-emulator.readthedocs.io/en/latest/)
-[![PyPI](https://img.shields.io/pypi/v/fme.svg)](https://pypi.org/project/fme/)
+# full-model
 
-<img src="ACE-logo.png" alt="Logo for the ACE Project" style="width: auto; height: 50px;">
+Create an ML-only climate model.
 
-# Ai2 Climate Emulator
-This repo contains code accompanying four papers describing ACE models:
-- "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
-- "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
-- "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses" ([link](https://arxiv.org/abs/2411.11268))
-- "ACE2-SOM: Coupling to a slab ocean and learning the sensitivity of climate to changes in CO2" ([link](https://arxiv.org/abs/2412.04418))
+Development documentation can be found on [github-pages](https://ai2cm.github.io/full-model/html/index.html).
 
-## Installation
+## Development
+
+This code is easiest to develop with access to an NVIDIA GPU. Therefore it is
+recommended to develop within an [interactive Beaker session](https://beaker-docs.apps.allenai.org/start/interactive.html).
+Once you have logged into a Beaker node and cloned this repo, call
+```
+make build_beaker_image
+```
+and then
+```
+make launch_beaker_session
+```
+Building the beaker image will be slow the first time, since the base
+image must be pulled from NIVDIA's container registry. It will be faster in
+subsequent calls on the same day. The code in this repository will be bind-mounted
+in the interactive session so that code changes outside the session will be
+reflected inside the session.
+
+Alternatively, if you'd like to skip the image building step since you already
+have a particular beaker image to use, you can do something like:
 
 ```
-pip install fme
+make VERSION=5df2501e58d5a585b3551979cc8ca1bb9f1585fc launch_beaker_session
 ```
 
-## Documentation
+## Environment
 
-See complete documentation [here](https://ai2-climate-emulator.readthedocs.io/en/latest/) and a quickstart guide [here](https://ai2-climate-emulator.readthedocs.io/en/latest/quickstart.html).
+The most reliable way to ensure that your development environment is the same
+as the environment used for our training jobs is to run tests within our
+docker/beaker image. This is described in the previous "Development" section.
 
-## Model checkpoints
-
-Pretrained model checkpoints are available in the [ACE Hugging Face](https://huggingface.co/collections/allenai/ace-67327d822f0f0d8e0e5e6ca4) collection.
-
-## Available datasets
-Two versions of the complete dataset described in [arxiv:2310.02074](https://arxiv.org/abs/2310.02074)
-are available on a [requester pays](https://cloud.google.com/storage/docs/requester-pays) Google Cloud Storage bucket:
+There is also tooling to install a conda environment in which our unit
+tests can run. Assuming you already have conda/miniconda installed, the
+following rule:
 ```
-gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-zarrs
-gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs
+make create_environment
 ```
-The `zarr` format is convenient for ad-hoc analysis. The netCDF version contains our
-train/validation split which was used for training and inference.
-
-The datasets used in the [ACE2 paper](https://arxiv.org/abs/2411.11268) are available at:
-```
-gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/c96-1deg-shield/
-gs://ai2cm-public-requester-pays/2024-11-13-ai2-climate-emulator-v2-amip/data/era5-1deg-1940-2022.zarr/
-```
-
-The dataset used in the [ACE2-SOM paper](https://arxiv.org/abs/2412.04418) is available at:
-```
-gs://ai2cm-public-requester-pays/2024-12-05-ai2-climate-emulator-v2-som/SHiELD-SOM-C96
-```
+will create conda environment called `fme`, which you can then
+activate (`conda activate fme`) and use.

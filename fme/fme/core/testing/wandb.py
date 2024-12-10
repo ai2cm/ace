@@ -1,6 +1,6 @@
 import collections
 import contextlib
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, List, Mapping
 
 from fme.core import wandb
 from fme.core.distributed import Distributed
@@ -11,6 +11,7 @@ class MockWandB:
         self._enabled = False
         self._configured = False
         self._logs: Dict[int, Dict[str, Any]] = collections.defaultdict(dict)
+        self._last_step = 0
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
@@ -31,12 +32,24 @@ class MockWandB:
             pass
 
     def log(self, data: Mapping[str, Any], step: int, sleep=None):
+        if step < self._last_step:
+            raise ValueError(
+                f"step {step} is less than last step {self._last_step}, "
+                "steps must be logged in order"
+            )
+        self._last_step = step
         # sleep arg is ignored since we don't want to sleep in tests
         if self._enabled:
             self._logs[step].update(data)
 
-    def get_logs(self) -> Dict[int, Dict[str, Any]]:
-        return self._logs
+    def get_logs(self) -> List[Dict[str, Any]]:
+        if len(self._logs) == 0:
+            return []
+        n_logs = max(self._logs.keys())
+        return_value: List[Dict[str, Any]] = [dict() for _ in range(n_logs + 1)]
+        for step, log in self._logs.items():
+            return_value[step] = log
+        return return_value
 
     def clean_wandb_dir(self, experiment_dir: str):
         pass

@@ -20,7 +20,7 @@ For the optional Weights and Biases (wandb) integration, you will need to set th
 
     export WANDB_API_KEY=wandb-api-key
 
-where `wandb-api-key` is created and retrieved from the "API Keys" section of the `Wandb`_ settings page.
+where ``wandb-api-key`` is created and retrieved from the "API Keys" section of the `Wandb`_ settings page.
 
 .. _Wandb: https://wandb.ai/settings
 
@@ -58,7 +58,7 @@ For example, the 10-year validation data (approx. 190GB) can be downloaded with:
 
     gsutil -m -u YOUR_GCP_PROJECT cp -r gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/data/repeating-climSST-1deg-netCDFs/validation .
 
-It is possible to download a portion of the dataset only, but it is necessary to have enough data to span the desired prediction period. The checkpoint is also available on GCS at `gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar`.
+It is possible to download a portion of the dataset only, but it is necessary to have enough data to span the desired prediction period. The checkpoint is also available on GCS at ``gs://ai2cm-public-requester-pays/2023-11-29-ai2-climate-emulator-v1/checkpoints/ace_ckpt.tar``.
 
 .. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
 .. _requester pays: https://cloud.google.com/storage/docs/requester-pays
@@ -83,7 +83,8 @@ If you run into configuration issues, you can validate your configuration with
 
     While inference can be performed without a GPU, it may be very slow. If running on a Mac, set the environmental variable
     ``export FME_USE_MPS=1`` to enable using the `Metal Performance Shaders`_ framework for GPU acceleration. Note this backend is
-    not fully featured and it may not work with all inference features or for training.
+    not fully featured and it may not work with all inference features or for training. It is recommended to use the latest version
+    of torch if using MPS.
 
 .. _Metal Performance Shaders: https://developer.apple.com/metal/pytorch/
 
@@ -171,7 +172,7 @@ Then in the ``fme`` conda environment, run evaluation with:
 
     torchrun --nproc_per_node RANK_COUNT -m fme.ace.train config-train.yaml
 
-where RANK_COUNT is how many processors you want to run on.
+where ``RANK_COUNT`` is how many processors you want to run on.
 This will typically be the number of GPUs you have available.
 If running on a single GPU, you can omit the `torchrun` command and use ``python -m`` instead.
 
