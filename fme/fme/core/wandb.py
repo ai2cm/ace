@@ -117,12 +117,13 @@ class WandB:
         self._configured = True
 
     def init(self, **kwargs):
-        """kwargs are passed to wandb.init"""
+        """Kwargs are passed to wandb.init."""
         if not self._configured:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
+            wandb.require("core")
             wandb.init(**kwargs)
 
     def watch(self, modules):

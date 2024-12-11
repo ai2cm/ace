@@ -1,0 +1,85 @@
+runs:
+  2024-07-10-e3smv2-1deg-testing: ""
+data_output_directory: /global/cfs/cdirs/m4492/fme-preprocess/zarr/
+stats:
+  output_directory: /global/cfs/cdirs/m4492/fme-preprocess/2024-07-10-e3smv2-1deg-testing
+  start_date: "1970-01-01"
+  end_date: "1970-12-31"
+  data_type: E3SMV2
+  beaker_dataset: e3sm-1deg-8layers-stats-1970 # this is not used in e3sm data processing
+dataset_computation:
+  chunking:
+    time_dim: 10
+    latitude_dim: 180
+    longitude_dim: 360
+  reference_vertical_coordinate_file: None
+  time_invariant_dir: /global/cfs/cdirs/m4331/jpduncan/e3smv2/time_invariant
+  vertical_coarsening_indices:
+# computed here: https://github.com/ai2cm/explore/blob/master/jamesd/2023-06-09-e3smv2-vertical-interface-indices.ipynb
+    - [0, 19]
+    - [19, 30]
+    - [30, 38]
+    - [38, 44]
+    - [44, 48]
+    - [48, 53]
+    - [53, 61]
+    - [61, 72]
+  roundtrip_fraction_kept: 1.0
+  n_split: 100
+  variable_sources:
+    time_invariant:
+      - PHIS
+    6hourly_instant/1yr:
+      - PS
+      - TS
+      - T
+      - U
+      - V
+      - Q
+      - CLDLIQ
+      - CLDICE
+      - RAINQM
+      - SNOWQM
+      - TMQ
+      - TGCLDLWP
+      - TGCLDIWP
+      - OCNFRAC
+      - LANDFRAC
+      - ICEFRAC
+    6hourly/1yr:
+      - PRECT
+      - LHFLX
+      - SHFLX
+      - FLNS
+      - FLDS
+      - FSNS
+      - FSDS
+      - FSNTOA
+      - SOLIN
+      - FLUT
+      - PRECSC
+      - PRECSL
+      - QFLX
+  standard_names:
+    longitude_dim: lon
+    latitude_dim: lat
+    vertical_dim: lev
+    vertical_interface_dim: ilev
+    time_dim: time
+    surface_pressure: PS
+    latent_heat_flux: LHFLX
+    precip_rate: PRECT
+    precipitable_water_path: precipitable_water_path
+    pressure_thickness: pressure_thickness_of_atmospheric_layer
+    air_temperature: T
+    specific_humidity: Q
+    cloud_water_mixing_ratio: CLDLIQ
+    cloud_ice_mixing_ratio: CLDICE
+    graupel_mixing_ratio: None
+    rain_mixing_ratio: RAINQM
+    snow_mixing_ratio: SNOWQM
+    northward_wind: V
+    eastward_wind: U
+    hybrid_level_coeffs:
+      - hyai
+      - hybi

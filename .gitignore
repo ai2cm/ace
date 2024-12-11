@@ -136,3 +136,6 @@ dmypy.json
 
 # scratch directory for testing
 scratch/
+
+# Some in progress data pipelines get added here
+scripts/data_process/.nfs*

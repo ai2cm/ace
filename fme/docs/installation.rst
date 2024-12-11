@@ -26,7 +26,7 @@ First, clone the repository:
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/ace.git
+    git clone git@github.com:ai2cm/full-model.git
 
 A make target is available to build a conda environment:
 
@@ -34,7 +34,7 @@ A make target is available to build a conda environment:
 
     make create_environment
 
-This will create an environment named ``fme``, and should use the same package versions we have used in development. If you would like a different name, set the ENVIRONMENT_NAME variable:
+This will create an environment named ``fme``. If you would like a different name, set the ENVIRONMENT_NAME variable:
 
 .. code-block:: shell
 
@@ -47,7 +47,7 @@ To install directly from source for development, clone the repository:
 
 .. code-block:: shell
 
-    git clone git@github.com:ai2cm/ace.git
+    git clone git@github.com:ai2cm/full-model.git
 
 Once downloaded, you can install the sources in development mode (``-e`` flag) with the extra dependencies for development (``[dev]``) and versions pinned to the ones we use in development (``-c constraints.txt``) with the following command:
 

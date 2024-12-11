@@ -22,7 +22,7 @@ class Packer:
 
     def pack(self, tensors: TensorDict, axis=0) -> torch.Tensor:
         """
-        Packs tensors into a single tensor, concatenated along a new axis
+        Packs tensors into a single tensor, concatenated along a new axis.
 
         Args:
             tensors: Dict from names to tensors.

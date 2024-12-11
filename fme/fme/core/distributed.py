@@ -2,6 +2,7 @@ import os
 from typing import Callable, List, Optional, Union
 
 import torch.distributed
+from torch.nn import SyncBatchNorm
 from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
@@ -40,7 +41,7 @@ class Distributed:
     variables without having to pass them around, and lets us put the initialization
     for this global state in the same place as the routines that use it.
 
-    Attributes:
+    Parameters:
         world_size: The number of processes in the distributed training job.
         rank: The global rank of the current process.
         local_rank: The node-local rank of the current process.
@@ -179,7 +180,6 @@ class Distributed:
             A list of tensors of consistent shape, where the i-th element is the tensor
                 from the i-th process.
         """
-
         return gather_irregular(
             tensor,
             self.reduce_max,
@@ -212,7 +212,7 @@ class Distributed:
                 device_ids = None
                 output_device = None
             return DistributedDataParallel(
-                module,
+                SyncBatchNorm.convert_sync_batchnorm(module),
                 device_ids=device_ids,
                 output_device=output_device,
             )
@@ -244,7 +244,6 @@ def gather_irregular(
     Returns:
         A list of tensors, where the i-th element is the tensor from the i-th process.
     """
-
     output_tensor_size = []
     tensor_size = list(tensor.size())
     for dim_len in tensor_size:
@@ -281,7 +280,7 @@ def pad_tensor_at_end(
     fill_value: Union[float, int] = 0.0,
 ):
     """Pad tensor by specified amount at end of each dimension.
-    Note that `pad` format is in reverse dimension order
+    Note that `pad` format is in reverse dimension order.
 
     Args:
         tensor: The tensor to pad
@@ -311,7 +310,7 @@ def pad_tensor_at_end(
 def unpad_tensor_at_end(
     tensor: torch.Tensor, dimension_difference: torch.Tensor
 ) -> torch.Tensor:
-    """Remove padding from tensor
+    """Remove padding from tensor.
 
     Args:
         tensor: The tensor to remove padding from

@@ -1,5 +1,6 @@
 from .climate_data import ClimateData
 from .device import get_device, using_gpu
+from .gridded_ops import GriddedOperations
 from .metrics import (
     root_mean_squared_error,
     spherical_area_weights,
@@ -8,7 +9,6 @@ from .metrics import (
 )
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
-from .stepper import SingleModuleStepper, SingleModuleStepperConfig
 
 __all__ = [
     "spherical_area_weights",
@@ -20,7 +20,6 @@ __all__ = [
     "StandardNormalizer",
     "get_normalizer",
     "Packer",
-    "SingleModuleStepper",
-    "SingleModuleStepperConfig",
     "ClimateData",
+    "GriddedOperations",
 ]

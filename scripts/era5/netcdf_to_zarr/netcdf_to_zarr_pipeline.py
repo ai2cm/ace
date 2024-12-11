@@ -223,7 +223,7 @@ def create_record(
 
 
 def create_record_local(
-    item: Tuple[pd.Timestamp, pd.Timestamp, str, str, str]
+    item: Tuple[pd.Timestamp, pd.Timestamp, str, str, str],
 ) -> Generator[Tuple[xbeam.Key, xr.Dataset], None, None]:
     start_time, end_time, variable, category, path = item
     with tempfile.TemporaryDirectory() as tmpdir:

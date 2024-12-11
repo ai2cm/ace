@@ -9,7 +9,7 @@ class SchedulerConfig:
     """
     Configuration for a scheduler to use during training.
 
-    Attributes:
+    Parameters:
         type: Name of scheduler class from torch.optim.lr_scheduler,
             no scheduler is used by default.
         kwargs: Keyword arguments to pass to the scheduler constructor.

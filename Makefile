@@ -4,7 +4,7 @@ ENVIRONMENT_NAME ?= fme
 DEPLOY_TARGET ?= pypi
 
 build_docker_image:
-	docker build -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
+	docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
 
 enter_docker_image: build_docker_image
 	docker run -it --rm $(IMAGE):$(VERSION) bash
@@ -12,11 +12,18 @@ enter_docker_image: build_docker_image
 # recommended to deactivate current conda environment before running this
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv==0.2.5
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e fme[dev]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e ./fme[dev,docs]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
-	pytest --durations 20 .
+	pytest --durations 40 .
+
+test_fast:
+	pytest --durations 40 --fast .
+
+test_very_fast:
+	pytest --durations 40 --very-fast .
 
 # For maintainer use only
 # requires fme[deploy] to be installed

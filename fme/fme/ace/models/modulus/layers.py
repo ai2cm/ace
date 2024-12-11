@@ -22,10 +22,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.cuda import amp
 from torch.utils.checkpoint import checkpoint
-from torch_harmonics import *
 
-from .activations import *
-from .contractions import *
+from .activations import ComplexReLU
+from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
 
 
 @torch.jit.script
@@ -199,185 +198,6 @@ class InverseRealFFT2(nn.Module):
         return out
 
 
-class SpectralConv2d(nn.Module):
-    """
-    Spectral Convolution as utilized in
-    """
-
-    def __init__(
-        self,
-        forward_transform,
-        inverse_transform,
-        hidden_size,
-        sparsity_threshold=0.0,
-        hard_thresholding_fraction=1,
-        use_complex_kernels=False,
-        compression=None,
-        rank=0,
-        bias=False,
-    ):  # pragma: no cover
-        super(SpectralConv2d, self).__init__()
-
-        self.hidden_size = hidden_size
-        self.sparsity_threshold = sparsity_threshold
-        self.hard_thresholding_fraction = hard_thresholding_fraction
-        self.scale = 1 / hidden_size**2
-        self.contract_handle = (
-            compl_contract2d_fwd_c if use_complex_kernels else compl_contract2d_fwd
-        )
-
-        self.forward_transform = forward_transform
-        self.inverse_transform = inverse_transform
-
-        self.output_dims = (self.inverse_transform.nlat, self.inverse_transform.nlon)
-        modes_lat = self.inverse_transform.lmax
-        modes_lon = self.inverse_transform.mmax
-        self.modes_lat = int(modes_lat * self.hard_thresholding_fraction)
-        self.modes_lon = int(modes_lon * self.hard_thresholding_fraction)
-
-        # new simple linear layer
-        self.w = nn.Parameter(
-            self.scale
-            * torch.randn(
-                self.hidden_size, self.hidden_size, self.modes_lat, self.modes_lon, 2
-            )
-        )
-        # optional bias
-        if bias:
-            self.b = nn.Parameter(
-                self.scale * torch.randn(1, self.hidden_size, *self.output_dims)
-            )
-
-    def forward(self, x):  # pragma: no cover
-        dtype = x.dtype
-        # x = x.float()
-        B, C, H, W = x.shape
-
-        with amp.autocast(enabled=False):
-            x = x.to(torch.float32)
-            x = self.forward_transform(x)
-            x = torch.view_as_real(x)
-            x = x.to(dtype)
-
-        # do spectral conv
-        modes = torch.zeros(x.shape, device=x.device)
-
-        # modes[:, :, :self.modes_lat,  :self.modes_lon, :] = self.contract_handle(x[:, :, :self.modes_lat,  :self.modes_lon, :], self.wh)
-        # modes[:, :, -self.modes_lat:, :self.modes_lon, :] = self.contract_handle(x[:, :, -self.modes_lat:, :self.modes_lon, :], self.wl)
-        modes = self.contract_handle(x, self.w)
-
-        # finalize
-        x = F.softshrink(modes, lambd=self.sparsity_threshold)
-        x = torch.view_as_complex(x)
-
-        with amp.autocast(enabled=False):
-            x = x.to(torch.float32)
-            x = torch.view_as_complex(x)
-            x = x.contiguous()
-            x = self.inverse_transform(x)
-            x = x.to(dtype)
-
-        if hasattr(self, "b"):
-            x = x + self.b
-
-        return x
-
-
-class SpectralConvS2(nn.Module):
-    """
-    Spectral Convolution as utilized in
-    """
-
-    def __init__(
-        self,
-        forward_transform,
-        inverse_transform,
-        hidden_size,
-        sparsity_threshold=0.0,
-        use_complex_kernels=False,
-        compression=None,
-        rank=128,
-        bias=False,
-    ):  # pragma: no cover
-        super(SpectralConvS2, self).__init__()
-
-        self.hidden_size = hidden_size
-        self.sparsity_threshold = sparsity_threshold
-        self.scale = 0.02
-
-        self.forward_transform = forward_transform
-        self.inverse_transform = inverse_transform
-
-        self.modes_lat = self.forward_transform.lmax
-        self.modes_lon = self.forward_transform.mmax
-
-        assert self.inverse_transform.lmax == self.modes_lat
-        assert self.inverse_transform.mmax == self.modes_lon
-
-        # remember the lower triangular indices
-        ii, jj = torch.tril_indices(self.modes_lat, self.modes_lon)
-        self.register_buffer("ii", ii)
-        self.register_buffer("jj", jj)
-
-        if compression == "tt":
-            self.rank = rank
-            # tensortrain coefficients
-            g1 = nn.Parameter(self.scale * torch.randn(self.hidden_size, self.rank, 2))
-            g2 = nn.Parameter(
-                self.scale * torch.randn(self.rank, self.hidden_size, self.rank, 2)
-            )
-            g3 = nn.Parameter(self.scale * torch.randn(self.rank, len(ii), 2))
-            self.w = nn.ParameterList([g1, g2, g3])
-
-            self.contract_handle = (
-                contract_tt  # if use_complex_kernels else raise(NotImplementedError)
-            )
-        else:
-            self.w = nn.Parameter(
-                self.scale * torch.randn(self.hidden_size, self.hidden_size, len(ii), 2)
-            )
-            self.contract_handle = (
-                compl_contract_fwd_c if use_complex_kernels else compl_contract_fwd
-            )
-
-        if bias:
-            self.b = nn.Parameter(
-                self.scale * torch.randn(1, self.hidden_size, *self.output_dims)
-            )
-
-    def forward(self, x):  # pragma: no cover
-        dtype = x.dtype
-        # x = x.float()
-        B, C, H, W = x.shape
-
-        with amp.autocast(enabled=False):
-            x = x.to(torch.float32)
-            x = x.contiguous()
-            x = self.forward_transform(x)
-            x = torch.view_as_real(x)
-            x = x.to(dtype)
-
-        # do spectral conv
-        modes = torch.zeros(x.shape, device=x.device)
-        modes[:, :, self.ii, self.jj, :] = self.contract_handle(
-            x[:, :, self.ii, self.jj, :], self.w
-        )
-
-        # finalize
-        x = F.softshrink(modes, lambd=self.sparsity_threshold)
-
-        with amp.autocast(enabled=False):
-            x = x.to(torch.float32)
-            x = torch.view_as_complex(x)
-            x = self.inverse_transform(x)
-            x = x.to(dtype)
-
-        if hasattr(self, "b"):
-            x = x + self.b
-
-        return x
-
-
 class SpectralAttention2d(nn.Module):
     """
     2d Spectral Attention layer
@@ -404,10 +224,10 @@ class SpectralAttention2d(nn.Module):
         self.hidden_size = int(hidden_size_factor * self.embed_dim)
         self.scale = 0.02
         self.spectral_layers = spectral_layers
-        self.mul_add_handle = (
-            compl_muladd2d_fwd_c if use_complex_kernels else compl_muladd2d_fwd
-        )
-        self.mul_handle = compl_mul2d_fwd_c if use_complex_kernels else compl_mul2d_fwd
+        if use_complex_kernels:
+            raise NotImplementedError("complex kernels not supported")
+        self.mul_add_handle = compl_muladd2d_fwd
+        self.mul_handle = compl_mul2d_fwd
 
         self.modes_lat = forward_transform.lmax
         self.modes_lon = forward_transform.mmax
@@ -512,12 +332,12 @@ class SpectralAttentionS2(nn.Module):
         self.sparsity_threshold = sparsity_threshold
         self.hidden_size = int(hidden_size_factor * self.embed_dim)
         self.scale = 0.02
+        if use_complex_kernels:
+            raise NotImplementedError("complex kernels not supported")
         # self.mul_add_handle = compl_muladd1d_fwd_c if use_complex_kernels else compl_muladd1d_fwd
-        self.mul_add_handle = (
-            compl_muladd2d_fwd_c if use_complex_kernels else compl_muladd2d_fwd
-        )
+        self.mul_add_handle = compl_muladd2d_fwd
         # self.mul_handle = compl_mul1d_fwd_c if use_complex_kernels else compl_mul1d_fwd
-        self.mul_handle = compl_mul2d_fwd_c if use_complex_kernels else compl_mul2d_fwd
+        self.mul_handle = compl_mul2d_fwd
         self.spectral_layers = spectral_layers
 
         self.modes_lat = forward_transform.lmax

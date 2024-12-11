@@ -21,11 +21,11 @@ def get_windowed_batch(dim_sizes: Sequence[int], start_time: Sequence[int]):
         .movedim(3, 1)
     )
     target = {VARNAME: data}
-    times = get_batch_times(n_timesteps, start_time, n_samples=n_samples)
-    return target, times
+    time = get_batch_time(n_timesteps, start_time, n_samples=n_samples)
+    return target, time
 
 
-def get_batch_times(
+def get_batch_time(
     n_timesteps: int,
     start_time: Sequence[int],
     n_samples: int = 2,
@@ -49,7 +49,7 @@ def _get_time_array(
         hours=6 * start_n_offset
     )
     time_index = xr.cftime_range(
-        start=start_time, periods=n_timesteps, freq=f"{freq_hrs}H", calendar="julian"
+        start=start_time, periods=n_timesteps, freq=f"{freq_hrs}h", calendar="julian"
     )
     return xr.DataArray(data=time_index, dims=["time"]).drop_vars(["time"])
 
@@ -59,7 +59,7 @@ def _get_time_array(
         "coarsen_factor",
         "start_timestep",
         "expected_coarsened_data",
-        "expected_coarsened_times",
+        "expected_coarsened_time",
         "expected_coarsened_start_timestep",
     ],
     [
@@ -67,7 +67,7 @@ def _get_time_array(
             1,
             0,
             [0.0, 1.0, 2.0, 3.0],
-            get_batch_times(start_time=(2020, 1, 1, 0, 0, 0), n_timesteps=4),
+            get_batch_time(start_time=(2020, 1, 1, 0, 0, 0), n_timesteps=4),
             0,
             id="coarsen_factor_1",
         ),
@@ -75,7 +75,7 @@ def _get_time_array(
             2,
             0,
             [0.5, 2.5],
-            get_batch_times(
+            get_batch_time(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
             0,
@@ -85,7 +85,7 @@ def _get_time_array(
             2,
             3,
             [0.5, 2.5],
-            get_batch_times(
+            get_batch_time(
                 start_time=(2020, 1, 1, 3, 0, 0), n_timesteps=2, freq_hrs=12
             ),
             1,
@@ -95,7 +95,7 @@ def _get_time_array(
             4,
             0,
             [1.5],
-            get_batch_times(
+            get_batch_time(
                 start_time=(2020, 1, 1, 9, 0, 0), n_timesteps=1, freq_hrs=24
             ),
             0,
@@ -107,41 +107,45 @@ def test_time_coarsen(
     coarsen_factor: int,
     start_timestep: int,
     expected_coarsened_data: Sequence[float],
-    expected_coarsened_times: Sequence[cftime.DatetimeJulian],
+    expected_coarsened_time: Sequence[cftime.DatetimeJulian],
     expected_coarsened_start_timestep: int,
     dim_sizes: Sequence[int] = DIM_SIZES,
 ):
-    target, times = get_windowed_batch(
+    target, time = get_windowed_batch(
         dim_sizes=dim_sizes, start_time=(2020, 1, 1, 0, 0, 0)
     )
     (
         target_coarsened,
         coarsened_start_timestep,
-        times_coarsened,
+        time_coarsened,
     ) = coarsen_batch(
         data=target,
         start_timestep=start_timestep,
-        batch_times=times,
+        batch_time=time,
         coarsen_factor=coarsen_factor,
     )
     # check the coarsened data time dim size
     assert target_coarsened[VARNAME].size(dim=1) == len(
         expected_coarsened_data
     ), "target coarsened time dim"
-    assert times_coarsened.sizes["time"] == len(
+    assert time_coarsened.sizes["time"] == len(
         expected_coarsened_data
-    ), "times coarsened time dim"
+    ), "time coarsened time dim"
     # check the coarsened data values
     n_samples, _, n_lat, n_lon = dim_sizes
-    torch.testing.assert_close(
-        target_coarsened[VARNAME],
-        torch.tensor(expected_coarsened_data, dtype=torch.float64)
-        .repeat(n_samples, n_lat, n_lon, 1)
-        .movedim(3, 1),
-    ), "target coarsened value"
+    (
+        torch.testing.assert_close(
+            target_coarsened[VARNAME],
+            torch.tensor(expected_coarsened_data, dtype=torch.float64)
+            .repeat(n_samples, n_lat, n_lon, 1)
+            .movedim(3, 1),
+        ),
+        "target coarsened value",
+    )
     # check the coarsened start timestep
     assert coarsened_start_timestep == expected_coarsened_start_timestep
     # check the coarsened data time coordinate values
-    xr.testing.assert_allclose(
-        times_coarsened, expected_coarsened_times
-    ), "times initial condition value"
+    (
+        xr.testing.assert_allclose(time_coarsened, expected_coarsened_time),
+        "time initial condition value",
+    )

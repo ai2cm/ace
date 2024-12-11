@@ -6,8 +6,8 @@ import numpy as np
 import torch
 import torch.jit
 
-from fme.core.device import get_device
-from fme.core.typing_ import TensorDict
+from fme.core.device import move_tensordict_to_device
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 @dataclasses.dataclass
@@ -18,17 +18,15 @@ class NormalizationConfig:
     Either global_means_path and global_stds_path or explicit means and stds
     must be provided.
 
-    Attributes:
+    Parameters:
         global_means_path: Path to a netCDF file containing global means.
         global_stds_path: Path to a netCDF file containing global stds.
-        exclude_names: Names to exclude from normalization.
         means: Mapping from variable names to means.
         stds: Mapping from variable names to stds.
     """
 
     global_means_path: Optional[str] = None
     global_stds_path: Optional[str] = None
-    exclude_names: Optional[List[str]] = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
 
@@ -49,8 +47,6 @@ class NormalizationConfig:
             )
 
     def build(self, names: List[str]):
-        if self.exclude_names is not None:
-            names = list(set(names) - set(self.exclude_names))
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -66,24 +62,6 @@ class NormalizationConfig:
             return StandardNormalizer(means=means, stds=stds)
 
 
-@dataclasses.dataclass
-class FromStateNormalizer:
-    """
-    An alternative to NormalizationConfig which provides a normalizer
-    initialized from a serializable state. This is not a public configuration
-    class, but instead allows for loading trained models that have been
-    serialized to disk, using the pre-existing normalization state.
-
-    Attributes:
-        state: State dict of a normalizer.
-    """
-
-    state: Dict[str, Dict[str, float]]
-
-    def build(self, names: List[str]):
-        return StandardNormalizer.from_state(self.state)
-
-
 class StandardNormalizer:
     """
     Responsible for normalizing tensors.
@@ -94,14 +72,17 @@ class StandardNormalizer:
         means: TensorDict,
         stds: TensorDict,
     ):
-        self.means = means
-        self.stds = stds
+        self.means = move_tensordict_to_device(means)
+        self.stds = move_tensordict_to_device(stds)
+        self._names = set(means).intersection(stds)
 
-    def normalize(self, tensors: TensorDict) -> TensorDict:
-        return _normalize(tensors, means=self.means, stds=self.stds)
+    def normalize(self, tensors: TensorMapping) -> TensorDict:
+        filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
+        return _normalize(filtered_tensors, means=self.means, stds=self.stds)
 
-    def denormalize(self, tensors: TensorDict) -> TensorDict:
-        return _denormalize(tensors, means=self.means, stds=self.stds)
+    def denormalize(self, tensors: TensorMapping) -> TensorDict:
+        filtered_tensors = {k: v for k, v in tensors.items() if k in self._names}
+        return _denormalize(filtered_tensors, means=self.means, stds=self.stds)
 
     def get_state(self):
         """
@@ -113,19 +94,15 @@ class StandardNormalizer:
         }
 
     @classmethod
-    def from_state(self, state) -> "StandardNormalizer":
+    def from_state(cls, state) -> "StandardNormalizer":
         """
         Loads state from a serializable data structure.
         """
         means = {
-            k: torch.tensor(v, device=get_device(), dtype=torch.float)
-            for k, v in state["means"].items()
+            k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
         }
-        stds = {
-            k: torch.tensor(v, device=get_device(), dtype=torch.float)
-            for k, v in state["stds"].items()
-        }
-        return StandardNormalizer(means=means, stds=stds)
+        stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
+        return cls(means=means, stds=stds)
 
 
 @torch.jit.script
@@ -134,10 +111,7 @@ def _normalize(
     means: TensorDict,
     stds: TensorDict,
 ) -> TensorDict:
-    return {
-        k: (t - means[k]) / stds[k] if k in means.keys() else t
-        for k, t in tensors.items()
-    }
+    return {k: (t - means[k]) / stds[k] for k, t in tensors.items()}
 
 
 @torch.jit.script
@@ -146,10 +120,7 @@ def _denormalize(
     means: TensorDict,
     stds: TensorDict,
 ) -> TensorDict:
-    return {
-        k: t * stds[k] + means[k] if k in means.keys() else t
-        for k, t in tensors.items()
-    }
+    return {k: t * stds[k] + means[k] for k, t in tensors.items()}
 
 
 def get_normalizer(

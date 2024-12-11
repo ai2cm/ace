@@ -25,7 +25,7 @@ class LoggingConfig:
     """
     Configuration for logging.
 
-    Attributes:
+    Parameters:
         project: name of the project in Weights & Biases
         entity: name of the entity in Weights & Biases
         log_to_screen: whether to log to the screen

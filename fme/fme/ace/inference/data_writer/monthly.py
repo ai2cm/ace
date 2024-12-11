@@ -9,8 +9,12 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.inference.data_writer.utils import get_all_names
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.ace.inference.data_writer.utils import (
+    DIM_INFO_HEALPIX,
+    DIM_INFO_LATLON,
+    get_all_names,
+)
 
 LEAD_TIME_DIM = "time"
 LEAD_TIME_UNITS = "months"
@@ -41,7 +45,7 @@ class PairedMonthlyDataWriter:
         n_timesteps: int,
         timestep: datetime.timedelta,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         n_months = months_for_timesteps(n_timesteps, timestep)
@@ -51,7 +55,7 @@ class PairedMonthlyDataWriter:
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
         self._prediction_writer = MonthlyDataWriter(
@@ -60,7 +64,7 @@ class PairedMonthlyDataWriter:
             n_samples=n_samples,
             n_months=n_months,
             save_names=save_names,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
         )
 
@@ -69,13 +73,13 @@ class PairedMonthlyDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
-            data=target, start_timestep=start_timestep, batch_times=batch_times
+            data=target, start_timestep=start_timestep, batch_time=batch_time
         )
         self._prediction_writer.append_batch(
-            data=prediction, start_timestep=start_timestep, batch_times=batch_times
+            data=prediction, start_timestep=start_timestep, batch_time=batch_time
         )
 
     def flush(self):
@@ -97,7 +101,7 @@ class MonthlyDataWriter:
         n_samples: int,
         n_months: int,
         save_names: Optional[Sequence[str]],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
@@ -109,14 +113,14 @@ class MonthlyDataWriter:
             n_months: Number of months to write to the file.
             save_names: Names of variables to save in the predictions netcdf file.
                 If None, all predicted variables will be saved.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         if label != "":
             label = "_" + label
         filename = str(Path(path) / f"monthly_mean{label}.nc")
         self._save_names = save_names
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self.dataset = Dataset(filename, "w", format="NETCDF4")
         self.dataset.createDimension(LEAD_TIME_DIM, n_months)
@@ -137,10 +141,10 @@ class MonthlyDataWriter:
         )
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
         self.dataset.variables[COUNTS][:] = 0
-        self._n_lat: Optional[int] = None
-        self._n_lon: Optional[int] = None
+
         self._init_years = np.full([n_samples], -1, dtype=int)
         self._init_months = np.full([n_samples], -1, dtype=int)
+        self._dataset_dims_created = False
 
     def _get_initial_year_and_month(
         self,
@@ -165,7 +169,7 @@ class MonthlyDataWriter:
             self.dataset.variables[VALID_TIME][:, :] = days_since_reference + 14
         return (self._init_years, self._init_months)
 
-    def _get_month_indices(self, batch_times: xr.DataArray) -> np.ndarray:
+    def _get_month_indices(self, batch_time: xr.DataArray) -> np.ndarray:
         """
         Get the month indices for the batch of data.
 
@@ -174,16 +178,16 @@ class MonthlyDataWriter:
         indices in this and future calls.
 
         Args:
-            batch_times: Time coordinates for each sample in the batch, of shape
+            batch_time: Time coordinate for each sample in the batch, of shape
                 [ensemble_member, lead_time].
 
         Returns:
             Month indices for the batch of data.
         """
-        calendar = batch_times.dt.calendar
-        years = batch_times.dt.year.values
+        calendar = batch_time.dt.calendar
+        years = batch_time.dt.year.values
         # datetime months are 1-indexed, we want 0-indexed
-        months = batch_times.dt.month.values - 1
+        months = batch_time.dt.month.values - 1
         init_years, init_months = self._get_initial_year_and_month(
             years=years[:, 0], months=months[:, 0], calendar=calendar
         )
@@ -198,7 +202,7 @@ class MonthlyDataWriter:
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -206,40 +210,39 @@ class MonthlyDataWriter:
         Args:
             data: Values to store.
             start_timestep: Timestep index for the start of the batch, unused.
-            batch_times: Time coordinates for each sample in the batch.
+            batch_time: Time coordinate for each sample in the batch.
         """
         del start_timestep  # unused
         n_samples_data = list(data.values())[0].shape[0]
-        n_samples_time = batch_times.sizes["sample"]
+        n_samples_time = batch_time.sizes["sample"]
         if n_samples_data != n_samples_time:
             raise ValueError(
                 f"Batch size mismatch, data has {n_samples_data} samples "
-                f"and times has {n_samples_time} samples."
+                f"and batch_time has {n_samples_time} samples."
             )
         n_times_data = list(data.values())[0].shape[1]
-        n_times_time = batch_times.sizes["time"]
+        n_times_time = batch_time.sizes["time"]
         if n_times_data != n_times_time:
             raise ValueError(
                 f"Batch time dimension mismatch, data has {n_times_data} times "
-                f"and times has {n_times_time} times."
+                f"and batch_time has {n_times_time} times."
             )
 
-        if self._n_lat is None:
-            self._n_lat = data[next(iter(data.keys()))].shape[-2]
-            self.dataset.createDimension("lat", self._n_lat)
-            if "lat" in self.coords:
-                self.dataset.createVariable("lat", "f4", ("lat",))
-                self.dataset.variables["lat"][:] = self.coords["lat"]
-        if self._n_lon is None:
-            self._n_lon = data[next(iter(data.keys()))].shape[-1]
-            self.dataset.createDimension("lon", self._n_lon)
-            if "lon" in self.coords:
-                self.dataset.createVariable("lon", "f4", ("lon",))
-                self.dataset.variables["lon"][:] = self.coords["lon"]
+        if not self._dataset_dims_created:
+            _dim_info = DIM_INFO_HEALPIX if "face" in self.coords else DIM_INFO_LATLON
+            _ordered_names = []
+            for dim in _dim_info:
+                dim_size = data[next(iter(data.keys()))].shape[dim.index]
+                self.dataset.createDimension(dim.name, dim_size)
+                if dim.name in self.coords:
+                    self.dataset.createVariable(dim.name, "f4", (dim.name,))
+                    self.dataset.variables[dim.name][:] = self.coords[dim.name]
+                _ordered_names.append(dim.name)
+            dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, *_ordered_names)
+            self._dataset_dims_created = True
 
-        dims = (ENSEMBLE_DIM, LEAD_TIME_DIM, "lat", "lon")
         save_names = self._get_variable_names_to_save(data.keys())
-        months = self._get_month_indices(batch_times)
+        months = self._get_month_indices(batch_time)
         month_min = np.min(months)
         month_range = np.max(months) - month_min + 1
         count_data = self.dataset.variables[COUNTS][
@@ -255,13 +258,13 @@ class MonthlyDataWriter:
                     fill_value=np.nan,
                 )
                 self.dataset.variables[variable_name][:] = 0.0
-                if variable_name in self.metadata:
-                    self.dataset.variables[variable_name].units = self.metadata[
+                if variable_name in self.variable_metadata:
+                    self.dataset.variables[
                         variable_name
-                    ].units
-                    self.dataset.variables[variable_name].long_name = self.metadata[
+                    ].units = self.variable_metadata[variable_name].units
+                    self.dataset.variables[
                         variable_name
-                    ].long_name
+                    ].long_name = self.variable_metadata[variable_name].long_name
                 self.dataset.variables[variable_name].coordinates = " ".join(
                     [INIT_TIME, VALID_TIME]
                 )
@@ -385,5 +388,7 @@ def get_days_since_reference(
             freq="MS",
             calendar=calendar,
         )
-        days_since_reference[i, :] = (dates_sample - reference_date).days
+        days_since_reference[i, :] = (
+            dates_sample.values - reference_date
+        ) // datetime.timedelta(days=1)
     return days_since_reference

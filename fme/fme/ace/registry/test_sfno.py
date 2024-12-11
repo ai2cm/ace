@@ -5,10 +5,11 @@ import numpy as np
 import pytest
 import torch
 
-from fme.core.data_loading.data_typing import SigmaCoordinates
+from fme.ace.stepper import SingleModuleStepperConfig
+from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
-from fme.core.normalizer import FromStateNormalizer
-from fme.core.stepper import SingleModuleStepperConfig
+from fme.core.gridded_ops import LatLonOperations
+from fme.core.normalizer import NormalizationConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -34,23 +35,21 @@ def test_sfno_init(shape):
         "in_names": ["x"],
         "out_names": ["x"],
         "normalization": dataclasses.asdict(
-            FromStateNormalizer(
-                state={
-                    "means": {"x": float(np.random.randn(1))},
-                    "stds": {"x": float(np.random.randn(1))},
-                }
+            NormalizationConfig(
+                means={"x": float(np.random.randn(1).item())},
+                stds={"x": float(np.random.randn(1).item())},
             )
         ),
     }
     area = torch.ones((1, 16, 32)).to(get_device())
-    sigma_coordinates = SigmaCoordinates(ak=torch.arange(7), bk=torch.arange(7)).to(
-        get_device()
-    )
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         img_shape=shape,
-        area=area,
-        sigma_coordinates=sigma_coordinates,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
     assert len(stepper.module.module.blocks) == num_layers

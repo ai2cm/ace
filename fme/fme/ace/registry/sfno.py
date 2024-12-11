@@ -5,12 +5,12 @@ from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
 )
 from fme.ace.models.modulus.sfnonet import SphericalFourierNeuralOperatorNet
-from fme.ace.registry.registry import ModuleConfig, register
+from fme.ace.registry.registry import ModuleConfig, ModuleSelector
 
 
 # this is based on the call signature of SphericalFourierNeuralOperatorNet at
 # https://github.com/NVIDIA/modulus/blob/b8e27c5c4ebc409e53adaba9832138743ede2785/modulus/models/sfno/sfnonet.py#L292  # noqa: E501
-@register("SphericalFourierNeuralOperatorNet")
+@ModuleSelector.register("SphericalFourierNeuralOperatorNet")
 @dataclasses.dataclass
 class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     """
@@ -55,7 +55,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         return sfno_net
 
 
-@register("SFNO-v0.1.0")
+@ModuleSelector.register("SFNO-v0.1.0")
 @dataclasses.dataclass
 class SFNO_V0_1_0(ModuleConfig):
     """

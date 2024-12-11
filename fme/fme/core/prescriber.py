@@ -1,8 +1,7 @@
 import dataclasses
 from typing import List
 
-import torch
-
+from fme.core.masking import replace_on_mask
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -17,7 +16,7 @@ class PrescriberConfig:
     target value at 1 based on the mask variable, and it is assumed the mask variable
     lies in the range from 0 to 1.
 
-    Attributes:
+    Parameters:
         prescribed_name: Name of the variable to be overwritten.
         mask_name: Name of the mask variable.
         mask_value: Value of the mask variable in the region to be overwritten.
@@ -78,7 +77,7 @@ class Prescriber:
     ) -> TensorDict:
         """
         Args:
-            data: Dictionary of data containing the mask variable.
+            mask_data: Dictionary of data containing the mask variable.
             gen: Dictionary of data to use outside of mask region.
             target: Dictionary of data to use in mask region.
 
@@ -104,11 +103,11 @@ class Prescriber:
             )
         else:
             # overwrite specified target variable in given mask region
-            rounded_mask = torch.round(mask_data[self.mask_name]).to(int)
-            output = torch.where(
-                condition=rounded_mask == self.mask_value,
-                input=target[self.prescribed_name],
-                other=gen[self.prescribed_name],
+            output = replace_on_mask(
+                original=gen[self.prescribed_name],
+                replacement=target[self.prescribed_name],
+                mask=mask_data[self.mask_name],
+                mask_value=self.mask_value,
             )
         return {**gen, self.prescribed_name: output}
 

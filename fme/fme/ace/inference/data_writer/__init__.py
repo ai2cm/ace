@@ -1,1 +1,1 @@
-from .main import DataWriter, DataWriterConfig, NullDataWriter, PairedDataWriter
+from .main import DataWriter, DataWriterConfig, PairedDataWriter

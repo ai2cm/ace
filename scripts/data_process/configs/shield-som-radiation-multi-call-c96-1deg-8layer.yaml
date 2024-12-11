@@ -1,0 +1,90 @@
+runs:
+  radiation-multi-call: gs://vcm-ml-raw-flexible-retention/2024-07-03-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/radiation-multi-call
+data_output_directory: gs://vcm-ml-intermediate/2024-10-22-vertically-resolved-1deg-c96-shield-som-radiation-multi-call-fme-dataset
+stats:
+  output_directory: gs://vcm-ml-intermediate/2024-10-22-vertically-resolved-1deg-c96-shield-som-radiation-multi-call-fme-dataset-stats
+  beaker_dataset: 2024-10-22-vertically-resolved-1deg-fme-c96-radiation-multi-call-co2-dataset-stats
+  start_date: null
+  end_date: null
+  data_type: FV3GFS
+  exclude_runs:
+    - radiation-multi-call
+dataset_computation:
+  reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
+  vertical_coarsening_indices:
+    - [0, 11]
+    - [11, 21]
+    - [21, 30]
+    - [30, 39]
+    - [39, 49]
+    - [49, 58]
+    - [58, 67]
+    - [67, 79]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+  variable_sources:
+    fluxes_2d.zarr:
+      - PRATEsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - precipitable_water_path
+      - GRAUPELsfc
+      - ICEsfc
+      - SNOWsfc
+    full_state.zarr:
+      - surface_temperature
+      - air_temperature
+      - specific_humidity
+      - cloud_water_mixing_ratio
+      - cloud_ice_mixing_ratio
+      - graupel_mixing_ratio
+      - rain_mixing_ratio
+      - snow_mixing_ratio
+      - northward_wind
+      - eastward_wind
+      - pressure_thickness_of_atmospheric_layer
+      - PRESsfc
+      - HGTsfc
+      - column_soil_moisture
+      - soil_moisture_0
+      - soil_moisture_1
+      - soil_moisture_2
+      - soil_moisture_3
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - specific_humidity_at_two_meters
+      - air_temperature_at_two_meters
+      - northward_wind_at_ten_meters
+      - eastward_wind_at_ten_meters
+      - RH200
+      - RH500
+      - RH850
+      - TMP200
+      - TMP500
+      - TMP850
+      - UGRD200
+      - UGRD500
+      - UGRD850
+      - VGRD200
+      - VGRD500
+      - VGRD850
+      - h50
+      - h200
+      - h500
+      - h850
+    ocean_forcing.zarr:
+      - prescribed_mixed_layer_depth
+      - prescribed_qflux
+    scalar.zarr:
+      - global_mean_co2

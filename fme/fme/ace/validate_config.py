@@ -7,8 +7,8 @@ import yaml
 
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.inference import InferenceConfig
+from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.train.train_config import TrainConfig
-from fme.core.stepper import SingleModuleStepperConfig
 
 CONFIG_CHOICES = ["train", "inference", "evaluator"]
 

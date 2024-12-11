@@ -1,5 +1,5 @@
 """
-Exponential Moving Average (EMA) module
+Exponential Moving Average (EMA) module.
 
 Copied from https://github.com/CompVis/latent-diffusion/blob/main/ldm/modules/ema.py
 and modified.
@@ -37,8 +37,7 @@ from torch import nn
 class HasNamedParameters(Protocol):
     def named_parameters(
         self, recurse: bool = True
-    ) -> Iterator[Tuple[str, nn.Parameter]]:
-        ...
+    ) -> Iterator[Tuple[str, nn.Parameter]]: ...
 
 
 @dataclasses.dataclass
@@ -46,7 +45,7 @@ class EMAConfig:
     """
     Configuration for exponential moving average of model weights.
 
-    Attributes:
+    Parameters:
         decay: decay rate for the moving average
     """
 
@@ -198,7 +197,7 @@ class EMATracker:
         Returns:
             The EMA tracker.
         """
-        ema = cls(model, state["decay"], state["faster_decay_at_start"])
+        ema = cls(model, float(state["decay"]), state["faster_decay_at_start"])
         ema.num_updates = state["num_updates"]
         ema._module_name_to_ema_name = state["module_name_to_ema_name"]
         return ema

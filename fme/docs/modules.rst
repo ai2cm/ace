@@ -15,7 +15,7 @@ The following module types are available:
 
 .. include:: available_modules.rst
 
-.. autofunction:: fme.ace.get_available_module_types
+.. autofunction:: fme.core.registry.ModuleSelector.get_available_types
 
 The following module builders are available:
 
@@ -26,6 +26,12 @@ The following module builders are available:
    :noindex:
 
 .. autoclass:: fme.ace.SFNO_V0_1_0
+   :members:
+   :undoc-members:
+   :show-inheritance:
+   :noindex:
+
+.. autoclass:: fme.ace.HEALPixRecUNetBuilder
    :members:
    :undoc-members:
    :show-inheritance:

@@ -2,9 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-import time
-from pathlib import Path
-from typing import Optional, Sequence
+from typing import Callable, Optional
 
 import dacite
 import torch
@@ -12,44 +10,53 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
+from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.batch_data import BatchData, InferenceGriddedData
+from fme.ace.data_loading.getters import get_inference_data
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.loop import run_dataset_comparison, run_inference_evaluator
-from fme.core import SingleModuleStepper
-from fme.core.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.data_typing import GriddedData, SigmaCoordinates
-from fme.core.data_loading.getters import get_inference_data
-from fme.core.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.inference.loop import (
+    DeriverABC,
+    run_dataset_comparison,
+    write_reduced_metrics,
+)
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
 from fme.core.dicts import to_flat_dict
+from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.ocean import OceanConfig
-from fme.core.stepper import SingleModuleStepperConfig
-from fme.core.wandb import WandB
+from fme.core.timing import GlobalTimer
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
-def load_stepper_config(checkpoint_file: str) -> SingleModuleStepperConfig:
+def load_stepper_config(
+    checkpoint_file: str, ocean_config: Optional[OceanConfig]
+) -> SingleModuleStepperConfig:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    return SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+    config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+    if ocean_config is not None:
+        logging.info(
+            "Overriding training ocean configuration with the inference ocean config."
+        )
+        config.ocean = ocean_config
+    return config
 
 
 def load_stepper(
     checkpoint_file: str,
-    area: torch.Tensor,
-    sigma_coordinates: SigmaCoordinates,
     ocean_config: Optional[OceanConfig] = None,
 ) -> SingleModuleStepper:
     checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(
-        checkpoint["stepper"], area=area, sigma_coordinates=sigma_coordinates
-    )
+    stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
     if ocean_config is not None:
         logging.info(
             "Overriding training ocean configuration with the inference ocean config."
         )
         new_ocean = ocean_config.build(
-            stepper.in_packer.names, stepper.out_packer.names, stepper.timestep
+            stepper.in_names, stepper.out_names, stepper.timestep
         )
-        stepper.ocean = new_ocean
+        stepper.replace_ocean(new_ocean)
     return stepper
 
 
@@ -76,7 +83,7 @@ class InferenceEvaluatorConfig:
     """
     Configuration for running inference including comparison to reference data.
 
-    Attributes:
+    Parameters:
         experiment_dir: Directory to save results to.
         n_forward_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to stepper checkpoint to load.
@@ -129,41 +136,22 @@ class InferenceEvaluatorConfig:
     def clean_wandb(self):
         self.logging.clean_wandb(self.experiment_dir)
 
-    def configure_gcs(self):
-        self.logging.configure_gcs()
-
-    def load_stepper(
-        self, area: torch.Tensor, sigma_coordinates: SigmaCoordinates
-    ) -> SingleModuleStepper:
-        """
-        Args:
-            area: A tensor of shape (n_lat, n_lon) containing the area of
-                each grid cell.
-            sigma_coordinates: The sigma coordinates of the model.
-        """
+    def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        stepper = load_stepper(
-            self.checkpoint_path,
-            area=area,
-            sigma_coordinates=sigma_coordinates,
-            ocean_config=self.ocean,
-        )
+        stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
         return stepper
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path)
+        return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
 
-    def get_data_writer(
-        self, data: GriddedData, prognostic_names: Sequence[str]
-    ) -> PairedDataWriter:
+    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
-            n_samples=self.loader.n_samples,
+            n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
-            prognostic_names=prognostic_names,
-            metadata=data.metadata,
+            variable_metadata=data.variable_metadata,
             coords=data.coords,
         )
 
@@ -180,10 +168,45 @@ def main(yaml_config: str):
         os.makedirs(config.experiment_dir, exist_ok=True)
     with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    return run_evaluator_from_config(config)
+    with GlobalTimer():
+        return run_evaluator_from_config(config)
+
+
+class _Deriver(DeriverABC):
+    """
+    DeriverABC implementation for dataset comparison.
+    """
+
+    def __init__(
+        self,
+        n_ic_timesteps: int,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+    ):
+        self._n_ic_timesteps = n_ic_timesteps
+        self._derive_func = derive_func
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._n_ic_timesteps
+
+    def get_forward_data(
+        self, data: BatchData, compute_derived_variables: bool = False
+    ) -> BatchData:
+        if compute_derived_variables:
+            timer = GlobalTimer.get_instance()
+            with timer.context("compute_derived_variables"):
+                data = data.compute_derived_variables(
+                    derive_func=self._derive_func,
+                    forcing_data=data,
+                )
+        return data.remove_initial_condition(self._n_ic_timesteps)
 
 
 def run_evaluator_from_config(config: InferenceEvaluatorConfig):
+    timer = GlobalTimer.get_instance()
+    timer.start_outer("inference")
+    timer.start("initialization")
+
     if not os.path.isdir(config.experiment_dir):
         os.makedirs(config.experiment_dir, exist_ok=True)
     config.configure_logging(log_filename="inference_out.log")
@@ -196,22 +219,22 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging_utils.log_versions()
     logging.info(f"Current device is {fme.get_device()}")
 
-    start_time = time.time()
     stepper_config = config.load_stepper_config()
     logging.info("Loading inference data")
-    data_requirements = stepper_config.get_data_requirements(
-        n_forward_steps=config.n_forward_steps
+    window_requirements = stepper_config.get_evaluation_window_data_requirements(
+        n_forward_steps=config.forward_steps_in_memory
+    )
+    initial_condition_requirements = (
+        stepper_config.get_prognostic_state_data_requirements()
     )
     data = get_inference_data(
-        config.loader,
-        config.forward_steps_in_memory,
-        data_requirements,
+        config=config.loader,
+        total_forward_steps=config.n_forward_steps,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
     )
 
-    stepper = config.load_stepper(
-        data.area_weights.to(fme.get_device()),
-        sigma_coordinates=data.sigma_coordinates.to(fme.get_device()),
-    )
+    stepper = config.load_stepper()
     if stepper.timestep != data.timestep:
         raise ValueError(
             f"Timestep of the loaded stepper, {stepper.timestep}, does not "
@@ -220,80 +243,85 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:
-        initial_times = batch.times.isel(time=0)
+        initial_time = batch.time.isel(time=0)
         break
     aggregator = aggregator_config.build(
-        area_weights=data.area_weights.to(fme.get_device()),
-        sigma_coordinates=data.sigma_coordinates,
+        vertical_coordinate=data.vertical_coordinate,
+        horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
-        n_timesteps=config.n_forward_steps + 1,
-        metadata=data.metadata,
-        data_grid=data.grid,
-        initial_times=initial_times,
+        n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
+        variable_metadata=data.variable_metadata,
+        initial_time=initial_time,
+        channel_mean_names=stepper.out_names,
+        normalize=stepper.normalizer.normalize,
     )
 
-    writer = config.get_data_writer(data, stepper.prognostic_names)
+    writer = config.get_data_writer(data)
 
+    timer.stop()
     logging.info("Starting inference")
+    record_logs = get_record_to_wandb(label="inference")
     if config.prediction_loader is not None:
         prediction_data = get_inference_data(
             config.prediction_loader,
-            config.forward_steps_in_memory,
-            data_requirements,
+            total_forward_steps=config.n_forward_steps,
+            window_requirements=window_requirements,
+            initial_condition=initial_condition_requirements,
         )
-
-        timers = run_dataset_comparison(
+        deriver = _Deriver(
+            n_ic_timesteps=stepper_config.n_ic_timesteps,
+            derive_func=stepper.derive_func,
+        )
+        run_dataset_comparison(
             aggregator=aggregator,
-            normalizer=stepper.normalizer,
             prediction_data=prediction_data,
             target_data=data,
+            deriver=deriver,
             writer=writer,
+            record_logs=record_logs,
         )
     else:
-        timers = run_inference_evaluator(
+        run_inference(
+            predict=stepper.predict_paired,
+            data=data,
             aggregator=aggregator,
             writer=writer,
-            stepper=stepper,
-            data=data,
+            record_logs=record_logs,
         )
 
-    final_flush_start_time = time.time()
+    timer.start("final_writer_flush")
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    for name, ds in aggregator.get_datasets(
-        ("time_mean", "zonal_mean", "histogram")
-    ).items():
-        coords = {k: v for k, v in data.coords.items() if k in ds.dims}
-        ds = ds.assign_coords(coords)
-        ds.to_netcdf(Path(config.experiment_dir) / f"{name}_diagnostics.nc")
+    write_reduced_metrics(
+        aggregator,
+        data.coords,
+        config.experiment_dir,
+        excluded=[
+            "video",
+        ],
+    )
+    timer.stop()
 
-    final_flush_duration = time.time() - final_flush_start_time
-    logging.info(f"Final writer flush duration: {final_flush_duration:.2f} seconds")
-    timers["final_writer_flush"] = final_flush_duration
+    timer.stop_outer("inference")
+    total_steps = config.n_forward_steps * config.loader.n_initial_conditions
+    inference_duration = timer.get_duration("inference")
+    wandb_logging_duration = timer.get_duration("wandb_logging")
+    total_steps_per_second = total_steps / (inference_duration - wandb_logging_duration)
+    timer.log_durations()
+    logging.info(
+        "Total steps per second (ignoring wandb logging): "
+        f"{total_steps_per_second:.2f} steps/second"
+    )
 
-    duration = time.time() - start_time
-    total_steps = config.n_forward_steps * config.loader.n_samples
-    total_steps_per_second = total_steps / duration
-    logging.info(f"Inference duration: {duration:.2f} seconds")
-    logging.info(f"Total steps per second: {total_steps_per_second:.2f} steps/second")
-
-    step_logs = aggregator.get_inference_logs(label="inference")
-    wandb = WandB.get_instance()
-    if wandb.enabled:
-        logging.info("Starting logging of metrics to wandb")
-        duration_logs = {
-            "duration_seconds": duration,
-            "total_steps_per_second": total_steps_per_second,
-        }
-        wandb.log({**timers, **duration_logs}, step=0)
-        for i, log in enumerate(step_logs):
-            wandb.log(log, step=i, sleep=0.01)
-
+    summary_logs = {
+        "total_steps_per_second": total_steps_per_second,
+        **timer.get_durations(),
+        **aggregator.get_summary_logs(),
+    }
+    record_logs([summary_logs])
     config.clean_wandb()
-
-    return step_logs
 
 
 if __name__ == "__main__":

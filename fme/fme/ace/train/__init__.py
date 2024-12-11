@@ -1,1 +1,2 @@
-from fme.ace.train.train import Trainer, _restore_checkpoint, count_parameters
+from fme.ace.train.train import Trainer
+from fme.core.generics.trainer import count_parameters

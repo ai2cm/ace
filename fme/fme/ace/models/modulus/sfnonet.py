@@ -232,9 +232,9 @@ class FourierNeuralOperatorBlock(nn.Module):
             x = self.act_layer(x)
 
         x_norm = torch.zeros_like(x)
-        x_norm[
-            ..., : self.output_shape_loc[0], : self.output_shape_loc[1]
-        ] = self.norm1(x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]])
+        x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
+            self.norm1(x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]])
+        )
         x = x_norm
 
         if hasattr(self, "mlp"):

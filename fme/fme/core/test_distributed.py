@@ -1,6 +1,8 @@
 import pytest
 import torch
 
+from fme import get_device
+
 from .distributed import pad_tensor_at_end, unpad_tensor_at_end
 
 
@@ -32,7 +34,7 @@ def test_pad_tensor_at_end(padding, fill_value):
     ],
 )
 def test_pad_unpad_rountrip(padding):
-    tensor = torch.ones(2, 3, 4)
+    tensor = torch.ones(2, 3, 4, device=get_device())
     padded_tensor = pad_tensor_at_end(tensor, padding)
     unpadded_tensor = unpad_tensor_at_end(padded_tensor, padding)
     assert unpadded_tensor.size() == tensor.size()

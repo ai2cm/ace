@@ -23,7 +23,7 @@ class FrozenParameterConfig:
 
     An exception is raised if a parameter is included by both lists.
 
-    Attributes:
+    Parameters:
         include: list of parameter names to freeze (set requires_grad = False)
         exclude: list of parameter names to ignore
     """
@@ -70,7 +70,7 @@ class ParameterInitializationConfig:
     pre-trained model. If the built model has larger weights than the
     pre-trained model, only the initial slice of the weights is overwritten.
 
-    Attributes:
+    Parameters:
         weight_path: path to a SingleModuleStepper checkpoint
             containing weights to load
         exclude_parameters: list of parameter names to exclude from the loaded
@@ -123,6 +123,8 @@ class ParameterInitializationConfig:
             def regularizer():
                 return torch.tensor(0.0, device=device)
 
+            return module, regularizer
+
         else:
             loaded_state_dict = {
                 name: value.to(device) for name, value in loaded_state_dict.items()
@@ -135,6 +137,8 @@ class ParameterInitializationConfig:
                     f"Dest module is missing parameters {missing_parameters}, "
                     "which is not allowed"
                 )
+
+            non_optional_state_dict = loaded_state_dict
 
             def regularizer():
                 loss = torch.tensor(0.0, device=device)
@@ -155,7 +159,7 @@ class ParameterInitializationConfig:
                             self.alpha
                             / 2
                             * torch.linalg.norm(
-                                (param - loaded_state_dict[name]).flatten(),
+                                (param - non_optional_state_dict[name]).flatten(),
                                 ord=2,
                             )
                         )
