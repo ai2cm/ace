@@ -357,6 +357,7 @@ class TrainOutput(TrainOutputABC):
             target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
             time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
+            derive_func=self.derive_func,
         )
 
     def copy(self) -> "TrainOutput":
@@ -367,6 +368,7 @@ class TrainOutput(TrainOutputABC):
             target_data={k: v for k, v in self.target_data.items()},
             time=self.time,
             normalize=self.normalize,
+            derive_func=self.derive_func,
         )
 
     def prepend_initial_condition(
@@ -392,6 +394,7 @@ class TrainOutput(TrainOutputABC):
             ),
             time=xr.concat([batch_data.time, self.time], dim="time"),
             normalize=self.normalize,
+            derive_func=self.derive_func,
         )
 
     def compute_derived_variables(
@@ -846,15 +849,12 @@ class SingleModuleStepper(
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
         )
+        ic = data.get_start(
+            set(data.data.keys()), self.n_ic_timesteps
+        )  # full data and not just prognostic get prepended
+        stepped = stepped.prepend_initial_condition(ic)
         if compute_derived_variables:
-            ic = data.get_start(
-                set(data.data.keys()), self.n_ic_timesteps
-            )  # full data and not just prognostic get prepended
-            stepped = (
-                stepped.prepend_initial_condition(ic)
-                .compute_derived_variables()
-                .remove_initial_condition(self.n_ic_timesteps)
-            )
+            stepped = stepped.compute_derived_variables()
         return stepped
 
     def get_state(self):
