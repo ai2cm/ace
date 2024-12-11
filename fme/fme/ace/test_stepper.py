@@ -10,6 +10,8 @@ import torch
 import xarray as xr
 
 import fme
+from fme.ace.aggregator import OneStepAggregator
+from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import (
     CorrectorConfig,
@@ -101,7 +103,7 @@ def test_stepper_config_all_names_property(
     assert set(config.all_names) == set(expected_all_names)
 
 
-def test_run_on_batch_normalizer_changes_only_norm_data():
+def test_train_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     area = torch.ones((5, 5), device=DEVICE)
@@ -155,7 +157,7 @@ def test_run_on_batch_normalizer_changes_only_norm_data():
     )  # mse scales with std**2
 
 
-def test_run_on_batch_addition_series():
+def test_train_on_batch_addition_series():
     torch.manual_seed(0)
 
     class AddOne(torch.nn.Module):
@@ -183,9 +185,8 @@ def test_run_on_batch_addition_series():
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=MagicMock())
-    # output of run_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps, 5, 5)
-    data = {k: data_with_ic.data[k][:, 1:] for k in data_with_ic.data}
+    # output of train_on_batch does not include the initial condition
+    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
 
     for i in range(n_steps - 1):
         assert torch.allclose(
@@ -202,11 +203,17 @@ def test_run_on_batch_addition_series():
         assert torch.allclose(
             stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
         )
-    assert torch.allclose(stepped.normalize(stepped.target_data)["a"], data["a"])
-    assert torch.allclose(stepped.normalize(stepped.target_data)["b"], data["b"])
+    assert torch.allclose(
+        stepped.normalize(stepped.target_data)["a"],
+        data_with_ic.data["a"],
+    )
+    assert torch.allclose(
+        stepped.normalize(stepped.target_data)["b"],
+        data_with_ic.data["b"],
+    )
 
 
-def test_run_on_batch_with_prescribed_ocean():
+def test_train_on_batch_with_prescribed_ocean():
     torch.manual_seed(0)
 
     class AddOne(torch.nn.Module):
@@ -328,14 +335,14 @@ class ReturnZerosModule(torch.nn.Module):
         return zero + self._param
 
 
-def _setup_and_run_on_batch(
+def _setup_and_train_on_batch(
     data: TensorDict,
     in_names,
     out_names,
     ocean_config: Optional[OceanConfig],
     optimization_config: Optional[OptimizationConfig],
 ):
-    """Sets up the requisite classes to run run_on_batch."""
+    """Sets up the requisite classes to run train_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
 
     if optimization_config is None:
@@ -373,7 +380,7 @@ def _setup_and_run_on_batch(
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
 @pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
-def test_run_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescribed):
+def test_train_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescribed):
     in_names, out_names = ["a"], ["a"]
     if is_input:
         in_names.append("b")
@@ -396,7 +403,53 @@ def test_run_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescri
     else:
         optimization = None
 
-    _setup_and_run_on_batch(data, in_names, out_names, ocean_config, optimization)
+    _setup_and_train_on_batch(data, in_names, out_names, ocean_config, optimization)
+
+
+@pytest.mark.parametrize("n_forward_steps", [1, 2, 3])
+def test_train_on_batch_one_step_aggregator(n_forward_steps):
+    in_names, out_names, all_names = ["a"], ["a"], ["a"]
+    data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
+    stepper = _get_stepper(in_names, out_names, ocean_config=None, module_name="AddOne")
+
+    aggregator = OneStepAggregator(
+        gridded_operations=LatLonOperations(torch.ones((5, 5))),
+    )
+
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
+    assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
+
+    aggregator.record_batch(stepped)
+    logs = aggregator.get_logs("one_step")
+
+    gen = data.data["a"].select(dim=1, index=0) + 1
+    tar = data.data["a"].select(dim=1, index=1)
+
+    bias = torch.mean(gen - tar)
+    assert np.isclose(bias.item(), logs["one_step/mean/weighted_bias/a"])
+
+    residual_gen = torch.ones((5, 5))
+    residual_tar = tar[0] - data.data["a"].select(dim=1, index=0)[0]
+    residual_imgs = [[residual_gen.cpu().numpy()], [residual_tar.cpu().numpy()]]
+    residual_plot = plot_paneled_data(residual_imgs, diverging=True)
+    assert np.allclose(
+        residual_plot.to_data_array(),
+        logs["one_step/snapshot/image-residual/a"].to_data_array(),
+    )
+
+    full_field_gen = gen.mean(dim=0)
+    full_field_tar = tar.mean(dim=0)
+    full_field_plot = plot_paneled_data(
+        [
+            [full_field_gen.cpu().numpy()],
+            [full_field_tar.cpu().numpy()],
+        ],
+        diverging=False,
+    )
+    assert np.allclose(
+        full_field_plot.to_data_array(),
+        logs["one_step/mean_map/image-full-field/a"].to_data_array(),
+    )
 
 
 class Multiply(torch.nn.Module):
@@ -419,7 +472,13 @@ class Multiply(torch.nn.Module):
         (False, "advection_and_precipitation", True),
     ],
 )
-def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: bool):
+@pytest.mark.parametrize("compute_derived_in_train_on_batch", [False, True])
+def test_stepper_corrector(
+    global_only: bool,
+    terms_to_modify,
+    force_positive: bool,
+    compute_derived_in_train_on_batch: bool,
+):
     torch.random.manual_seed(0)
     n_forward_steps = 5
     device = get_device()
@@ -458,8 +517,6 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     )
     assert (mean_advection.abs() > 0.0).all()
 
-    # use a randomly initialized Linear layer for the module
-    # using PrebuiltBuilder
     stepper_config = SingleModuleStepperConfig(
         builder=ModuleSelector(
             type="prebuilt",
@@ -502,10 +559,10 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
         stepped = stepper.train_on_batch(
             data=batch_data,
             optimization=NullOptimization(),
+            compute_derived_variables=compute_derived_in_train_on_batch,
         )
-
-    stepped = stepped.compute_derived_variables()
-
+    if not compute_derived_in_train_on_batch:
+        stepped = stepped.compute_derived_variables()
     # check that the budget residual is zero
     budget_residual = stepped.gen_data["total_water_path_budget_residual"]
     if global_only:
@@ -554,7 +611,7 @@ def test_stepper_corrector(global_only: bool, terms_to_modify, force_positive: b
     # check that positive forcing is enforced
     if force_positive:
         for name in force_positive_names:
-            assert stepped.gen_data[name].min() >= 0.0
+            assert stepped.gen_data[name][:, 1:].min() >= 0.0
 
 
 def _get_stepper(
