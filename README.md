@@ -2,7 +2,7 @@
 
 Create an ML-only climate model.
 
-Development documentation can be found on [github-pages](https://ai2cm.github.io/full-model/html/index.html).
+Development documentation can be found on [github-pages](https://ai2cm.github.io/full-model/index.html).
 
 ## Development
 
