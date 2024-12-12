@@ -10,7 +10,6 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData
-from fme.ace.data_loading.requirements import DataRequirements
 from fme.ace.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
@@ -18,6 +17,7 @@ from fme.ace.stepper import (
     TrainOutputABC,
 )
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import GriddedOperations

@@ -12,30 +12,26 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading._xarray import (
-    XarrayDataset,
-    get_cumulative_timesteps,
-    get_file_local_index,
-    get_raw_times,
-    get_timestep,
-    repeat_and_increment_time,
-)
-from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.config import (
-    DataLoaderConfig,
+from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset.config import (
     FillNaNsConfig,
     OverwriteConfig,
     TimeSlice,
     XarrayDataConfig,
 )
-from fme.ace.data_loading.getters import get_data_loader, get_dataset
-from fme.ace.data_loading.requirements import DataRequirements
-from fme.ace.data_loading.utils import (
-    as_broadcasted_tensor,
-    infer_horizontal_dimension_names,
+from fme.core.dataset.requirements import DataRequirements
+from fme.core.dataset.xarray import (
+    XarrayDataset,
+    get_cumulative_timesteps,
+    get_file_local_index,
+    get_raw_times,
+    get_timestep,
+    get_xarray_dataset,
+    repeat_and_increment_time,
 )
-from fme.core.coordinates import LatLonCoordinates
 from fme.core.typing_ import Slice
+
+from .utils import as_broadcasted_tensor, infer_horizontal_dimension_names
 
 SLICE_NONE = slice(None)
 MOCK_DATA_FREQ = "3h"
@@ -323,17 +319,13 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
     mock_data: MockData = mock_monthly_netcdfs
     if len(mock_data.var_names.initial_condition_names) != 0:
         return
-    config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=n_samples))],
-        1,
-        0,
-    )
+    config = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=n_samples))
     n_forward_steps = 4
     requirements = DataRequirements(
         names=mock_data.var_names.all_names + ["x"],
         n_timesteps=n_forward_steps + 1,
     )
-    dataset, _ = get_dataset(config.dataset, requirements)
+    dataset, _ = get_xarray_dataset(config, requirements)
     if n_samples is None:
         assert len(dataset) == len(mock_data.obs_times) - n_forward_steps
     else:
@@ -425,16 +417,12 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
 
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
-    config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=mock_data.tmpdir)],
-        batch_size=1,
-        num_data_workers=0,
-    )
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
     requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=15)
-    data = get_data_loader(config=config, train=False, requirements=requirements)
-    batch: BatchData = next(iter(data.loader))
-    assert batch.data["constant_var"].shape[1] == 15
-    assert batch.data["constant_scalar_var"].shape == (1, 15, 4, 8)
+    dataset = XarrayDataset(config=config, requirements=requirements)
+    data = dataset[0][0]
+    assert data["constant_var"].shape[0] == 15
+    assert data["constant_scalar_var"].shape == (15, 4, 8)
 
 
 def _get_repeat_dataset(

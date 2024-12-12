@@ -3,8 +3,8 @@ from typing import Dict, Mapping, Optional, Protocol
 import numpy as np
 import torch
 
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.stepper import TrainOutput
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping

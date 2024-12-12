@@ -10,14 +10,12 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.data_loading.requirements import (
-    DataRequirements,
-    PrognosticStateDataRequirements,
-)
-from fme.ace.data_loading.utils import decode_timestep, encode_timestep
 from fme.ace.inference.derived_variables import compute_derived_quantities
+from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.dataset.requirements import DataRequirements
+from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction

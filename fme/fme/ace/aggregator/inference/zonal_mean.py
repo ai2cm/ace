@@ -6,7 +6,7 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
