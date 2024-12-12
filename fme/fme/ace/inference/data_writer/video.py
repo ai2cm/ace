@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference.video import VideoAggregator
-from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 
 
 class PairedVideoDataWriter:

@@ -9,14 +9,13 @@ import xarray as xr
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from fme.ace.data_loading._xarray import DatasetProperties
-from fme.ace.data_loading.config import DataLoaderConfig as CoreDataLoaderConfig
-from fme.ace.data_loading.config import XarrayDataConfig
-from fme.ace.data_loading.data_typing import Dataset, VariableMetadata
-from fme.ace.data_loading.getters import get_dataset
-from fme.ace.data_loading.requirements import DataRequirements as CoreDataRequirements
 from fme.core import metrics
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
+from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.data_typing import Dataset, VariableMetadata
+from fme.core.dataset.getters import get_dataset
+from fme.core.dataset.requirements import DataRequirements as CoreDataRequirements
+from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -28,13 +27,13 @@ def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
-def get_topography(config: CoreDataLoaderConfig) -> torch.Tensor:
+def get_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
     """
     Load the topography data from the specified path and return the normalized
     height of the topography values.
 
     Args:
-        config: Data loader configuration corresponding to the desired
+        configs: Sequence of dataset configs corresponding to the desired
             topography data.
 
     Returns:
@@ -42,7 +41,7 @@ def get_topography(config: CoreDataLoaderConfig) -> torch.Tensor:
     """
     topography_name = "HGTsfc"
     dataset = get_dataset(
-        config.dataset, CoreDataRequirements(names=[topography_name], n_timesteps=1)
+        configs, CoreDataRequirements(names=[topography_name], n_timesteps=1)
     )
     example, _ = dataset[0]
     topography = example[topography_name]
@@ -370,13 +369,7 @@ class DataLoaderConfig:
         }
 
         if requirements.use_fine_topography:
-            fine_topography = get_topography(
-                CoreDataLoaderConfig(
-                    dataset=self.fine,
-                    batch_size=self.batch_size,
-                    num_data_workers=self.num_data_workers,
-                )
-            )
+            fine_topography = get_topography(self.fine)
         else:
             fine_topography = None
 

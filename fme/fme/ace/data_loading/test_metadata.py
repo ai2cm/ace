@@ -6,10 +6,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from fme.ace.data_loading.config import DataLoaderConfig, XarrayDataConfig
-from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader
-from fme.ace.data_loading.requirements import DataRequirements
+from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.requirements import DataRequirements
 
 
 def _coord_value(name, size):

@@ -7,12 +7,12 @@ import cftime
 import numpy as np
 import xarray as xr
 
-from fme.ace.data_loading.config import XarrayDataConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
 from fme.core.coordinates import DimSize
+from fme.core.dataset.config import XarrayDataConfig
 
 
 def _coord_value(

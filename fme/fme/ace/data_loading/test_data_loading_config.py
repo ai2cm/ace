@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fme.ace.data_loading.config import RepeatedInterval
+from fme.core.dataset.config import RepeatedInterval
 
 
 def test_repeated_interval_int():

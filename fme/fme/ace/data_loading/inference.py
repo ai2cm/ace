@@ -8,12 +8,12 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.ace.data_loading._xarray import DatasetProperties, XarrayDataset
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.config import XarrayDataConfig
 from fme.ace.data_loading.perturbation import SSTPerturbation
-from fme.ace.data_loading.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.requirements import DataRequirements
+from fme.core.dataset.xarray import DatasetProperties, XarrayDataset
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 

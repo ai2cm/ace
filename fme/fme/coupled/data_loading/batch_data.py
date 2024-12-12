@@ -7,8 +7,8 @@ import numpy as np
 import torch
 
 from fme.ace.data_loading.batch_data import BatchData, SizedMap
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem

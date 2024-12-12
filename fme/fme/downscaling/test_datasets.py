@@ -4,11 +4,11 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading._xarray import DatasetProperties
-from fme.ace.data_loading.config import XarrayDataConfig
-from fme.ace.data_loading.data_typing import Dataset
 from fme.ace.testing.fv3gfs_data import DimSizes, FV3GFSData
 from fme.core.coordinates import DimSize, LatLonCoordinates
+from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.data_typing import Dataset
+from fme.core.dataset.xarray import DatasetProperties
 from fme.downscaling.requirements import DataRequirements
 
 from .datasets import (

@@ -5,9 +5,10 @@ import pytest
 import xarray as xr
 from write_monthly_data import Config, run
 
-from fme.ace.data_loading.config import DataLoaderConfig, XarrayDataConfig
+from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.testing import DimSize, DimSizes
 from fme.ace.testing.fv3gfs_data import save_nd_netcdf
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 
 
