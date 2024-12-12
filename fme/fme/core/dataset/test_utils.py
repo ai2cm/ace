@@ -7,18 +7,19 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.utils import (
-    _get_indexers,
-    as_broadcasted_tensor,
-    decode_timestep,
-    encode_timestep,
-    infer_horizontal_dimension_names,
-)
 from fme.core.coordinates import (
     DimSize,
     HEALPixCoordinates,
     HorizontalCoordinates,
     LatLonCoordinates,
+)
+
+from .utils import (
+    _get_indexers,
+    as_broadcasted_tensor,
+    decode_timestep,
+    encode_timestep,
+    infer_horizontal_dimension_names,
 )
 
 LON_DIM = "lon"

@@ -1,6 +1,5 @@
 import sys
 
-from fme.ace.data_loading.config import TimeSlice, XarrayDataConfig
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     InferenceInitialConditionIndices,
@@ -41,6 +40,7 @@ from fme.ace.registry.hpx import (
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
+from fme.core.dataset.config import TimeSlice, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig

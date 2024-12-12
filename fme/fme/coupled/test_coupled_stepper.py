@@ -5,10 +5,10 @@ import pytest
 import torch
 
 import fme
-from fme.ace.data_loading.config import XarrayDataConfig
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.test_stepper import get_scalar_data
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig

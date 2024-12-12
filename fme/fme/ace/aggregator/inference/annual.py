@@ -7,7 +7,7 @@ import torch
 import xarray as xr
 from matplotlib.figure import Figure
 
-from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations

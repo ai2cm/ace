@@ -10,19 +10,16 @@ import xarray as xr
 import yaml
 
 import fme.core.logging_utils as logging_utils
-from fme.ace.data_loading._xarray import DatasetProperties
-from fme.ace.data_loading.batch_data import (
-    BatchData,
-    default_collate,
-)
+from fme.ace.data_loading.batch_data import BatchData, default_collate
 from fme.ace.data_loading.config import DataLoaderConfig
-from fme.ace.data_loading.getters import get_datasets
-from fme.ace.data_loading.requirements import DataRequirements
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
 from fme.ace.stepper import AtmosphericDeriveFn
+from fme.core.dataset.getters import get_datasets
+from fme.core.dataset.requirements import DataRequirements
+from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig

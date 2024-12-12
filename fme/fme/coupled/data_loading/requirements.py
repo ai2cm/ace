@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 
-from fme.ace.data_loading.requirements import DataRequirements
+from fme.core.dataset.requirements import DataRequirements
 
 
 @dataclasses.dataclass

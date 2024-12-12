@@ -17,12 +17,12 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.core.coordinates import (
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,

@@ -5,7 +5,7 @@ from typing import Dict, Mapping, Optional, Sequence
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.data_typing import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogram
 
 

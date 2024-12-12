@@ -11,8 +11,8 @@ from fme.ace.aggregator.one_step.snapshot import (
     SnapshotAggregator as CoreSnapshotAggregator,
 )
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.core import metrics
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
