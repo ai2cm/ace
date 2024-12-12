@@ -217,7 +217,7 @@ class LatLonCoordinates(HorizontalCoordinates):
     loaded_lon_name: str = "lon"
 
     def __post_init__(self):
-        self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
+        self._area_weights: Optional[torch.Tensor] = None
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
@@ -239,6 +239,8 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def area_weights(self) -> torch.Tensor:
+        if self._area_weights is None:
+            self._area_weights = metrics.spherical_area_weights(self.lat, len(self.lon))
         return self._area_weights
 
     @property
