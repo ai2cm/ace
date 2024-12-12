@@ -10,16 +10,14 @@ from fme.ace.data_loading.batch_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader, get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
-from fme.ace.data_loading.requirements import (
-    DataRequirements,
-    PrognosticStateDataRequirements,
-)
+from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.ace.stepper import (
     ExistingStepperConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
 )
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset.requirements import DataRequirements
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback

@@ -6,8 +6,8 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.inference.data_writer.main import _write
+from fme.core.dataset.data_typing import VariableMetadata
 
 
 def test_write_single_timestep():

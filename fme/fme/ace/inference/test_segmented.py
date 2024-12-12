@@ -16,7 +16,6 @@ import xarray as xr
 import yaml
 
 import fme
-from fme.ace.data_loading.config import XarrayDataConfig
 from fme.ace.data_loading.inference import ForcingDataLoaderConfig, TimestampList
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.inference import (
@@ -28,6 +27,7 @@ from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig

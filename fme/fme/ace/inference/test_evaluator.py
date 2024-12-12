@@ -12,7 +12,6 @@ import xarray as xr
 import yaml
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.data_loading.config import XarrayDataConfig
 from fme.ace.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -25,6 +24,7 @@ from fme.ace.stepper import SingleModuleStepperConfig, TrainOutput
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
