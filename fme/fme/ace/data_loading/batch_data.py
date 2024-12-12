@@ -25,10 +25,10 @@ import torch
 import xarray as xr
 from torch.utils.data import default_collate
 
-from fme.ace.data_loading._xarray import DatasetProperties
-from fme.ace.data_loading.data_typing import VariableMetadata
-from fme.ace.data_loading.requirements import PrognosticStateDataRequirements
+from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import get_device
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations

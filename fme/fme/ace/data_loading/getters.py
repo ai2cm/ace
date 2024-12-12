@@ -1,64 +1,28 @@
 import logging
-import warnings
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import Optional, Union
 
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.config import DataLoaderConfig, XarrayDataConfig
+from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.core.dataset.getters import get_dataset
+from fme.core.dataset.requirements import DataRequirements
+from fme.core.dataset.xarray import XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from ._xarray import DatasetProperties, XarrayDataset, get_xarray_dataset
 from .batch_data import GriddedData, InferenceGriddedData, PrognosticState
+from .config import DataLoaderConfig
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
     InferenceDataLoaderConfig,
     InferenceDataset,
 )
-from .requirements import DataRequirements, PrognosticStateDataRequirements
 
 logger = logging.getLogger(__name__)
-
-
-def get_datasets(
-    dataset_configs: Sequence[XarrayDataConfig],
-    requirements: DataRequirements,
-    strict: bool = True,
-) -> Tuple[List[XarrayDataset], DatasetProperties]:
-    datasets = []
-    properties: Optional[DatasetProperties] = None
-    for config in dataset_configs:
-        dataset, new_properties = get_xarray_dataset(config, requirements)
-        datasets.append(dataset)
-        if properties is None:
-            properties = new_properties
-        elif not strict:
-            try:
-                properties.update(new_properties)
-            except ValueError as e:
-                warnings.warn(
-                    f"Metadata for each ensemble member are not the same: {e}"
-                )
-        else:
-            properties.update(new_properties)
-    if properties is None:
-        raise ValueError("At least one dataset must be provided.")
-
-    return datasets, properties
-
-
-def get_dataset(
-    dataset_configs: Sequence[XarrayDataConfig],
-    requirements: DataRequirements,
-    strict: bool = True,
-) -> Tuple[torch.utils.data.ConcatDataset[XarrayDataset], DatasetProperties]:
-    datasets, properties = get_datasets(dataset_configs, requirements, strict=strict)
-    ensemble = torch.utils.data.ConcatDataset(datasets)
-    return ensemble, properties
 
 
 def get_data_loader(

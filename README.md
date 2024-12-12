@@ -3,12 +3,16 @@
 
 <img src="ACE-logo.png" alt="Logo for the ACE Project" style="width: auto; height: 50px;">
 
+<<<<<<< HEAD
+Development documentation can be found on [github-pages](https://ai2cm.github.io/full-model/index.html).
+=======
 # Ai2 Climate Emulator
 This repo contains code accompanying four papers describing ACE models:
 - "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
 - "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
 - "ACE2: Accurately learning subseasonal to decadal atmospheric variability and forced responses" ([link](https://arxiv.org/abs/2411.11268))
 - "ACE2-SOM: Coupling to a slab ocean and learning the sensitivity of climate to changes in CO2" ([link](https://arxiv.org/abs/2412.04418))
+>>>>>>> a7734af7f1435d88bb71651c10b1ac2031ddbe17
 
 ## Installation
 

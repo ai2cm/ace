@@ -68,10 +68,10 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.ace.data_loading.data_typing import VariableMetadata
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
