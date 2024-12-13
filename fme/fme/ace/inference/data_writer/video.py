@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.aggregator.inference.video import VideoAggregator
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.ace.aggregator.inference.video import VideoAggregator
+from fme.core.dataset.data_typing import VariableMetadata
 
 
 class PairedVideoDataWriter:
@@ -18,25 +18,27 @@ class PairedVideoDataWriter:
         self,
         path: str,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
         """
         Args:
-            filename: Path to write netCDF file(s).
+            path: Directory within which to write the file.
             n_samples: Number of samples to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
         """
         self.path = path
         self._metrics_filename = str(
             Path(path) / "reduced_autoregressive_predictions.nc"
         )
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.coords = coords
         self._video = VideoAggregator(
-            n_timesteps=n_timesteps, enable_extended_videos=True, metadata=metadata
+            n_timesteps=n_timesteps,
+            enable_extended_videos=True,
+            variable_metadata=variable_metadata,
         )
 
     def append_batch(
@@ -44,7 +46,7 @@ class PairedVideoDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
@@ -53,10 +55,9 @@ class PairedVideoDataWriter:
             target: Target data.
             prediction: Prediction data.
             start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch. Unused.
+            batch_time: Time coordinate for each sample in the batch. Unused.
         """
         self._video.record_batch(
-            loss=np.nan,
             target_data=target,
             gen_data=prediction,
             i_time_start=start_timestep,

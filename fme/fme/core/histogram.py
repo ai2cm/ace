@@ -1,7 +1,7 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Tuple
+from typing import Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -128,6 +128,8 @@ class DynamicHistogram:
         Double the sizes of bins, extending the histogram
         to the left (further negative).
         """
+        if self.bin_edges is None:
+            raise RuntimeError("Cannot double size of bins without bin edges")
         current_range = self.bin_edges[-1] - self.bin_edges[0]
         new_range = 2 * current_range
 
@@ -147,6 +149,8 @@ class DynamicHistogram:
         Double the sizes of bins, extending the histogram
         to the right (further positive).
         """
+        if self.bin_edges is None:
+            raise RuntimeError("Cannot double size of bins without bin edges")
         current_range = self.bin_edges[-1] - self.bin_edges[0]
         new_range = 2 * current_range
 
@@ -167,7 +171,8 @@ _Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
 
 class ComparedDynamicHistograms:
     """Wrapper of DynamicHistogram for multiple histograms, two histograms per
-    variable plotted on the same axis."""
+    variable plotted on the same axis.
+    """
 
     def __init__(self, n_bins: int, percentiles: Optional[List[float]] = None) -> None:
         self.n_bins = n_bins
@@ -205,9 +210,9 @@ class ComparedDynamicHistograms:
     ) -> Dict[str, Dict[Literal["target", "prediction"], _Histogram]]:
         if self.target_histograms is None or self.prediction_histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return_dict: Dict[
-            str, Dict[Literal["target", "prediction"], _Histogram]
-        ] = collections.defaultdict(dict)
+        return_dict: Dict[str, Dict[Literal["target", "prediction"], _Histogram]] = (
+            collections.defaultdict(dict)
+        )
         for k in self.target_histograms:
             counts, bin_edges = trim_zero_bins(
                 self.target_histograms[k].counts.squeeze(self._time_dim),
@@ -250,7 +255,7 @@ class ComparedDynamicHistograms:
         return fig
 
     def get_wandb(self) -> Dict[str, float]:
-        return_dict: Dict[str, float] = {}
+        return_dict: Dict[str, Union[matplotlib.figure.Figure, float]] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")
@@ -309,9 +314,9 @@ class ComparedDynamicHistograms:
                     np.zeros_like(target_dataset[missing_prediction_name]),
                     dims=("bin",),
                 )
-                prediction_dataset[
-                    f"{missing_prediction_name}_bin_edges"
-                ] = target_dataset[f"{missing_prediction_name}_bin_edges"]
+                prediction_dataset[f"{missing_prediction_name}_bin_edges"] = (
+                    target_dataset[f"{missing_prediction_name}_bin_edges"]
+                )
         ds = xr.concat([target_dataset, prediction_dataset], dim="source")
         ds["source"] = ["target", "prediction"]
         return ds

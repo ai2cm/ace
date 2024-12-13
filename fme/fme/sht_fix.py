@@ -10,8 +10,6 @@ the torch harmonics sht.py file [*].
 [*] https://github.com/NVIDIA/torch-harmonics/blob/17eefa53468d1a885d72087918eba905fa53e10a/torch_harmonics/sht.py
 """
 
-USE_FIX = True
-
 
 # coding=utf-8
 
@@ -49,12 +47,8 @@ import torch
 import torch.nn as nn
 import torch.fft
 
-if USE_FIX:
-    from torch_harmonics.quadrature import *
-    from torch_harmonics.legendre import *
-else:
-    from .quadrature import *
-    from .legendre import *
+from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, clenshaw_curtiss_weights
+from torch_harmonics.legendre import precompute_legpoly, precompute_dlegpoly
 
 
 class RealSHT(nn.Module):
@@ -115,10 +109,7 @@ class RealSHT(nn.Module):
         weights = torch.einsum('mlk,k->mlk', pct, weights)
 
         # remember quadrature weights
-        if USE_FIX:
-            self.weights = weights.float()
-        else:
-            self.register_buffer('weights', weights, persistent=False)
+        self.weights = weights.float()
 
     def extra_repr(self):
         """
@@ -144,8 +135,7 @@ class RealSHT(nn.Module):
         xout = torch.zeros(out_shape, dtype=x.dtype, device=x.device)
 
         # contraction
-        if USE_FIX:
-            self.weights = self.weights.to(x.device)
+        self.weights = self.weights.to(x.device)
         xout[..., 0] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 0], self.weights)
         xout[..., 1] = torch.einsum('...km,mlk->...lm', x[..., :self.mmax, 1], self.weights)
         x = torch.view_as_complex(xout)
@@ -197,10 +187,7 @@ class InverseRealSHT(nn.Module):
         pct = precompute_legpoly(self.mmax, self.lmax, t, norm=self.norm, inverse=True, csphase=self.csphase)
 
         # register buffer
-        if USE_FIX:
-            self.pct = pct.float()
-        else:
-            self.register_buffer('pct', pct, persistent=False)
+        self.pct = pct.float()
 
     def extra_repr(self):
         """
@@ -216,8 +203,7 @@ class InverseRealSHT(nn.Module):
         # Evaluate associated Legendre functions on the output nodes
         x = torch.view_as_real(x)
 
-        if USE_FIX:
-            self.pct = self.pct.to(x.device)
+        self.pct = self.pct.to(x.device)
         rl = torch.einsum('...lm, mlk->...km', x[..., 0], self.pct )
         im = torch.einsum('...lm, mlk->...km', x[..., 1], self.pct )
         xs = torch.stack((rl, im), -1)
@@ -291,10 +277,7 @@ class RealVectorSHT(nn.Module):
         weights[1] = -1 * weights[1]
 
         # remember quadrature weights
-        if USE_FIX:
-            self.weights = weights.float()
-        else:
-            self.register_buffer('weights', weights, persistent=False)
+        self.weights = weights.float()
 
     def extra_repr(self):
         """
@@ -380,10 +363,7 @@ class InverseRealVectorSHT(nn.Module):
         dpct = precompute_dlegpoly(self.mmax, self.lmax, t, norm=self.norm, inverse=True, csphase=self.csphase)
 
         # register weights
-        if USE_FIX:
-            self.dpct = dpct.float()
-        else:
-            self.register_buffer('dpct', dpct, persistent=False)
+        self.dpct = dpct.float()
 
     def extra_repr(self):
         """
@@ -401,8 +381,7 @@ class InverseRealVectorSHT(nn.Module):
 
         # contraction - spheroidal component
         # real component
-        if USE_FIX:
-            self.dpct = self.dpct.to(x.device)
+        self.dpct = self.dpct.to(x.device)
         srl =   torch.einsum('...lm,mlk->...km', x[..., 0, :, :, 0], self.dpct[0]) \
               - torch.einsum('...lm,mlk->...km', x[..., 1, :, :, 1], self.dpct[1])
         # iamg component

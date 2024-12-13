@@ -5,7 +5,7 @@ from typing import Dict, Mapping, Optional, Sequence
 import torch
 import xarray as xr
 
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogram
 
 
@@ -73,21 +73,21 @@ class PairedHistogramDataWriter:
         self,
         path: str,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         save_names: Optional[Sequence[str]],
     ):
         self._target_writer = HistogramDataWriter(
             path=path,
             n_timesteps=n_timesteps,
             filename="histograms_target.nc",
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             save_names=save_names,
         )
         self._prediction_writer = HistogramDataWriter(
             path=path,
             n_timesteps=n_timesteps,
             filename="histograms_prediction.nc",
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             save_names=save_names,
         )
 
@@ -96,17 +96,17 @@ class PairedHistogramDataWriter:
         target: Dict[str, torch.Tensor],
         prediction: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         self._target_writer.append_batch(
             data=target,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
         self._prediction_writer.append_batch(
             data=prediction,
             start_timestep=start_timestep,
-            batch_times=batch_times,
+            batch_time=batch_time,
         )
 
     def flush(self):
@@ -124,36 +124,37 @@ class HistogramDataWriter:
         path: str,
         n_timesteps: int,
         filename: str,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         save_names: Optional[Sequence[str]],
     ):
         """
         Args:
-            path: Path to write netCDF file(s).
+            path: The directory within which to write the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            filename: Name of the file to write.
+            variable_metadata: Metadata for each variable to be written to the file.
+            save_names: Names of variables to save. If None, all variables are saved.
         """
         self.path = path
         self._metrics_filename = str(Path(path) / filename)
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self._histogram = _HistogramAggregator(n_times=n_timesteps, names=save_names)
 
     def append_batch(
         self,
         data: Dict[str, torch.Tensor],
         start_timestep: int,
-        batch_times: xr.DataArray,
+        batch_time: xr.DataArray,
     ):
         """
         Append a batch of data to the file.
 
         Args:
-            target: Target data.
-            prediction: Prediction data.
+            data: The data to write.
             start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch_time: Time coordinate for each sample in the batch.
         """
-        del batch_times
+        del batch_time
         self._histogram.record_batch(
             data=data,
             i_time_start=start_timestep,
@@ -164,11 +165,11 @@ class HistogramDataWriter:
         Flush the data to disk.
         """
         metric_dataset = self._histogram.get_dataset()
-        for name in self.metadata:
+        for name in self.variable_metadata:
             try:
-                metric_dataset[f"{name}_bin_edges"].attrs["units"] = self.metadata[
-                    name
-                ].units
+                metric_dataset[f"{name}_bin_edges"].attrs["units"] = (
+                    self.variable_metadata[name].units
+                )
             except KeyError:
                 logging.info(
                     f"{name} in metadata but not in data written to "
@@ -176,9 +177,9 @@ class HistogramDataWriter:
                 )
         for name in metric_dataset.data_vars:
             if not name.endswith("_bin_edges"):
-                metric_dataset[f"{name}_bin_edges"].attrs[
-                    "long_name"
-                ] = f"{name} bin edges"
+                metric_dataset[f"{name}_bin_edges"].attrs["long_name"] = (
+                    f"{name} bin edges"
+                )
                 metric_dataset[name].attrs["units"] = "count"
                 metric_dataset[name].attrs["long_name"] = f"{name} histogram"
         metric_dataset.to_netcdf(self._metrics_filename)

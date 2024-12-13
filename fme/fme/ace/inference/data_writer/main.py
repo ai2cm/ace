@@ -2,18 +2,19 @@ import dataclasses
 import datetime
 import warnings
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Union
+from typing import List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
 import xarray as xr
 
-from fme.core.data_loading.data_typing import VariableMetadata
+from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.generics.writer import WriterABC
 
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
-from .restart import PairedRestartWriter, RestartWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import PairedVideoDataWriter
 
@@ -23,10 +24,9 @@ PairedSubwriter = Union[
     PairedHistogramDataWriter,
     PairedTimeCoarsen,
     PairedMonthlyDataWriter,
-    PairedRestartWriter,
 ]
 
-Subwriter = Union[MonthlyDataWriter, RawDataWriter, RestartWriter, TimeCoarsen]
+Subwriter = Union[MonthlyDataWriter, RawDataWriter, TimeCoarsen]
 
 
 @dataclasses.dataclass
@@ -34,7 +34,7 @@ class DataWriterConfig:
     """
     Configuration for inference data writers.
 
-    Attributes:
+    Parameters:
         log_extended_video_netcdfs: Whether to enable writing of netCDF files
             containing video metrics.
         save_prediction_files: Whether to enable writing of netCDF files
@@ -73,25 +73,23 @@ class DataWriterConfig:
     def build_paired(
         self,
         experiment_dir: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "PairedDataWriter":
         return PairedDataWriter(
             path=experiment_dir,
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
             timestep=timestep,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
             enable_video_netcdfs=self.log_extended_video_netcdfs,
             save_names=self.names,
-            prognostic_names=prognostic_names,
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
         )
@@ -99,11 +97,10 @@ class DataWriterConfig:
     def build(
         self,
         experiment_dir: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        prognostic_names: Sequence[str],
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ) -> "DataWriter":
         if self.save_histogram_files:
@@ -118,43 +115,42 @@ class DataWriterConfig:
             )
         return DataWriter(
             path=experiment_dir,
-            n_samples=n_samples,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=n_timesteps,
-            metadata=metadata,
+            variable_metadata=variable_metadata,
             coords=coords,
             timestep=timestep,
             enable_prediction_netcdfs=self.save_prediction_files,
             enable_monthly_netcdfs=self.save_monthly_files,
             save_names=self.names,
-            prognostic_names=prognostic_names,
             time_coarsen=self.time_coarsen,
         )
 
 
-class PairedDataWriter:
+class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
         save_names: Optional[Sequence[str]],
-        prognostic_names: Sequence[str],
         enable_histogram_netcdfs: bool,
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
         """
         Args:
             path: Path to write netCDF file(s).
-            n_samples: Number of samples to write to the file.
+            n_initial_conditions: Number of ICs/ensemble members to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            timestep: Timestep of the model.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
                 containing the predictions and target values.
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
@@ -169,8 +165,7 @@ class PairedDataWriter:
         self._writers: List[PairedSubwriter] = []
         self.path = path
         self.coords = coords
-        self.metadata = metadata
-        self.prognostic_names = prognostic_names
+        self.variable_metadata = variable_metadata
 
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
@@ -187,9 +182,9 @@ class PairedDataWriter:
                 _time_coarsen_builder(
                     PairedRawDataWriter(
                         path=path,
-                        n_samples=n_samples,
+                        n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -198,11 +193,11 @@ class PairedDataWriter:
             self._writers.append(
                 PairedMonthlyDataWriter(
                     path=path,
-                    n_samples=n_samples,
+                    n_samples=n_initial_conditions,
                     n_timesteps=n_timesteps,
                     timestep=timestep,
                     save_names=save_names,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                     coords=coords,
                 )
             )
@@ -212,7 +207,7 @@ class PairedDataWriter:
                     PairedVideoDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -223,66 +218,46 @@ class PairedDataWriter:
                     PairedHistogramDataWriter(
                         path=path,
                         n_timesteps=n_coarsened_timesteps,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         save_names=save_names,
                     )
                 )
             )
-        self._writers.append(
-            PairedRestartWriter(
-                path=path,
-                is_restart_step=lambda i: i == n_timesteps - 1,
-                prognostic_names=prognostic_names,
-                metadata=metadata,
-                coords=coords,
-            )
-        )
+        self._n_timesteps_seen = 0
 
-    def save_initial_condition(
-        self,
-        ic_data: Dict[str, torch.Tensor],
-        ic_time: xr.DataArray,
-    ):
-        data_arrays = {}
-        for name in self.prognostic_names:
-            if name not in ic_data:
-                raise KeyError(
-                    f"Initial condition data missing for prognostic variable {name}."
-                )
-            data = ic_data[name].cpu().numpy()
-            data_arrays[name] = xr.DataArray(data, dims=["sample", "lat", "lon"])
-            if name in self.metadata:
-                data_arrays[name].attrs = {
-                    "long_name": self.metadata[name].long_name,
-                    "units": self.metadata[name].units,
-                }
-        data_arrays["time"] = ic_time
-        ds = xr.Dataset(data_arrays, coords=self.coords)
-        ds.to_netcdf(str(Path(self.path) / "initial_condition.nc"))
+    def write(self, data: PrognosticState, filename: str):
+        """Eagerly write data to a single netCDF file.
+
+        Args:
+            data: the data to be written.
+            filename: the filename to use for the netCDF file.
+        """
+        _write(
+            data=data.as_batch_data(),
+            path=self.path,
+            filename=filename,
+            variable_metadata=self.variable_metadata,
+            coords=self.coords,
+        )
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
-        start_timestep: int,
-        batch_times: xr.DataArray,
+        batch: PairedData,
     ):
         """
         Append a batch of data to the file.
 
         Args:
-            target: Target data.
-            prediction: Prediction data.
-            start_timestep: Timestep at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch: Prediction and target data.
         """
         for writer in self._writers:
             writer.append_batch(
-                target=target,
-                prediction=prediction,
-                start_timestep=start_timestep,
-                batch_times=batch_times,
+                target=dict(batch.target),
+                prediction=dict(batch.prediction),
+                start_timestep=self._n_timesteps_seen,
+                batch_time=batch.time,
             )
+        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """
@@ -292,27 +267,76 @@ class PairedDataWriter:
             writer.flush()
 
 
-class DataWriter:
+def _write(
+    data: BatchData,
+    path: str,
+    filename: str,
+    variable_metadata: Mapping[str, VariableMetadata],
+    coords: Mapping[str, np.ndarray],
+):
+    """Write provided data to a single netCDF at specified path/filename.
+
+    If the data has only one timestep, the data is squeezed to remove
+    the time dimension.
+
+    Args:
+        data: Batch data to written.
+        path: Directory to write the netCDF file in.
+        filename: filename to use for netCDF.
+        variable_metadata: Metadata for each variable to be written to the file.
+        coords: Coordinate data to be written to the file.
+    """
+    if data.time.sizes["time"] == 1:
+        time_dim = data.dims.index("time")
+        dims_to_write = data.dims[:time_dim] + data.dims[time_dim + 1 :]
+
+        def maybe_squeeze(x: torch.Tensor) -> torch.Tensor:
+            return x.squeeze(dim=time_dim)
+
+        time_array = data.time.isel(time=0)
+    else:
+        dims_to_write = data.dims
+
+        def maybe_squeeze(x):
+            return x
+
+        time_array = data.time
+
+    data_arrays = {}
+    for name in data.data:
+        array = maybe_squeeze(data.data[name]).cpu().numpy()
+        data_arrays[name] = xr.DataArray(array, dims=dims_to_write)
+        if name in variable_metadata:
+            data_arrays[name].attrs = {
+                "long_name": variable_metadata[name].long_name,
+                "units": variable_metadata[name].units,
+            }
+    data_arrays["time"] = time_array
+    ds = xr.Dataset(data_arrays, coords=coords)
+    ds.to_netcdf(str(Path(path) / filename))
+
+
+class DataWriter(WriterABC[PrognosticState, BatchData]):
     def __init__(
         self,
         path: str,
-        n_samples: int,
+        n_initial_conditions: int,
         n_timesteps: int,
-        metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         save_names: Optional[Sequence[str]],
-        prognostic_names: Sequence[str],
         time_coarsen: Optional[TimeCoarsenConfig] = None,
     ):
         """
         Args:
             path: Directory within which to write netCDF file(s).
-            n_samples: Number of samples to write to the file.
+            n_initial_conditions: Number of initial conditions / timeseries
+                to write to the file.
             n_timesteps: Number of timesteps to write to the file.
-            metadata: Metadata for each variable to be written to the file.
+            variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
             timestep: Timestep of the model.
             enable_prediction_netcdfs: Whether to enable writing of netCDF files
@@ -323,6 +347,10 @@ class DataWriter:
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
         self._writers: List[Subwriter] = []
+        if "face" in coords:
+            # TODO: handle writing HEALPix data
+            # https://github.com/ai2cm/full-model/issues/1089
+            return
 
         def _time_coarsen_builder(data_writer: Subwriter) -> Subwriter:
             if time_coarsen is not None:
@@ -335,9 +363,9 @@ class DataWriter:
                     RawDataWriter(
                         path=path,
                         label="autoregressive_predictions.nc",
-                        n_samples=n_samples,
+                        n_initial_conditions=n_initial_conditions,
                         save_names=save_names,
-                        metadata=metadata,
+                        variable_metadata=variable_metadata,
                         coords=coords,
                     )
                 )
@@ -348,40 +376,33 @@ class DataWriter:
                 MonthlyDataWriter(
                     path=path,
                     label="predictions",
-                    n_samples=n_samples,
+                    n_samples=n_initial_conditions,
                     n_months=months_for_timesteps(n_timesteps, timestep),
                     save_names=save_names,
-                    metadata=metadata,
+                    variable_metadata=variable_metadata,
                     coords=coords,
                 )
             )
 
-        self._writers.append(
-            RestartWriter(
-                path=path,
-                is_restart_step=lambda i: i == n_timesteps - 1,
-                prognostic_names=prognostic_names,
-                metadata=metadata,
-                coords=coords,
-            )
-        )
+        self.path = path
+        self.variable_metadata = variable_metadata
+        self.coords = coords
+        self._n_timesteps_seen = 0
 
-    def append_batch(
-        self,
-        data: Dict[str, torch.Tensor],
-        start_timestep: int,
-        batch_times: xr.DataArray,
-    ):
+    def append_batch(self, batch: BatchData):
         """
-        Append a batch of data to the file.
+        Append prediction data to the file.
+
         Args:
-            data: Data to write.
-            start_timestep: Timestep at which to start writing.
-            start_sample: Sample at which to start writing.
-            batch_times: Time coordinates for each sample in the batch.
+            batch: Data to be written.
         """
         for writer in self._writers:
-            writer.append_batch(data, start_timestep, batch_times)
+            writer.append_batch(
+                data=dict(batch.data),
+                start_timestep=self._n_timesteps_seen,
+                batch_time=batch.time,
+            )
+        self._n_timesteps_seen += batch.time.shape[1]
 
     def flush(self):
         """
@@ -390,30 +411,11 @@ class DataWriter:
         for writer in self._writers:
             writer.flush()
 
-
-class NullDataWriter:
-    """
-    Null pattern for DataWriter, which does nothing.
-    """
-
-    def __init__(self):
-        pass
-
-    def append_batch(
-        self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
-        start_timestep: int,
-        batch_times: xr.DataArray,
-    ):
-        pass
-
-    def flush(self):
-        pass
-
-    def save_initial_condition(
-        self,
-        ic_data: Dict[str, torch.Tensor],
-        ic_time: xr.DataArray,
-    ):
-        pass
+    def write(self, data: PrognosticState, filename: str):
+        _write(
+            data=data.as_batch_data(),
+            path=self.path,
+            filename=filename,
+            variable_metadata=self.variable_metadata,
+            coords=self.coords,
+        )

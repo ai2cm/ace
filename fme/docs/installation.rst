@@ -34,7 +34,7 @@ A make target is available to build a conda environment:
 
     make create_environment
 
-This will create an environment named ``fme``, and should use the same package versions we have used in development. If you would like a different name, set the ENVIRONMENT_NAME variable:
+This will create an environment named ``fme``. If you would like a different name, set the ENVIRONMENT_NAME variable:
 
 .. code-block:: shell
 

@@ -1,0 +1,71 @@
+runs:
+  2024-09-20-cm4-1deg-8layer-trial-run: gs://vcm-ml-raw-flexible-retention/2024-08-10-pre-industrial-CM4-simulation/regridded-zarrs/gaussian_grid_180_by_360/trial-run
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/2024-09-20-cm4-1deg-8layer-trial-run-stats
+  start_date: "0151-01-01"
+  end_date: "0159-01-01"
+  data_type: CM4
+  beaker_dataset: not-used
+dataset_computation:
+  reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-08-10-pre-industrial-CM4-simulation/vertical-coordinate-file/fv_core.res.nc
+  vertical_coarsening_indices:
+    # computed here: https://github.com/ai2cm/explore/blob/master/jamesd/2024-08-13-pre-industiral-CM4-eda/2024-08-28-AM4-vertical-indices.ipynb
+    - [0, 7]
+    - [7, 10]
+    - [10, 13]
+    - [13, 16]
+    - [16, 18]
+    - [18, 22]
+    - [22, 25]
+    - [25, 33]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+  variable_sources:
+    fluxes_2d.zarr:
+      - PRATEsfc
+      - SHTFLsfc
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - surface_evaporation_rate
+      - total_energy
+      - total_frozen_precipitation_rate
+    full_state.zarr:
+      # 2D vars
+      - HGTsfc # static
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_at_two_meters
+      - specific_humidity_at_two_meters
+      - eastward_wind_at_ten_meters
+      - northward_wind_at_ten_meters
+      # 3D vars:
+      - air_temperature
+      - specific_humidity # water species
+      - cloud_water_mixing_ratio # water species
+      - cloud_ice_mixing_ratio # water species
+      - eastward_wind
+      - northward_wind
+    land_static.zarr:
+      - land_fraction
+    full_state_land.zarr:
+      - column_soil_moisture
+    full_state_ice.zarr:
+      - sea_ice_fraction
+  standard_names:
+    longitude_dim: lon
+    latitude_dim: lat
+    graupel_mixing_ratio: None
+    rain_mixing_ratio: None
+    snow_mixing_ratio: None
+    precipitable_water_path: None

@@ -79,20 +79,28 @@ def test_dynamic_histogram_random_values(n_times: int, time_bin_len: int):
 def test_dynamic_histogram_extends_as_expected():
     histogram = DynamicHistogram(n_times=1, n_bins=200)
     histogram.add(torch.as_tensor([[-1.0, 0.0, 1.0]]))
-    np.testing.assert_approx_equal(histogram.bin_edges[0], -1.0, significant=6)
-    np.testing.assert_approx_equal(histogram.bin_edges[-1], 1.0, significant=6)
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
+    np.testing.assert_approx_equal(bin_edges[0], -1.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[-1], 1.0, significant=6)
     histogram.add(torch.as_tensor([[-2.0]]))
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
     # double in size to the left, length becomes 4, from -3 to 1.0
-    np.testing.assert_approx_equal(histogram.bin_edges[0], -3.0, significant=6)
-    np.testing.assert_approx_equal(histogram.bin_edges[-1], 1.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[-1], 1.0, significant=6)
     histogram.add(torch.as_tensor([[2.0]]))
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
     # double in size to the right, length becomes 8, from -3 to 5.0
-    np.testing.assert_approx_equal(histogram.bin_edges[0], -3.0, significant=6)
-    np.testing.assert_approx_equal(histogram.bin_edges[-1], 5.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[-1], 5.0, significant=6)
     histogram.add(torch.as_tensor([[27.0]]))
+    bin_edges = histogram.bin_edges
+    assert bin_edges is not None
     # double in size twice to the right, length becomes 32, from -3 to 29.0
-    np.testing.assert_approx_equal(histogram.bin_edges[0], -3.0, significant=6)
-    np.testing.assert_approx_equal(histogram.bin_edges[-1], 29.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[0], -3.0, significant=6)
+    np.testing.assert_approx_equal(bin_edges[-1], 29.0, significant=6)
 
 
 def test_histogram_handles_uniform_field():
@@ -134,8 +142,8 @@ def test_compared_dynamic_histograms(shape, percentiles):
         for data_type in ["target", "prediction"]:
             assert isinstance(wandb_result[f"{var_name}"], matplotlib.figure.Figure)
             for p in percentiles:
-                assert (
-                    wandb_result[f"{data_type}/{p}th-percentile/{var_name}"].shape == ()
+                assert isinstance(
+                    wandb_result[f"{data_type}/{p}th-percentile/{var_name}"], float
                 )
 
     ds = histogram.get_dataset()

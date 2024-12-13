@@ -1,24 +1,37 @@
 import dataclasses
-import logging
+import datetime
 import os
-from typing import Any, Dict, Optional, Union
+from typing import List, Optional, Tuple, Union
 
-from fme.core.aggregator import InferenceEvaluatorAggregatorConfig
-from fme.core.data_loading.config import DataLoaderConfig, Slice
-from fme.core.data_loading.inference import InferenceDataLoaderConfig
-from fme.core.dicts import to_flat_dict
+import torch
+
+from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.ace.data_loading.batch_data import GriddedData, InferenceGriddedData
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.getters import get_data_loader, get_inference_data
+from fme.ace.data_loading.inference import InferenceDataLoaderConfig
+from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.stepper import (
+    ExistingStepperConfig,
+    SingleModuleStepper,
+    SingleModuleStepperConfig,
+)
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset.requirements import DataRequirements
 from fme.core.distributed import Distributed
-from fme.core.ema import EMAConfig
+from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.optimization import OptimizationConfig
-from fme.core.stepper import ExistingStepperConfig, SingleModuleStepperConfig
+from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 
 
 @dataclasses.dataclass
 class InlineInferenceConfig:
     """
-    Attributes:
+    Parameters:
         loader: configuration for the data loader used during inference
         n_forward_steps: number of forward steps to take
         forward_steps_in_memory: number of forward steps to take before
@@ -34,7 +47,9 @@ class InlineInferenceConfig:
     forward_steps_in_memory: int = 2
     epochs: Slice = Slice(start=0, stop=None, step=1)
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
-        default_factory=lambda: InferenceEvaluatorAggregatorConfig()
+        default_factory=lambda: InferenceEvaluatorAggregatorConfig(
+            log_global_mean_time_series=False, log_global_mean_norm_time_series=False
+        )
     )
 
     def __post_init__(self):
@@ -46,6 +61,14 @@ class InlineInferenceConfig:
                 f"{self.loader.start_indices.n_initial_conditions} and "
                 f"{dist.world_size}."
             )
+        if (
+            self.aggregator.log_global_mean_time_series
+            or self.aggregator.log_global_mean_norm_time_series
+        ):
+            # Both of log_global_mean_time_series and
+            # log_global_mean_norm_time_series must be False for inline inference.
+            self.aggregator.log_global_mean_time_series = False
+            self.aggregator.log_global_mean_norm_time_series = False
 
 
 @dataclasses.dataclass
@@ -53,7 +76,7 @@ class TrainConfig:
     """
     Configuration for training a model.
 
-    Attributes:
+    Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
         stepper: Configuration for the stepper.
@@ -104,69 +127,97 @@ class TrainConfig:
     segment_epochs: Optional[int] = None
 
     @property
+    def inference_n_forward_steps(self) -> int:
+        return self.inference.n_forward_steps
+
+    @property
+    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig:
+        return self.inference.aggregator
+
+    @property
     def checkpoint_dir(self) -> str:
         """
         The directory where checkpoints are saved.
         """
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
-    @property
-    def latest_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "ckpt.tar")
+    def clean_wandb(self, experiment_dir: str) -> None:
+        self.logging.clean_wandb(experiment_dir=experiment_dir)
 
-    @property
-    def best_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "best_ckpt.tar")
+    def get_inference_epochs(self) -> List[int]:
+        return list(range(0, self.max_epochs))[self.inference.epochs.slice]
 
-    @property
-    def best_inference_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "best_inference_ckpt.tar")
 
-    @property
-    def ema_checkpoint_path(self) -> str:
-        return os.path.join(self.checkpoint_dir, "ema_ckpt.tar")
+class TrainBuilders:
+    def __init__(self, config: TrainConfig):
+        self.config = config
 
-    def epoch_checkpoint_path(self, epoch: int) -> str:
-        return os.path.join(self.checkpoint_dir, f"ckpt_{epoch:04d}.tar")
-
-    def ema_epoch_checkpoint_path(self, epoch: int) -> str:
-        return os.path.join(self.checkpoint_dir, f"ema_ckpt_{epoch:04d}.tar")
-
-    def epoch_checkpoint_enabled(self, epoch: int) -> bool:
-        return epoch_checkpoint_enabled(
-            epoch, self.max_epochs, self.checkpoint_save_epochs
+    def _get_train_window_data_requirements(self) -> DataRequirements:
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            self.config.n_forward_steps
         )
 
-    def ema_epoch_checkpoint_enabled(self, epoch: int) -> bool:
-        return epoch_checkpoint_enabled(
-            epoch, self.max_epochs, self.ema_checkpoint_save_epochs
+    def _get_evaluation_window_data_requirements(self) -> DataRequirements:
+        return self.config.stepper.get_evaluation_window_data_requirements(
+            self.config.inference.forward_steps_in_memory
         )
 
-    @property
-    def resuming(self) -> bool:
-        checkpoint_file_exists = os.path.isfile(self.latest_checkpoint_path)
-        resuming = True if checkpoint_file_exists else False
-        return resuming
+    def _get_initial_condition_data_requirements(
+        self,
+    ) -> PrognosticStateDataRequirements:
+        return self.config.stepper.get_prognostic_state_data_requirements()
 
-    def configure_logging(self, log_filename: str):
-        self.logging.configure_logging(self.experiment_dir, log_filename)
+    def get_train_data(self) -> GriddedData:
+        data_requirements = self._get_train_window_data_requirements()
+        return get_data_loader(
+            self.config.train_loader,
+            requirements=data_requirements,
+            train=True,
+        )
 
-    def configure_wandb(self, env_vars: Optional[Dict[str, Any]] = None, **kwargs):
-        config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
+    def get_validation_data(self) -> GriddedData:
+        data_requirements = self._get_train_window_data_requirements()
+        return get_data_loader(
+            self.config.validation_loader,
+            requirements=data_requirements,
+            train=False,
+        )
 
-    def log(self):
-        logging.info("------------------ Configuration ------------------")
-        logging.info(str(self))
-        logging.info("---------------------------------------------------")
+    def get_evaluation_inference_data(
+        self,
+    ) -> InferenceGriddedData:
+        return get_inference_data(
+            config=self.config.inference.loader,
+            total_forward_steps=self.config.inference_n_forward_steps,
+            window_requirements=self._get_evaluation_window_data_requirements(),
+            initial_condition=self._get_initial_condition_data_requirements(),
+        )
 
-    def clean_wandb(self):
-        self.logging.clean_wandb(experiment_dir=self.experiment_dir)
+    def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
+        return self.config.optimization.build(modules, self.config.max_epochs)
 
+    def get_stepper(
+        self,
+        img_shape: Tuple[int, int],
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
+        timestep: datetime.timedelta,
+    ) -> SingleModuleStepper:
+        return self.config.stepper.get_stepper(
+            img_shape=img_shape,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        )
 
-def epoch_checkpoint_enabled(
-    epoch: int, max_epochs: int, save_epochs: Optional[Slice]
-) -> bool:
-    if save_epochs is None:
-        return False
-    return epoch in range(max_epochs)[save_epochs.slice]
+    def get_ema(self, modules) -> EMATracker:
+        return self.config.ema.build(modules)
+
+    def get_end_of_batch_ops(
+        self, modules: List[torch.nn.Module]
+    ) -> EndOfBatchCallback:
+        base_weights = self.config.stepper.get_base_weights()
+        if base_weights is not None:
+            copy_after_batch = self.config.copy_weights_after_batch
+            return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)
+        return lambda: None
