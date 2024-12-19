@@ -328,7 +328,12 @@ def _combine_normalizers(
     means, stds = copy(model_normalizer.means), copy(model_normalizer.stds)
     means.update(residual_normalizer.means)
     stds.update(residual_normalizer.stds)
-    return StandardNormalizer(means=means, stds=stds)
+    return StandardNormalizer(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=model_normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=model_normalizer.fill_nans_on_denormalize,
+    )
 
 
 def _prepend_timesteps(
