@@ -868,14 +868,19 @@ def test__combine_normalizers():
     full_field_normalizer = StandardNormalizer(
         means={var: torch.rand(3) for var in vars},
         stds={var: torch.rand(3) for var in vars},
+        fill_nans_on_normalize=True,
+        fill_nans_on_denormalize=True,
     )
     residual_normalizer = StandardNormalizer(
         means={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
         stds={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
     )
     combined_normalizer = _combine_normalizers(
-        residual_normalizer=residual_normalizer, model_normalizer=full_field_normalizer
+        residual_normalizer=residual_normalizer,
+        model_normalizer=full_field_normalizer,
     )
+    assert combined_normalizer.fill_nans_on_normalize
+    assert combined_normalizer.fill_nans_on_denormalize
     for var in combined_normalizer.means:
         if "prog" in var:
             assert torch.allclose(
