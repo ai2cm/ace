@@ -80,3 +80,49 @@ def test_tensors_with_missing_normalization_stats_get_filtered():
 
     denormalized = normalization.denormalize(sample_input)
     assert "c" not in denormalized
+
+
+@pytest.mark.parametrize("fill_nans_on_normalize", [True, False])
+@pytest.mark.parametrize("fill_nans_on_denormalize", [True, False])
+def test_normalization_with_nans(fill_nans_on_normalize, fill_nans_on_denormalize):
+    means = {"a": 1.0, "b": 2.0}
+    stds = {"a": 1.0, "b": 2.0}
+    normalization = NormalizationConfig(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=fill_nans_on_normalize,
+        fill_nans_on_denormalize=fill_nans_on_denormalize,
+    ).build(["a", "b"])
+    denormalized_input = {
+        "a": torch.tensor([-1.0, float("nan"), 1.0]),
+        "b": torch.tensor([0.0, float("nan"), 4.0]),
+    }
+    denormalized_input = move_tensordict_to_device(denormalized_input)
+    normalized = normalization.normalize(denormalized_input)
+    if fill_nans_on_normalize:
+        assert not torch.isnan(normalized["a"][1]), "normalized_nans_removed_a"
+        assert normalized["a"][1] == torch.tensor(0), "normalized_nans_filled_means_a"
+        assert not torch.isnan(normalized["b"][1]), "normalized_nans_removed_b"
+        assert normalized["b"][1] == torch.tensor(0), "normalized_nans_filled_means_b"
+    else:
+        assert torch.isnan(normalized["a"][1]), "normalized_nans_not_removed_a"
+        assert torch.isnan(normalized["b"][1]), "normalized_nans_not_removed_b"
+
+    normalized_input = {
+        "a": torch.tensor([-1.0, float("nan"), 1.0]),
+        "b": torch.tensor([-1.0, float("nan"), 1.0]),
+    }
+    normalized_input = move_tensordict_to_device(normalized_input)
+    denormalized = normalization.denormalize(normalized_input)
+    if fill_nans_on_denormalize:
+        assert not torch.isnan(denormalized["a"][1]), "denormalized_nans_removed_a"
+        assert denormalized["a"][1] == torch.tensor(
+            means["a"]
+        ), "denormalized_nans_filled_means_a"
+        assert not torch.isnan(denormalized["b"][1]), "denormalized_nans_removed_b"
+        assert denormalized["b"][1] == torch.tensor(
+            means["b"]
+        ), "denormalized_nans_filled_means_b"
+    else:
+        assert torch.isnan(denormalized["a"][1]), "denormalized_nans_not_removed_a"
+        assert torch.isnan(denormalized["b"][1]), "denormalized_nans_not_removed_b"
