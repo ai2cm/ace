@@ -121,6 +121,13 @@ def _get_test_yaml_files(
       input_time_size: {input_time_size}
       output_time_size: {output_time_size}
         """
+    elif nettype == "Samudra":
+        config_str = f"""
+      ch_width: [8, 16]
+      dilation: [2, 4]
+      n_layers: [1, 1]
+      """
+        spatial_dimensions_str = "latlon"
     else:
         config_str = """
       num_layers: 2
@@ -350,7 +357,13 @@ def _setup(
 
 
 @pytest.mark.parametrize(
-    "nettype", ["SphericalFourierNeuralOperatorNet", "HEALPixRecUNet", "SFNO-v0.1.0"]
+    "nettype",
+    [
+        "SphericalFourierNeuralOperatorNet",
+        "HEALPixRecUNet",
+        "Samudra",
+        "SFNO-v0.1.0",
+    ],
 )
 def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
     """Make sure that training and inference run without errors
