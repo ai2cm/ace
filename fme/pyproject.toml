@@ -52,3 +52,6 @@ ignore = ["D1", "D200", "D205", "D212", "E203", "W293", "F541", "E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
