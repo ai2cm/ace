@@ -4,9 +4,11 @@ REGISTRY ?= registry.nersc.gov/m4492/ai2cm
 ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
+BEAKER_WORKSPACE = ai2/ace
+CURRENT_DATE = $(shell date +'%Y-%m')
 
 build_docker_image:
-	docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) .
+	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
 
 push_shifter_image: build_docker_image
 	docker tag $(IMAGE):$(VERSION) $(REGISTRY)/$(IMAGE):$(VERSION)
@@ -26,6 +28,12 @@ enter_docker_image: build_docker_image
 
 launch_beaker_session:
 	./launch-beaker-session.sh $(USERNAME)/$(IMAGE)-$(VERSION)
+
+test_image:
+	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE)-deps-only-$(CURRENT_DATE) --target ci-test .
+	beaker image delete $(USERNAME)/$(IMAGE)-deps-only-$(CURRENT_DATE) || true
+	beaker image create $(IMAGE)-deps-only-$(CURRENT_DATE) --name $(IMAGE)-deps-only-$(CURRENT_DATE) --workspace ai2/ace-ci-tests
+
 
 # recommended to deactivate current conda environment before running this
 create_environment:
