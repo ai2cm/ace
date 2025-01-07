@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+  # Add a button to manually trigger the workflow
+  workflow_dispatch:
+
 jobs:
   cpu:
     runs-on: ubuntu-latest
@@ -126,5 +129,5 @@ jobs:
                   path: /results
           token: ${{ env.BEAKER_TOKEN }}
           workspace: ${{ env.BEAKER_WORKSPACE }}
-          name: $(date +'%Y-%m-%d')-ci-ace-evaluator
+          name: ci-ace-evaluator
 
