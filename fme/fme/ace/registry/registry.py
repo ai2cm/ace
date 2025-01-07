@@ -1,4 +1,1 @@
-from fme.core.registry.module import (  # noqa: F401
-    ModuleConfig,
-    ModuleSelector,
-)
+from fme.core.registry.module import ModuleConfig, ModuleSelector  # noqa: F401
