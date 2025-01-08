@@ -11,6 +11,7 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.inference.derived_variables import compute_derived_quantities
+from fme.ace.multi_call import MultiCallConfig
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.corrector import CorrectorConfig
@@ -74,6 +75,9 @@ class SingleModuleStepperConfig:
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
+        multi_call: The configuration of multi-called diagnostics.
+        include_multi_call_in_loss: Whether to include multi-call diagnostics in the
+            loss. The same loss configuration as specified in 'loss' is used.
     """
 
     builder: ModuleSelector
@@ -93,6 +97,8 @@ class SingleModuleStepperConfig:
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[NormalizationConfig] = None
     residual_normalization: Optional[NormalizationConfig] = None
+    multi_call: Optional[MultiCallConfig] = None
+    include_multi_call_in_loss: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -116,6 +122,14 @@ class SingleModuleStepperConfig:
                 "If loss_normalization is provided, it will be used for all variables "
                 "in loss scaling."
             )
+        if self.multi_call is not None:
+            self.multi_call.validate(self.in_names, self.out_names)
+        if self.include_multi_call_in_loss:
+            if self.multi_call is None:
+                raise ValueError(
+                    "include_multi_calls_in_loss is True but no multi_call config "
+                    "was provided."
+                )
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -198,13 +212,18 @@ class SingleModuleStepperConfig:
         extra_names = []
         if self.ocean is not None:
             extra_names.extend(self.ocean.forcing_names)
+        if self.multi_call is not None:
+            extra_names.extend(self.multi_call.names)
         all_names = list(set(self.in_names).union(self.out_names).union(extra_names))
         return all_names
 
     @property
     def normalize_names(self):
         """Names of variables which require normalization. I.e. inputs/outputs."""
-        return list(set(self.in_names).union(self.out_names))
+        extra_names = []
+        if self.multi_call is not None:
+            extra_names.extend(self.multi_call.names)
+        return list(set(self.in_names).union(self.out_names).union(extra_names))
 
     @property
     def forcing_names(self) -> List[str]:
@@ -218,8 +237,12 @@ class SingleModuleStepperConfig:
 
     @property
     def diagnostic_names(self) -> List[str]:
-        """Names of variables which both inputs and outputs."""
-        return list(set(self.out_names).difference(self.in_names))
+        """Names of variables which are outputs only."""
+        extra_names = []
+        if self.multi_call is not None:
+            extra_names = self.multi_call.names
+        out_names = list(set(self.out_names).union(extra_names))
+        return list(set(out_names).difference(self.in_names))
 
     @classmethod
     def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -515,6 +538,20 @@ class SingleModuleStepper(
         self.in_names = config.in_names
         self.out_names = config.out_names
 
+        if config.multi_call is not None:
+            self._multi_call = config.multi_call.build(self.step)
+            if config.include_multi_call_in_loss:
+                self._multi_call_loss = config.loss.build(
+                    gridded_operations.area_weighted_mean,
+                    self._multi_call.names,
+                    self.CHANNEL_DIM,
+                )
+            else:
+                zero_loss = torch.tensor(0.0, device=get_device())
+                self._multi_call_loss = lambda x, y: zero_loss
+        else:
+            self._multi_call = None
+
         _1: PredictFunction[  # for type checking
             PrognosticState,
             BatchData,
@@ -577,13 +614,11 @@ class SingleModuleStepper(
 
     @property
     def prognostic_names(self) -> List[str]:
-        return sorted(
-            list(set(self.out_packer.names).intersection(self.in_packer.names))
-        )
+        return sorted(self._config.prognostic_names)
 
     @property
     def diagnostic_names(self) -> List[str]:
-        return sorted(list(set(self.out_packer.names).difference(self.in_packer.names)))
+        return sorted(self._config.diagnostic_names)
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -669,6 +704,11 @@ class SingleModuleStepper(
             }
             input_data = {**state, **ml_input_forcing}
             state = self.step(input_data, next_step_forcing_data)
+            if self._multi_call is not None:
+                multi_called_outputs = self._multi_call.step(
+                    input_data, next_step_forcing_data
+                )
+                state = {**multi_called_outputs, **state}
             output_list.append(state)
         output_timeseries = {}
         for name in state:
@@ -815,11 +855,8 @@ class SingleModuleStepper(
 
         optimization.set_mode(self.module)
         with optimization.autocast():
-            # output from self.predict does not include initial condition
-            output, _ = self.predict_paired(
-                input_data,
-                forcing=data,
-            )
+            # output from self.predict_paired does not include initial condition
+            output, _ = self.predict_paired(input_data, forcing=data)
             gen_data = output.prediction
             target_data = output.target
             n_forward_steps = output.time.shape[1]
@@ -834,6 +871,11 @@ class SingleModuleStepper(
                 }
                 gen_norm_step = self.loss_normalizer.normalize(gen_step)
                 target_norm_step = self.loss_normalizer.normalize(target_step)
+
+                if self._multi_call is not None:
+                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
+                    loss += mc_loss
+                    metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
 
                 step_loss = self.loss_obj(gen_norm_step, target_norm_step)
                 loss += step_loss
