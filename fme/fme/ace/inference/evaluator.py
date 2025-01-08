@@ -129,12 +129,7 @@ class InferenceEvaluatorConfig:
 
     def configure_wandb(self, env_vars: Optional[dict] = None, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(
-            config=config, env_vars=env_vars, resume=False, **kwargs
-        )
-
-    def clean_wandb(self):
-        self.logging.clean_wandb(self.experiment_dir)
+        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
 
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
@@ -321,7 +316,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         **aggregator.get_summary_logs(),
     }
     record_logs([summary_logs])
-    config.clean_wandb()
 
 
 if __name__ == "__main__":

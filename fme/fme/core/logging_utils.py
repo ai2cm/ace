@@ -19,6 +19,8 @@ ENV_VAR_NAMES = (
     "FME_IMAGE",
 )
 
+DEFAULT_TMP_DIR = "/tmp"
+
 
 @dataclasses.dataclass
 class LoggingConfig:
@@ -72,6 +74,8 @@ class LoggingConfig:
         self,
         config: Mapping[str, Any],
         env_vars: Optional[Mapping[str, Any]] = None,
+        wandb_dir: Optional[str] = DEFAULT_TMP_DIR,
+        resumable: bool = False,
         **kwargs,
     ):
         config_copy = {**config}
@@ -89,13 +93,11 @@ class LoggingConfig:
             config=config_copy,
             project=self.project,
             entity=self.entity,
-            dir=config["experiment_dir"],
+            experiment_dir=config["experiment_dir"],
+            resumable=resumable,
+            dir=wandb_dir,
             **kwargs,
         )
-
-    def clean_wandb(self, experiment_dir: str):
-        wandb = WandB.get_instance()
-        wandb.clean_wandb_dir(experiment_dir=experiment_dir)
 
 
 def log_versions():
