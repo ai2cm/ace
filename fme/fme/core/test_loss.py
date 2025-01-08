@@ -118,15 +118,6 @@ def test__construct_weight_tensor():
             assert torch.allclose(weighted_gen_data[:, i], gen_data[:, i])
 
 
-def test__construct_weight_tensor_missing_key_error():
-    out_names = ["a", "b", "c"]
-    weights = {"a": 0.5, "c": 3.0, "d": 1.5}
-    with pytest.raises(KeyError):
-        _construct_weight_tensor(weights, out_names, n_dim=4, channel_dim=-3)(
-            out_names, n_dim=4, channel_dim=-3
-        )
-
-
 def test_MappingLoss():
     loss = torch.nn.MSELoss()
     n_channels = 5

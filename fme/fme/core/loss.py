@@ -52,12 +52,6 @@ def _construct_weight_tensor(
         n_dim: number of dimensions of the output tensor
         channel_dim: the channel dimension of the output tensor
     """
-    missing_keys = set(weights.keys()) - set(out_names)
-    if len(missing_keys) > 0:
-        raise KeyError(
-            f"Variables {missing_keys} in loss weights not in "
-            f"output variables list."
-        )
     weights_tensor = torch.tensor([weights.get(key, 1.0) for key in out_names])
     # positive index of the channel dimension
     _channel_dim = n_dim + channel_dim if channel_dim < 0 else channel_dim
