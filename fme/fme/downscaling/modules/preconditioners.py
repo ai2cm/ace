@@ -25,15 +25,11 @@ class EDMPrecond(torch.nn.Module):
         model,                              # The underlying neural network model. Add by <gideond@allenai.org>
         label_dim       = 0,                # Number of class labels, 0 = unconditional.
         use_fp16        = False,            # Execute the underlying model at FP16 precision?
-        sigma_min       = 0.0,              # Minimum supported noise level.
-        sigma_max       = float('inf'),     # Maximum supported noise level.
         sigma_data      = 0.5,              # Expected standard deviation of the training data.
     ):
         super().__init__()
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
         self.sigma_data = sigma_data
         self.model = model
 

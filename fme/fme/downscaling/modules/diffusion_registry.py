@@ -96,8 +96,6 @@ class UNetDiffusionSong:
         return UNetDiffusionModule(
             EDMPrecond(
                 unet,
-                sigma_min=None,  # type: ignore
-                sigma_max=None,  # type: ignore
                 sigma_data=sigma_data,
             ),
             coarse_shape,
