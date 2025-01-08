@@ -442,16 +442,28 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             train_main(
                 yaml_config=train_config,
             )
-        assert min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
-        assert max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
-        assert not mock.called
+            assert (
+                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
+            )
+            assert (
+                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
+            )
+            assert not mock.called
+            # need to persist the id since mock_wandb doesn't
+            id = wandb.get_id()
         with mock_wandb() as wandb:
+            # set the id so that we can check it matches what's in the experiment dir
+            wandb.set_id(id)
             train_main(
                 yaml_config=train_config,
             )
-        mock.assert_called()
-        assert min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
-        assert max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+            mock.assert_called()
+            assert (
+                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+            )
+            assert (
+                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+            )
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])

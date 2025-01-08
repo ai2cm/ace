@@ -1,6 +1,8 @@
 import collections
 import contextlib
-from typing import Any, Dict, List, Mapping
+import random
+import string
+from typing import Any, Dict, List, Literal, Mapping, Optional
 
 from fme.core import wandb
 from fme.core.distributed import Distributed
@@ -12,19 +14,69 @@ class MockWandB:
         self._configured = False
         self._logs: Dict[int, Dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
+        self._id: Optional[str] = None
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
 
-    def init(self, **kwargs):
+    def init(
+        self,
+        resumable: bool = False,
+        experiment_dir: Optional[str] = None,
+        **kwargs,
+    ):
         if not self._configured:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
-            pass
+            if resumable:
+                if experiment_dir is None:
+                    raise ValueError(
+                        "must provide `experiment_dir` when `resumable` is True"
+                    )
+                else:
+                    wandb.init_wandb_with_resumption(
+                        experiment_dir,
+                        direct_access=False,
+                        wandb_init=self._wandb_init,
+                        wandb_id=self.get_id,
+                        **kwargs,
+                    )
+            else:
+                pass
+
+    def _wandb_init(
+        self, resume: Literal["must", "never"], id: Optional[str] = None, **kwargs
+    ):
+        """
+        Mocks the `wandb.init` behavior, specifically around initializing
+        a run with `resume` and `id`.
+        See https://docs.wandb.ai/guides/runs/resuming/.
+        """
+        if resume == "must":
+            if id is None:
+                raise ValueError("resume='must' and id is None")
+            else:
+                if id != self._id:
+                    raise ValueError("resume='must' and id does not match previous id")
+        else:
+            if id is not None:
+                raise ValueError("resume='never' and id is not None")
+            else:
+                if self._id is not None:
+                    raise ValueError(
+                        "resume='never' and id is None but previous id exists"
+                    )
+            self._id = _mock_wandb_id()
+
+    def get_id(self) -> Optional[str]:
+        return self._id
+
+    def set_id(self, id: str):
+        self._id = id
 
     def watch(self, modules):
         if self._enabled:
@@ -50,9 +102,6 @@ class MockWandB:
         for step, log in self._logs.items():
             return_value[step] = log
         return return_value
-
-    def clean_wandb_dir(self, experiment_dir: str):
-        pass
 
     def Image(self, *args, **kwargs) -> wandb.Image:
         return wandb.Image(*args, direct_access=False, **kwargs)
@@ -87,3 +136,9 @@ def mock_wandb():
         yield wandb.singleton
     finally:
         wandb.singleton = original
+
+
+def _mock_wandb_id(n_chars: int = 8) -> str:
+    return "".join(
+        random.choice(string.ascii_lowercase + string.digits) for _ in range(n_chars)
+    )

@@ -210,7 +210,7 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     beaker_url = logging_utils.log_beaker_url()
     config_as_dict = to_flat_dict(dataclasses.asdict(config))
     config.logging.configure_wandb(
-        config=config_as_dict, env_vars=env_vars, resume=True, notes=beaker_url
+        config=config_as_dict, env_vars=env_vars, notes=beaker_url, resumable=True
     )
     trainer = build_trainer(builders, config)
     trainer.train()

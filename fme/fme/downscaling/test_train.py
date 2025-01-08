@@ -368,9 +368,12 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_not_called()
-
+            # need to persist the id since mock_wandb doesn't
+            id = wandb.get_id()
     with unittest.mock.patch("fme.downscaling.train.restore_checkpoint", new=mock):
         with mock_wandb() as wandb:
+            # set the id so that we can check it matches what's in the experiment dir
+            wandb.set_id(id)
             main(config_segment_two_path)
             assert 2 == len(
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]

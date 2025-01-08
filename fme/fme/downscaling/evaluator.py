@@ -248,7 +248,7 @@ def main(config_path: str):
     evaluator_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    evaluator_config.configure_wandb(resume=True, notes=beaker_url)
+    evaluator_config.configure_wandb(notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
     evaluator = evaluator_config.build()

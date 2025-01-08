@@ -179,7 +179,6 @@ class Config:
     checkpoint_save_epochs: Optional[Slice] = None
     ema_checkpoint_save_epochs: Optional[Slice] = None
     segment_epochs: Optional[int] = None
-    clean_wandb = unittest.mock.MagicMock()
 
     def __post_init__(self):
         self.get_inference_epochs = unittest.mock.MagicMock(
