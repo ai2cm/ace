@@ -141,9 +141,6 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
-    def clean_wandb(self, experiment_dir: str) -> None:
-        self.logging.clean_wandb(experiment_dir=experiment_dir)
-
     def get_inference_epochs(self) -> List[int]:
         return list(range(0, self.max_epochs))[self.inference.epochs.slice]
 

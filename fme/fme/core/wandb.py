@@ -1,6 +1,5 @@
-import glob
+import logging
 import os
-import shutil
 import time
 from typing import Any, Mapping, Optional
 
@@ -10,6 +9,8 @@ import wandb
 from fme.core.distributed import Distributed
 
 singleton: Optional["WandB"] = None
+
+WANDB_RUN_ID_FILE = "wandb_run_id"
 
 
 class DirectInitializationError(RuntimeError):
@@ -116,15 +117,40 @@ class WandB:
         self._enabled = log_to_wandb and dist.is_root()
         self._configured = True
 
-    def init(self, **kwargs):
-        """Kwargs are passed to wandb.init."""
+    def init(
+        self,
+        resumable: bool = False,
+        experiment_dir: Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Initialize wandb, potentially with resumption logic.
+
+        Args:
+            resumable: If True, attempt to resume the run in the experiment directory,
+                or start a new run there if no run is found.
+            experiment_dir: The directory where the experiment is being run. Required if
+                `resumable` is True.
+            **kwargs: Passed to wandb.init.
+        """
         if not self._configured:
             raise RuntimeError(
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
             wandb.require("core")
-            wandb.init(**kwargs)
+            if resumable:
+                if experiment_dir is None:
+                    raise ValueError(
+                        "must provide `experiment_dir` when `resumable` is True"
+                    )
+                else:
+                    init_wandb_with_resumption(
+                        experiment_dir, direct_access=False, **kwargs
+                    )
+            else:
+                wandb.init(**kwargs)
+                logging.info(f"New non-resuming wandb run with id: {wandb.run.id}.")
 
     def watch(self, modules):
         if self._enabled:
@@ -141,14 +167,6 @@ class WandB:
             data_or_path = scale_image(data_or_path)
 
         return Image(data_or_path, *args, direct_access=False, **kwargs)
-
-    def clean_wandb_dir(self, experiment_dir: str):
-        # this is necessary because wandb does not remove run media directories
-        # after a run is synced; see https://github.com/wandb/wandb/issues/3564
-        if self._enabled:
-            wandb.run.finish()  # necessary to ensure the run directory is synced
-            wandb_dir = os.path.join(experiment_dir, "wandb")
-            remove_media_dirs(wandb_dir)
 
     def Video(self, *args, **kwargs) -> Video:
         return Video(*args, direct_access=False, **kwargs)
@@ -180,12 +198,57 @@ def scale_image(
     return image_data
 
 
-def remove_media_dirs(wandb_dir: str, media_dir_pattern: str = "run-*-*/files/media"):
+def init_wandb_with_resumption(
+    experiment_dir: str,
+    direct_access=True,
+    wandb_run_id_file: str = WANDB_RUN_ID_FILE,
+    wandb_init=None,
+    wandb_id=None,
+    **kwargs: Any,
+) -> None:
     """
-    Remove the media directories in the wandb run directories.
+    Initialize wandb with resumption logic. If wandb has previously
+    been initialized in the experiment directory, resume the run. Otherwise,
+    start a new run.
+
+    The reason we implement our own resumption logic is that wandb uses the same
+    location to save temporary media files and the information necessary for
+    resumption. We want to save these things in different places.
+
+    Args:
+        experiment_dir: The directory where the experiment is being run.
+        direct_access: If True, raise an error if this function is called directly.
+        wandb_run_id_file: The file where the wandb run id is stored.
+        wandb_init: The wandb.init function to use (for testing).
+        wandb_id: A function returning the wandb run_id (for testing).
+        **kwargs: Arguments to pass to `wandb.init`.
     """
-    glob_pattern = os.path.join(wandb_dir, media_dir_pattern)
-    media_dirs = glob.glob(glob_pattern)
-    for media_dir in media_dirs:
-        if os.path.isdir(media_dir):
-            shutil.rmtree(media_dir)
+    if direct_access:
+        raise DirectInitializationError(
+            "Must access this function by calling `wandb.init` after "
+            "`wandb = WandB.get_instance()`. It should not be called from anywhere "
+            "else."
+        )
+
+    if wandb_init is None:
+        wandb_init = wandb.init
+
+    if wandb_id is None:
+
+        def wandb_id():
+            return wandb.run.id
+
+    if not os.path.exists(os.path.join(experiment_dir, wandb_run_id_file)):
+        # new run
+        kwargs.update({"resume": "never"})
+        wandb_init(**kwargs)
+        logging.info(f"New resumable wandb run with id: {wandb_id()}.")
+        with open(os.path.join(experiment_dir, wandb_run_id_file), "w") as f:
+            f.write(wandb_id())
+    else:
+        # resuming
+        with open(os.path.join(experiment_dir, wandb_run_id_file), "r") as f:
+            wandb_run_id = f.read().strip()
+        kwargs.update({"resume": "must", "id": wandb_run_id})
+        wandb_init(**kwargs)
+        logging.info(f"Resuming wandb run with id: {wandb_id()}")

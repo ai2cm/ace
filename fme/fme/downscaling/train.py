@@ -341,7 +341,7 @@ def main(config_path: str):
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    train_config.configure_wandb(resume=True, notes=beaker_url)
+    train_config.configure_wandb(notes=beaker_url, resumable=True)
 
     logging.info("Starting training")
     trainer = train_config.build()

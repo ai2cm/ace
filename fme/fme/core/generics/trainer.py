@@ -116,8 +116,6 @@ class TrainConfigProtocol(Protocol):
     @property
     def ema_checkpoint_save_epochs(self) -> Optional[Slice]: ...
 
-    def clean_wandb(self, experiment_dir: str) -> None: ...
-
     def get_inference_epochs(self) -> List[int]: ...
 
 
@@ -313,8 +311,6 @@ class Trainer:
                 all_logs["epoch_inference_seconds"] = inference_end - valid_end
             wandb = WandB.get_instance()
             wandb.log(all_logs, step=self.num_batches_seen)
-        if segment_max_epochs == self.config.max_epochs:
-            self.config.clean_wandb(experiment_dir=self.config.experiment_dir)
 
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
