@@ -95,6 +95,16 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           echo "COMMIT_SHA=${{ github.event.pull_request.head.sha }}" >> $GITHUB_ENV
+
+      - name: Determine current commit SHA (push)
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "COMMIT_SHA=$GITHUB_SHA" >> $GITHUB_ENV
+
+      - name: Shortened commit SHA
+        run: |
+          echo "COMMIT_SHA_SHORT=$(echo "$GITHUB_SHA" | cut -c1-6)" >> $GITHUB_ENV
+
       - name: Integration tests
         uses: allenai/beaker-run-action@v1.2
         with:
@@ -129,5 +139,5 @@ jobs:
                   path: /results
           token: ${{ env.BEAKER_TOKEN }}
           workspace: ${{ env.BEAKER_WORKSPACE }}
-          name: ci-ace-evaluator
+          name: ci-ace-evaluator-${{ env.COMMIT_SHA_SHORT }}
 
