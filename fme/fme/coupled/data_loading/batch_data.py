@@ -6,12 +6,39 @@ from typing import List, Literal, Mapping, Optional, Sequence
 import numpy as np
 import torch
 
-from fme.ace.data_loading.batch_data import BatchData, SizedMap
+from fme.ace.data_loading.batch_data import (
+    BatchData,
+    PairedData,
+    PrognosticState,
+    SizedMap,
+)
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
+
+
+class CoupledPrognosticState:
+    """
+    Thin typing wrapper around CoupledBatchData to indicate that the data is
+    a prognostic state, such as an initial condition or final state when
+    evolving forward in time.
+    """
+
+    def __init__(self, ocean_data: PrognosticState, atmosphere_data: PrognosticState):
+        self.ocean_data = ocean_data
+        self.atmosphere_data = atmosphere_data
+
+    def to_device(self) -> "CoupledPrognosticState":
+        return CoupledPrognosticState(
+            self.ocean_data.to_device(), self.atmosphere_data.to_device()
+        )
+
+    def as_batch_data(self) -> "CoupledBatchData":
+        return CoupledBatchData(
+            self.ocean_data.as_batch_data(), self.atmosphere_data.as_batch_data()
+        )
 
 
 @dataclasses.dataclass
@@ -63,6 +90,17 @@ class CoupledBatchData:
             sample_dim_name=sample_dim_name,
         )
         return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)
+
+
+@dataclasses.dataclass
+class CoupledPairedData:
+    """
+    A container for the data and time coordinates of a batch, with paired
+    prediction and target data.
+    """
+
+    ocean_data: PairedData
+    atmosphere_data: PairedData
 
 
 class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
