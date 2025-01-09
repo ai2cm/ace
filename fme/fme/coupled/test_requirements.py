@@ -3,7 +3,8 @@ import datetime
 import pytest
 
 from fme.core.dataset.requirements import DataRequirements
-from fme.coupled.data_loading.requirements import CoupledDataRequirements
+
+from .requirements import CoupledDataRequirements
 
 
 @pytest.mark.parametrize(

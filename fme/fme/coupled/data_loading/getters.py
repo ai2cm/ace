@@ -15,7 +15,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledProperties,
 )
-from fme.coupled.data_loading.requirements import CoupledDataRequirements
+from fme.coupled.requirements import CoupledDataRequirements
 
 
 def get_coupled_dataset(
