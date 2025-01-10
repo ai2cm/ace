@@ -118,13 +118,15 @@ jobs:
                   beaker: ${{ env.BEAKER_IMAGE }}
                 context:
                   priority: normal
-                  preemptible: false
+                  preemptible: true
                 resources:
                   gpuCount: 1
                   sharedMemory: 10 GiB
                 constraints:
                   cluster:
                     - ai2/saturn-cirrascale
+                    - ai2/jupiter-cirrascale-2
+                    - ai2/augusta-google-1
                 datasets:
                   - mountPath: /test-default
                     source:
