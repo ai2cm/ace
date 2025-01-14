@@ -3,10 +3,14 @@
 import pytest
 import torch
 
-from fme.core.climate_data import ClimateData, _height_at_interface, _layer_thickness
+from fme.core.climate_data import (
+    ClimateData,
+    _height_at_interface,
+    compute_layer_thickness,
+)
 
 
-def test__layer_thickness():
+def test_compute_layer_thickness():
     pressure_at_interface = torch.tensor(
         [
             [[1, 2, 3], [4, 5, 6]],
@@ -20,7 +24,9 @@ def test__layer_thickness():
         ]
     )
     specific_total_water = torch.full((2, 2, 2), 0.1)
-    dz = _layer_thickness(pressure_at_interface, air_temperature, specific_total_water)
+    dz = compute_layer_thickness(
+        pressure_at_interface, air_temperature, specific_total_water
+    )
     assert dz.shape == (2, 2, 2)
     assert torch.all(dz >= 0.0)
 

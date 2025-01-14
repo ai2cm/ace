@@ -7,7 +7,6 @@ import torch
 from fme.core import metrics
 from fme.core.climate_data import ClimateData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.device import get_device
 
 DerivedVariableFunc = Callable[
     [ClimateData, HybridSigmaPressureCoordinate, datetime.timedelta], torch.Tensor
@@ -91,11 +90,7 @@ def net_energy_flux_toa_into_atmosphere(
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    return (
-        data.toa_down_sw_radiative_flux
-        - data.toa_up_sw_radiative_flux
-        - data.toa_up_lw_radiative_flux
-    )
+    return data.net_top_of_atmosphere_energy_flux
 
 
 @register
@@ -115,39 +110,28 @@ def net_energy_flux_into_atmospheric_column(
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    return net_energy_flux_sfc_into_atmosphere(
-        data, vertical_coordinate, timestep
-    ) + net_energy_flux_toa_into_atmosphere(data, vertical_coordinate, timestep)
+    return data.net_energy_flux_into_atmosphere
 
 
 @register
-def column_moist_static_energy(
+def total_energy_ace2_path(
     data: ClimateData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    return vertical_coordinate.vertical_integral(
-        data.moist_static_energy(vertical_coordinate),
-        data.surface_pressure,
-    )
+    return data.total_energy_ace2_path(vertical_coordinate)
 
 
 @register
-def column_moist_static_energy_tendency(
+def total_energy_ace2_path_tendency(
     data: ClimateData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    mse = column_moist_static_energy(data, vertical_coordinate, timestep)
-    diff = torch.diff(mse, n=1, dim=1)
-    # Only the very first timestep in series is filled with nan; subsequent batches
-    # drop the first step as it's the initial condition.
-    first_step_shape = (diff.shape[0], 1, *diff.shape[2:])
-    tendency = (
-        torch.concat([torch.zeros(first_step_shape).to(get_device()), diff], dim=1)
-        / timestep.total_seconds()
-    )
-    return tendency
+    mse = total_energy_ace2_path(data, vertical_coordinate, timestep)
+    mse_tendency = torch.zeros_like(mse)
+    mse_tendency[:, 1:] = torch.diff(mse, n=1, dim=1) / timestep.total_seconds()
+    return mse_tendency
 
 
 def _compute_derived_variable(

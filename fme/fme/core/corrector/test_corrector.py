@@ -17,6 +17,7 @@ from fme.core.typing_ import TensorMapping
 from .corrector import (
     _force_conserve_dry_air,
     _force_conserve_moisture,
+    _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
     force_positive,
 )
@@ -245,6 +246,94 @@ def test_force_positive():
     torch.testing.assert_close(new_min, torch.tensor(0.0))
     # Ensure other variables are not modified
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
+
+
+def test__force_conserve_total_energy():
+    tensor_shape = (5, 5)
+    vertical_coord = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    # debugging a bit easier with realistic scales for input variables
+    variables = [
+        ("PRESsfc", 100000, 1000),
+        ("HGTsfc", 500, 50),
+        ("SHTFLsfc", 100, 50),
+        ("LHTFLsfc", 100, 50),
+        ("specific_total_water_0", 0.001, 0.0001),
+        ("specific_total_water_1", 0.001, 0.0001),
+        ("air_temperature_0", 300, 10),
+        ("air_temperature_1", 300, 10),
+        ("DSWRFtoa", 500, 100),
+        ("USWRFtoa", 500, 100),
+        ("ULWRFtoa", 500, 100),
+        ("USWRFsfc", 500, 100),
+        ("DSWRFsfc", 500, 100),
+        ("ULWRFsfc", 500, 100),
+        ("DLWRFsfc", 500, 100),
+    ]
+    forcing_names = ["HGTsfc", "DSWRFtoa"]
+    non_forcing_names = [name for name, _, _ in variables if name not in forcing_names]
+    input_data = {
+        name: centering + scale * torch.rand(size=tensor_shape)
+        for name, centering, scale in variables
+    }
+    gen_data = {
+        name: centering + scale * torch.rand(size=tensor_shape)
+        for name, centering, scale in variables
+        if name in non_forcing_names
+    }
+    forcing_data = {
+        name: centering + scale * torch.rand(size=tensor_shape)
+        for name, centering, scale in variables
+        if name in forcing_names
+    }
+    timestep = datetime.timedelta(seconds=3600)
+
+    corrected_gen_data = _force_conserve_total_energy(
+        input_data=input_data,
+        gen_data=gen_data,
+        forcing_data=forcing_data,
+        area_weighted_mean=ops.area_weighted_mean,
+        vertical_coordinate=vertical_coord,
+        timestep=timestep,
+    )
+
+    # ensure only temperature is modified
+    for name in non_forcing_names:
+        if "air_temperature" in name:
+            assert not torch.allclose(
+                corrected_gen_data[name], gen_data[name], rtol=1e-6
+            )
+        else:
+            torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
+
+    # ensure forcing variables are not in the corrected data
+    for name in forcing_names:
+        assert name not in corrected_gen_data
+
+    # ensure the corrected global mean MSE path is what we expect
+    input = ClimateData(input_data)
+    corrected_gen = ClimateData(corrected_gen_data | forcing_data)
+    input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path(vertical_coord))
+    corrected_gen_gm_mse = ops.area_weighted_mean(
+        corrected_gen.total_energy_ace2_path(vertical_coord)
+    )
+    predicted_mse_tendency = ops.area_weighted_mean(
+        corrected_gen.net_energy_flux_into_atmosphere
+    )
+    expected_gm_mse = input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
+    torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
+
+    # ensure the temperature correction is constant
+    corrected_gen_temperature = corrected_gen_data["air_temperature_1"]
+    initial_gen_temperature = gen_data["air_temperature_1"]
+    temperature_1_correction = corrected_gen_temperature - initial_gen_temperature
+    assert torch.all(torch.eq(temperature_1_correction, temperature_1_correction[0, 0]))
+    temperature_correction_0 = (
+        corrected_gen_data["air_temperature_0"] - gen_data["air_temperature_0"]
+    )
+    torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
 
 
 def test_corrector_selector():
