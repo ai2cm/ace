@@ -1,12 +1,14 @@
 import dataclasses
 import datetime
+import warnings
 from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol
 
 import dacite
 import torch
 
 import fme
-from fme.core.climate_data import ClimateData
+from fme.core.climate_data import ClimateData, compute_layer_thickness
+from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
@@ -89,6 +91,10 @@ class CorrectorConfig(CorrectorConfigProtocol):
 
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero. This is useful for fields like precipitation.
+        total_energy_budget_correction: If not None, force the generated data to
+            conserve an idealized version of total energy. Currently, the only way
+            to force this conservation is by imposing a vertically uniform air
+            temperature correction.
     """
 
     conserve_dry_air: bool = False
@@ -102,6 +108,7 @@ class CorrectorConfig(CorrectorConfigProtocol):
         ]
     ] = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
+    total_energy_budget_correction: Optional[Literal["constant_temperature"]] = None
 
     def build(
         self,
@@ -181,6 +188,16 @@ class Corrector(CorrectorABC):
                 vertical_coordinate=self._vertical_coordinates,
                 timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
+            )
+        if self._config.total_energy_budget_correction is not None:
+            gen_data = _force_conserve_total_energy(
+                input_data=input_data,
+                gen_data=gen_data,
+                forcing_data=forcing_data,
+                area_weighted_mean=self._gridded_operations.area_weighted_mean,
+                vertical_coordinate=self._vertical_coordinates,
+                timestep=self._timestep,
+                method=self._config.total_energy_budget_correction,
             )
         return gen_data
 
@@ -370,3 +387,82 @@ def _force_conserve_moisture(
         )
         gen.tendency_of_total_water_path_due_to_advection = new_advection
     return gen.data
+
+
+def _force_conserve_total_energy(
+    input_data: TensorMapping,
+    gen_data: TensorMapping,
+    forcing_data: TensorMapping,
+    area_weighted_mean: AreaWeightedMean,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
+    timestep: datetime.timedelta,
+    method: Literal["constant_temperature"] = "constant_temperature",
+) -> TensorDict:
+    if method != "constant_temperature":
+        raise NotImplementedError(
+            f"Method {method} not implemented for total energy conservation"
+        )
+    input = ClimateData(input_data)
+    gen = ClimateData(dict(gen_data) | forcing_data)
+    if torch.any(gen.surface_pressure <= 0):
+        warnings.warn(
+            "Surface pressure has a non-positive value, skipping energy correction."
+        )
+        return {k: v for k, v in gen.data.items() if k in gen_data}
+
+    gen_energy_path = gen.total_energy_ace2_path(vertical_coordinate)
+    input_energy_path = input.total_energy_ace2_path(vertical_coordinate)
+    predicted_energy_flux_into_atmosphere = gen.net_energy_flux_into_atmosphere
+
+    gen_energy_path_global_mean = area_weighted_mean(gen_energy_path, keepdim=True)
+    input_energy_path_global_mean = area_weighted_mean(input_energy_path, keepdim=True)
+    energy_flux_global_mean = area_weighted_mean(
+        predicted_energy_flux_into_atmosphere, keepdim=True
+    )
+
+    desired_energy_path_global_mean = (
+        input_energy_path_global_mean
+        + energy_flux_global_mean * timestep.total_seconds()
+    )
+
+    energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
+    energy_to_temperature_factor = _energy_correction_factor(gen, vertical_coordinate)
+    # take global mean to impose a spatially uniform temperature correction
+    energy_to_temp_factor_gm = area_weighted_mean(energy_to_temperature_factor, True)
+    temperature_correction = energy_correction / energy_to_temp_factor_gm
+
+    # apply same temperature correction to all vertical layers
+    n_levels = gen.air_temperature.shape[-1]
+    for k in range(n_levels):
+        name = f"air_temperature_{k}"
+        gen.data[name] = gen.data[name] + temperature_correction
+
+    # filter required here because we merged forcing data into gen_data above
+    return {k: v for k, v in gen.data.items() if k in gen_data}
+
+
+def _energy_correction_factor(
+    gen: ClimateData, vertical_coordinate: HybridSigmaPressureCoordinate
+) -> torch.Tensor:
+    """
+    Compute the factor to get a vertically-uniform temperature correction that
+    will lead to a desired change in the globally-averaged total energy.
+
+    See https://www.overleaf.com/read/dqjjcvzxnfvn#d525aa.
+    """
+    interface_pressure = vertical_coordinate.interface_pressure(gen.surface_pressure)
+    q_times_dlogp = (
+        compute_layer_thickness(
+            interface_pressure, gen.air_temperature, gen.specific_total_water
+        )
+        * GRAVITY
+        / gen.air_temperature
+    )
+    cumulative = torch.cumsum(q_times_dlogp.flip(dims=(-1,)), dim=-1).flip(dims=(-1,))
+    total_integrand = (
+        SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME - 0.5 * q_times_dlogp + cumulative
+    )
+    correction_factor = vertical_coordinate.vertical_integral(
+        total_integrand, gen.surface_pressure
+    )
+    return correction_factor
