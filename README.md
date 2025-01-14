@@ -4,6 +4,9 @@
 <img src="ACE-logo.png" alt="Logo for the ACE Project" style="width: auto; height: 50px;">
 
 # Ai2 Climate Emulator
+
+Ai2 Climate Emulator (ACE) is a fast machine learning model that simulates global atmospheric variability in a changing climate over time scales ranging from hours to centuries.
+
 This repo contains code accompanying four papers describing ACE models:
 - "ACE: A fast, skillful learned global atmospheric model for climate prediction" ([link](https://arxiv.org/abs/2310.02074))
 - "Application of the Ai2 Climate Emulator to E3SMv2's global atmosphere model, with a focus on precipitation fidelity" ([link](https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2024JH000136))
