@@ -5,7 +5,7 @@ import torch
 import torch_harmonics
 from typing_extensions import TypeAlias
 
-from fme.core.constants import GRAVITY
+from fme.core.constants import GRAVITY, LATENT_HEAT_OF_FREEZING
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
@@ -259,8 +259,8 @@ def net_surface_energy_flux(
         lw_rad_up: Upward longwave surface radiation in W/m^2.
         sw_rad_down: Downward shortwave surface radiation in W/m^2.
         sw_rad_up: Upward shortwave surface radiation in W/m^2.
-        latent_heat_flux: Latent heat flux in W/m^2.
-        sensible_heat_flux: Sensible heat flux in W/m^2.
+        latent_heat_flux: Latent heat flux in W/m^2 (positive=upward).
+        sensible_heat_flux: Sensible heat flux in W/m^2 (positive=upward).
         frozen_precipitation_rate (optional): Frozen precipitation rate in kg/m^2/s.
 
     Returns:
@@ -268,12 +268,34 @@ def net_surface_energy_flux(
         from atmosphere to surface.
     """
     if frozen_precipitation_rate is not None:
-        raise NotImplementedError(
-            "Computing net surface energy flux with frozen precipitation is "
-            "not implemented."
-        )
+        frozen_precip_heat_flux = frozen_precipitation_rate * LATENT_HEAT_OF_FREEZING
+    else:
+        frozen_precip_heat_flux = 0.0
     net_surface_radiative_flux = sw_rad_down - sw_rad_up + lw_rad_down - lw_rad_up
-    return net_surface_radiative_flux - latent_heat_flux - sensible_heat_flux
+    net_surface_turbulent_heat_flux = -latent_heat_flux - sensible_heat_flux
+    return (
+        net_surface_radiative_flux
+        + net_surface_turbulent_heat_flux
+        + frozen_precip_heat_flux
+    )
+
+
+def net_top_of_atmosphere_energy_flux(
+    sw_rad_down, sw_rad_up, lw_rad_up
+) -> torch.Tensor:
+    """
+    Compute the net top-of-atmosphere energy flux from individual terms in budget.
+
+    Args:
+        sw_rad_down: Downward shortwave TOA radiation in W/m^2.
+        sw_rad_up: Upward longwave TOA radiation in W/m^2.
+        lw_rad_up: Upward shortwave TOA radiation in W/m^2.
+
+    Returns:
+        Net TOA energy flux in W/m^2. Positive values indicate energy flowing
+        into the atmosphere.
+    """
+    return sw_rad_down - sw_rad_up - lw_rad_up
 
 
 def quantile(bins: np.ndarray, hist: np.ndarray, probability: float) -> float:

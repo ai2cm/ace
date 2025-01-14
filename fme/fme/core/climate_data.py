@@ -10,8 +10,10 @@ from fme.core.constants import (
     RDGAS,
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
+    SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.device import get_device
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -167,6 +169,16 @@ class ClimateData:
         )
 
     @property
+    def frozen_precipitation_rate(self) -> torch.Tensor:
+        # Return zero if any necessary fields are missing
+        try:
+            return (
+                self._data["ICEsfc"] + self._data["GRAUPELsfc"] + self._data["SNOWsfc"]
+            )
+        except KeyError:
+            return torch.zeros(self.surface_pressure.shape, device=get_device())
+
+    @property
     def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:
         return metrics.net_surface_energy_flux(
             self._get("sfc_down_lw_radiative_flux"),
@@ -176,6 +188,34 @@ class ClimateData:
             self._get("latent_heat_flux"),
             self._get("sensible_heat_flux"),
         )
+
+    @property
+    def net_surface_energy_flux(self) -> torch.Tensor:
+        try:
+            frozen_precip_rate = self._get("frozen_precipitation_rate")
+        except KeyError:
+            frozen_precip_rate = None
+        return metrics.net_surface_energy_flux(
+            self._get("sfc_down_lw_radiative_flux"),
+            self._get("sfc_up_lw_radiative_flux"),
+            self._get("sfc_down_sw_radiative_flux"),
+            self._get("sfc_up_sw_radiative_flux"),
+            self._get("latent_heat_flux"),
+            self._get("sensible_heat_flux"),
+            frozen_precipitation_rate=frozen_precip_rate,
+        )
+
+    @property
+    def net_top_of_atmosphere_energy_flux(self) -> torch.Tensor:
+        return metrics.net_top_of_atmosphere_energy_flux(
+            self._get("toa_down_sw_radiative_flux"),
+            self._get("toa_up_sw_radiative_flux"),
+            self._get("toa_up_lw_radiative_flux"),
+        )
+
+    @property
+    def net_energy_flux_into_atmosphere(self) -> torch.Tensor:
+        return self.net_top_of_atmosphere_energy_flux - self.net_surface_energy_flux
 
     @property
     def precipitation_rate(self) -> torch.Tensor:
@@ -232,13 +272,28 @@ class ClimateData:
         interface_pressure = vertical_coordinate.interface_pressure(
             self.surface_pressure
         )
-        layer_thickness = _layer_thickness(
+        layer_thickness = compute_layer_thickness(
             pressure_at_interface=interface_pressure,
             air_temperature=self.air_temperature,
             specific_total_water=self.specific_total_water,
         )
         height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
         return (height_at_interface[..., :-1] * height_at_interface[..., 1:]) ** 0.5
+
+    def height_at_midpoint(
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
+    ) -> torch.Tensor:
+        """Compute vertical height at layer midpoints with linear interpolation."""
+        interface_pressure = vertical_coordinate.interface_pressure(
+            self.surface_pressure
+        )
+        layer_thickness = compute_layer_thickness(
+            pressure_at_interface=interface_pressure,
+            air_temperature=self.air_temperature,
+            specific_total_water=self.specific_total_water,
+        )
+        height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
+        return 0.5 * (height_at_interface[..., :-1] + height_at_interface[..., 1:])
 
     def moist_static_energy(
         self, vertical_coordinate: HybridSigmaPressureCoordinate
@@ -251,7 +306,32 @@ class ClimateData:
         return (
             self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE
             + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
-            + self.height_at_log_midpoint(vertical_coordinate) * GRAVITY
+            + self.height_at_midpoint(vertical_coordinate) * GRAVITY
+        )
+
+    def total_energy_ace2(
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
+    ) -> torch.Tensor:
+        """
+        Compute the total energy, following some assumptions used for ACE2 models.
+
+        Namely, we ignore kinetic energy, use hydrostatic balance to compute the
+        geoportential energy, and approximate specific humidity with specific total
+        water. We also ignore the ice water contribution to total energy.
+        """
+        return (
+            self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+            + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
+            + self.height_at_midpoint(vertical_coordinate) * GRAVITY
+        )
+
+    def total_energy_ace2_path(
+        self, vertical_coordinate: HybridSigmaPressureCoordinate
+    ) -> torch.Tensor:
+        """Compute vertical integral of total energy."""
+        return vertical_coordinate.vertical_integral(
+            self.total_energy_ace2(vertical_coordinate),
+            self.surface_pressure,
         )
 
 
@@ -284,7 +364,7 @@ def compute_dry_air_absolute_differences(
     return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 
 
-def _layer_thickness(
+def compute_layer_thickness(
     pressure_at_interface: torch.Tensor,
     air_temperature: torch.Tensor,
     specific_total_water: torch.Tensor,
@@ -295,7 +375,9 @@ def _layer_thickness(
     approximate this using specific total water.
     """
     tv = air_temperature * (1 + (RVGAS / RDGAS - 1.0) * specific_total_water)
-    # Enforce min log(p) = 0 so that geopotential energy calculation is finite
+    # Enforce min log(p) = 0 so that geopotential energy calculation is finite.
+    # This is equivalent to setting the TOA pressure to 1 Pa if it is less than that.
+    # The ERA5 data has a TOA pressure of 0.0 Pa which causes issues otherwise.
     dlogp = torch.clamp(torch.log(pressure_at_interface), min=0.0).diff(dim=-1)
     return dlogp * RDGAS * tv / GRAVITY
 
