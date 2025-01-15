@@ -11,8 +11,9 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
-from fme.ace.data_loading.batch_data import BatchData, InferenceGriddedData
+from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.getters import get_inference_data
+from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.data_loading.batch_data import DataLoader
+from fme.ace.data_loading.gridded_data import DataLoader
 from fme.ace.stepper import TrainOutputABC, TrainStepperABC
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (

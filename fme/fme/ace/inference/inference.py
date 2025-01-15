@@ -12,12 +12,9 @@ import yaml
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
-from fme.ace.data_loading.batch_data import (
-    BatchData,
-    InferenceGriddedData,
-    PrognosticState,
-)
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.getters import get_forcing_data
+from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
