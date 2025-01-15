@@ -122,21 +122,16 @@ class UNetRegressionModule(torch.nn.Module):
     def __init__(
         self,
         unet: torch.nn.Module,
-        coarse_shape: Tuple[int, int],
-        target_shape: Tuple[int, int],
         downscale_factor: int,
         fine_topography: Optional[torch.Tensor],
     ):
         super(UNetRegressionModule, self).__init__()
         self.unet = unet
-        self.coarse_shape = coarse_shape
-        self.target_shape = target_shape
         self.downscale_factor = downscale_factor
         self.fine_topography = fine_topography
 
     def forward(self, x: torch.Tensor):
         inputs = interpolate(x, self.downscale_factor)
-        inputs = pad_right(inputs, self.target_shape)
 
         if self.fine_topography is not None:
             batch_size = inputs.shape[0]
@@ -145,12 +140,9 @@ class UNetRegressionModule(torch.nn.Module):
                 .expand(batch_size, -1, -1, -1)
                 .to(get_device())
             )
-            topography = pad_right(topography, self.target_shape)
             inputs = torch.concat((inputs, topography), dim=1)
 
-        outputs = self.unet(inputs, torch.tensor([0], device=get_device()), None)
-        fine_shape = tuple(s * self.downscale_factor for s in self.coarse_shape)
-        return outputs[..., : fine_shape[0], : fine_shape[1]]
+        return self.unet(inputs, torch.tensor([0], device=get_device()), None)
 
 
 @dataclasses.dataclass
@@ -203,8 +195,6 @@ class UNetRegressionSong:
         )
         return UNetRegressionModule(
             unet,
-            coarse_shape,
-            (target_height, target_width),
             downscale_factor,
             fine_topography,
         )
@@ -249,8 +239,6 @@ class UNetRegressionDhariwal:
         )
         return UNetRegressionModule(
             unet,
-            coarse_shape,
-            (target_height, target_width),
             downscale_factor,
             fine_topography,
         )

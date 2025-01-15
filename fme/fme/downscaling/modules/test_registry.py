@@ -186,7 +186,7 @@ def test_interpolate(
 @pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
 @pytest.mark.parametrize("use_topography", [True, False])
 def test_unets_output_shape(type_, use_topography):
-    coarse_shape = (9, 18)
+    coarse_shape = (8, 16)
     downscale_factor = 2
     fine_topography = torch.zeros(1, *[s * downscale_factor for s in coarse_shape])
     unet = (
