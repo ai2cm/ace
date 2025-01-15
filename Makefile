@@ -51,6 +51,9 @@ test_fast:
 test_very_fast:
 	pytest --durations 40 --very-fast .
 
+# beaker experiment submission rules
+run_ace_evaluator:
+	./examples/run-ace-evaluator.sh
 
 # For maintainer use only
 # requires fme[deploy] to be installed
