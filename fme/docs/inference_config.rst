@@ -34,7 +34,7 @@ in the dataset configuration.  See :class:`fme.ace.XarrayDataConfig` for an exam
 Example YAML Configuration
 ---------------------------
 
-.. _Zenodo repository: https://zenodo.org/records/13787710
+.. _Zenodo repository: https://zenodo.org/records/14606905
 
 .. literalinclude:: inference-config.yaml
    :language: yaml
