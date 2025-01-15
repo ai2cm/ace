@@ -13,8 +13,9 @@ from fme.core.dataset.xarray import XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 
-from .batch_data import GriddedData, InferenceGriddedData, PrognosticState
+from .batch_data import PrognosticState
 from .config import DataLoaderConfig
+from .gridded_data import GriddedData, InferenceGriddedData
 from .inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -93,6 +94,7 @@ def get_data_loader(
         loader=dataloader,
         properties=properties,
         sampler=sampler,
+        modifier=config.augmentation.build_modifier(),
     )
 
 
