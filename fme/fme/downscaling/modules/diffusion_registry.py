@@ -5,7 +5,6 @@ import dacite
 import torch
 
 from fme.downscaling.modules.preconditioners import EDMPrecond
-from fme.downscaling.modules.registry import compute_unet_padding_size
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.unets import SongUNet
 
@@ -64,12 +63,7 @@ class UNetDiffusionSong:
         fine_topography: Optional[torch.Tensor],
         sigma_data: float,
     ):
-        divisor = 2 ** (len(self.channel_mult) - 1)
-        target_height, target_width = [
-            s * downscale_factor
-            + compute_unet_padding_size(s * downscale_factor, divisor)
-            for s in coarse_shape
-        ]
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
         # number of input channels = latents (num desired outputs) + conditioning fields
         n_in_channels_conditioned = n_in_channels + n_out_channels
         unet = SongUNet(
@@ -98,8 +92,6 @@ class UNetDiffusionSong:
                 unet,
                 sigma_data=sigma_data,
             ),
-            coarse_shape,
-            (target_height, target_width),
             downscale_factor,
             fine_topography,
         )

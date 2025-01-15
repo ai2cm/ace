@@ -16,7 +16,7 @@ https://github.com/NVlabs/edm/blob/main/training/networks.py
 """Model architectures and preconditioning schemes used in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -318,8 +318,10 @@ class SongUNet(torch.nn.Module):
                     self.dec[f'{res}x{res}_aux_up'] = Conv2d(in_channels=out_channels, out_channels=out_channels, kernel=0, up=True, resample_filter=resample_filter)
                 self.dec[f'{res}x{res}_aux_norm'] = GroupNorm(num_channels=cout, eps=1e-6)
                 self.dec[f'{res}x{res}_aux_conv'] = Conv2d(in_channels=cout, out_channels=out_channels, kernel=3, **init_zero)
+        self._channel_mult = channel_mult
 
     def forward(self, x: torch.Tensor, noise_labels, class_labels, augment_labels=None):
+        validate_shape(x.shape[-2:], len(self._channel_mult))
         # Mapping.
         emb = self.map_noise(noise_labels)  # type: ignore
         emb = emb.reshape(emb.shape[0], 2, -1).flip(1).reshape(*emb.shape) # swap sin/cos
@@ -363,6 +365,23 @@ class SongUNet(torch.nn.Module):
                     x = torch.cat([x, skips.pop()], dim=1)
                 x = block(x, emb)
         return aux
+
+
+class NonDivisibleShapeError(ValueError):
+    pass
+
+
+def validate_shape(x_shape: Tuple[int, int], levels: int):
+    next_shape = (x_shape[0] // 2, x_shape[1] // 2)
+    if next_shape[0] * next_shape[1] * 4 != x_shape[0] * x_shape[1]:
+        raise NonDivisibleShapeError(f"Shape {x_shape} is not divisible by {levels} levels")
+    elif levels > 1:
+        try:
+            validate_shape(next_shape, levels - 1)
+        except NonDivisibleShapeError:
+            raise NonDivisibleShapeError(
+                f"Shape {x_shape} is not divisible by {levels} levels"
+            )
 
 #----------------------------------------------------------------------------
 # Reimplementation of the ADM architecture from the paper
