@@ -1,6 +1,7 @@
 import dataclasses
 from typing import Optional, Sequence
 
+from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.distributed import Distributed
 
@@ -17,6 +18,7 @@ class DataLoaderConfig:
             hold in host memory at a given time.
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
+        augmentation: Configuration for data augmentation.
     """
 
     dataset: Sequence[XarrayDataConfig]
@@ -24,6 +26,7 @@ class DataLoaderConfig:
     num_data_workers: int = 0
     prefetch_factor: Optional[int] = None
     strict_ensemble: bool = True
+    augmentation: AugmentationConfig = AugmentationConfig()
 
     def __post_init__(self):
         dist = Distributed.get_instance()
