@@ -16,6 +16,7 @@ from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.config import (
     FillNaNsConfig,
     OverwriteConfig,
+    RepeatedInterval,
     TimeSlice,
     XarrayDataConfig,
 )
@@ -717,3 +718,18 @@ def test_overwrite_raises_error_on_original_name(mock_monthly_netcdfs):
             overwrite=overwrite_config,
             renamed_variables={"foo": "foo_new"},
         )
+
+
+def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    requirements = DataRequirements(
+        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=1
+    )
+    dataset = XarrayDataset(config, requirements)
+    interval = RepeatedInterval(interval_length="1D", block_length="7D", start="3D")
+    boolean_mask = interval.get_boolean_mask(len(dataset), dataset.timestep)
+    subset = dataset.subset(boolean_mask)
+
+    # Check that the subset length matches the expected number of intervals
+    expected_length = boolean_mask.sum().item()
+    assert len(subset) == expected_length

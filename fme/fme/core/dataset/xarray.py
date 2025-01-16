@@ -624,9 +624,9 @@ class XarrayDataset(Dataset):
 
         return tensors, time
 
-    def subset(self, subset: Union[slice, torch.Tensor]) -> Dataset:
+    def subset(self, subset: Union[slice, np.ndarray]) -> Dataset:
         """Returns a subset of the dataset and propagates other properties."""
-        indices = range(len(self))[subset]
+        indices = np.arange(len(self))[subset]
         logging.info(f"Subsetting dataset samples according to {subset}.")
         subsetted_dataset = torch.utils.data.Subset(self, indices)
         return subsetted_dataset
