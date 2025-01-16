@@ -36,25 +36,29 @@ from fme.core.dataset.requirements import DataRequirements
 from fme.core.typing_ import Slice
 
 
-def _get_coords(dim_sizes, calendar, timestep_size=1):
+def _get_coords(dim_sizes, calendar, timestep_size=1, timestep_start=0):
     coords = {}
     for dim_name, size in dim_sizes.items():
         if dim_name == "time":
             dtype = np.int64
+            start = timestep_start
             step = timestep_size
             size = size * step
             attrs = {"calendar": calendar, "units": "days since 1970-01-01"}
         else:
             dtype = np.float32
+            start = 0
             step = 1
             attrs = {}
-        coord_value = np.arange(0, size, step, dtype=dtype)
+        coord_value = np.arange(start, start + size, step, dtype=dtype)
         coord = xr.DataArray(coord_value, dims=(dim_name,), attrs=attrs)
         coords[dim_name] = coord
     return coords
 
 
-def _save_netcdf(filename, dim_sizes, variable_names, calendar, timestep_size=1):
+def _save_netcdf(
+    filename, dim_sizes, variable_names, calendar, timestep_size=1, timestep_start=0
+):
     data_vars = {}
     for name in variable_names:
         if name == "constant_mask":
@@ -66,11 +70,10 @@ def _save_netcdf(filename, dim_sizes, variable_names, calendar, timestep_size=1)
         data_vars[name] = xr.DataArray(
             data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
         )
-    coords = _get_coords(dim_sizes, calendar, timestep_size)
+    coords = _get_coords(dim_sizes, calendar, timestep_size, timestep_start)
     for i in range(7):
         data_vars[f"ak_{i}"] = float(i)
         data_vars[f"bk_{i}"] = float(i + 1)
-
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
     return ds

@@ -21,7 +21,7 @@ from .data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from .stepper import CoupledComponentConfig, CoupledStepper, CoupledStepperConfig
+from .stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
 DEVICE = fme.get_device()
 NZ = 7  # number of vertical interface levels in mock data from get_data
@@ -40,8 +40,8 @@ ATMOS_STEPPER_CONFIG = SingleModuleStepperConfig(
 
 OCEAN_STEPPER_CONFIG = SingleModuleStepperConfig(
     builder=MagicMock(),
-    in_names=["a"],
-    out_names=["a"],
+    in_names=["sst"],
+    out_names=["sst"],
     normalization=MagicMock(),
     loss=MagicMock(),
 )
@@ -96,9 +96,9 @@ FORCING_TEST_PARAMS = [
 )
 def test_config_names(inputs, expectations):
     # atmosphere and ocean have the same surface temperature name
-    atmos_in = inputs.atmos_in + ["surface_temp", "frac"]
-    atmos_out = inputs.atmos_out + ["surface_temp"]
-    atmosphere = CoupledComponentConfig(
+    atmos_in = inputs.atmos_in + ["a_sfc_temp", "frac"]
+    atmos_out = inputs.atmos_out + ["a_sfc_temp"]
+    atmosphere = ComponentConfig(
         timedelta="6h",
         stepper=SingleModuleStepperConfig(
             builder=MagicMock(),
@@ -107,14 +107,14 @@ def test_config_names(inputs, expectations):
             normalization=MagicMock(),
             loss=MagicMock(),
             ocean=OceanConfig(
-                surface_temperature_name="surface_temp",
+                surface_temperature_name="a_sfc_temp",
                 ocean_fraction_name="frac",
             ),
         ),
     )
-    ocean_in = inputs.ocean_in + ["surface_temp"]
-    ocean_out = inputs.ocean_out + ["surface_temp"]
-    ocean = CoupledComponentConfig(
+    ocean_in = inputs.ocean_in + ["o_sfc_temp"]
+    ocean_out = inputs.ocean_out + ["o_sfc_temp"]
+    ocean = ComponentConfig(
         timedelta="12h",
         stepper=SingleModuleStepperConfig(
             builder=MagicMock(),
@@ -124,7 +124,9 @@ def test_config_names(inputs, expectations):
             loss=MagicMock(),
         ),
     )
-    config = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
+    config = CoupledStepperConfig(
+        atmosphere=atmosphere, ocean=ocean, sst_name="o_sfc_temp"
+    )
     assert sorted(config.atmosphere_forcing_exogenous_names) == sorted(
         expectations.atmos_exog
         + [
@@ -138,16 +140,16 @@ def test_config_names(inputs, expectations):
         expectations.ocean_exog
     )
     assert sorted(config.ocean_to_atmosphere_forcing_names) == sorted(
-        expectations.ocean_to_atmos_forcings + ["surface_temp"]
+        expectations.ocean_to_atmos_forcings + ["o_sfc_temp"]
     )
     assert sorted(config._all_ocean_names) == sorted(
-        expectations.all_ocean + ["surface_temp"]
+        expectations.all_ocean + ["o_sfc_temp"]
     )
     assert sorted(config._all_atmosphere_names) == sorted(
         expectations.all_atmos
         + [
             "frac",
-            "surface_temp",
+            "a_sfc_temp",
         ]
     )
 
@@ -160,7 +162,7 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     # atmosphere and ocean have different surface temperature name
     atmos_in = inputs.atmos_in + ["atmos_surface_temp", "frac"]
     atmos_out = inputs.atmos_out + ["atmos_surface_temp"]
-    atmosphere = CoupledComponentConfig(
+    atmosphere = ComponentConfig(
         timedelta="6h",
         stepper=SingleModuleStepperConfig(
             builder=MagicMock(),
@@ -176,9 +178,8 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     )
     ocean_in = inputs.ocean_in + ["ocean_surface_temp"]
     ocean_out = inputs.ocean_out + ["ocean_surface_temp"]
-    ocean = CoupledComponentConfig(
+    ocean = ComponentConfig(
         timedelta="12h",
-        surface_temperature_name="ocean_surface_temp",
         stepper=SingleModuleStepperConfig(
             builder=MagicMock(),
             in_names=ocean_in,
@@ -187,7 +188,9 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
             loss=MagicMock(),
         ),
     )
-    config = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
+    config = CoupledStepperConfig(
+        atmosphere=atmosphere, ocean=ocean, sst_name="ocean_surface_temp"
+    )
     assert sorted(config.atmosphere_forcing_exogenous_names) == sorted(
         expectations.atmos_exog + ["frac"]
     )
@@ -220,11 +223,11 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
     ],
 )
 def test_config_n_inner_steps(timedelta_atmos, timedelta_ocean, expected_n_inner_steps):
-    atmosphere = CoupledComponentConfig(
+    atmosphere = ComponentConfig(
         timedelta=timedelta_atmos,
         stepper=ATMOS_STEPPER_CONFIG,
     )
-    ocean = CoupledComponentConfig(
+    ocean = ComponentConfig(
         timedelta=timedelta_ocean,
         stepper=OCEAN_STEPPER_CONFIG,
     )
@@ -234,11 +237,11 @@ def test_config_n_inner_steps(timedelta_atmos, timedelta_ocean, expected_n_inner
 
 def test_config_init_atmos_stepper_missing_ocean_error():
     # atmosphere is required to have stepper.ocean attribute
-    atmosphere = CoupledComponentConfig(
+    atmosphere = ComponentConfig(
         timedelta="6h",
         stepper=OCEAN_STEPPER_CONFIG,
     )
-    ocean = CoupledComponentConfig(
+    ocean = ComponentConfig(
         timedelta="1h",
         stepper=OCEAN_STEPPER_CONFIG,
     )
@@ -250,11 +253,11 @@ def test_config_init_atmos_stepper_missing_ocean_error():
 
 def test_config_init_timedelta_comparison_error():
     # atmosphere timedelta > ocean timedelta raises error
-    atmosphere = CoupledComponentConfig(
+    atmosphere = ComponentConfig(
         timedelta="6h",
         stepper=ATMOS_STEPPER_CONFIG,
     )
-    ocean = CoupledComponentConfig(
+    ocean = ComponentConfig(
         timedelta="1h",
         stepper=OCEAN_STEPPER_CONFIG,
     )
@@ -266,11 +269,11 @@ def test_config_init_timedelta_comparison_error():
 
 def test_config_init_incompatible_timedelta_error():
     # ocean timestep % atmosphere timestep != 0 raises error
-    atmosphere = CoupledComponentConfig(
+    atmosphere = ComponentConfig(
         timedelta="2h",
         stepper=ATMOS_STEPPER_CONFIG,
     )
-    ocean = CoupledComponentConfig(
+    ocean = ComponentConfig(
         timedelta="5h",
         stepper=OCEAN_STEPPER_CONFIG,
     )
@@ -316,7 +319,7 @@ def _get_stepper_and_batch(
     n_forward_times_ocean: int,
     n_forward_times_atmosphere: int,
     n_samples: int,
-    sst_name_in_ocean_data: str = "tos",
+    sst_name_in_ocean_data: str = "sst",
     sst_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
@@ -366,7 +369,7 @@ def _get_stepper_and_batch(
         ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
 
     config = CoupledStepperConfig(
-        atmosphere=CoupledComponentConfig(
+        atmosphere=ComponentConfig(
             timedelta="1D",
             stepper=SingleModuleStepperConfig(
                 builder=atmosphere_builder,
@@ -383,9 +386,8 @@ def _get_stepper_and_batch(
                 ),
             ),
         ),
-        ocean=CoupledComponentConfig(
+        ocean=ComponentConfig(
             timedelta="2D",
-            surface_temperature_name=sst_name_in_ocean_data,
             stepper=SingleModuleStepperConfig(
                 builder=ocean_builder,
                 in_names=ocean_in_names,
@@ -397,6 +399,7 @@ def _get_stepper_and_batch(
                 loss=WeightedMappingLossConfig(type="MSE"),
             ),
         ),
+        sst_name=sst_name_in_ocean_data,
     )
     coupler = config.get_stepper(
         img_shape=(5, 5),
@@ -582,7 +585,7 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
 
 
 def test_predict_paired_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "tos"]
+    ocean_in_names = ["thetao_0", "thetao_1", "sst"]
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -623,8 +626,44 @@ def test_predict_paired_with_derived_variables():
         assert name in paired_data.atmosphere_data.prediction
 
 
+def test_train_on_batch_loss():
+    ocean_in_names = ["o_sfc", "ext_forcing"]
+    ocean_out_names = ["o_sfc", "o_diag"]
+    atmos_in_names = ["a_prog", "a_sfc", "ocean_frac"]
+    atmos_out_names = ["a_prog", "a_sfc", "a_diag"]
+    coupler, coupled_data = _get_stepper_and_batch(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        n_forward_times_ocean=1,
+        n_forward_times_atmosphere=2,
+        n_samples=3,
+        sst_name_in_ocean_data="o_sfc",
+        sst_name_in_atmosphere_data="a_sfc",
+        ocean_fraction_name="ocean_frac",
+    )
+    output = coupler.train_on_batch(
+        data=coupled_data.data,
+        optimization=NullOptimization(),
+    )
+    loss = output.metrics["loss"]
+    pred = {}
+    target = {}
+    for i, name in enumerate(ocean_out_names):
+        # NOTE: default ocean module from _get_stepper_and_batch just multiplies
+        # input fields by 2 and renames "ext_forcing" to "o_diag"
+        in_name = ocean_in_names[i]
+        pred[name] = 2 * coupled_data.data.ocean_data.data[in_name].select(
+            dim=1, index=0
+        )
+        target[name] = coupled_data.data.ocean_data.data[name].select(dim=1, index=1)
+    expected_loss = coupler.ocean.loss_obj(pred, target)
+    assert torch.allclose(loss, expected_loss)
+
+
 def test_train_on_batch_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "tos"]
+    ocean_in_names = ["thetao_0", "thetao_1", "sst"]
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -653,7 +692,7 @@ def test_train_on_batch_with_derived_variables():
 def test_reloaded_stepper_gives_same_prediction():
     torch.manual_seed(0)
     config = CoupledStepperConfig(
-        atmosphere=CoupledComponentConfig(
+        atmosphere=ComponentConfig(
             timedelta="1D",
             stepper=SingleModuleStepperConfig(
                 builder=ModuleSelector(
@@ -672,9 +711,8 @@ def test_reloaded_stepper_gives_same_prediction():
                 ),
             ),
         ),
-        ocean=CoupledComponentConfig(
+        ocean=ComponentConfig(
             timedelta="2D",
-            surface_temperature_name="o_sfc",
             stepper=SingleModuleStepperConfig(
                 builder=ModuleSelector(
                     type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
@@ -688,6 +726,7 @@ def test_reloaded_stepper_gives_same_prediction():
                 loss=WeightedMappingLossConfig(type="MSE"),
             ),
         ),
+        sst_name="o_sfc",
     )
     area = torch.ones((5, 5), device=DEVICE)
     vertical_coordinate = HybridSigmaPressureCoordinate(
