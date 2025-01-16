@@ -6,7 +6,7 @@ from fme.core.distributed import Distributed
 
 
 @dataclasses.dataclass
-class CoupledDataConfig:
+class CoupledDatasetConfig:
     """
     Parameters:
         ocean: Configuration for the ocean dataset.
@@ -36,7 +36,7 @@ class CoupledDataLoaderConfig:
 
     """
 
-    dataset: Sequence[CoupledDataConfig]
+    dataset: Sequence[CoupledDatasetConfig]
     batch_size: int
     num_data_workers: int = 1
     prefetch_factor: Optional[int] = None
