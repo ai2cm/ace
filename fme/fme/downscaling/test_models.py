@@ -25,24 +25,29 @@ class LinearDownscaling(torch.nn.Module):
     def __init__(
         self,
         factor: int,
-        img_shape: Tuple[int, int],
+        fine_img_shape: Tuple[int, int],
         n_channels: int = 1,
         fine_topography: Optional[torch.Tensor] = None,
     ):
         super(LinearDownscaling, self).__init__()
-        self.img_shape = img_shape
+        self.img_shape = fine_img_shape
         self.n_channels = n_channels
         if fine_topography is not None:
             fine_topography = fine_topography.to(get_device())
         self.fine_topography = fine_topography
-        height, width = img_shape
+        height, width = fine_img_shape
         self.linear = torch.nn.Linear(
             ((height * width) // factor**2) * n_channels,
             height * width * n_channels,
             bias=False,
         )
+        self._coarse_img_shape = (height // factor, width // factor)
 
     def forward(self, x):
+        if tuple(x.shape[-2:]) != self._coarse_img_shape:
+            raise ValueError(
+                f"Expected input shape {self._coarse_img_shape}, got {x.shape[-2:]}"
+            )
         x = self.linear(torch.flatten(x, start_dim=1))
         x = x.view(x.shape[0], self.n_channels, *self.img_shape)
         if self.fine_topography is not None:
@@ -69,13 +74,13 @@ def test_train_and_generate(use_opt, use_fine_topography):
         {
             "module": LinearDownscaling(
                 factor=upscaling_factor,
-                img_shape=fine_shape,
+                fine_img_shape=fine_shape,
                 fine_topography=fine_topography if use_fine_topography else None,
             )
         },
     )
     area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
+        fine=torch.ones(*fine_shape), coarse=torch.ones(*coarse_shape)
     )
     model = DownscalingModelConfig(
         module_selector,
@@ -91,8 +96,8 @@ def test_train_and_generate(use_opt, use_fine_topography):
         fine_topography=fine_topography,
     )
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
-        {"x": torch.ones(batch_size, *fine_shape)},
-        {"x": torch.ones(batch_size, *coarse_shape)},
+        fine={"x": torch.ones(batch_size, *fine_shape)},
+        coarse={"x": torch.ones(batch_size, *coarse_shape)},
     )
     if use_opt:
         optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
@@ -149,7 +154,7 @@ def test_serialization(tmp_path):
     fine_shape = (16, 32)
     coarse_shape = (8, 16)
     downscale_factor = 2
-    module = LinearDownscaling(factor=2, img_shape=fine_shape)
+    module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
