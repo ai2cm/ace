@@ -244,3 +244,14 @@ build_docker_image:
 .PHONY: push_docker_image
 push_docker_image: build_docker_image
 	docker push us.gcr.io/vcm-ml/beaker-py
+
+create_ocean_data_proc_env:
+	conda create -y -n ocean_data_proc python=3.10 pip yq
+	conda install -y -n ocean_data_proc -c conda-forge xesmf
+	conda run --no-capture-output -n ocean_data_proc python -m pip install uv
+	conda run --no-capture-output -n ocean_data_proc uv pip install -r requirements-ocean.txt
+	conda run --no-capture-output -n ocean_data_proc bash ./install_ocean_emulators.sh
+
+.PHONY: cm4_trial_run_ocean_dataset_and_stats
+cm4_trial_run_ocean_dataset_and_stats:
+	./compute_ocean_dataset.sh --config configs/pre-industrial-CM4-1deg-ocean.yaml

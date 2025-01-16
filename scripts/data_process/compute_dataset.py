@@ -22,9 +22,16 @@ import fsspec
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: F401
-import xtorch_harmonics
 import yaml
 from dask.diagnostics import ProgressBar
+
+try:
+    from xtorch_harmonics import roundtrip_filter
+except ModuleNotFoundError:
+
+    def roundtrip_filter(*args, **kwargs):
+        raise ModuleNotFoundError("xtorch_harmonics")
+
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from get_stats import StatsConfig
@@ -42,12 +49,16 @@ TOTAL_WATER_PATH = "total_water_path"
 
 
 @dataclasses.dataclass
-class StandardNameMapping:
+class StandardDimMapping:
     longitude_dim: str = "grid_xt"
     latitude_dim: str = "grid_yt"
+    time_dim: str = "time"
+
+
+@dataclasses.dataclass
+class StandardNameMapping(StandardDimMapping):
     vertical_dim: str = "pfull"
     vertical_interface_dim: str = "phalf"
-    time_dim: str = "time"
     surface_pressure: str = "PRESsfc"
     latent_heat_flux: str = "LHTFLsfc"
     precip_rate: str = "PRATEsfc"
@@ -132,7 +143,7 @@ class _ChunkingConfig(abc.ABC):
     time_dim: int = 160
 
     @abc.abstractmethod
-    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]: ...
+    def get_chunks(self, standard_names: StandardDimMapping) -> Dict[str, int]: ...
 
 
 @dataclasses.dataclass
@@ -140,7 +151,7 @@ class ChunkingConfig(_ChunkingConfig):
     latitude_dim: int = -1
     longitude_dim: int = -1
 
-    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
+    def get_chunks(self, standard_names: StandardDimMapping) -> Dict[str, int]:
         return {
             standard_names.time_dim: self.time_dim,
             standard_names.longitude_dim: self.longitude_dim,
@@ -154,7 +165,7 @@ class DLWPChunkingConfig(_ChunkingConfig):
     width_dim: int = -1
     height_dim: int = -1
 
-    def get_chunks(self, standard_names: StandardNameMapping) -> Dict[str, int]:
+    def get_chunks(self, standard_names: StandardDimMapping) -> Dict[str, int]:
         dlwp_names = standard_names
         if not isinstance(dlwp_names, DLWPNameMapping):
             raise TypeError(
@@ -531,8 +542,9 @@ def construct_lazy_dataset(
         del ds[var].encoding["chunks"]
         del ds[var].encoding["preferred_chunks"]
     print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+
     if config.roundtrip_fraction_kept is not None:
-        ds = xtorch_harmonics.roundtrip_filter(
+        ds = roundtrip_filter(
             ds,
             lat_dim=standard_names.latitude_dim,
             lon_dim=standard_names.longitude_dim,
