@@ -1,3 +1,4 @@
+import gc
 import signal
 
 import pytest
@@ -66,3 +67,11 @@ def pytest_runtest_call(item):
         yield
     except TimeoutException:
         pytest.fail("Test failed due to timeout")
+
+
+@pytest.fixture(autouse=True)
+def mock_gc_collect(monkeypatch):
+    def mock_collect():
+        pass
+
+    monkeypatch.setattr(gc, "collect", mock_collect)
