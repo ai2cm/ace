@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import List, Literal, Mapping, Optional, Sequence
+from typing import List, Literal, Mapping, Optional, Sequence, TypeVar, Union
 
 import numpy as np
 import torch
@@ -10,9 +10,15 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.generics.data import DataLoader, GriddedDataABC
+from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
-from fme.coupled.data_loading.data_typing import CoupledDatasetItem
+from fme.coupled.data_loading.data_typing import (
+    CoupledDatasetItem,
+    CoupledDatasetProperties,
+)
+from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
+
+SelfType = TypeVar("SelfType", bound="CoupledBatchData")
 
 
 class CoupledPrognosticState:
@@ -42,13 +48,25 @@ class CoupledBatchData:
     ocean_data: BatchData
     atmosphere_data: BatchData
 
+    def to_device(self) -> "CoupledBatchData":
+        return self.__class__(
+            ocean_data=self.ocean_data.to_device(),
+            atmosphere_data=self.atmosphere_data.to_device(),
+        )
+
     @classmethod
     def new_on_device(
         cls,
         ocean_data: BatchData,
         atmosphere_data: BatchData,
     ) -> "CoupledBatchData":
-        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmosphere_data)
+        ocean_batch = BatchData.new_on_device(
+            ocean_data.data, ocean_data.time, ocean_data.horizontal_dims
+        )
+        atmos_batch = BatchData.new_on_device(
+            atmosphere_data.data, atmosphere_data.time, atmosphere_data.horizontal_dims
+        )
+        return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
 
     @classmethod
     def new_on_cpu(
@@ -56,13 +74,13 @@ class CoupledBatchData:
         ocean_data: BatchData,
         atmosphere_data: BatchData,
     ) -> "CoupledBatchData":
-        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmosphere_data)
-
-    def to_device(self) -> "CoupledBatchData":
-        return CoupledBatchData.new_on_device(
-            ocean_data=self.ocean_data.to_device(),
-            atmosphere_data=self.atmosphere_data.to_device(),
+        ocean_batch = BatchData.new_on_cpu(
+            ocean_data.data, ocean_data.time, ocean_data.horizontal_dims
         )
+        atmos_batch = BatchData.new_on_cpu(
+            atmosphere_data.data, atmosphere_data.time, atmosphere_data.horizontal_dims
+        )
+        return CoupledBatchData(ocean_data=ocean_batch, atmosphere_data=atmos_batch)
 
     @classmethod
     def collate_fn(
@@ -87,6 +105,24 @@ class CoupledBatchData:
         )
         return CoupledBatchData.new_on_cpu(ocean_data, atmosphere_data)
 
+    def get_start(
+        self: SelfType,
+        requirements: CoupledPrognosticStateDataRequirements,
+    ) -> CoupledPrognosticState:
+        """
+        Get the initial condition state.
+        """
+        return CoupledPrognosticState(
+            ocean_data=self.ocean_data.get_start(
+                requirements.ocean.names,
+                requirements.ocean.n_timesteps,
+            ),
+            atmosphere_data=self.atmosphere_data.get_start(
+                requirements.atmosphere.names,
+                requirements.atmosphere.n_timesteps,
+            ),
+        )
+
 
 @dataclasses.dataclass
 class CoupledPairedData:
@@ -99,7 +135,7 @@ class CoupledPairedData:
     atmosphere_data: PairedData
 
 
-class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
+class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
         loader: DataLoader[CoupledBatchData],
@@ -201,3 +237,47 @@ class CoupledGriddedData(GriddedDataABC[CoupledBatchData]):
             f"Dataset {name} has {self.n_samples} samples, {self.n_batches} batches, "
             f"batch size {self.batch_size}, timestep {self.timestep}."
         )
+
+
+def get_initial_condition(
+    loader: DataLoader[CoupledBatchData],
+    requirements: CoupledPrognosticStateDataRequirements,
+) -> CoupledPrognosticState:
+    for batch in loader:
+        return batch.get_start(requirements).to_device()
+    raise ValueError("No initial condition found in loader")
+
+
+class InferenceData(InferenceDataABC[CoupledPrognosticState, CoupledBatchData]):
+    def __init__(
+        self,
+        loader: DataLoader[CoupledBatchData],
+        initial_condition: Union[
+            CoupledPrognosticState, CoupledPrognosticStateDataRequirements
+        ],
+        properties: CoupledDatasetProperties,
+    ):
+        self._loader = loader
+        self._properties = properties.to_device()
+        self._n_initial_conditions: Optional[int] = None
+        if isinstance(initial_condition, CoupledPrognosticStateDataRequirements):
+            self._initial_condition: CoupledPrognosticState = get_initial_condition(
+                loader, initial_condition
+            )
+        else:
+            self._initial_condition = initial_condition.to_device()
+
+    @property
+    def initial_condition(self) -> CoupledPrognosticState:
+        return self._initial_condition
+
+    @property
+    def loader(self) -> DataLoader[CoupledBatchData]:
+        def on_device(x: CoupledBatchData) -> CoupledBatchData:
+            return x.to_device()
+
+        return SizedMap(on_device, self._loader)
+
+    @property
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._properties.variable_metadata

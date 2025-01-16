@@ -1,0 +1,183 @@
+import dataclasses
+import logging
+import os
+from datetime import timedelta
+from typing import Callable, Mapping, Optional
+
+import dacite
+import dask
+import torch
+import xarray as xr
+import yaml
+
+import fme
+import fme.core.logging_utils as logging_utils
+from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dicts import to_flat_dict
+from fme.core.distributed import Distributed
+from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
+from fme.core.gridded_ops import GriddedOperations
+from fme.core.typing_ import TensorDict, TensorMapping
+from fme.coupled.aggregator import (
+    InferenceEvaluatorAggregatorConfig,
+    OneStepAggregator,
+    TrainAggregator,
+)
+from fme.coupled.data_loading.batch_data import (
+    CoupledPairedData,
+    CoupledPrognosticState,
+)
+from fme.coupled.stepper import CoupledTrainOutput
+from fme.coupled.train.train_config import TrainBuilders, TrainConfig
+
+# dask used on individual workers to load batches
+dask.config.set(scheduler="synchronous")
+
+
+def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
+    train_data = builder.get_train_data()
+    validation_data = builder.get_validation_data()
+    inference_data = builder.get_evaluation_inference_data()
+
+    batch = next(iter(train_data.loader))
+    img_shape = next(iter(batch.ocean_data.data.values())).shape[-2:]
+    logging.info("Starting model initialization")
+    stepper = builder.get_stepper(
+        img_shape=img_shape,
+        gridded_operations=train_data.gridded_operations,
+        atmosphere_vertical_coordinate=train_data.vertical_coordinate,
+        timestep=train_data.timestep,
+    )
+    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+
+    batch = next(iter(inference_data.loader))
+    initial_inference_times = batch.ocean_data.time.isel(time=0)
+    aggregator_builder = CoupledAggregatorBuilder(
+        inference_config=config.inference_aggregator,
+        gridded_operations=train_data.gridded_operations,
+        vertical_coordinate=train_data.vertical_coordinate,
+        horizontal_coordinates=train_data.horizontal_coordinates,
+        ocean_timestep=stepper.ocean_timestep,
+        atmosphere_timestep=stepper.atmosphere_timestep,
+        initial_inference_times=initial_inference_times,
+        n_timesteps_ocean=config.inference_n_coupled_steps
+        + stepper.ocean.n_ic_timesteps,
+        n_timesteps_atmosphere=stepper.n_inner_steps
+        + stepper.atmosphere.n_ic_timesteps,
+        ocean_normalize=stepper.ocean.normalizer.normalize,
+        atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
+        ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
+        atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
+        variable_metadata=train_data.variable_metadata,
+    )
+    return Trainer(
+        train_data=train_data,
+        validation_data=validation_data,
+        inference_data=inference_data,
+        stepper=stepper,
+        build_optimization=builder.get_optimization,
+        build_ema=builder.get_ema,
+        config=config,
+        aggregator_builder=aggregator_builder,
+        end_of_batch_callback=end_of_batch_ops,
+    )
+
+
+class CoupledAggregatorBuilder(
+    AggregatorBuilderABC[CoupledPrognosticState, CoupledTrainOutput, CoupledPairedData]
+):
+    def __init__(
+        self,
+        inference_config: InferenceEvaluatorAggregatorConfig,
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: HybridSigmaPressureCoordinate,
+        horizontal_coordinates: HorizontalCoordinates,
+        ocean_timestep: timedelta,
+        atmosphere_timestep: timedelta,
+        initial_inference_times: xr.DataArray,
+        n_timesteps_ocean: int,
+        n_timesteps_atmosphere: int,
+        ocean_normalize: Callable[[TensorMapping], TensorDict],
+        atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        ocean_loss_scaling: Optional[TensorMapping] = None,
+        atmosphere_loss_scaling: Optional[TensorMapping] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ):
+        self.inference_config = inference_config
+        self.gridded_operations = gridded_operations
+        self.vertical_coordinate = vertical_coordinate
+        self.horizontal_coordinates = horizontal_coordinates
+        self.ocean_timestep = ocean_timestep
+        self.atmosphere_timestep = atmosphere_timestep
+        self.initial_inference_times = initial_inference_times
+        self.n_timesteps_ocean = n_timesteps_ocean
+        self.n_timesteps_atmosphere = n_timesteps_atmosphere
+        self.variable_metadata = variable_metadata
+        self.ocean_normalize = ocean_normalize
+        self.atmosphere_normalize = atmosphere_normalize
+        self.ocean_loss_scaling = ocean_loss_scaling
+        self.atmosphere_loss_scaling = atmosphere_loss_scaling
+
+    def get_train_aggregator(self) -> TrainAggregator:
+        return TrainAggregator()
+
+    def get_validation_aggregator(self) -> OneStepAggregator:
+        return OneStepAggregator(
+            gridded_operations=self.gridded_operations,
+            variable_metadata=self.variable_metadata,
+            ocean_loss_scaling=self.ocean_loss_scaling,
+            atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+        )
+
+    def get_inference_aggregator(self):
+        return self.inference_config.build(
+            vertical_coordinate=self.vertical_coordinate,
+            horizontal_coordinates=self.horizontal_coordinates,
+            ocean_timestep=self.ocean_timestep,
+            atmosphere_timestep=self.atmosphere_timestep,
+            n_timesteps_ocean=self.n_timesteps_ocean,
+            n_timesteps_atmosphere=self.n_timesteps_atmosphere,
+            initial_time=self.initial_inference_times,
+            ocean_normalize=self.ocean_normalize,
+            atmosphere_normalize=self.atmosphere_normalize,
+            variable_metadata=self.variable_metadata,
+        )
+
+
+def run_train(builders: TrainBuilders, config: TrainConfig):
+    dist = Distributed.get_instance()
+    if fme.using_gpu():
+        torch.backends.cudnn.benchmark = True
+    if not os.path.isdir(config.experiment_dir):
+        os.makedirs(config.experiment_dir, exist_ok=True)
+    config.logging.configure_logging(config.experiment_dir, log_filename="out.log")
+    env_vars = logging_utils.retrieve_env_vars()
+    logging_utils.log_versions()
+    beaker_url = logging_utils.log_beaker_url()
+    config_as_dict = to_flat_dict(dataclasses.asdict(config))
+    config.logging.configure_wandb(
+        config=config_as_dict, env_vars=env_vars, resume=True, notes=beaker_url
+    )
+    trainer = build_trainer(builders, config)
+    trainer.train()
+    logging.info("DONE ---- rank %d" % dist.rank)
+
+
+def run_train_from_config(config: TrainConfig):
+    run_train(TrainBuilders(config), config)
+
+
+def main(yaml_config: str):
+    with open(yaml_config, "r") as f:
+        data = yaml.safe_load(f)
+    train_config: TrainConfig = dacite.from_dict(
+        data_class=TrainConfig,
+        data=data,
+        config=dacite.Config(strict=True),
+    )
+    if not os.path.isdir(train_config.experiment_dir):
+        os.makedirs(train_config.experiment_dir, exist_ok=True)
+    with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    run_train_from_config(train_config)

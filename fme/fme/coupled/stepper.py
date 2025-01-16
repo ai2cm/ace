@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 import dacite
 import numpy as np
@@ -11,18 +11,13 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.stepper import (
-    SingleModuleStepper,
-    SingleModuleStepperConfig,
-    TrainOutput,
-    TrainOutputABC,
-    TrainStepperABC,
-)
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
@@ -30,11 +25,14 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.requirements import CoupledDataRequirements
+from fme.coupled.requirements import (
+    CoupledDataRequirements,
+    CoupledPrognosticStateDataRequirements,
+)
 
 
 @dataclasses.dataclass
-class CoupledComponentConfig:
+class ComponentConfig:
     """Configuration for one of the components (ocean or atmosphere) within a
     CoupledStepper.
 
@@ -42,15 +40,11 @@ class CoupledComponentConfig:
         timedelta: An ISO 8601 Duration string specifying the size of this component's
             stepper step.
         stepper: The single module stepper configuration for this component.
-        surface_temperature_name: (optional) Name of the sea surface temperature
-            field for this component, in case the name is different from the
-            OceanConfig.surface_temperature_name specified in the atmosphere stepper.
 
     """
 
     timedelta: str
     stepper: SingleModuleStepperConfig
-    surface_temperature_name: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -62,11 +56,12 @@ class CoupledStepperConfig:
         ocean: The ocean component configuration.
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
-
+        sst_name: Name of the sea surface temperature field in the ocean data.
     """
 
-    ocean: CoupledComponentConfig
-    atmosphere: CoupledComponentConfig
+    ocean: ComponentConfig
+    atmosphere: ComponentConfig
+    sst_name: str = "sst"
 
     def __post_init__(self):
         if self.atmosphere.stepper.ocean is None:
@@ -87,7 +82,15 @@ class CoupledStepperConfig:
         if n_inner_steps != int(n_inner_steps):
             raise ValueError("Ocean timedelta must be a multiple of the atmosphere's.")
         self.n_inner_steps = int(n_inner_steps)
-        # calculate forcings
+        # check for overlapping names
+        duplicate_outputs = set(self.ocean.stepper.out_names).intersection(
+            self.atmosphere.stepper.out_names
+        )
+        if len(duplicate_outputs) > 0:
+            raise ValueError(
+                "Output variable names of CoupledStepper components cannot "
+                f"overlap. Found the following duplicated names: {duplicate_outputs}"
+            )
         self._ocean_forcing_exogenous_names = list(
             set(self.ocean.stepper.forcing_names).difference(
                 self.atmosphere.stepper.out_names
@@ -104,25 +107,21 @@ class CoupledStepperConfig:
             )
         )
         # include the ocean surface temperature variable as forcing for the atmosphere
-        ocean_sfc_temp_name = self.ocean.surface_temperature_name
-        if ocean_sfc_temp_name is None:
-            ocean_sfc_temp_name = self.atmosphere.stepper.ocean.surface_temperature_name
-        if ocean_sfc_temp_name not in self.ocean.stepper.out_names:
+        if self.sst_name not in self.ocean.stepper.out_names:
             raise ValueError(
-                f"The variable {ocean_sfc_temp_name} is not in the ocean's output "
+                f"The variable {self.sst_name} is not in the ocean's output "
                 "names but is required for coupling with the atmosphere."
             )
-        self.ocean_surface_temperature_name = ocean_sfc_temp_name
         self._ocean_to_atmosphere_forcing_names = list(
             set(self.atmosphere.stepper.forcing_names)
             .intersection(self.ocean.stepper.out_names)
-            .union([self.ocean_surface_temperature_name])
+            .union([self.sst_name])
         )
         # calculate names for each component's data requirements
         self._all_ocean_names = list(
             set(self.ocean.stepper.all_names)
             .difference(self.atmosphere.stepper.out_names)
-            .union([self.ocean_surface_temperature_name])
+            .union([self.sst_name])
         )
         self._all_atmosphere_names = list(
             set(self.atmosphere.stepper.all_names)
@@ -175,7 +174,9 @@ class CoupledStepperConfig:
             names=self._all_atmosphere_names, n_timesteps=n_forward_steps + 1
         )
 
-    def get_data_requirements(self, n_coupled_steps: int) -> CoupledDataRequirements:
+    def get_evaluation_window_data_requirements(
+        self, n_coupled_steps: int
+    ) -> CoupledDataRequirements:
         """Get the DataRequirements for the ocean and atmosphere. For every step
         of the CoupledStepper, the atmosphere takes n_inner_steps (determined by
         the number of atmosphere timesteps that fit in a single ocean timestep)
@@ -194,6 +195,15 @@ class CoupledStepperConfig:
             atmosphere_requirements=self._get_atmosphere_data_requirements(
                 n_coupled_steps * self.n_inner_steps
             ),
+        )
+
+    def get_prognostic_state_data_requirements(
+        self,
+    ) -> CoupledPrognosticStateDataRequirements:
+        """Get the PrognosticStateDataRequirements for the ocean and atmosphere."""
+        return CoupledPrognosticStateDataRequirements(
+            ocean=self.ocean.stepper.get_prognostic_state_data_requirements(),
+            atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
         )
 
     def _get_ocean_stepper(
@@ -389,6 +399,14 @@ class CoupledStepper(
         return self._config.timestep
 
     @property
+    def ocean_timestep(self) -> datetime.timedelta:
+        return self.timestep
+
+    @property
+    def atmosphere_timestep(self) -> datetime.timedelta:
+        return self.atmosphere.timestep
+
+    @property
     def n_inner_steps(self) -> int:
         """Number of atmosphere steps per ocean step."""
         return self._config.n_inner_steps
@@ -453,7 +471,7 @@ class CoupledStepper(
         # rename the ocean surface temperature variable using the corresponding
         # name in the atmosphere
         forcings_from_ocean[self._config.atmosphere_surface_temperature_name] = (
-            forcings_from_ocean.pop(self._config.ocean_surface_temperature_name)
+            forcings_from_ocean.pop(self._config.sst_name)
         )
         forcing_data.update(forcings_from_ocean)
         return BatchData(forcing_data, time=atmos_data.time)

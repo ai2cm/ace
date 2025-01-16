@@ -10,8 +10,14 @@ from fme.core.dataset.xarray import DatasetProperties
 from fme.core.typing_ import TensorDict
 
 
-class CoupledProperties:
-    def __init__(self, ocean: DatasetProperties, atmosphere: DatasetProperties):
+class CoupledDatasetProperties:
+    def __init__(
+        self,
+        all_ic_times: xr.CFTimeIndex,
+        ocean: DatasetProperties,
+        atmosphere: DatasetProperties,
+    ):
+        self.all_ic_times = all_ic_times
         self.ocean = ocean
         self.atmosphere = atmosphere
 
@@ -34,7 +40,16 @@ class CoupledProperties:
     def is_remote(self) -> bool:
         return self.ocean.is_remote or self.atmosphere.is_remote
 
-    def update(self, other: "CoupledProperties"):
+    def to_device(self) -> "CoupledDatasetProperties":
+        return CoupledDatasetProperties(
+            all_ic_times=self.all_ic_times,
+            ocean=self.ocean.to_device(),
+            atmosphere=self.atmosphere.to_device(),
+        )
+
+    def update(self, other: "CoupledDatasetProperties"):
+        if (self.all_ic_times.values != other.all_ic_times.values).any():
+            raise ValueError("All times must be the same for both datasets.")
         if self.vertical_coordinate != other.vertical_coordinate:
             raise ValueError("Vertical coordinates must be the same for both datasets.")
         if self.horizontal_coordinates != other.horizontal_coordinates:
@@ -51,12 +66,12 @@ class CoupledDatasetItem:
     atmosphere: Tuple[TensorDict, xr.DataArray]
 
 
-class CoupledDataset(Dataset):
+class CoupledDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        ocean: torch.utils.data.Dataset,
-        atmosphere: torch.utils.data.Dataset,
-        properties: CoupledProperties,
+        ocean: Dataset,
+        atmosphere: Dataset,
+        properties: CoupledDatasetProperties,
         n_steps_fast: int,
     ):
         """
@@ -75,6 +90,15 @@ class CoupledDataset(Dataset):
                 f"with n_steps_fast={n_steps_fast}."
             )
         self._atmosphere = atmosphere
+        ocean_time = ocean[0][1].isel(time=0).item()
+        atmos_time = atmosphere[0][1].isel(time=0).item()
+        if ocean_time != atmos_time:
+            raise ValueError(
+                f"First time of ocean dataset is {ocean_time} "
+                f"but the atmosphere's first time is {atmos_time}. "
+                "Maybe align the datasets using a subset?"
+            )
+
         self._properties = properties
         self._n_steps_fast = n_steps_fast
 
@@ -94,12 +118,17 @@ class CoupledDataset(Dataset):
     def is_remote(self) -> bool:
         return self._properties.is_remote
 
-    def get_sample_by_time_slice(
-        self, time_slice: slice
-    ) -> Tuple[TensorDict, xr.DataArray]:
-        raise NotImplementedError(
-            "CoupledDataset has no get_sample_by_time_slice method"
-        )
+    @property
+    def properties(self) -> CoupledDatasetProperties:
+        return self._properties
+
+    @property
+    def n_steps_fast(self) -> int:
+        return self._n_steps_fast
+
+    @property
+    def all_ic_times(self) -> xr.CFTimeIndex:
+        return self.properties.all_ic_times
 
     def __len__(self):
         return min([len(self._ocean), len(self._atmosphere)])
@@ -108,5 +137,4 @@ class CoupledDataset(Dataset):
         fast_idx = idx * self._n_steps_fast
         ocean = self._ocean[idx]
         atmosphere = self._atmosphere[fast_idx]
-        assert atmosphere[1].isel(time=0) == ocean[1].isel(time=0)
         return CoupledDatasetItem(ocean=ocean, atmosphere=atmosphere)

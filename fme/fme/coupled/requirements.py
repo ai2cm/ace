@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 
+from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.dataset.requirements import DataRequirements
 
 
@@ -40,3 +41,14 @@ class CoupledDataRequirements:
     @property
     def n_steps_fast(self) -> int:
         return self._n_steps_fast
+
+
+@dataclasses.dataclass
+class CoupledPrognosticStateDataRequirements:
+    """
+    The requirements for the model's prognostic state.
+
+    """
+
+    ocean: PrognosticStateDataRequirements
+    atmosphere: PrognosticStateDataRequirements
