@@ -53,7 +53,10 @@ test_very_fast:
 
 # beaker experiment submission rules
 run_ace_evaluator:
-	./examples/run-ace-evaluator.sh
+	./gantry_examples/run-ace-evaluator.sh
+
+run_ace_train:
+	./gantry_examples/run-ace-train.sh
 
 # For maintainer use only
 # requires fme[deploy] to be installed
