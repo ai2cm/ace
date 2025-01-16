@@ -1,3 +1,4 @@
+from typing import Tuple
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,15 +10,15 @@ from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import Dataset
 from fme.core.dataset.xarray import DatasetProperties
-from fme.downscaling.requirements import DataRequirements
-
-from .datasets import (
+from fme.downscaling.datasets import (
     BatchData,
     ClosedInterval,
     DataLoaderConfig,
     HorizontalSubsetDataset,
     PairedDataset,
+    _spatial_subset,
 )
+from fme.downscaling.requirements import DataRequirements
 
 
 def random_named_tensor(var_names, shape):
@@ -197,3 +198,59 @@ def test_dataloader_build(tmp_path):
     for var_name in coarse_names:
         assert batch.coarse[var_name].shape == (batch_size, *coarse_shape)
         assert batch.times.shape == (batch_size,)
+
+
+def get_lat_lon_index_tensors(
+    n_lat: int, n_lon: int
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    lat_indices = torch.arange(n_lat)
+    lon_indices = torch.arange(n_lon)
+    lat_map = torch.broadcast_to(lat_indices[:, None], (n_lat, n_lon))
+    lon_map = torch.broadcast_to(lon_indices[None, :], (n_lat, n_lon))
+    return lat_map, lon_map
+
+
+def test_spatial_subset():
+    n_lat_coarse, n_lon_coarse = 8, 16
+    scale = 2
+    n_lat_fine, n_lon_fine = n_lat_coarse * scale, n_lon_coarse * scale
+    n_lat_coarse_subset, n_lon_coarse_subset = 4, 8
+    lat_coarse, lon_coarse = get_lat_lon_index_tensors(n_lat_coarse, n_lon_coarse)
+    lat_fine, lon_fine = get_lat_lon_index_tensors(n_lat_fine, n_lon_fine)
+    lat_fine, lon_fine = (
+        lat_fine / scale,
+        lon_fine / scale,
+    )  # so the indices are of the coarse grid
+
+    fine_batch = {
+        "i_lat": lat_fine[None, None, :, :],
+        "i_lon": lon_fine[None, None, :, :],
+    }
+    coarse_batch = {
+        "i_lat": lat_coarse[None, None, :, :],
+        "i_lon": lon_coarse[None, None, :, :],
+    }
+    fine_batch, coarse_batch = _spatial_subset(
+        fine_batch,
+        coarse_batch,
+        scale,
+        (n_lat_coarse, n_lon_coarse),
+        coarse_lat_extent=n_lat_coarse_subset,
+        coarse_lon_extent=n_lon_coarse_subset,
+    )
+    assert fine_batch["i_lat"].shape == (
+        1,
+        1,
+        n_lat_coarse_subset * scale,
+        n_lon_coarse_subset * scale,
+    )
+    assert coarse_batch["i_lat"].shape == (
+        1,
+        1,
+        n_lat_coarse_subset,
+        n_lon_coarse_subset,
+    )
+    assert coarse_batch["i_lat"].min() == fine_batch["i_lat"].min()
+    assert coarse_batch["i_lon"].min() == fine_batch["i_lon"].min()
+    assert coarse_batch["i_lat"].max() == torch.floor(fine_batch["i_lat"].max())
+    assert coarse_batch["i_lon"].max() == torch.floor(fine_batch["i_lon"].max())

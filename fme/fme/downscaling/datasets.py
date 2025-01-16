@@ -1,6 +1,7 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
+import random
 from typing import Mapping, Optional, Sequence, Tuple, Union
 
 import torch
@@ -89,18 +90,118 @@ class PairedDataset(torch.utils.data.Dataset):
             self.dataset2
         ), "Datasets must have the same number of samples."
 
-        batch1, times1 = self.dataset1[0]
-        batch2, times2 = self.dataset2[0]
-        assert all(times1 == times2), "Times must match."
+        _, time1 = self.dataset1[0]
+        _, time2 = self.dataset2[0]
+        assert all(time1 == time2), "Times must match."
 
     def __len__(self):
         return len(self.dataset1)
 
-    def __getitem__(self, idx):
-        batch1, times1 = self.dataset1[idx]
+    def __getitem__(self, idx) -> Tuple[TensorMapping, TensorMapping, xr.DataArray]:
+        batch1, time1 = self.dataset1[idx]
         batch2, _ = self.dataset2[idx]
 
-        return squeeze_time_dim(batch1), squeeze_time_dim(batch2), times1.squeeze()
+        return squeeze_time_dim(batch1), squeeze_time_dim(batch2), time1.squeeze()
+
+
+class RandomSpatialSubsetPairedDataset(torch.utils.data.Dataset):
+    """
+    Subsets the horizontal latitude-longitude dimensions of a dataset randomly
+    for each batch (the same for each sample of the batch).
+
+    Args:
+        paired_dataset: The paired dataset to subset.
+        coarse_lat_extent: The output length of the coarse latitude dimension.
+        coarse_lon_extent: The output length of the coarse longitude dimension.
+    """
+
+    def __init__(
+        self,
+        paired_dataset: PairedDataset,
+        coarse_lat_extent: Optional[int] = None,
+        coarse_lon_extent: Optional[int] = None,
+    ):
+        self.paired_dataset = paired_dataset
+        self.coarse_lat_extent = coarse_lat_extent
+        self.coarse_lon_extent = coarse_lon_extent
+        example_fine, example_coarse, _ = paired_dataset[0]
+        fine_shape = next(iter(example_fine.values())).shape[-2:]
+        coarse_shape = next(iter(example_coarse.values())).shape[-2:]
+        scale = fine_shape[0] // coarse_shape[0]
+        if fine_shape[1] // coarse_shape[1] != scale:
+            raise ValueError("Aspect ratio must match between lat and lon")
+        self.scale = scale
+        self.coarse_shape = coarse_shape
+
+    def __len__(self):
+        return len(self.paired_dataset)
+
+    def __getitem__(self, idx) -> Tuple[TensorMapping, TensorMapping, xr.DataArray]:
+        fine_batch, coarse_batch, time = self.paired_dataset[idx]
+        fine_batch, coarse_batch = self._spatial_subset(fine_batch, coarse_batch)
+        return fine_batch, coarse_batch, time
+
+    def _spatial_subset(self, fine_batch: TensorMapping, coarse_batch: TensorMapping):
+        return _spatial_subset(
+            fine_batch,
+            coarse_batch,
+            self.scale,
+            self.coarse_shape,
+            self.coarse_lat_extent,
+            self.coarse_lon_extent,
+        )
+
+
+def _spatial_subset(
+    fine_batch: TensorMapping,
+    coarse_batch: TensorMapping,
+    scale: int,
+    coarse_shape: Tuple[int, int],
+    coarse_lat_extent: Optional[int],
+    coarse_lon_extent: Optional[int],
+):
+    """
+    Subset the coarse and fine batches to the specified extents.
+
+    Randomly selects a subset of the domain and applies this uniformly to
+    all variables and samples in the batch.
+
+    Args:
+        fine_batch: The fine batch to subset.
+        coarse_batch: The coarse batch to subset.
+        scale: The scale factor between the fine and coarse resolutions.
+        coarse_shape: The shape of the coarse batch.
+        coarse_lat_extent: The output length of the coarse latitude dimension.
+        coarse_lon_extent: The output length of the coarse longitude dimension.
+
+    Returns:
+        The subsetted fine and coarse batches.
+    """
+    if coarse_lat_extent is not None:
+        i_start = random.randint(0, coarse_shape[0] - coarse_lat_extent)
+        i_stop = i_start + coarse_lat_extent
+        coarse_lat_slice = slice(i_start, i_stop)
+        fine_lat_slice = slice(i_start * scale, i_stop * scale)
+    else:
+        coarse_lat_slice = slice(None)
+        fine_lat_slice = slice(None)
+    if coarse_lon_extent is not None:
+        j_start = random.randint(0, coarse_shape[1] - coarse_lon_extent)
+        j_stop = j_start + coarse_lon_extent
+        coarse_lon_slice = slice(j_start, j_stop)
+        fine_lon_slice = slice(j_start * scale, j_stop * scale)
+    else:
+        coarse_lon_slice = slice(None)
+        fine_lon_slice = slice(None)
+    fine_batch = _slice_mapping(fine_batch, fine_lat_slice, fine_lon_slice)
+    coarse_batch = _slice_mapping(coarse_batch, coarse_lat_slice, coarse_lon_slice)
+    return fine_batch, coarse_batch
+
+
+def _slice_mapping(
+    mapping: TensorMapping, lat_slice: slice, lon_slice: slice
+) -> TensorMapping:
+    return {k: v[..., lat_slice, lon_slice] for k, v in mapping.items()}
 
 
 @dataclasses.dataclass
@@ -274,6 +375,8 @@ class DataLoaderConfig:
     lon_interval: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
+    coarse_lat_extent: Optional[int] = None
+    coarse_lon_extent: Optional[int] = None
 
     def build(
         self,
@@ -311,8 +414,15 @@ class DataLoaderConfig:
 
         dataset = PairedDataset(
             dataset_fine_subset,
-            dataset_coarse_subset,  # type: ignore
+            dataset_coarse_subset,
         )
+
+        if self.coarse_lat_extent is not None or self.coarse_lon_extent is not None:
+            dataset = RandomSpatialSubsetPairedDataset(
+                dataset,
+                coarse_lat_extent=self.coarse_lat_extent,
+                coarse_lon_extent=self.coarse_lon_extent,
+            )
 
         sampler: Optional[DistributedSampler] = (
             DistributedSampler(dataset, shuffle=train)
@@ -339,8 +449,7 @@ class DataLoaderConfig:
             coarse=dataset_coarse_subset.horizontal_coordinates,
         )
 
-        example_fine, _ = dataset_fine_subset[0]
-        example_coarse, _ = dataset_coarse_subset[0]
+        example_fine, example_coarse, _ = dataset[0]
         fine_shape = next(iter(example_fine.values())).shape[-2:]
         coarse_shape = next(iter(example_coarse.values())).shape[-2:]
         img_shape = FineResCoarseResPair(fine_shape, coarse_shape)

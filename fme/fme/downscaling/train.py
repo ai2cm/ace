@@ -125,8 +125,14 @@ class Trainer:
 
     def train_one_epoch(self) -> None:
         self.model.module.train()
+        include_positional_comparisons = _include_positional_comparisons(
+            self.config.train_data
+        )
         train_aggregator = Aggregator(
-            self.area_weights.fine.cpu(), self.latitudes, self.model.downscale_factor
+            self.area_weights.fine.cpu(),
+            self.latitudes,
+            self.model.downscale_factor,
+            include_positional_comparisons=include_positional_comparisons,
         )
         batch: BatchData
         wandb = WandB.get_instance()
@@ -178,16 +184,21 @@ class Trainer:
 
     def valid_one_epoch(self) -> float:
         self.model.module.eval()
+        include_positional_comparisons = _include_positional_comparisons(
+            self.config.validation_data
+        )
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.area_weights.fine.cpu(),
                 self.latitudes,
                 self.model.downscale_factor,
+                include_positional_comparisons=include_positional_comparisons,
             )
             generation_aggregator = Aggregator(
                 self.area_weights.fine.cpu(),
                 self.latitudes,
                 self.model.downscale_factor,
+                include_positional_comparisons=include_positional_comparisons,
             )
             batch: BatchData
             for batch in self.validation_data.loader:
@@ -261,7 +272,7 @@ class Trainer:
 
         for epoch in range(self.startEpoch, segment_max_epochs):
             self.startEpoch = epoch
-            logging.info(f"Training epoch: {epoch+1}")
+            logging.info(f"Training epoch: {epoch + 1}")
             self.train_one_epoch()
             logging.info("Running metrics on validation data.")
             valid_loss = self.valid_one_epoch()
@@ -326,6 +337,12 @@ class TrainerConfig:
         config = to_flat_dict(dataclasses.asdict(self))
         env_vars = logging_utils.retrieve_env_vars()
         self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
+
+
+def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
+    if config.coarse_lat_extent is not None or config.coarse_lon_extent is not None:
+        return False
+    return True
 
 
 def main(config_path: str):
