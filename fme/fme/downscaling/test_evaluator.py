@@ -1,6 +1,6 @@
 import os
 import unittest.mock
-from typing import Any, Dict, Mapping, Tuple, Type, Union
+from typing import Any, Mapping
 
 import pytest
 import yaml
@@ -55,50 +55,64 @@ class LinearDownscalingDiffusion(LinearDownscaling):
         return super().forward(coarse)
 
 
-ExtraModelParams = Dict[Any, Any]
-DeterministicModelTypes = Tuple[
-    ModuleRegistrySelector, Type[DownscalingModelConfig], ExtraModelParams
-]
-DiffusionModelTypes = Tuple[
-    DiffusionModuleRegistrySelector, Type[DiffusionModelConfig], ExtraModelParams
-]
-ModelTypeDict = Dict[str, Union[DeterministicModelTypes, DiffusionModelTypes]]
-
-
-def get_model_type_params(
-    model_type: str,
-) -> Union[DeterministicModelTypes, DiffusionModelTypes]:
-    model_type_params: ModelTypeDict = {
-        "deterministic": (
+def get_trainer_model_config(model_type: str):
+    if model_type == "deterministic":
+        return DownscalingModelConfig(
             ModuleRegistrySelector(
                 "prebuilt",
-                {"module": LinearDownscaling(2, (8, 8), n_channels=2)},
+                {"module": LinearDownscaling(2, fine_img_shape=(16, 16), n_channels=2)},
             ),
-            DownscalingModelConfig,
-            {},
-        ),
-        "diffusion": (
+            loss=LossConfig("NaN"),
+            in_names=["x", "y"],
+            out_names=["x", "y"],
+            normalization=PairedNormalizationConfig(
+                NormalizationConfig(
+                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
+                ),
+                NormalizationConfig(
+                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
+                ),
+            ),
+            use_fine_topography=False,
+        )
+    elif model_type == "diffusion":
+        return DiffusionModelConfig(
             DiffusionModuleRegistrySelector(
                 "prebuilt",
-                {"module": LinearDownscalingDiffusion(2, (8, 8), n_channels=2)},
+                {
+                    "module": LinearDownscalingDiffusion(
+                        factor=2,
+                        fine_img_shape=(16, 16),
+                        n_channels=2,
+                    )
+                },
             ),
-            DiffusionModelConfig,
-            {
-                "p_mean": 0,
-                "p_std": 1,
-                "sigma_min": 1,
-                "sigma_max": 2,
-                "churn": 1,
-                "num_diffusion_generation_steps": 1,
-                "predict_residual": True,
-            },
-        ),
-    }
-    return model_type_params[model_type]
+            loss=LossConfig("NaN"),
+            in_names=["x", "y"],
+            out_names=["x", "y"],
+            normalization=PairedNormalizationConfig(
+                NormalizationConfig(
+                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
+                ),
+                NormalizationConfig(
+                    means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
+                ),
+            ),
+            use_fine_topography=False,
+            p_mean=0,
+            p_std=1,
+            sigma_min=1,
+            sigma_max=2,
+            churn=1,
+            num_diffusion_generation_steps=1,
+            predict_residual=True,
+        )
+    else:
+        raise ValueError(f"Invalid model type: {model_type}")
 
 
 @pytest.mark.parametrize(
-    "model_config, model_type, num_samples",
+    "evaluator_model_config, model_type, num_samples",
     [
         pytest.param(
             {
@@ -112,36 +126,36 @@ def get_model_type_params(
             id="interpolation",
         ),
         pytest.param(
-            {"checkpoint": "checkpoint.ckpt"},
+            {"checkpoint": "unused value"},
             "deterministic",
             1,
-            id="checkpoint deterministic model",
+            id="checkpoint_deterministic_model",
         ),
         pytest.param(
-            {"checkpoint": "checkpoint.ckpt"},
+            {"checkpoint": "unused value"},
             "diffusion",
             1,
-            id="checkpoint diffusion model, single sample",
+            id="checkpoint_diffusion_model_single_sample",
         ),
         pytest.param(
-            {"checkpoint": "checkpoint.ckpt"},
+            {"checkpoint": "unused value"},
             "diffusion",
             2,
-            id="checkpoint diffusion model,  multiple samples",
+            id="checkpoint_diffusion_model_multiple_samples",
         ),
     ],
 )
-def test_evaluator_runs(tmp_path, model_config, model_type, num_samples):
+def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_samples):
     """Check that evaluator runs with different models."""
-    evaluator_config_path = create_evaluator_config(tmp_path, model_config, num_samples)
+    evaluator_config_path = create_evaluator_config(
+        tmp_path, evaluator_model_config, num_samples
+    )
 
     paths = data_paths_helper(tmp_path)
 
-    registry_selector, model_config_cls, extra_kwargs = get_model_type_params(
-        model_type
-    )
+    trainer_model_config = get_trainer_model_config(model_type)
 
-    if "checkpoint" in model_config:
+    if "checkpoint" in evaluator_model_config:
         with open(evaluator_config_path, "r") as file:
             config = yaml.safe_load(file)
 
@@ -153,22 +167,7 @@ def test_evaluator_runs(tmp_path, model_config, model_type, num_samples):
             strict_ensemble=False,
         )
         trainer = TrainerConfig(
-            model=model_config_cls(
-                registry_selector,  # type: ignore
-                LossConfig("NaN"),
-                ["x", "y"],
-                ["x", "y"],
-                PairedNormalizationConfig(
-                    NormalizationConfig(
-                        means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                    ),
-                    NormalizationConfig(
-                        means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
-                    ),
-                ),
-                use_fine_topography=False,
-                **extra_kwargs,
-            ),
+            model=trainer_model_config,
             optimization=OptimizationConfig(),
             train_data=data_loader_config,
             validation_data=data_loader_config,

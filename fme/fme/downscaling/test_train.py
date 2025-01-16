@@ -83,8 +83,8 @@ def create_test_data_on_disk(
 
 def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
     dim_sizes = FineResCoarseResPair[Dict[str, int]](
-        fine={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
-        coarse={"time": NUM_TIMESTEPS, "lat": 4, "lon": 4},
+        fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
+        coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
     )
     variable_names = ["x", "y", "HGTsfc"]
     fine_path = tmp_path / "fine"
@@ -154,6 +154,8 @@ def _create_config_dict(
     config["validation_data"]["coarse"] = [
         {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
     ]
+    config["train_data"]["coarse_lat_extent"] = 4
+    config["train_data"]["coarse_lon_extent"] = 4
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -219,7 +221,7 @@ def default_trainer_config(
 @pytest.mark.parametrize(
     "module_type",
     ["unet_regression_song", "unet_diffusion_song"],
-    ids=["Regression", "Diffusion"],
+    ids=["regression", "diffusion"],
 )
 @pytest.mark.parametrize(
     "in_names, out_names",
@@ -229,9 +231,9 @@ def default_trainer_config(
         (["x", "y"], ["x", "y"]),
     ],
     ids=[
-        "single input, multiple out",
-        "multiple input, single out",
-        "multiple input, multiple out",
+        "single_input_multiple_out",
+        "multiple_input_single_out",
+        "multiple_input_multiple_out",
     ],
 )
 def test_train_main_only(

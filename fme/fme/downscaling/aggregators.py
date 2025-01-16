@@ -489,6 +489,7 @@ class Aggregator:
         percentiles: Optional[List[float]] = None,
         ssim_kwargs: Optional[Mapping[str, Any]] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        include_positional_comparisons: bool = True,
     ) -> None:
         self.downscale_factor = downscale_factor
         if area_weights is not None:
@@ -504,21 +505,24 @@ class Aggregator:
 
         self._comparisons: Mapping[str, _ComparisonAggregator] = {
             "rmse": MeanComparison(metrics.root_mean_squared_error),
-            "weighted_rmse": MeanComparison(_area_weighted_rmse),
             "snapshot": SnapshotAggregator(variable_metadata),
-            "time_mean_map": MeanMapAggregator(variable_metadata),
             "histogram": ComparedDynamicHistograms(
                 n_bins=n_histogram_bins, percentiles=percentiles
             ),
         }
-        self._intrinsics: Mapping[
-            str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
-        ] = {
-            input_type: {
-                "spectrum": ZonalPowerSpectrum(latitudes),
+        if include_positional_comparisons:
+            self._comparisons["weighted_rmse"] = MeanComparison(_area_weighted_rmse)
+            self._comparisons["time_mean_map"] = MeanMapAggregator(variable_metadata)
+            self._intrinsics: Mapping[
+                str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
+            ] = {
+                input_type: {
+                    "spectrum": ZonalPowerSpectrum(latitudes),
+                }
+                for input_type in ("target", "prediction")
             }
-            for input_type in ("target", "prediction")
-        }
+        else:
+            self._intrinsics = {}
         self._coarse_comparisons = {
             "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
         }
@@ -559,8 +563,9 @@ class Aggregator:
         for input, input_type in zip(
             (folded_target, folded_prediction), ("target", "prediction")
         ):
-            for _, intrinsic_aggregator in self._intrinsics[input_type].items():
-                intrinsic_aggregator.record_batch(input)
+            if input_type in self._intrinsics:
+                for _, intrinsic_aggregator in self._intrinsics[input_type].items():
+                    intrinsic_aggregator.record_batch(input)
 
         self._latent_step_aggregator.record_batch(outputs.latent_steps)
 
@@ -591,7 +596,7 @@ class Aggregator:
                 }
             )
 
-        for data_role in ("target", "prediction"):
+        for data_role in self._intrinsics:
             _aggregators = self._intrinsics[data_role]
             for metric_name, intrinsic_agg in _aggregators.items():
                 _metric_values = {
