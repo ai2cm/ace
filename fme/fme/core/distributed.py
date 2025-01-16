@@ -154,12 +154,11 @@ class Distributed:
             A list of tensors, where the i-th element is the tensor
                 from the i-th process.
         """
+        gather_list: Optional[List[torch.Tensor]] = None
         if self.rank == 0:
-            gather_list: Optional[List[torch.Tensor]] = [
-                torch.empty_like(tensor) for _ in range(self.world_size)
+            gather_list = [tensor] + [
+                torch.empty_like(tensor) for _ in range(self.world_size - 1)
             ]
-        else:
-            gather_list = None
         if self._distributed:
             torch.distributed.gather(tensor, gather_list)
         return gather_list
