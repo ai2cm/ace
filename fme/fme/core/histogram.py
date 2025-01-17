@@ -1,7 +1,7 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Optional, Set, Tuple, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -181,11 +181,31 @@ class ComparedDynamicHistograms:
         self.target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self.prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self._time_dim = -2
+        self._variables: Set[str] = set()
+
+    def _check_overlapping_keys(self, target: TensorMapping, prediction: TensorMapping):
+        if not self._variables:
+            self._variables = set(target.keys()).intersection(prediction.keys())
+        if not self._variables:
+            raise ValueError(
+                "No overlapping keys between target and prediction variables. "
+                f"target: {target.keys()}, prediction: {prediction.keys()}"
+            )
+
+        current_variables = set(target.keys()).intersection(prediction.keys())
+        if current_variables != self._variables:
+            raise ValueError(
+                "Available comparison variables provided to record_batch differ "
+                f"from initial call to record_batch.  initial: {self._variables}, "
+                f"current: {current_variables}"
+            )
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping):
-        target = {k: v.detach() for k, v in target.items()}
-        prediction = {k: v.detach() for k, v in prediction.items()}
+        self._check_overlapping_keys(target, prediction)
+
+        target = {k: v for k, v in target.items() if k in self._variables}
+        prediction = {k: v for k, v in prediction.items() if k in self._variables}
 
         if self.target_histograms is None or self.prediction_histograms is None:
             self.target_histograms = {}

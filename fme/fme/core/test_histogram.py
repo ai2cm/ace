@@ -148,3 +148,54 @@ def test_compared_dynamic_histograms(shape, percentiles):
 
     ds = histogram.get_dataset()
     all(ds.coords["source"] == ["target", "prediction"])
+
+
+@pytest.mark.parametrize(
+    "target, prediction",
+    [
+        pytest.param(
+            {"x": torch.ones(2, 8, 16), "y": torch.zeros(2, 8, 16)},
+            {},
+            id="non_empty_target_empty_prediction",
+        ),
+        pytest.param(
+            {},
+            {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 8)},
+            id="empty_target_non_empty_prediction",
+        ),
+        pytest.param({}, {}, id="empty_target_empty_prediction"),
+    ],
+)
+def test_compared_dynamic_histogram_empty_tensor_mapping(target, prediction):
+    """
+    Test that histogram aggregator handles empty tensor mappings.
+    """
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+
+    with pytest.raises(ValueError):
+        histogram.record_batch(target, prediction)
+
+
+def test_compared_dynamic_histogram_varying_variables_with_record_batch():
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    target = {"x": torch.ones(2, 8, 16), "y": torch.zeros(2, 8, 16)}
+    prediction = {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 8)}
+
+    # record one batch to set the recorded variables
+    histogram.record_batch(target, prediction)
+
+    target_missing_y = {"x": torch.ones(2, 8, 16)}
+    prediction_missing_y = {"x": torch.rand(2, 8, 16)}
+    target_extra_z = {**target, "z": torch.ones(2, 8, 16)}
+    prediction_extra_w = {**prediction, "w": torch.rand(2, 8, 16)}
+
+    # fails on variables missing from inital recorded batch
+    with pytest.raises(ValueError):
+        histogram.record_batch(target_missing_y, prediction)
+    with pytest.raises(ValueError):
+        histogram.record_batch(target, prediction_missing_y)
+
+    # ignores non-matching variables
+    histogram.record_batch(target_extra_z, prediction_extra_w)

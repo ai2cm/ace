@@ -10,12 +10,13 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
-from fme.core.device import get_device
+from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
+from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
 from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
@@ -137,7 +138,10 @@ class Trainer:
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
-            inputs = FineResCoarseResPair(batch.fine, batch.coarse)
+            inputs = FineResCoarseResPair[TensorMapping](
+                move_tensordict_to_device(batch.fine),
+                move_tensordict_to_device(batch.coarse),
+            )
             outputs = self.model.train_on_batch(inputs, self.optimization)
             self.num_batches_seen += 1
             with torch.no_grad():
@@ -202,10 +206,12 @@ class Trainer:
             )
             batch: BatchData
             for batch in self.validation_data.loader:
-                inputs = FineResCoarseResPair(
-                    batch.fine,
-                    batch.coarse,
+                fine, coarse = (
+                    move_tensordict_to_device(batch.fine),
+                    move_tensordict_to_device(batch.coarse),
                 )
+                inputs = FineResCoarseResPair[TensorMapping](fine, coarse)
+
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -258,6 +264,13 @@ class Trainer:
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
 
+    def _validate_current_epoch(self, epoch: int) -> bool:
+        valid_frequency = self.config.validate_interval
+        if epoch % valid_frequency == 0:
+            return True
+        else:
+            return False
+
     def train(self) -> None:
         logging.info("Running metrics on validation data.")
         self.valid_one_epoch()
@@ -274,13 +287,14 @@ class Trainer:
             self.startEpoch = epoch
             logging.info(f"Training epoch: {epoch + 1}")
             self.train_one_epoch()
-            logging.info("Running metrics on validation data.")
-            valid_loss = self.valid_one_epoch()
-            wandb.log({"epoch": epoch}, step=self.num_batches_seen)
+            if self._validate_current_epoch(epoch):
+                logging.info("Running metrics on validation data.")
+                valid_loss = self.valid_one_epoch()
+                wandb.log({"epoch": epoch}, step=self.num_batches_seen)
 
-            dist = Distributed.get_instance()
-            if dist.is_root():
-                self.save_all_checkpoints(valid_loss)
+                dist = Distributed.get_instance()
+                if dist.is_root():
+                    self.save_all_checkpoints(valid_loss)
 
 
 @dataclasses.dataclass
@@ -297,6 +311,7 @@ class TrainerConfig:
     validate_using_ema: bool = False
     generate_n_samples: int = 1
     segment_epochs: Optional[int] = None
+    validate_interval: int = 1
 
     @property
     def checkpoint_dir(self) -> str:
