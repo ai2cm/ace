@@ -37,7 +37,7 @@ class Packer:
                 raise DataShapesNotUniform(
                     (
                         f"Cannot pack tensors of different shapes. "
-                        'Expected "{shape}" got "{tensors[name].shape}"'
+                        f'Expected "{shape}" got "{tensors[name].shape}"'
                     )
                 )
         return _pack(tensors, self.names, axis=axis)

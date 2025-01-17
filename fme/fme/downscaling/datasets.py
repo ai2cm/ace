@@ -375,8 +375,19 @@ class DataLoaderConfig:
     lon_interval: ClosedInterval = dataclasses.field(
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
+    repeat: int = 1
     coarse_lat_extent: Optional[int] = None
     coarse_lon_extent: Optional[int] = None
+
+    def _repeat_if_requested(self, dataset: HorizontalSubsetDataset) -> Dataset:
+        properties = dataset._properties
+        if self.repeat > 1:
+            dataset = torch.utils.data.ConcatDataset([dataset] * self.repeat)
+            dataset = HorizontalSubsetDataset(
+                dataset, properties, self.lat_interval, self.lon_interval
+            )
+
+        return dataset
 
     def build(
         self,
@@ -412,6 +423,9 @@ class DataLoaderConfig:
             lon_interval=self.lon_interval,
         )
 
+        dataset_fine_subset = self._repeat_if_requested(dataset_fine_subset)
+        dataset_coarse_subset = self._repeat_if_requested(dataset_coarse_subset)
+
         dataset = PairedDataset(
             dataset_fine_subset,
             dataset_coarse_subset,
@@ -435,7 +449,7 @@ class DataLoaderConfig:
             batch_size=dist.local_batch_size(int(self.batch_size)),
             num_workers=self.num_data_workers,
             shuffle=(sampler is None) and train,
-            sampler=sampler if train else None,
+            sampler=sampler,
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=BatchData.from_sample_tuples,
