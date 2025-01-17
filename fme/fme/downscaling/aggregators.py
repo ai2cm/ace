@@ -273,6 +273,7 @@ class MeanMapAggregator:
             gap = torch.full(
                 (target[var_name].shape[-2], self.gap_width),
                 float(target[var_name].min()),
+                device=target[var_name].device,
             )
             ret[f"full-field/{var_name}"] = torch.cat(
                 (prediction[var_name], gap, target[var_name]), dim=1
