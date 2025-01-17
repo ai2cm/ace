@@ -134,6 +134,26 @@ def total_energy_ace2_path_tendency(
     return mse_tendency
 
 
+@register
+def implied_tendency_of_total_energy_ace2_path_due_to_advection(
+    data: ClimateData,
+    vertical_coordinate: HybridSigmaPressureCoordinate,
+    timestep: datetime.timedelta,
+):
+    """Implied tendency of total energy path due to advection.
+
+    This is computed as a residual from the column total energy budget.
+    """
+    column_energy_tendency = total_energy_ace2_path_tendency(
+        data, vertical_coordinate, timestep
+    )
+    flux_through_vertical_boundaries = net_energy_flux_into_atmospheric_column(
+        data, vertical_coordinate, timestep
+    )
+    implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
+    return implied_column_heating
+
+
 def _compute_derived_variable(
     data: Dict[str, torch.Tensor],
     vertical_coordinate: HybridSigmaPressureCoordinate,
