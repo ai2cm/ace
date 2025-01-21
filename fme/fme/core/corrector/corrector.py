@@ -246,14 +246,14 @@ def _force_conserve_dry_air(
             1 - sum_k(bk_diff * wat_k)
         )
     """
-    input = AtmosphereData(input_data)
+    input = AtmosphereData(input_data, vertical_coordinate)
     if input.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
-    gen = AtmosphereData(gen_data)
-    gen_dry_air = gen.surface_pressure_due_to_dry_air(vertical_coordinate)
+    gen = AtmosphereData(gen_data, vertical_coordinate)
+    gen_dry_air = gen.surface_pressure_due_to_dry_air
     global_gen_dry_air = area_weighted_mean(gen_dry_air.to(precision), keepdim=True)
     global_target_gen_dry_air = area_weighted_mean(
-        input.surface_pressure_due_to_dry_air(vertical_coordinate).to(precision),
+        input.surface_pressure_due_to_dry_air.to(precision),
         keepdim=True,
     )
     error = global_gen_dry_air - global_target_gen_dry_air
@@ -333,13 +333,13 @@ def _force_conserve_moisture(
             - "advection_and_precipitation": modify advection and precipitation
             - "advection_and_evaporation": modify advection and evaporation
     """
-    input = AtmosphereData(input_data)
-    gen = AtmosphereData(gen_data)
+    input = AtmosphereData(input_data, vertical_coordinate)
+    gen = AtmosphereData(gen_data, vertical_coordinate)
 
-    gen_total_water_path = gen.total_water_path(vertical_coordinate)
+    gen_total_water_path = gen.total_water_path
     timestep_seconds = timestep / datetime.timedelta(seconds=1)
     twp_total_tendency = (
-        gen_total_water_path - input.total_water_path(vertical_coordinate)
+        gen_total_water_path - input.total_water_path
     ) / timestep_seconds
     twp_tendency_global_mean = area_weighted_mean(twp_total_tendency, keepdim=True)
     evaporation_global_mean = area_weighted_mean(gen.evaporation_rate, keepdim=True)
@@ -402,16 +402,16 @@ def _force_conserve_total_energy(
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
         )
-    input = AtmosphereData(input_data)
-    gen = AtmosphereData(dict(gen_data) | forcing_data)
+    input = AtmosphereData(input_data, vertical_coordinate)
+    gen = AtmosphereData(dict(gen_data) | forcing_data, vertical_coordinate)
     if torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Surface pressure has a non-positive value, skipping energy correction."
         )
         return {k: v for k, v in gen.data.items() if k in gen_data}
 
-    gen_energy_path = gen.total_energy_ace2_path(vertical_coordinate)
-    input_energy_path = input.total_energy_ace2_path(vertical_coordinate)
+    gen_energy_path = gen.total_energy_ace2_path
+    input_energy_path = input.total_energy_ace2_path
     predicted_energy_flux_into_atmosphere = gen.net_energy_flux_into_atmosphere
 
     gen_energy_path_global_mean = area_weighted_mean(gen_energy_path, keepdim=True)

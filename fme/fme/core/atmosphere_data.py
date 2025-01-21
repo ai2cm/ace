@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Callable, List, Mapping
+from typing import Callable, List, Mapping, Optional
 
 import torch
 
@@ -49,6 +49,7 @@ class AtmosphereData:
     def __init__(
         self,
         atmosphere_data: TensorMapping,
+        vertical_coordinate: Optional[HybridSigmaPressureCoordinate] = None,
         atmosphere_field_name_prefixes: Mapping[
             str, List[str]
         ] = ATMOSPHERE_FIELD_NAME_PREFIXES,
@@ -58,6 +59,8 @@ class AtmosphereData:
 
         Args:
             atmosphere_data: Mapping from field names to tensors.
+            vertical_coordinate: The vertical coordinate of the model. If not provided,
+                then variables which require vertical integration will raise an error.
             atmosphere_field_name_prefixes: Mapping which defines the correspondence
                 between an arbitrary set of "standard" names (e.g., "surface_pressure"
                 or "air_temperature") and lists of possible names or prefix variants
@@ -66,6 +69,7 @@ class AtmosphereData:
         """
         self._data = dict(atmosphere_data)
         self._prefix_map = atmosphere_field_name_prefixes
+        self._vertical_coordinate = vertical_coordinate
         self._stacker = Stacker(atmosphere_field_name_prefixes)
 
     @property
@@ -151,19 +155,23 @@ class AtmosphereData:
     def toa_up_lw_radiative_flux(self, value: torch.Tensor):
         self._set("toa_up_lw_radiative_flux", value)
 
-    def surface_pressure_due_to_dry_air(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    @property
+    def surface_pressure_due_to_dry_air(self) -> torch.Tensor:
+        if self._vertical_coordinate is None:
+            raise ValueError("Vertical coordinate must be provided to compute dry air.")
         return metrics.surface_pressure_due_to_dry_air(
             self.specific_total_water,
             self.surface_pressure,
-            vertical_coordinate,
+            self._vertical_coordinate,
         )
 
-    def total_water_path(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
-        return vertical_coordinate.vertical_integral(
+    @property
+    def total_water_path(self) -> torch.Tensor:
+        if self._vertical_coordinate is None:
+            raise ValueError(
+                "Vertical coordinate must be provided to compute total water path."
+            )
+        return self._vertical_coordinate.vertical_integral(
             self.specific_total_water,
             self.surface_pressure,
         )
@@ -263,13 +271,15 @@ class AtmosphereData:
     def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
         self._set("tendency_of_total_water_path_due_to_advection", value)
 
-    def height_at_log_midpoint(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    def height_at_log_midpoint(self) -> torch.Tensor:
         """
         Compute vertical height at layer log midpoints.
         """
-        interface_pressure = vertical_coordinate.interface_pressure(
+        if self._vertical_coordinate is None:
+            raise ValueError(
+                "Vertical coordinate must be provided to compute height at log midpoint"
+            )
+        interface_pressure = self._vertical_coordinate.interface_pressure(
             self.surface_pressure
         )
         layer_thickness = compute_layer_thickness(
@@ -280,11 +290,14 @@ class AtmosphereData:
         height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
         return (height_at_interface[..., :-1] * height_at_interface[..., 1:]) ** 0.5
 
-    def height_at_midpoint(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    @property
+    def height_at_midpoint(self) -> torch.Tensor:
         """Compute vertical height at layer midpoints with linear interpolation."""
-        interface_pressure = vertical_coordinate.interface_pressure(
+        if self._vertical_coordinate is None:
+            raise ValueError(
+                "Vertical coordinate must be provided to compute height at mmidpoint"
+            )
+        interface_pressure = self._vertical_coordinate.interface_pressure(
             self.surface_pressure
         )
         layer_thickness = compute_layer_thickness(
@@ -295,9 +308,8 @@ class AtmosphereData:
         height_at_interface = _height_at_interface(layer_thickness, self.surface_height)
         return 0.5 * (height_at_interface[..., :-1] + height_at_interface[..., 1:])
 
-    def moist_static_energy(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    @property
+    def moist_static_energy(self) -> torch.Tensor:
         """
         Compute moist static energy.
         """
@@ -306,12 +318,11 @@ class AtmosphereData:
         return (
             self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE
             + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
-            + self.height_at_midpoint(vertical_coordinate) * GRAVITY
+            + self.height_at_midpoint * GRAVITY
         )
 
-    def total_energy_ace2(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    @property
+    def total_energy_ace2(self) -> torch.Tensor:
         """
         Compute the total energy, following some assumptions used for ACE2 models.
 
@@ -322,16 +333,18 @@ class AtmosphereData:
         return (
             self.air_temperature * SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
             + self.specific_total_water * LATENT_HEAT_OF_VAPORIZATION
-            + self.height_at_midpoint(vertical_coordinate) * GRAVITY
+            + self.height_at_midpoint * GRAVITY
         )
 
-    def total_energy_ace2_path(
-        self, vertical_coordinate: HybridSigmaPressureCoordinate
-    ) -> torch.Tensor:
+    @property
+    def total_energy_ace2_path(self) -> torch.Tensor:
         """Compute vertical integral of total energy."""
-        return vertical_coordinate.vertical_integral(
-            self.total_energy_ace2(vertical_coordinate),
-            self.surface_pressure,
+        if self._vertical_coordinate is None:
+            raise ValueError(
+                "Vertical coordinate must be provided to compute total energy ACE2 path"
+            )
+        return self._vertical_coordinate.vertical_integral(
+            self.total_energy_ace2, self.surface_pressure
         )
 
 

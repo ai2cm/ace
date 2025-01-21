@@ -181,8 +181,7 @@ def test_force_conserve_moisture(
         data["tendency_of_total_water_path_due_to_advection"], keepdim=True
     )
     original_budget_residual = total_water_path_budget_residual(
-        AtmosphereData(data),
-        vertical_coordinate=vertical_coordinate,
+        AtmosphereData(data, vertical_coordinate),
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
     if global_only:
@@ -191,9 +190,8 @@ def test_force_conserve_moisture(
         )
     original_budget_residual = original_budget_residual.cpu().numpy()
     original_dry_air = (
-        AtmosphereData(data)
-        .surface_pressure_due_to_dry_air(vertical_coordinate)
-        .cpu()
+        AtmosphereData(data, vertical_coordinate)
+        .surface_pressure_due_to_dry_air.cpu()
         .numpy()
     )
     assert np.any(np.abs(original_budget_residual) > 0.0)
@@ -211,14 +209,12 @@ def test_force_conserve_moisture(
         k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
     }
     new_budget_residual = total_water_path_budget_residual(
-        AtmosphereData(new_data),
-        vertical_coordinate=vertical_coordinate,
+        AtmosphereData(new_data, vertical_coordinate),
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
     new_dry_air = (
-        AtmosphereData(data)
-        .surface_pressure_due_to_dry_air(vertical_coordinate)
-        .cpu()
+        AtmosphereData(data, vertical_coordinate)
+        .surface_pressure_due_to_dry_air.cpu()
         .numpy()
     )
 
@@ -313,12 +309,10 @@ def test__force_conserve_total_energy():
         assert name not in corrected_gen_data
 
     # ensure the corrected global mean MSE path is what we expect
-    input = AtmosphereData(input_data)
-    corrected_gen = AtmosphereData(corrected_gen_data | forcing_data)
-    input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path(vertical_coord))
-    corrected_gen_gm_mse = ops.area_weighted_mean(
-        corrected_gen.total_energy_ace2_path(vertical_coord)
-    )
+    input = AtmosphereData(input_data, vertical_coord)
+    corrected_gen = AtmosphereData(corrected_gen_data | forcing_data, vertical_coord)
+    input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path)
+    corrected_gen_gm_mse = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
     predicted_mse_tendency = ops.area_weighted_mean(
         corrected_gen.net_energy_flux_into_atmosphere
     )

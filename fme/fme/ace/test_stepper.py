@@ -596,9 +596,9 @@ def test_stepper_corrector(
     # check that the dry air is conserved
     dry_air = (
         metrics.weighted_mean(
-            AtmosphereData(stepped.gen_data).surface_pressure_due_to_dry_air(
-                vertical_coordinate
-            ),
+            AtmosphereData(
+                stepped.gen_data, vertical_coordinate
+            ).surface_pressure_due_to_dry_air,
             weights=area_weights,
             dim=[-2, -1],
         )

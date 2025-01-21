@@ -4,13 +4,10 @@ from typing import Callable, Dict, MutableMapping, Optional
 
 import torch
 
-from fme.core import metrics
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 
-DerivedVariableFunc = Callable[
-    [AtmosphereData, HybridSigmaPressureCoordinate, datetime.timedelta], torch.Tensor
-]
+DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableFunc] = {}
@@ -27,23 +24,17 @@ def register(func: DerivedVariableFunc):
 @register
 def surface_pressure_due_to_dry_air(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    return metrics.surface_pressure_due_to_dry_air(
-        data.specific_total_water,
-        data.surface_pressure,
-        vertical_coordinate,
-    )
+    return data.surface_pressure_due_to_dry_air
 
 
 @register
 def surface_pressure_due_to_dry_air_absolute_tendency(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    ps_dry = surface_pressure_due_to_dry_air(data, vertical_coordinate, timestep)
+    ps_dry = data.surface_pressure_due_to_dry_air
     abs_ps_dry_tendency = torch.zeros_like(ps_dry)
     abs_ps_dry_tendency[:, 1:] = torch.diff(ps_dry, n=1, dim=1).abs()
     return abs_ps_dry_tendency
@@ -52,25 +43,17 @@ def surface_pressure_due_to_dry_air_absolute_tendency(
 @register
 def total_water_path(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    return vertical_coordinate.vertical_integral(
-        data.specific_total_water,
-        data.surface_pressure,
-    )
+    return data.total_water_path
 
 
 @register
 def total_water_path_budget_residual(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    total_water_path = vertical_coordinate.vertical_integral(
-        data.specific_total_water,
-        data.surface_pressure,
-    )
+    total_water_path = data.total_water_path
     twp_total_tendency = (total_water_path[:, 1:] - total_water_path[:, :-1]) / (
         timestep.total_seconds()
     )
@@ -87,7 +70,6 @@ def total_water_path_budget_residual(
 @register
 def net_energy_flux_toa_into_atmosphere(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     return data.net_top_of_atmosphere_energy_flux
@@ -96,7 +78,6 @@ def net_energy_flux_toa_into_atmosphere(
 @register
 def net_energy_flux_sfc_into_atmosphere(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     # property is defined as positive into surface, but want to compare to
@@ -107,7 +88,6 @@ def net_energy_flux_sfc_into_atmosphere(
 @register
 def net_energy_flux_into_atmospheric_column(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     return data.net_energy_flux_into_atmosphere
@@ -116,19 +96,17 @@ def net_energy_flux_into_atmospheric_column(
 @register
 def total_energy_ace2_path(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    return data.total_energy_ace2_path(vertical_coordinate)
+    return data.total_energy_ace2_path
 
 
 @register
 def total_energy_ace2_path_tendency(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
-    mse = total_energy_ace2_path(data, vertical_coordinate, timestep)
+    mse = total_energy_ace2_path(data, timestep)
     mse_tendency = torch.zeros_like(mse)
     mse_tendency[:, 1:] = torch.diff(mse, n=1, dim=1) / timestep.total_seconds()
     return mse_tendency
@@ -137,19 +115,14 @@ def total_energy_ace2_path_tendency(
 @register
 def implied_tendency_of_total_energy_ace2_path_due_to_advection(
     data: AtmosphereData,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
     """Implied tendency of total energy path due to advection.
 
     This is computed as a residual from the column total energy budget.
     """
-    column_energy_tendency = total_energy_ace2_path_tendency(
-        data, vertical_coordinate, timestep
-    )
-    flux_through_vertical_boundaries = net_energy_flux_into_atmospheric_column(
-        data, vertical_coordinate, timestep
-    )
+    column_energy_tendency = total_energy_ace2_path_tendency(data, timestep)
+    flux_through_vertical_boundaries = data.net_energy_flux_into_atmosphere
     implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
     return implied_column_heating
 
@@ -193,10 +166,10 @@ def _compute_derived_variable(
             if key not in data:
                 data[key] = value
 
-    atmosphere_data = AtmosphereData(data)
+    atmosphere_data = AtmosphereData(data, vertical_coordinate)
 
     try:
-        output = derived_variable_func(atmosphere_data, vertical_coordinate, timestep)
+        output = derived_variable_func(atmosphere_data, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised
