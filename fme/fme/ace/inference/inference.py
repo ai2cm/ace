@@ -166,9 +166,13 @@ class InferenceConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self, env_vars: Optional[dict] = None, **kwargs):
+    def configure_wandb(
+        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+    ):
         config = to_flat_dict(dataclasses.asdict(self))
-        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
+        self.logging.configure_wandb(
+            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        )
 
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
