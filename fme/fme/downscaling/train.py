@@ -348,10 +348,12 @@ class TrainerConfig:
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
-    def configure_wandb(self, **kwargs):
+    def configure_wandb(self, resumable: bool = True, **kwargs):
         config = to_flat_dict(dataclasses.asdict(self))
         env_vars = logging_utils.retrieve_env_vars()
-        self.logging.configure_wandb(config=config, env_vars=env_vars, **kwargs)
+        self.logging.configure_wandb(
+            config=config, env_vars=env_vars, resumable=resumable, **kwargs
+        )
 
 
 def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
@@ -373,7 +375,7 @@ def main(config_path: str):
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    train_config.configure_wandb(notes=beaker_url, resumable=True)
+    train_config.configure_wandb(notes=beaker_url)
 
     logging.info("Starting training")
     trainer = train_config.build()
