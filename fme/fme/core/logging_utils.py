@@ -28,12 +28,13 @@ class LoggingConfig:
     Configuration for logging.
 
     Parameters:
-        project: name of the project in Weights & Biases
-        entity: name of the entity in Weights & Biases
-        log_to_screen: whether to log to the screen
-        log_to_file: whether to log to a file
-        log_to_wandb: whether to log to Weights & Biases
-        log_format: format of the log messages
+        project: Name of the project in Weights & Biases.
+        entity: Name of the entity in Weights & Biases.
+        log_to_screen: Whether to log to the screen.
+        log_to_file: Whether to log to a file.
+        log_to_wandb: Whether to log to Weights & Biases.
+        log_format: Format of the log messages.
+        level: Sets the logging level.
     """
 
     project: str = "ace"
@@ -75,9 +76,15 @@ class LoggingConfig:
         config: Mapping[str, Any],
         env_vars: Optional[Mapping[str, Any]] = None,
         wandb_dir: Optional[str] = DEFAULT_TMP_DIR,
-        resumable: bool = False,
+        resumable: bool = True,
+        resume: Any = None,
         **kwargs,
     ):
+        if resume is not None:
+            raise ValueError(
+                "The 'resume' argument is no longer supported, "
+                "please pass 'resumable' instead."
+            )
         config_copy = {**config}
         if "environment" in config_copy:
             logging.warning(
