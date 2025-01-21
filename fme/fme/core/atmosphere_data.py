@@ -17,7 +17,7 @@ from fme.core.device import get_device
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
-CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
+ATMOSPHERE_FIELD_NAME_PREFIXES = MappingProxyType(
     {
         "specific_total_water": ["specific_total_water_"],
         "surface_pressure": ["PRESsfc", "PS"],
@@ -41,32 +41,32 @@ CLIMATE_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
-class ClimateData:
-    """Container for climate data for accessing variables and providing
+class AtmosphereData:
+    """Container for atmospheric data for accessing variables and providing
     torch.Tensor views on data with multiple vertical levels.
     """
 
     def __init__(
         self,
-        climate_data: TensorMapping,
-        climate_field_name_prefixes: Mapping[
+        atmosphere_data: TensorMapping,
+        atmosphere_field_name_prefixes: Mapping[
             str, List[str]
-        ] = CLIMATE_FIELD_NAME_PREFIXES,
+        ] = ATMOSPHERE_FIELD_NAME_PREFIXES,
     ):
         """
-        Initializes the instance based on the climate data and prefixes.
+        Initializes the instance based on the provided data and prefixes.
 
         Args:
-            climate_data: Mapping from field names to tensors.
-            climate_field_name_prefixes: Mapping which defines the correspondence
+            atmosphere_data: Mapping from field names to tensors.
+            atmosphere_field_name_prefixes: Mapping which defines the correspondence
                 between an arbitrary set of "standard" names (e.g., "surface_pressure"
                 or "air_temperature") and lists of possible names or prefix variants
                 (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
                 data.
         """
-        self._data = dict(climate_data)
-        self._prefix_map = climate_field_name_prefixes
-        self._stacker = Stacker(climate_field_name_prefixes)
+        self._data = dict(atmosphere_data)
+        self._prefix_map = atmosphere_field_name_prefixes
+        self._stacker = Stacker(atmosphere_field_name_prefixes)
 
     @property
     def data(self) -> TensorDict:
@@ -336,7 +336,7 @@ class ClimateData:
 
 
 def compute_dry_air_absolute_differences(
-    climate_data: ClimateData,
+    atmosphere_data: AtmosphereData,
     area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
     vertical_coordinate: HybridSigmaPressureCoordinate,
 ) -> torch.Tensor:
@@ -344,7 +344,7 @@ def compute_dry_air_absolute_differences(
     Computes the absolute value of the dry air tendency of each time step.
 
     Args:
-        climate_data: ClimateData object.
+        atmosphere_data: AtmosphereData object.
         area_weighted_mean: Function which returns an area-weighted mean.
         vertical_coordinate: The vertical coordinate of the model.
 
@@ -353,8 +353,8 @@ def compute_dry_air_absolute_differences(
             of each time step.
     """
     try:
-        water = climate_data.specific_total_water
-        pressure = climate_data.surface_pressure
+        water = atmosphere_data.specific_total_water
+        pressure = atmosphere_data.surface_pressure
     except KeyError:
         return torch.tensor([torch.nan])
     ps_dry = metrics.surface_pressure_due_to_dry_air(

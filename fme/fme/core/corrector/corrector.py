@@ -7,7 +7,7 @@ import dacite
 import torch
 
 import fme
-from fme.core.climate_data import ClimateData, compute_layer_thickness
+from fme.core.atmosphere_data import AtmosphereData, compute_layer_thickness
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
@@ -246,10 +246,10 @@ def _force_conserve_dry_air(
             1 - sum_k(bk_diff * wat_k)
         )
     """
-    input = ClimateData(input_data)
+    input = AtmosphereData(input_data)
     if input.surface_pressure is None:
         raise ValueError("surface_pressure is required to force dry air conservation")
-    gen = ClimateData(gen_data)
+    gen = AtmosphereData(gen_data)
     gen_dry_air = gen.surface_pressure_due_to_dry_air(vertical_coordinate)
     global_gen_dry_air = area_weighted_mean(gen_dry_air.to(precision), keepdim=True)
     global_target_gen_dry_air = area_weighted_mean(
@@ -285,7 +285,7 @@ def _force_zero_global_mean_moisture_advection(
         area_weighted_mean: Computes an area-weighted mean,
             removing horizontal dimensions.
     """
-    gen = ClimateData(gen_data)
+    gen = AtmosphereData(gen_data)
 
     mean_moisture_advection = area_weighted_mean(
         gen.tendency_of_total_water_path_due_to_advection,
@@ -333,8 +333,8 @@ def _force_conserve_moisture(
             - "advection_and_precipitation": modify advection and precipitation
             - "advection_and_evaporation": modify advection and evaporation
     """
-    input = ClimateData(input_data)
-    gen = ClimateData(gen_data)
+    input = AtmosphereData(input_data)
+    gen = AtmosphereData(gen_data)
 
     gen_total_water_path = gen.total_water_path(vertical_coordinate)
     timestep_seconds = timestep / datetime.timedelta(seconds=1)
@@ -402,8 +402,8 @@ def _force_conserve_total_energy(
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
         )
-    input = ClimateData(input_data)
-    gen = ClimateData(dict(gen_data) | forcing_data)
+    input = AtmosphereData(input_data)
+    gen = AtmosphereData(dict(gen_data) | forcing_data)
     if torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Surface pressure has a non-positive value, skipping energy correction."
@@ -442,7 +442,7 @@ def _force_conserve_total_energy(
 
 
 def _energy_correction_factor(
-    gen: ClimateData, vertical_coordinate: HybridSigmaPressureCoordinate
+    gen: AtmosphereData, vertical_coordinate: HybridSigmaPressureCoordinate
 ) -> torch.Tensor:
     """
     Compute the factor to get a vertically-uniform temperature correction that

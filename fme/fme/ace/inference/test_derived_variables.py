@@ -6,7 +6,7 @@ import torch
 import xarray as xr
 
 from fme.ace.stepper import TrainOutput
-from fme.core.climate_data import ClimateData
+from fme.core.atmosphere_data import AtmosphereData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -21,7 +21,7 @@ def test_compute_derived_variable():
         ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
     )
 
-    def _derived_variable_func(data: ClimateData, *_) -> torch.Tensor:
+    def _derived_variable_func(data: AtmosphereData, *_) -> torch.Tensor:
         return data.surface_pressure + data.precipitation_rate
 
     output_data = _compute_derived_variable(
@@ -36,7 +36,9 @@ def test_compute_derived_variable_raises_value_error_when_overwriting():
         ak=torch.tensor([0.0, 0.0]), bk=torch.tensor([0.0, 1.0])
     )
 
-    def add_surface_pressure_and_precipitation(data: ClimateData, *_) -> torch.Tensor:
+    def add_surface_pressure_and_precipitation(
+        data: AtmosphereData, *_
+    ) -> torch.Tensor:
         return data.surface_pressure + data.precipitation_rate
 
     derived_variable_func = add_surface_pressure_and_precipitation

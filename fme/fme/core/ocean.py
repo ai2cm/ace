@@ -6,7 +6,7 @@ import torch
 
 from fme.core.typing_ import TensorDict, TensorMapping
 
-from .climate_data import ClimateData
+from .atmosphere_data import AtmosphereData
 from .constants import DENSITY_OF_WATER, SPECIFIC_HEAT_OF_WATER
 from .prescriber import Prescriber
 
@@ -120,7 +120,7 @@ class Ocean:
             next_step_temperature = target_data[self.surface_temperature_name]
         elif self.type == "slab":
             temperature_tendency = mixed_layer_temperature_tendency(
-                ClimateData(gen_data).net_surface_energy_flux_without_frozen_precip,
+                AtmosphereData(gen_data).net_surface_energy_flux_without_frozen_precip,
                 target_data[self.q_flux_name],
                 target_data[self.mixed_layer_depth_name],
             )

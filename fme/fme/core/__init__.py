@@ -1,4 +1,4 @@
-from .climate_data import ClimateData
+from .atmosphere_data import AtmosphereData
 from .device import get_device, using_gpu
 from .gridded_ops import GriddedOperations
 from .metrics import (
@@ -20,6 +20,6 @@ __all__ = [
     "StandardNormalizer",
     "get_normalizer",
     "Packer",
-    "ClimateData",
+    "AtmosphereData",
     "GriddedOperations",
 ]
