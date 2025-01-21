@@ -5,11 +5,11 @@ from typing import Callable, Dict, MutableMapping, Optional
 import torch
 
 from fme.core import metrics
-from fme.core.climate_data import ClimateData
+from fme.core.atmosphere_data import AtmosphereData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 
 DerivedVariableFunc = Callable[
-    [ClimateData, HybridSigmaPressureCoordinate, datetime.timedelta], torch.Tensor
+    [AtmosphereData, HybridSigmaPressureCoordinate, datetime.timedelta], torch.Tensor
 ]
 
 
@@ -26,7 +26,7 @@ def register(func: DerivedVariableFunc):
 
 @register
 def surface_pressure_due_to_dry_air(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
@@ -39,7 +39,7 @@ def surface_pressure_due_to_dry_air(
 
 @register
 def surface_pressure_due_to_dry_air_absolute_tendency(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
@@ -51,7 +51,7 @@ def surface_pressure_due_to_dry_air_absolute_tendency(
 
 @register
 def total_water_path(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
@@ -63,7 +63,7 @@ def total_water_path(
 
 @register
 def total_water_path_budget_residual(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -86,7 +86,7 @@ def total_water_path_budget_residual(
 
 @register
 def net_energy_flux_toa_into_atmosphere(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -95,7 +95,7 @@ def net_energy_flux_toa_into_atmosphere(
 
 @register
 def net_energy_flux_sfc_into_atmosphere(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -106,7 +106,7 @@ def net_energy_flux_sfc_into_atmosphere(
 
 @register
 def net_energy_flux_into_atmospheric_column(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -115,7 +115,7 @@ def net_energy_flux_into_atmospheric_column(
 
 @register
 def total_energy_ace2_path(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -124,7 +124,7 @@ def total_energy_ace2_path(
 
 @register
 def total_energy_ace2_path_tendency(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -136,7 +136,7 @@ def total_energy_ace2_path_tendency(
 
 @register
 def implied_tendency_of_total_energy_ace2_path_due_to_advection(
-    data: ClimateData,
+    data: AtmosphereData,
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
 ):
@@ -193,10 +193,10 @@ def _compute_derived_variable(
             if key not in data:
                 data[key] = value
 
-    climate_data = ClimateData(data)
+    atmosphere_data = AtmosphereData(data)
 
     try:
-        output = derived_variable_func(climate_data, vertical_coordinate, timestep)
+        output = derived_variable_func(atmosphere_data, vertical_coordinate, timestep)
     except KeyError as key_error:
         logging.debug(f"Could not compute {label} because {key_error} is missing")
     else:  # if no exception was raised

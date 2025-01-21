@@ -1,10 +1,8 @@
-"""Tests for classes and methods related to climate data."""
-
 import pytest
 import torch
 
-from fme.core.climate_data import (
-    ClimateData,
+from fme.core.atmosphere_data import (
+    AtmosphereData,
     _height_at_interface,
     compute_layer_thickness,
 )
@@ -68,11 +66,11 @@ def test_missing_specific_total_water(has_water_variable):
                 "PRESsfc": torch.rand(n_samples, n_time_steps, nlat, nlon),
             }
 
-    climate_data = ClimateData(_get_data(water=has_water_variable))
+    atmos_data = AtmosphereData(_get_data(water=has_water_variable))
 
     if has_water_variable:
-        assert climate_data.specific_total_water is not None
-        assert climate_data.specific_total_water.shape == (
+        assert atmos_data.specific_total_water is not None
+        assert atmos_data.specific_total_water.shape == (
             n_samples,
             n_time_steps,
             nlat,
@@ -81,7 +79,7 @@ def test_missing_specific_total_water(has_water_variable):
         )
     else:
         with pytest.raises(KeyError):
-            _ = climate_data.specific_total_water
+            _ = atmos_data.specific_total_water
 
 
 @pytest.mark.parametrize("missing_water_layer", [True, False])
@@ -102,11 +100,11 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
             )
         return data
 
-    climate_data = ClimateData(_get_data(missing_water_layer))
+    atmos_data = AtmosphereData(_get_data(missing_water_layer))
 
     if not missing_water_layer:
-        assert climate_data.specific_total_water is not None
-        assert climate_data.specific_total_water.shape == (
+        assert atmos_data.specific_total_water is not None
+        assert atmos_data.specific_total_water.shape == (
             n_samples,
             n_time_steps,
             nlat,
@@ -115,4 +113,4 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
         )
     else:
         with pytest.raises(ValueError):
-            _ = climate_data.specific_total_water
+            _ = atmos_data.specific_total_water

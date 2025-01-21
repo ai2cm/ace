@@ -20,7 +20,7 @@ from fme.ace.stepper import (
     TrainOutput,
     _combine_normalizers,
 )
-from fme.core import ClimateData, metrics
+from fme.core import AtmosphereData, metrics
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -596,7 +596,7 @@ def test_stepper_corrector(
     # check that the dry air is conserved
     dry_air = (
         metrics.weighted_mean(
-            ClimateData(stepped.gen_data).surface_pressure_due_to_dry_air(
+            AtmosphereData(stepped.gen_data).surface_pressure_due_to_dry_air(
                 vertical_coordinate
             ),
             weights=area_weights,

@@ -6,8 +6,8 @@ import pytest
 import torch
 
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
-from fme.core import ClimateData, metrics
-from fme.core.climate_data import compute_dry_air_absolute_differences
+from fme.core import AtmosphereData, metrics
+from fme.core.atmosphere_data import compute_dry_air_absolute_differences
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.ocean import OceanCorrector
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
@@ -43,7 +43,7 @@ def get_dry_air_nonconservation(
         vertical_coordinate: The vertical coordinates of the model.
     """
     return compute_dry_air_absolute_differences(
-        ClimateData(data),
+        AtmosphereData(data),
         area_weighted_mean=area_weighted_mean,
         vertical_coordinate=vertical_coordinate,
     ).mean()
@@ -181,7 +181,7 @@ def test_force_conserve_moisture(
         data["tendency_of_total_water_path_due_to_advection"], keepdim=True
     )
     original_budget_residual = total_water_path_budget_residual(
-        ClimateData(data),
+        AtmosphereData(data),
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
@@ -191,7 +191,7 @@ def test_force_conserve_moisture(
         )
     original_budget_residual = original_budget_residual.cpu().numpy()
     original_dry_air = (
-        ClimateData(data)
+        AtmosphereData(data)
         .surface_pressure_due_to_dry_air(vertical_coordinate)
         .cpu()
         .numpy()
@@ -211,12 +211,12 @@ def test_force_conserve_moisture(
         k: torch.stack([v, fixed_out_data[k]], dim=1) for k, v in in_data.items()
     }
     new_budget_residual = total_water_path_budget_residual(
-        ClimateData(new_data),
+        AtmosphereData(new_data),
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )[:, 1]  # no meaning for initial value data, want first timestep
     new_dry_air = (
-        ClimateData(data)
+        AtmosphereData(data)
         .surface_pressure_due_to_dry_air(vertical_coordinate)
         .cpu()
         .numpy()
@@ -313,8 +313,8 @@ def test__force_conserve_total_energy():
         assert name not in corrected_gen_data
 
     # ensure the corrected global mean MSE path is what we expect
-    input = ClimateData(input_data)
-    corrected_gen = ClimateData(corrected_gen_data | forcing_data)
+    input = AtmosphereData(input_data)
+    corrected_gen = AtmosphereData(corrected_gen_data | forcing_data)
     input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path(vertical_coord))
     corrected_gen_gm_mse = ops.area_weighted_mean(
         corrected_gen.total_energy_ace2_path(vertical_coord)
