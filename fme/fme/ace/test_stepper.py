@@ -1,4 +1,5 @@
 import datetime
+import pathlib
 from collections import namedtuple
 from typing import Iterable, List, Literal, Optional, Tuple, Union
 from unittest.mock import MagicMock
@@ -13,15 +14,25 @@ import fme
 from fme.ace.aggregator import OneStepAggregator
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.inference.test_evaluator import (
+    save_plus_one_stepper,
+    validate_stepper_multi_call,
+    validate_stepper_ocean,
+)
+from fme.ace.multi_call import MultiCallConfig
 from fme.ace.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
+    StepperOverrideConfig,
     TrainOutput,
     _combine_normalizers,
+    load_stepper,
+    load_stepper_config,
 )
+from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
@@ -34,6 +45,46 @@ from fme.core.typing_ import TensorDict
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
 TIMESTEP = datetime.timedelta(hours=6)
 DEVICE = fme.get_device()
+OCEAN_CONFIG = OceanConfig(surface_temperature_name="a", ocean_fraction_name="b")
+MULTI_CALL_CONFIG = MultiCallConfig(
+    forcing_name="co2", forcing_multipliers={"_b": 0.5}, output_names=["ULWRFtoa"]
+)
+LOAD_STEPPER_TESTS = {
+    "override-ocean": (None, None, OCEAN_CONFIG, "keep", OCEAN_CONFIG, None),
+    "persist-ocean": (OCEAN_CONFIG, None, "keep", "keep", OCEAN_CONFIG, None),
+    "override-multi-call": (
+        None,
+        None,
+        "keep",
+        MULTI_CALL_CONFIG,
+        None,
+        MULTI_CALL_CONFIG,
+    ),
+    "persist-multi-call": (
+        None,
+        MULTI_CALL_CONFIG,
+        "keep",
+        "keep",
+        None,
+        MULTI_CALL_CONFIG,
+    ),
+    "override-all": (
+        None,
+        None,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+    ),
+    "persist-all": (
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+        "keep",
+        "keep",
+        OCEAN_CONFIG,
+        MULTI_CALL_CONFIG,
+    ),
+}
 
 
 def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
@@ -948,3 +999,72 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
+
+
+@pytest.mark.parametrize(
+    (
+        "serialized_ocean_config",
+        "serialized_multi_call_config",
+        "overriding_ocean_config",
+        "overriding_multi_call_config",
+        "expected_ocean_config",
+        "expected_multi_call_config",
+    ),
+    list(LOAD_STEPPER_TESTS.values()),
+    ids=list(LOAD_STEPPER_TESTS.keys()),
+)
+def test_load_stepper_and_load_stepper_config(
+    tmp_path: pathlib.Path,
+    serialized_ocean_config: Optional[OceanConfig],
+    serialized_multi_call_config: Optional[MultiCallConfig],
+    overriding_ocean_config: Literal["keep"] | OceanConfig | None,
+    overriding_multi_call_config: Literal["keep"] | MultiCallConfig | None,
+    expected_ocean_config: Optional[OceanConfig],
+    expected_multi_call_config: Optional[MultiCallConfig],
+):
+    in_names = ["co2", "var", "a", "b"]
+    fluxes = ["ULWRFtoa"]
+    out_names = ["var", "a"] + fluxes
+    stepper_path = tmp_path / "stepper"
+    n_forward_steps = 8
+
+    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    dim_sizes = DimSizes(
+        n_time=n_forward_steps + 1,
+        horizontal=horizontal,
+        nz_interface=4,
+    )
+    save_plus_one_stepper(
+        stepper_path,
+        in_names,
+        out_names,
+        mean=0.0,
+        std=1.0,
+        data_shape=dim_sizes.shape_nd,
+        ocean=serialized_ocean_config,
+        multi_call=serialized_multi_call_config,
+    )
+
+    # First check that load_stepper_config and load_stepper functions load
+    # the unmodified stepper when no StepperOverrideConfig is passed.
+    stepper_config = load_stepper_config(stepper_path)
+    assert stepper_config.ocean == serialized_ocean_config
+    assert stepper_config.multi_call == serialized_multi_call_config
+
+    stepper = load_stepper(stepper_path)
+    validate_stepper_ocean(stepper, serialized_ocean_config)
+    validate_stepper_multi_call(stepper, serialized_multi_call_config)
+
+    # Then check that they load the appropriately modified config and
+    # stepper when provided with a StepperOverrideConfig.
+    stepper_override = StepperOverrideConfig(
+        ocean=overriding_ocean_config, multi_call=overriding_multi_call_config
+    )
+
+    stepper_config = load_stepper_config(stepper_path, stepper_override)
+    assert stepper_config.ocean == expected_ocean_config
+    assert stepper_config.multi_call == expected_multi_call_config
+
+    stepper = load_stepper(stepper_path, stepper_override)
+    validate_stepper_ocean(stepper, expected_ocean_config)
+    validate_stepper_multi_call(stepper, expected_multi_call_config)
