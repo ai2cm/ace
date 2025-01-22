@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Tuple, Type, TypeVar
+from typing import Any, Callable, ClassVar, Mapping, Tuple, Type
 
 import dacite
 import numpy as np
@@ -35,21 +35,20 @@ class PerturbationConfig(abc.ABC):
     ) -> None: ...
 
 
-PT = TypeVar("PT", bound=Type[PerturbationConfig])
-
-
 @dataclasses.dataclass
 class PerturbationSelector:
     type: str
     config: Mapping[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[PerturbationConfig]] = Registry[PerturbationConfig]()
 
-    def __post__init(self):
-        if self.registry is not Registry():
+    def __post_init__(self):
+        if not isinstance(self.registry, Registry):
             raise ValueError("PerturbationSelector.registry should not be set manually")
 
     @classmethod
-    def register(cls, type_name) -> Callable[[PT], PT]:
+    def register(
+        cls, type_name
+    ) -> Callable[[Type[PerturbationConfig]], Type[PerturbationConfig]]:
         return cls.registry.register(type_name)
 
     def build(self) -> PerturbationConfig:

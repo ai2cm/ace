@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
+from typing import Any, Callable, ClassVar, Mapping, Type
 
 import dacite
 
@@ -9,8 +9,6 @@ from fme.core.corrector.registry import CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
 
 from .registry import Registry
-
-CT = TypeVar("CT", bound=Type[CorrectorConfigProtocol])
 
 
 @dataclasses.dataclass
@@ -38,14 +36,18 @@ class CorrectorSelector:
 
     type: str
     config: Mapping[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[CorrectorConfigProtocol]] = Registry[
+        CorrectorConfigProtocol
+    ]()
 
-    def __post__init(self):
-        if self.registry is not Registry():
+    def __post_init__(self):
+        if not isinstance(self.registry, Registry):
             raise ValueError("CorrectorSelector.registry should not be set manually")
 
     @classmethod
-    def register(cls, type_name) -> Callable[[CT], CT]:
+    def register(
+        cls, type_name
+    ) -> Callable[[Type[CorrectorConfigProtocol]], Type[CorrectorConfigProtocol]]:
         return cls.registry.register(type_name)
 
     def build(
@@ -78,11 +80,6 @@ class CorrectorSelector:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
-
-    @classmethod
-    def from_dict(cls, config: dict):
-        instance = cls.registry.from_dict(config)
-        return cls(config=instance, type=config["type"])
 
     @classmethod
     def get_available_types(cls):
