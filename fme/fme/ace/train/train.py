@@ -70,6 +70,7 @@ from fme.ace.aggregator.inference.main import (
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
+from fme.core.config import update_dict_with_dotlist
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
@@ -219,9 +220,12 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     logging.info("DONE ---- rank %d" % dist.rank)
 
 
-def main(yaml_config: str):
+def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
     with open(yaml_config, "r") as f:
         data = yaml.safe_load(f)
+
+    data = update_dict_with_dotlist(data, override_dotlist)
+
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,
         data=data,
