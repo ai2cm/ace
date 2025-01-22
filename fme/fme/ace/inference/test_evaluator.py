@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import os
 import pathlib
-from typing import List
+from typing import List, Optional
 
 import dacite
 import numpy as np
@@ -18,9 +18,14 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.evaluator import InferenceEvaluatorConfig, main
+from fme.ace.inference.evaluator import (
+    InferenceEvaluatorConfig,
+    StepperOverrideConfig,
+    main,
+)
+from fme.ace.multi_call import MultiCall, MultiCallConfig
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepperConfig, TrainOutput
+from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
@@ -53,8 +58,13 @@ def save_plus_one_stepper(
     data_shape: List[int],
     timestep: datetime.timedelta = TIMESTEP,
     nz_interface: int = 7,
+    ocean=None,
+    multi_call=None,
 ):
-    all_names = list(set(in_names).union(out_names))
+    if multi_call is None:
+        all_names = list(set(in_names).union(out_names))
+    else:
+        all_names = list(set(in_names).union(out_names)) + multi_call.names
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
         in_names=in_names,
@@ -63,6 +73,8 @@ def save_plus_one_stepper(
             means={name: mean for name in all_names},
             stds={name: std for name in all_names},
         ),
+        ocean=ocean,
+        multi_call=multi_call,
     )
     area = torch.ones(data_shape[-2:], device=get_device())
     vertical_coordinate = HybridSigmaPressureCoordinate(
@@ -75,6 +87,52 @@ def save_plus_one_stepper(
         timestep=timestep,
     )
     torch.save({"stepper": stepper.get_state()}, path)
+
+
+def validate_stepper_ocean(
+    stepper: SingleModuleStepper, expected_ocean_config: Optional[OceanConfig]
+):
+    assert stepper._config.ocean == expected_ocean_config
+    if expected_ocean_config is not None:
+        assert isinstance(stepper.ocean, Ocean)
+        assert (
+            stepper.ocean.surface_temperature_name
+            == expected_ocean_config.surface_temperature_name
+        )
+        assert (
+            stepper.ocean.ocean_fraction_name
+            == expected_ocean_config.ocean_fraction_name
+        )
+    else:
+        assert stepper.ocean is None
+
+
+def validate_stepper_multi_call(
+    stepper: SingleModuleStepper, expected_multi_call_config: Optional[MultiCallConfig]
+):
+    assert stepper._config.multi_call == expected_multi_call_config
+    if expected_multi_call_config is not None:
+        assert isinstance(stepper._multi_call, MultiCall)
+        assert (
+            stepper._multi_call.forcing_name == expected_multi_call_config.forcing_name
+        )
+        assert (
+            stepper._multi_call.forcing_multipliers
+            == expected_multi_call_config.forcing_multipliers
+        )
+        assert (
+            stepper._multi_call.output_names == expected_multi_call_config.output_names
+        )
+        expected_all_names = set(
+            expected_multi_call_config.names + stepper.in_names + stepper.out_names
+        )
+        assert set(stepper._config.all_names) == expected_all_names
+        expected_diagnostic_names = set(
+            expected_multi_call_config.names + expected_multi_call_config.output_names
+        )
+        assert set(stepper._config.diagnostic_names) == expected_diagnostic_names
+    else:
+        assert stepper._multi_call is None
 
 
 def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
@@ -747,10 +805,11 @@ def test_inference_config_raises_incompatible_timesteps(
         )
 
 
-def test_inference_ocean_override(tmp_path: pathlib.Path):
+def test_inference_override(tmp_path: pathlib.Path):
     """Test that data at initial condition boundaires"""
-    in_names = ["var"]
-    out_names = ["var"]
+    in_names = ["co2", "surface_temperature", "ocean_fraction"]
+    fluxes = ["ULWRFtoa"]
+    out_names = ["surface_temperature"] + fluxes
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
     n_forward_steps = 8
@@ -776,8 +835,16 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         timestep_days=TIMESTEP.total_seconds() / 86400,
     )
     ocean_override = OceanConfig(
-        surface_temperature_name="var",
-        ocean_fraction_name="override_ocean_fraction",
+        surface_temperature_name="surface_temperature",
+        ocean_fraction_name="ocean_fraction",
+    )
+    multi_call_override = MultiCallConfig(
+        forcing_name="co2",
+        forcing_multipliers={"_quartered_co2": 0.25},
+        output_names=fluxes,
+    )
+    stepper_override = StepperOverrideConfig(
+        ocean=ocean_override, multi_call=multi_call_override
     )
 
     config = InferenceEvaluatorConfig(
@@ -788,18 +855,15 @@ def test_inference_ocean_override(tmp_path: pathlib.Path):
         loader=data.inference_data_loader_config,
         data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
         forward_steps_in_memory=4,
-        ocean=ocean_override,
+        stepper_override=stepper_override,
     )
     stepper = config.load_stepper()
-    assert isinstance(stepper.ocean, Ocean)
-    assert (
-        stepper.ocean.surface_temperature_name
-        == ocean_override.surface_temperature_name
-    )
-    assert stepper.ocean.ocean_fraction_name == ocean_override.ocean_fraction_name
+    validate_stepper_ocean(stepper, ocean_override)
+    validate_stepper_multi_call(stepper, multi_call_override)
 
     stepper_config = config.load_stepper_config()
     assert stepper_config.ocean == ocean_override
+    assert stepper_config.multi_call == multi_call_override
 
 
 def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):

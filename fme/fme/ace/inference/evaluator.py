@@ -22,43 +22,18 @@ from fme.ace.inference.loop import (
     run_dataset_comparison,
     write_reduced_metrics,
 )
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
+from fme.ace.stepper import (
+    SingleModuleStepper,
+    SingleModuleStepperConfig,
+    StepperOverrideConfig,
+    load_stepper,
+    load_stepper_config,
+)
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
-from fme.core.ocean import OceanConfig
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
-
-
-def load_stepper_config(
-    checkpoint_file: str, ocean_config: Optional[OceanConfig]
-) -> SingleModuleStepperConfig:
-    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
-    if ocean_config is not None:
-        logging.info(
-            "Overriding training ocean configuration with the inference ocean config."
-        )
-        config.ocean = ocean_config
-    return config
-
-
-def load_stepper(
-    checkpoint_file: str,
-    ocean_config: Optional[OceanConfig] = None,
-) -> SingleModuleStepper:
-    checkpoint = torch.load(checkpoint_file, map_location=fme.get_device())
-    stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
-    if ocean_config is not None:
-        logging.info(
-            "Overriding training ocean configuration with the inference ocean config."
-        )
-        new_ocean = ocean_config.build(
-            stepper.in_names, stepper.out_names, stepper.timestep
-        )
-        stepper.replace_ocean(new_ocean)
-    return stepper
 
 
 def validate_time_coarsen_config(
@@ -98,8 +73,8 @@ class InferenceEvaluatorConfig:
             at a time, will load one more step for initial condition.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference evaluator aggregator.
-        ocean: Ocean configuration for running inference with a
-            different one than what is used in training.
+        stepper_override: Configuration for overriding select stepper configuration
+            options at inference time (optional).
     """
 
     experiment_dir: str
@@ -115,7 +90,7 @@ class InferenceEvaluatorConfig:
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
-    ocean: Optional[OceanConfig] = None
+    stepper_override: Optional[StepperOverrideConfig] = None
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -138,12 +113,11 @@ class InferenceEvaluatorConfig:
 
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
-        return stepper
+        return load_stepper(self.checkpoint_path, self.stepper_override)
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
+        return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
     def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
         return self.data_writer.build_paired(
