@@ -1,8 +1,9 @@
 import dataclasses
 import datetime
 import logging
+import pathlib
 from copy import copy
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -598,14 +599,34 @@ class SingleModuleStepper(
             for k in self._config.out_names
         }
 
-    def replace_ocean(self, ocean: Ocean):
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
         """
         Replace the ocean model with a new one.
 
         Args:
-            ocean: The new ocean model.
+            ocean: The new ocean model configuration or None.
         """
-        self.ocean = ocean
+        self._config.ocean = ocean
+        if ocean is None:
+            self.ocean = ocean
+        else:
+            self.ocean = ocean.build(self.in_names, self.out_names, self.timestep)
+
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        """
+        Replace the MultiCall object with a new one. Note this is only
+        meant to be used at inference time and does not affect the loss
+        function.
+
+        Args:
+            multi_call: The new multi_call configuration or None.
+        """
+        self._config.multi_call = multi_call
+        if multi_call is None:
+            self._multi_call = None
+        else:
+            multi_call.validate(self.in_names, self.out_names)
+            self._multi_call = multi_call.build(self.step)
 
     @property
     def forcing_names(self) -> List[str]:
@@ -1000,3 +1021,92 @@ class SingleModuleStepper(
         )
         stepper.load_state(state)
         return stepper
+
+
+@dataclasses.dataclass
+class StepperOverrideConfig:
+    """
+    Configuration for overriding stepper configuration options.
+
+    The default value for each parameter is ``"keep"``, which denotes that the
+    serialized stepper's configuration will not be modified when loaded. Passing
+    other values will override the configuration of the loaded stepper.
+
+    Parameters:
+        ocean: Ocean configuration to override that used in producing a serialized
+            stepper.
+        multi_call: MultiCall configuration to override that used in producing a
+            serialized stepper.
+    """
+
+    ocean: Literal["keep"] | OceanConfig | None = "keep"
+    multi_call: Literal["keep"] | MultiCallConfig | None = "keep"
+
+
+def load_stepper_config(
+    checkpoint_path: str | pathlib.Path,
+    override_config: Optional[StepperOverrideConfig] = None,
+) -> SingleModuleStepperConfig:
+    """Load a stepper configuration, optionally overriding certain aspects.
+
+    Args:
+        checkpoint_path: The path to the serialized checkpoint.
+        override_config: Configuration options to override (optional).
+
+    Returns:
+        The configuration of the stepper serialized in the checkpoint, with
+        appropriate options overridden.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
+
+    checkpoint = torch.load(checkpoint_path, map_location=get_device())
+    config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        config.ocean = override_config.ocean
+    if override_config.multi_call != "keep":
+        logging.info(
+            "Overriding training multi_call configuration with a new "
+            "multi_call configuration."
+        )
+        config.multi_call = override_config.multi_call
+    return config
+
+
+def load_stepper(
+    checkpoint_path: str | pathlib.Path,
+    override_config: Optional[StepperOverrideConfig] = None,
+) -> SingleModuleStepper:
+    """Load a stepper, optionally overriding certain aspects.
+
+    Args:
+        checkpoint_path: The path to the serialized checkpoint.
+        override_config: Configuration options to override (optional).
+
+    Returns:
+        The stepper serialized in the checkpoint, with appropriate options
+        overridden.
+    """
+    if override_config is None:
+        override_config = StepperOverrideConfig()
+
+    checkpoint = torch.load(checkpoint_path, map_location=get_device())
+    stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
+
+    if override_config.ocean != "keep":
+        logging.info(
+            "Overriding training ocean configuration with a new ocean configuration."
+        )
+        stepper.replace_ocean(override_config.ocean)
+
+    if override_config.multi_call != "keep":
+        logging.info(
+            "Overriding training multi_call configuration with a new "
+            "multi_call configuration."
+        )
+        stepper.replace_multi_call(override_config.multi_call)
+    return stepper

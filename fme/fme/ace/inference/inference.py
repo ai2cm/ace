@@ -23,14 +23,19 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
 from fme.ace.inference.loop import write_reduced_metrics
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
+from fme.ace.stepper import (
+    SingleModuleStepper,
+    SingleModuleStepperConfig,
+    StepperOverrideConfig,
+    load_stepper,
+    load_stepper_config,
+)
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
-from fme.core.ocean import OceanConfig
 from fme.core.timing import GlobalTimer
 
-from .evaluator import load_stepper, load_stepper_config, validate_time_coarsen_config
+from .evaluator import validate_time_coarsen_config
 
 StartIndices = Union[InferenceInitialConditionIndices, ExplicitIndices, TimestampList]
 
@@ -136,8 +141,8 @@ class InferenceConfig:
             at a time.
         data_writer: Configuration for data writers.
         aggregator: Configuration for inference aggregator.
-        ocean: Ocean configuration for running inference with a
-            different one than what is used in training.
+        stepper_override: Configuration for overriding select stepper configuration
+            options at inference time (optional).
     """
 
     experiment_dir: str
@@ -153,7 +158,7 @@ class InferenceConfig:
     aggregator: InferenceAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceAggregatorConfig()
     )
-    ocean: Optional[OceanConfig] = None
+    stepper_override: Optional[StepperOverrideConfig] = None
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -176,12 +181,11 @@ class InferenceConfig:
 
     def load_stepper(self) -> SingleModuleStepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        stepper = load_stepper(self.checkpoint_path, ocean_config=self.ocean)
-        return stepper
+        return load_stepper(self.checkpoint_path, self.stepper_override)
 
     def load_stepper_config(self) -> SingleModuleStepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
-        return load_stepper_config(self.checkpoint_path, ocean_config=self.ocean)
+        return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
     def get_data_writer(self, data: InferenceGriddedData) -> DataWriter:
         return self.data_writer.build(

@@ -17,7 +17,6 @@ from fme.ace.inference.evaluator import (
     InferenceDataLoaderConfig,
     InferenceEvaluatorAggregatorConfig,
     InferenceEvaluatorConfig,
-    OceanConfig,
     run_evaluator_from_config,
 )
 from fme.ace.inference.inference import (
@@ -44,7 +43,7 @@ from fme.core.dataset.config import TimeSlice, XarrayDataConfig
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.ocean import SlabOceanConfig
+from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
 from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
 from fme.core.registry.corrector import CorrectorSelector
