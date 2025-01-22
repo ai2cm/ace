@@ -3,7 +3,6 @@ from typing import Any, Callable, Dict, Generic, Mapping, Optional, Type, TypeVa
 import dacite
 
 T = TypeVar("T")
-TT = TypeVar("TT", bound=Type)
 
 
 class Registry(Generic[T]):
@@ -22,7 +21,7 @@ class Registry(Generic[T]):
         self._types: Dict[str, Type[T]] = {}
         self.default_type = default_type
 
-    def register(self, type_name: str) -> Callable[[TT], TT]:
+    def register(self, type_name: str) -> Callable[[Type[T]], Type[T]]:
         """
         Registers a configuration type with the registry.
 
@@ -36,7 +35,16 @@ class Registry(Generic[T]):
                 class as the target type to be initialized when using from_dict.
         """
 
-        def register_func(cls: TT) -> TT:
+        def register_func(cls: Type[T]) -> Type[T]:
+            base_type = None
+            # attribute exists only when type parameter is passed
+            # i.e. Registry[BaseClass]()
+            if hasattr(self, "__orig_class__"):
+                base_type = self.__orig_class__.__args__[0]
+
+            if base_type and not issubclass(cls, base_type):
+                raise TypeError(f"{cls} must be a subclass of {base_type}")
+
             self._types[type_name] = cls
             return cls
 

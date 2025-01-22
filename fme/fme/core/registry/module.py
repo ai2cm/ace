@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Tuple, TypeVar, Union
+from typing import Any, Callable, ClassVar, Mapping, Tuple, Type, Union
 
 import dacite
 from torch import nn
@@ -51,9 +51,6 @@ class ModuleConfig(abc.ABC):
         )
 
 
-MT = TypeVar("MT", bound=nn.Module)
-
-
 @dataclasses.dataclass
 class ModuleSelector:
     """
@@ -75,14 +72,16 @@ class ModuleSelector:
 
     type: str
     config: Mapping[str, Any]
-    registry: ClassVar[Registry] = Registry()
+    registry: ClassVar[Registry[ModuleConfig]] = Registry[ModuleConfig]()
 
-    def __post__init(self):
-        if self.registry is not Registry():
+    def __post_init__(self):
+        if not isinstance(self.registry, Registry):
             raise ValueError("ModuleSelector.registry should not be set manually")
 
     @classmethod
-    def register(cls, type_name) -> Callable[[MT], MT]:
+    def register(
+        cls, type_name: str
+    ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:
         return cls.registry.register(type_name)
 
     def build(
@@ -126,11 +125,6 @@ class ModuleSelector:
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
-
-    @classmethod
-    def from_dict(cls, config: dict):
-        instance = cls.registry.from_dict(config)
-        return cls(config=instance, type=config["type"])
 
     @classmethod
     def get_available_types(cls):
