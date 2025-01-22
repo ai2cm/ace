@@ -18,3 +18,4 @@ matplotlib
 dask
 astropy-healpix
 pandas
+omegaconf>=2.1.0

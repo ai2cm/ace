@@ -9,6 +9,7 @@ from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.inference import InferenceConfig
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.train.train_config import TrainConfig
+from fme.core.config import update_dict_with_dotlist
 
 CONFIG_CHOICES = ["train", "inference", "evaluator"]
 
@@ -31,6 +32,12 @@ if __name__ == "__main__":
         default="train",
         help=("Indicates the kind of configuration being validated."),
     )
+    parser.add_argument(
+        "--override",
+        nargs="*",
+        help="A dotlist of key=value pairs to override the config. "
+        "For example, --override a.b=1 c=2, where a dot indicates nesting.",
+    )
     args = parser.parse_args()
 
     if args.inference:
@@ -44,6 +51,8 @@ if __name__ == "__main__":
 
     with open(args.path, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
+
+    config_data = update_dict_with_dotlist(config_data, args.override)
 
     if config_type == "evaluator":
         dacite.from_dict(
