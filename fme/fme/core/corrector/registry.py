@@ -1,12 +1,13 @@
 import abc
 import datetime
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 
+@runtime_checkable
 class CorrectorConfigProtocol(Protocol):
     def build(
         self,
