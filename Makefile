@@ -5,7 +5,7 @@ ENVIRONMENT_NAME ?= fme
 USERNAME ?= $(shell beaker account whoami --format=json | jq -r '.[0].name')
 DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
-CURRENT_DATE = $(shell date +'%Y-%m')
+CURRENT_DATE = $(shell date +'%Y-%m-%d')
 
 build_docker_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
