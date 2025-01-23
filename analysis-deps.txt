@@ -2,7 +2,7 @@
 # but which are not requirements of the "fme" package. We do not relist the fme
 # dependencies here.
 beaker-py
-beaker-gantry>=1.11.0
+beaker-gantry>=1.12.0
 Bottleneck
 cartopy>=0.22.0
 dask[distributed]
