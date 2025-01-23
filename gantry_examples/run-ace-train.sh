@@ -26,6 +26,7 @@ gantry run \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
+    --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset oliverwm/era5-1deg-8layer-stats-1990-2019-v2:/statsdata \
     --gpus $N_GPUS \
     --shared-memory 400GiB \
