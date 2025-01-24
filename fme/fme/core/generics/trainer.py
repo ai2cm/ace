@@ -62,6 +62,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Mapping,
     Optional,
     Protocol,
     TypeVar,
@@ -84,6 +85,14 @@ from fme.core.wandb import WandB
 
 class EndOfBatchCallback(Protocol):
     def __call__(self) -> None: ...
+
+
+class EndOfEpochCallback(Protocol):
+    def __call__(self, epoch: int) -> Mapping[str, Any]: ...
+
+
+def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
+    return {}
 
 
 class TrainConfigProtocol(Protocol):
@@ -179,6 +188,7 @@ class Trainer:
         config: TrainConfigProtocol,
         aggregator_builder: AggregatorBuilderABC[PS, TO, SD],
         end_of_batch_callback: EndOfBatchCallback = lambda: None,
+        end_of_epoch_callback: EndOfEpochCallback = null_end_of_epoch_callback,
         do_gc_collect: bool = True,
     ):
         logging.info(f"Current device is {fme.get_device()}")
@@ -210,6 +220,7 @@ class Trainer:
         self.stepper = stepper
         self.optimization = build_optimization(stepper.modules)
         self._end_of_batch_ops = end_of_batch_callback
+        self._end_of_epoch_ops = end_of_epoch_callback
         self._no_optimization = NullOptimization()
         self._aggregator_builder = aggregator_builder
 
@@ -256,7 +267,7 @@ class Trainer:
                 # garbage collect to avoid CUDA error in some contexts
                 # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
                 gc.collect()
-            logging.info(f"Epoch: {epoch+1}")
+            logging.info(f"Epoch: {epoch + 1}")
             self.train_data.set_epoch(epoch)
 
             start_time = time.time()
@@ -294,11 +305,15 @@ class Trainer:
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
+            with self._validation_context():
+                additional_logs = self._end_of_epoch_ops(epoch)
+
             logging.info("Logging to wandb")
             all_logs = {
                 **train_logs,
                 **valid_logs,
                 **inference_logs,
+                **additional_logs,
                 **{
                     "lr": lr,
                     "epoch": epoch,
