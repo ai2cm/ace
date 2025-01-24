@@ -203,7 +203,7 @@ class Distributed:
         """
         Wrap a model with DistributedDataParallel if running in a distributed context.
         """
-        if self.is_distributed():
+        if self.is_distributed() and any(p.requires_grad for p in module.parameters()):
             if using_gpu():
                 device_ids = [self.local_rank]
                 output_device = [self.local_rank]
