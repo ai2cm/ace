@@ -506,7 +506,6 @@ class SingleModuleStepper(
         self._no_optimization = NullOptimization()
 
         dist = Distributed.get_instance()
-        self._is_distributed = dist.is_distributed()
         self.module = dist.wrap_module(self.module)
 
         self._vertical_coordinates = vertical_coordinate.to(get_device())
