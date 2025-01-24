@@ -68,7 +68,7 @@ class MultiCallConfig:
 
     def build(
         self,
-        step_method: Callable[[TensorMapping, TensorMapping], TensorDict],
+        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
     ):
         return MultiCall(self, step_method)
 
@@ -86,7 +86,7 @@ class MultiCall:
     def __init__(
         self,
         config: MultiCallConfig,
-        step_method: Callable[[TensorMapping, TensorMapping], TensorDict],
+        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
     ):
         self.forcing_name = config.forcing_name
         self.forcing_multipliers = config.forcing_multipliers
@@ -99,13 +99,18 @@ class MultiCall:
         return self._names
 
     def step(
-        self, input: TensorMapping, next_step_forcing_data: TensorMapping
+        self,
+        input: TensorMapping,
+        next_step_forcing_data: TensorMapping,
+        use_activation_checkpointing: bool = False,
     ) -> TensorDict:
         predictions = {}
         unscaled_forcing = input[self.forcing_name]
         for suffix, multiplier in self.forcing_multipliers.items():
             scaled_input = input | {self.forcing_name: multiplier * unscaled_forcing}
-            output = self._step(scaled_input, next_step_forcing_data)
+            output = self._step(
+                scaled_input, next_step_forcing_data, use_activation_checkpointing
+            )
 
             for name in self.output_names:
                 new_name = TEMPLATE.format(name=name, suffix=suffix)
