@@ -24,7 +24,7 @@ TEST_CONFIG = MultiCallConfig(
 )
 
 
-def _step(input, next_step_forcing):
+def _step(input, next_step_forcing, *_):
     names = TEST_CONFIG.output_names
     prediction = {k: input["CO2"].detach().clone() for k in names}
     return prediction

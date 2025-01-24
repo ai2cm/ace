@@ -3,6 +3,7 @@ import dataclasses
 import itertools
 from typing import Any, Iterable, Literal, Mapping, Optional
 
+import numpy as np
 import torch
 import torch.cuda.amp as amp
 from torch import nn
@@ -180,3 +181,20 @@ class NullOptimization(OptimizationABC):
         Sets the mode of the module to eval.
         """
         module.eval()
+
+
+@dataclasses.dataclass
+class ActivationCheckpointingConfig:
+    """
+    Trade increased computation in exchange for lowered memory consumption during
+    training by recomputing activations in the backward pass.
+
+    after_n_forward_steps: Number of forward steps to generate before activation
+        checkpointing is applied. Activation checkpointing is not used unless this
+        number is less than the number of forward steps in the optimization.
+    kwargs: Keyword arguments to pass to torch.utils.checkpoint.checkpoint. Note that
+        use_reentrant=False is always explicitly passed as recommended by the docs.
+    """
+
+    after_n_forward_steps: float = np.inf
+    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)

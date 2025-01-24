@@ -2,7 +2,7 @@ import datetime
 import pathlib
 from collections import namedtuple
 from typing import Iterable, List, Literal, Optional, Tuple, Union
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import cftime
 import numpy as np
@@ -38,7 +38,12 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
-from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
+from fme.core.optimization import (
+    ActivationCheckpointingConfig,
+    NullOptimization,
+    Optimization,
+    OptimizationConfig,
+)
 from fme.core.registry.module import ModuleSelector
 from fme.core.typing_ import TensorDict
 
@@ -392,6 +397,7 @@ def _setup_and_train_on_batch(
     out_names,
     ocean_config: Optional[OceanConfig],
     optimization_config: Optional[OptimizationConfig],
+    stepper_config_kwargs,
 ):
     """Sets up the requisite classes to run train_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
@@ -414,6 +420,7 @@ def _setup_and_train_on_batch(
             stds=get_scalar_data(set(in_names + out_names), 1.0),
         ),
         ocean=ocean_config,
+        **stepper_config_kwargs,
     )
     stepper = config.get_stepper(
         area.shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
@@ -431,7 +438,17 @@ def _setup_and_train_on_batch(
 )
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3], ids=lambda p: f"k={p}")
 @pytest.mark.parametrize("is_train", [True, False], ids=["is_train", ""])
-def test_train_on_batch(n_forward_steps, is_input, is_output, is_train, is_prescribed):
+@pytest.mark.parametrize(
+    "with_activation_checkpointing", [True, False], ids=["act_ckpt", ""]
+)
+def test_train_on_batch(
+    n_forward_steps,
+    is_input,
+    is_output,
+    is_train,
+    is_prescribed,
+    with_activation_checkpointing,
+):
     in_names, out_names = ["a"], ["a"]
     if is_input:
         in_names.append("b")
@@ -454,7 +471,24 @@ def test_train_on_batch(n_forward_steps, is_input, is_output, is_train, is_presc
     else:
         optimization = None
 
-    _setup_and_train_on_batch(data, in_names, out_names, ocean_config, optimization)
+    stepper_config_kwargs = {}
+    if with_activation_checkpointing:
+        stepper_config_kwargs["activation_checkpointing"] = (
+            ActivationCheckpointingConfig(after_n_forward_steps=n_forward_steps - 1)
+        )
+
+    with patch("torch.utils.checkpoint.checkpoint") as mock_checkpoint:
+        # have the mock call the module and return the step
+        mock_checkpoint.side_effect = lambda f, x, **_: f(x)
+        _setup_and_train_on_batch(
+            data, in_names, out_names, ocean_config, optimization, stepper_config_kwargs
+        )
+
+        if with_activation_checkpointing:
+            # should be called exactly once, for the final forward step
+            mock_checkpoint.assert_called_once()
+        else:
+            mock_checkpoint.assert_not_called()
 
 
 @pytest.mark.parametrize("n_forward_steps", [1, 2, 3])
