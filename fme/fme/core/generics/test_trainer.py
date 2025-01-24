@@ -338,7 +338,6 @@ def get_trainer(
         validation_losses=validation_losses,
         inference_losses=inference_losses,
     )
-    callback = unittest.mock.MagicMock()
     return config, Trainer(
         train_data=train_data,
         validation_data=validation_data,
@@ -348,7 +347,8 @@ def get_trainer(
         build_ema=build_ema,
         config=config,
         aggregator_builder=aggregator_builder,
-        end_of_batch_callback=callback,
+        end_of_batch_callback=unittest.mock.MagicMock(),
+        end_of_epoch_callback=unittest.mock.MagicMock(side_effect=lambda epoch: {}),
         do_gc_collect=False,  # for much faster tests
     )
 
@@ -386,6 +386,9 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Optional[Slice]):
     assert valid_data.set_epoch_mock.mock_calls == []  # no shuffling
     assert train_data.log_info_mock.called
     assert valid_data.log_info_mock.called
+    assert trainer._end_of_epoch_ops.mock_calls == [  # type: ignore
+        unittest.mock.call(i) for i in range(config.max_epochs)
+    ]
 
 
 @pytest.mark.parametrize("segment_epochs", [1, 2, 3])
