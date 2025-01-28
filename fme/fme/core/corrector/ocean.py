@@ -16,6 +16,7 @@ from fme.core.typing_ import TensorMapping
 
 OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
     {
+        "sea_surface_temperature": ["sst"],
         "surface_height": ["zos"],
         "salinity": ["so_"],
         "potential_temperature": ["thetao_"],
