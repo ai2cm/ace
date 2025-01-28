@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import math
+from typing import Tuple
 
 import torch
 import torch.fft
@@ -25,6 +26,77 @@ from torch.utils.checkpoint import checkpoint
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
+
+
+class ConditionalLayerNorm(nn.Module):
+    """
+    Conditional Layer Normalization as described in "AdaSpeech: Adaptive
+    Text to Speech for Custom Voice" https://arxiv.org/abs/2103.00993.
+
+    Assumes that the input has shape (batch_size, channels, height, width).
+    """
+
+    def __init__(
+        self,
+        n_channels: int,
+        img_shape: Tuple[int, int],
+        global_layer_norm: bool = False,
+        n_context_embedding: int = 256,
+        epsilon: float = 1e-5,
+    ):
+        super(ConditionalLayerNorm, self).__init__()
+        self.n_channels = n_channels
+        self.n_context_embedding = n_context_embedding
+        self.epsilon = epsilon
+        self.W_scale = nn.Linear(self.n_context_embedding, self.n_channels)
+        self.W_bias = nn.Linear(self.n_context_embedding, self.n_channels)
+        if global_layer_norm:
+            self.norm = nn.LayerNorm(
+                (self.n_channels, img_shape[0], img_shape[1]),
+                eps=epsilon,
+                elementwise_affine=False,
+            )
+        else:
+            self.norm = nn.LayerNorm(
+                (self.n_channels,),
+                eps=epsilon,
+                elementwise_affine=False,
+            )
+        self._global_layer_norm = global_layer_norm
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.constant_(self.W_scale.weight, 0.0)
+        torch.nn.init.constant_(self.W_scale.bias, 1.0)
+        torch.nn.init.constant_(self.W_bias.weight, 0.0)
+        torch.nn.init.constant_(self.W_bias.bias, 0.0)
+
+    def forward(self, x: torch.Tensor, context_embedding: torch.Tensor) -> torch.Tensor:
+        """
+        Conditional Layer Normalization
+
+        This is a modified version of LayerNorm that allows the scale and bias to be
+        conditioned on a context embedding.
+
+        Args:
+            x: The input tensor to normalize, of shape
+                (batch_size, channels, height, width).
+            context_embedding: The context embedding to condition on, of shape
+                (batch_size, n_context_embedding).
+
+        Returns:
+            The normalized tensor, of shape (batch_size, channels, height, width).
+        """
+        scale: torch.Tensor = (
+            self.W_scale(context_embedding).unsqueeze(-1).unsqueeze(-1)
+        )
+        bias: torch.Tensor = self.W_bias(context_embedding).unsqueeze(-1).unsqueeze(-1)
+        if not self._global_layer_norm:
+            x = x.transpose(1, -1)
+        x_norm = self.norm(x)
+        if not self._global_layer_norm:
+            x_norm = x_norm.transpose(1, -1)
+        return x_norm * scale + bias
 
 
 @torch.jit.script

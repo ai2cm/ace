@@ -30,16 +30,8 @@ from .initialization import trunc_normal_
 # wrap fft, to unify interface to spectral transforms
 # import global convolution and non-linear spectral layers
 # helpers
-from .layers import MLP, DropPath, RealFFT2, SpectralAttention2d
+from .layers import MLP, DropPath, RealFFT2, SpectralAttention2d, ConditionalLayerNorm
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
-
-# layer normalization
-try:
-    from apex.normalization import FusedLayerNorm
-
-    apex_imported = True
-except ImportError:
-    apex_imported = False
 
 
 class SpectralFilterLayer(nn.Module):
@@ -128,13 +120,14 @@ class FourierNeuralOperatorBlock(nn.Module):
         forward_transform,
         inverse_transform,
         embed_dim,
+        conditional_embed_dim: int,
         filter_type="linear",
         operator_type="diagonal",
+        global_layer_norm: bool = False,
         mlp_ratio=2.0,
         drop_rate=0.0,
         drop_path=0.0,
         act_layer=nn.GELU,
-        norm_layer=(nn.LayerNorm, nn.LayerNorm),
         sparsity_threshold=0.0,
         use_complex_kernels=True,
         rank=1.0,
@@ -155,7 +148,12 @@ class FourierNeuralOperatorBlock(nn.Module):
         self.output_shape_loc = (inverse_transform.nlat, inverse_transform.nlon)
 
         # norm layer
-        self.norm0 = norm_layer[0]()
+        self.norm0 = ConditionalLayerNorm(
+            embed_dim,
+            img_shape=self.input_shape_loc,
+            global_layer_norm=global_layer_norm,
+            n_context_embedding=conditional_embed_dim,
+        )
 
         # convolution layer
         self.filter = SpectralFilterLayer(
@@ -193,7 +191,12 @@ class FourierNeuralOperatorBlock(nn.Module):
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
 
         # norm layer
-        self.norm1 = norm_layer[1]()
+        self.norm1 = ConditionalLayerNorm(
+            embed_dim,
+            img_shape=self.output_shape_loc,
+            global_layer_norm=global_layer_norm,
+            n_context_embedding=conditional_embed_dim,
+        )
 
         if use_mlp == True:
             MLPH = MLP
@@ -214,10 +217,11 @@ class FourierNeuralOperatorBlock(nn.Module):
         if concat_skip and outer_skip is not None:
             self.outer_skip_conv = nn.Conv2d(2 * embed_dim, embed_dim, 1, bias=False)
 
-    def forward(self, x):
+    def forward(self, x, context_embedding):
         x_norm = torch.zeros_like(x)
         x_norm[..., : self.input_shape_loc[0], : self.input_shape_loc[1]] = self.norm0(
-            x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]]
+            x[..., : self.input_shape_loc[0], : self.input_shape_loc[1]],
+            context_embedding,
         )
         x, residual = self.filter(x_norm)
 
@@ -233,7 +237,10 @@ class FourierNeuralOperatorBlock(nn.Module):
 
         x_norm = torch.zeros_like(x)
         x_norm[..., : self.output_shape_loc[0], : self.output_shape_loc[1]] = (
-            self.norm1(x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]])
+            self.norm1(
+                x[..., : self.output_shape_loc[0], : self.output_shape_loc[1]],
+                context_embedding,
+            )
         )
         x = x_norm
 
@@ -349,6 +356,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         in_chans: int = 2,
         out_chans: int = 2,
         embed_dim: int = 256,
+        conditional_embed_dim: int = 256,
+        global_layer_norm: bool = False,
         num_layers: int = 12,
         use_mlp: int = True,
         mlp_ratio: float = 2.0,
@@ -359,7 +368,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         drop_path_rate: float = 0.0,
         num_blocks: int = 16,
         sparsity_threshold: float = 0.0,
-        normalization_layer: str = "instance_norm",
         hard_thresholding_fraction: float = 1.0,
         use_complex_kernels: bool = True,
         big_skip: bool = True,
@@ -402,6 +410,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.embed_dim = self.num_features = (
             params.embed_dim if hasattr(params, "embed_dim") else embed_dim
         )
+        self.conditional_embed_dim = conditional_embed_dim
         self.num_layers = (
             params.num_layers if hasattr(params, "num_layers") else num_layers
         )
@@ -412,11 +421,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             params.hard_thresholding_fraction
             if hasattr(params, "hard_thresholding_fraction")
             else hard_thresholding_fraction
-        )
-        self.normalization_layer = (
-            params.normalization_layer
-            if hasattr(params, "normalization_layer")
-            else normalization_layer
         )
         self.use_mlp = params.use_mlp if hasattr(params, "use_mlp") else use_mlp
         self.activation_function = (
@@ -549,33 +553,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate) if drop_rate > 0.0 else nn.Identity()
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, self.num_layers)]
 
-        # pick norm layer
-        if self.normalization_layer == "layer_norm":
-            norm_layer0 = partial(
-                nn.LayerNorm,
-                normalized_shape=(self.img_shape_loc[0], self.img_shape_loc[1]),
-                eps=1e-6,
-            )
-            norm_layer1 = partial(
-                nn.LayerNorm, normalized_shape=(self.h_loc, self.w_loc), eps=1e-6
-            )
-        elif self.normalization_layer == "instance_norm":
-            norm_layer0 = partial(
-                nn.InstanceNorm2d,
-                num_features=self.embed_dim,
-                eps=1e-6,
-                affine=True,
-                track_running_stats=False,
-            )
-            norm_layer1 = norm_layer0
-        elif self.normalization_layer == "none":
-            norm_layer0 = nn.Identity
-            norm_layer1 = norm_layer0
-        else:
-            raise NotImplementedError(
-                f"Error, normalization {self.normalization_layer} not implemented."
-            )
-
         # FNO blocks
         self.blocks = nn.ModuleList([])
         for i in range(self.num_layers):
@@ -588,13 +565,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             inner_skip = "linear"
             outer_skip = "identity"
 
-            if first_layer:
-                norm_layer = (norm_layer0, norm_layer1)
-            elif last_layer:
-                norm_layer = (norm_layer1, norm_layer0)
-            else:
-                norm_layer = (norm_layer1, norm_layer1)
-
             filter_type = self.filter_type
 
             operator_type = self.operator_type
@@ -603,14 +573,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 forward_transform,
                 inverse_transform,
                 self.embed_dim,
+                self.conditional_embed_dim,
                 filter_type=filter_type,
                 operator_type=operator_type,
                 mlp_ratio=mlp_ratio,
                 drop_rate=drop_rate,
                 drop_path=dpr[i],
                 act_layer=self.activation_function,
-                norm_layer=norm_layer,
                 sparsity_threshold=sparsity_threshold,
+                global_layer_norm=global_layer_norm,
                 use_complex_kernels=use_complex_kernels,
                 inner_skip=inner_skip,
                 outer_skip=outer_skip,
@@ -659,27 +630,24 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm) or (
-            apex_imported and isinstance(m, FusedLayerNorm)
-        ):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
+        elif isinstance(m, ConditionalLayerNorm):
+            m.reset_parameters()
 
     @torch.jit.ignore
     def no_weight_decay(self):  # pragma: no cover
         """Helper"""
         return {"pos_embed", "cls_token"}
 
-    def _forward_features(self, x):
+    def _forward_features(self, x: torch.Tensor, context_embedding: torch.Tensor):
         for blk in self.blocks:
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x)
+                x = checkpoint(blk, x, context_embedding)
             else:
-                x = blk(x)
+                x = blk(x, context_embedding)
 
         return x
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor, context_embedding: torch.Tensor):
         # save big skip
         if self.big_skip:
             residual = x
@@ -705,7 +673,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.pos_drop(x)
 
-        x = self._forward_features(x)
+        x = self._forward_features(x, context_embedding)
 
         if self.big_skip:
             x = torch.cat((x, residual), dim=1)
