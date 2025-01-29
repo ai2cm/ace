@@ -6,22 +6,28 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 
 DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableFunc] = {}
+DERIVED_VARIABLE_METADATA: MutableMapping[str, VariableMetadata] = {}
 
 
-def register(func: DerivedVariableFunc):
-    label = func.__name__
-    if label in _DERIVED_VARIABLE_REGISTRY:
-        raise ValueError(f"Function {label} has already been added to registry.")
-    _DERIVED_VARIABLE_REGISTRY[label] = func
-    return func
+def register(metadata: VariableMetadata):
+    def decorator(func: DerivedVariableFunc):
+        label = func.__name__
+        if label in _DERIVED_VARIABLE_REGISTRY:
+            raise ValueError(f"Function {label} has already been added to registry.")
+        _DERIVED_VARIABLE_REGISTRY[label] = func
+        DERIVED_VARIABLE_METADATA[label] = metadata
+        return func
+
+    return decorator
 
 
-@register
+@register(VariableMetadata("Pa", "Surface pressure due to dry air only"))
 def surface_pressure_due_to_dry_air(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -29,7 +35,7 @@ def surface_pressure_due_to_dry_air(
     return data.surface_pressure_due_to_dry_air
 
 
-@register
+@register(VariableMetadata("Pa/s", "Tendency of surface pressure due to dry air only"))
 def surface_pressure_due_to_dry_air_absolute_tendency(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -40,7 +46,7 @@ def surface_pressure_due_to_dry_air_absolute_tendency(
     return abs_ps_dry_tendency
 
 
-@register
+@register(VariableMetadata("kg/m**2", "Total water path"))
 def total_water_path(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -48,7 +54,7 @@ def total_water_path(
     return data.total_water_path
 
 
-@register
+@register(VariableMetadata("kg/m**2/s", "Total water path budget residual"))
 def total_water_path_budget_residual(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -67,7 +73,7 @@ def total_water_path_budget_residual(
     return twp_budget_residual
 
 
-@register
+@register(VariableMetadata("W/m**2", "Net TOA radiative flux into atmosphere"))
 def net_energy_flux_toa_into_atmosphere(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -75,7 +81,7 @@ def net_energy_flux_toa_into_atmosphere(
     return data.net_top_of_atmosphere_energy_flux
 
 
-@register
+@register(VariableMetadata("W/m**2", "Net surface energy flux into atmosphere"))
 def net_energy_flux_sfc_into_atmosphere(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -85,7 +91,11 @@ def net_energy_flux_sfc_into_atmosphere(
     return -data.net_surface_energy_flux_without_frozen_precip
 
 
-@register
+@register(
+    VariableMetadata(
+        "W/m**2", "Net energy flux through TOA and surface into atmosphere"
+    )
+)
 def net_energy_flux_into_atmospheric_column(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -93,7 +103,7 @@ def net_energy_flux_into_atmospheric_column(
     return data.net_energy_flux_into_atmosphere
 
 
-@register
+@register(VariableMetadata("J/m**2", "Total energy path following ACE2 assumptions"))
 def total_energy_ace2_path(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -101,7 +111,11 @@ def total_energy_ace2_path(
     return data.total_energy_ace2_path
 
 
-@register
+@register(
+    VariableMetadata(
+        "W/m**2", "Tendency of total energy path following ACE2 assumptions"
+    )
+)
 def total_energy_ace2_path_tendency(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -112,7 +126,12 @@ def total_energy_ace2_path_tendency(
     return mse_tendency
 
 
-@register
+@register(
+    VariableMetadata(
+        "W/m**2",
+        "Implied advective tendency of total energy path assuming closed budget",
+    )
+)
 def implied_tendency_of_total_energy_ace2_path_due_to_advection(
     data: AtmosphereData,
     timestep: datetime.timedelta,
