@@ -127,6 +127,8 @@ def _get_data(
             data_varying_scalar, dims=("time",)
         )
 
+        if with_nans:
+            constant_var[0, 0] = np.nan
         data_vars["constant_var"] = constant_var
         data_vars["constant_scalar_var"] = constant_scalar_var
 
@@ -658,6 +660,7 @@ def test_fill_nans(mock_monthly_netcdfs_with_nans):
     dataset = XarrayDataset(config, requirements)
     data, _ = dataset[0]
     assert torch.all(data["foo"][0, :, 0] == 0)
+    assert torch.all(data["constant_var"][:, 0, 0] == 0)
 
 
 def test_keep_nans(mock_monthly_netcdfs_with_nans):
@@ -668,6 +671,7 @@ def test_keep_nans(mock_monthly_netcdfs_with_nans):
     dataset = XarrayDataset(config_keep_nan, requirements)
     data_with_nan, _ = dataset[0]
     assert torch.all(torch.isnan(data_with_nan["foo"][0, :, 0]))
+    assert torch.all(torch.isnan(data_with_nan["constant_var"][:, 0, 0]))
 
 
 def test_overwrite(mock_monthly_netcdfs):

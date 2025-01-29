@@ -599,6 +599,8 @@ class XarrayDataset(Dataset):
             shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
             for name in self._time_invariant_names:
                 variable = ds[name].variable
+                if self.fill_nans is not None:
+                    variable = variable.fillna(self.fill_nans.value)
                 tensors[name] = as_broadcasted_tensor(variable, dims, shape)
             ds.close()
             del ds
