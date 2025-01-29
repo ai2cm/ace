@@ -769,6 +769,10 @@ def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
     assert "inference/mean_norm/weighted_rmse/total_water_path" not in inference_logs[0]
     assert "inference/time_mean_norm/rmse/total_water_path" not in inference_logs[-1]
 
+    ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    assert "units" in ds["total_water_path"].attrs
+    assert "long_name" in ds["total_water_path"].attrs
+
 
 @pytest.mark.parametrize(
     "time_coarsen,n_forward_steps,forward_steps_in_memory",

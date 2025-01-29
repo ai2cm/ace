@@ -186,6 +186,8 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     assert "USWRFtoa" in ds
     # derived in
     assert "net_energy_flux_toa_into_atmosphere" in ds
+    assert "units" in ds.net_energy_flux_toa_into_atmosphere.attrs
+    assert "long_name" in ds.net_energy_flux_toa_into_atmosphere.attrs
     # forcings not in
     assert "DSWRFtoa" not in ds
     assert "forcing_var" not in ds
