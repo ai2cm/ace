@@ -68,6 +68,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
+from fme.ace.inference.derived_variables import DERIVED_VARIABLE_METADATA
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.config import update_dict_with_dotlist
@@ -89,6 +90,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     train_data = builder.get_train_data()
     validation_data = builder.get_validation_data()
     inference_data = builder.get_evaluation_inference_data()
+
+    variable_metadata = DERIVED_VARIABLE_METADATA | dict(train_data.variable_metadata)
 
     for batch in train_data.loader:
         shapes = {k: v.shape for k, v in batch.data.items()}
@@ -117,7 +120,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         initial_inference_time=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
         n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
-        variable_metadata=train_data.variable_metadata,
+        variable_metadata=variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,

@@ -22,6 +22,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.derived_variables import DERIVED_VARIABLE_METADATA
 from fme.ace.inference.loop import write_reduced_metrics
 from fme.ace.stepper import (
     SingleModuleStepper,
@@ -188,13 +189,14 @@ class InferenceConfig:
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
     def get_data_writer(self, data: InferenceGriddedData) -> DataWriter:
+        variable_metadata = DERIVED_VARIABLE_METADATA | dict(data.variable_metadata)
         return self.data_writer.build(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
             n_initial_conditions=data.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
-            variable_metadata=data.variable_metadata,
+            variable_metadata=variable_metadata,
             coords=data.coords,
         )
 
@@ -259,10 +261,12 @@ def run_inference_from_config(config: InferenceConfig):
             f"Timestep of the loaded stepper, {stepper.timestep}, does not "
             f"match that of the forcing data, {data.timestep}."
         )
+
+    variable_metadata = DERIVED_VARIABLE_METADATA | dict(data.variable_metadata)
     aggregator = config.aggregator.build(
         gridded_operations=data.gridded_operations,
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
-        variable_metadata=data.variable_metadata,
+        variable_metadata=variable_metadata,
     )
 
     writer = config.get_data_writer(data)

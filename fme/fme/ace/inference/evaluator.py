@@ -17,6 +17,7 @@ from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.derived_variables import DERIVED_VARIABLE_METADATA
 from fme.ace.inference.loop import (
     DeriverABC,
     run_dataset_comparison,
@@ -120,12 +121,13 @@ class InferenceEvaluatorConfig:
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
     def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
+        variable_metadata = DERIVED_VARIABLE_METADATA | dict(data.variable_metadata)
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
             timestep=data.timestep,
-            variable_metadata=data.variable_metadata,
+            variable_metadata=variable_metadata,
             coords=data.coords,
         )
 
@@ -219,13 +221,14 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     for batch in data.loader:
         initial_time = batch.time.isel(time=0)
         break
+    variable_metadata = DERIVED_VARIABLE_METADATA | dict(data.variable_metadata)
     aggregator = aggregator_config.build(
         vertical_coordinate=data.vertical_coordinate,
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
-        variable_metadata=data.variable_metadata,
+        variable_metadata=variable_metadata,
         initial_time=initial_time,
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,
