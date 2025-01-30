@@ -11,9 +11,9 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from .derived_variables import (
-    DERIVED_VARIABLE_METADATA,
     _compute_derived_variable,
     compute_derived_quantities,
+    get_derived_variable_metadata,
 )
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -123,5 +123,6 @@ def test_compute_derived_quantities(dataset: str):
 
 
 def test_metadata_registry():
-    assert DERIVED_VARIABLE_METADATA["total_water_path"].units == "kg/m**2"
-    assert DERIVED_VARIABLE_METADATA["total_water_path"].long_name == "Total water path"
+    metadata = get_derived_variable_metadata()
+    assert metadata["total_water_path"].units == "kg/m**2"
+    assert metadata["total_water_path"].long_name == "Total water path"
