@@ -68,7 +68,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.ace.inference.derived_variables import DERIVED_VARIABLE_METADATA
+from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.config import update_dict_with_dotlist
@@ -91,7 +91,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     validation_data = builder.get_validation_data()
     inference_data = builder.get_evaluation_inference_data()
 
-    variable_metadata = DERIVED_VARIABLE_METADATA | dict(train_data.variable_metadata)
+    variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
 
     for batch in train_data.loader:
         shapes = {k: v.shape for k, v in batch.data.items()}

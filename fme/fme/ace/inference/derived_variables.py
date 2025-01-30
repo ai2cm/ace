@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Optional
+from typing import Callable, Dict, MutableMapping, Optional, Tuple
 
 import torch
 
@@ -11,8 +11,15 @@ from fme.core.dataset.data_typing import VariableMetadata
 DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
 
 
-_DERIVED_VARIABLE_REGISTRY: MutableMapping[str, DerivedVariableFunc] = {}
-DERIVED_VARIABLE_METADATA: MutableMapping[str, VariableMetadata] = {}
+_DERIVED_VARIABLE_REGISTRY: MutableMapping[
+    str, Tuple[DerivedVariableFunc, VariableMetadata]
+] = {}
+
+
+def get_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+    return {
+        label: metadata for label, (_, metadata) in _DERIVED_VARIABLE_REGISTRY.items()
+    }
 
 
 def register(metadata: VariableMetadata):
@@ -20,8 +27,7 @@ def register(metadata: VariableMetadata):
         label = func.__name__
         if label in _DERIVED_VARIABLE_REGISTRY:
             raise ValueError(f"Function {label} has already been added to registry.")
-        _DERIVED_VARIABLE_REGISTRY[label] = func
-        DERIVED_VARIABLE_METADATA[label] = metadata
+        _DERIVED_VARIABLE_REGISTRY[label] = (func, metadata)
         return func
 
     return decorator
@@ -35,7 +41,9 @@ def surface_pressure_due_to_dry_air(
     return data.surface_pressure_due_to_dry_air
 
 
-@register(VariableMetadata("Pa/s", "Tendency of surface pressure due to dry air only"))
+@register(
+    VariableMetadata("Pa/s", "Absolute value of tendency of dry air surface pressure")
+)
 def surface_pressure_due_to_dry_air_absolute_tendency(
     data: AtmosphereData,
     timestep: datetime.timedelta,
@@ -203,7 +211,8 @@ def compute_derived_quantities(
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:
     """Computes all derived quantities from the given data."""
-    for label, func in _DERIVED_VARIABLE_REGISTRY.items():
+    for label in _DERIVED_VARIABLE_REGISTRY:
+        func = _DERIVED_VARIABLE_REGISTRY[label][0]
         data = _compute_derived_variable(
             data,
             vertical_coordinate,
