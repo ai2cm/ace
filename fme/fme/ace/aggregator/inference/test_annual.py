@@ -8,7 +8,10 @@ import torch
 import xarray as xr
 
 import fme
-from fme.ace.aggregator.inference.annual import GlobalMeanAnnualAggregator
+from fme.ace.aggregator.inference.annual import (
+    GlobalMeanAnnualAggregator,
+    PairedGlobalMeanAnnualAggregator,
+)
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize
 from fme.core.device import get_device
@@ -18,7 +21,7 @@ from fme.core.testing import mock_distributed
 TIMESTEP = datetime.timedelta(hours=6)
 
 
-def test_annual_aggregator(tmpdir):
+def test_paired_annual_aggregator(tmpdir):
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised
@@ -38,7 +41,7 @@ def test_annual_aggregator(tmpdir):
         n_ensemble=3,
     )
     monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
-    agg = GlobalMeanAnnualAggregator(
+    agg = PairedGlobalMeanAnnualAggregator(
         ops=LatLonOperations(area_weights),
         timestep=TIMESTEP,
         monthly_reference_data=monthly_ds,
@@ -79,7 +82,7 @@ def test__get_gathered_means(use_mock_distributed):
     n_sample = 2
     n_time = 365 * 4 * 2  # two years, approximately
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
-    agg = GlobalMeanAnnualAggregator(
+    agg = PairedGlobalMeanAnnualAggregator(
         ops=LatLonOperations(area_weights),
         timestep=TIMESTEP,
     )
@@ -121,3 +124,34 @@ def test__get_gathered_means(use_mock_distributed):
         assert list(dataset.year.values) == [2000, 2001, 2002]
         assert dataset.sizes["sample"] == n_sample * world_size
     assert set(combined.coords["source"].values) == set(["target", "prediction"])
+
+
+def test_annual_aggregator():
+    n_lat = 4
+    n_lon = 8
+    # need to have two actual full years of data for plotting to get exercised
+    n_sample = 2
+    n_time = 365 * 4 * 2
+    area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
+    agg = GlobalMeanAnnualAggregator(
+        ops=LatLonOperations(area_weights), timestep=TIMESTEP
+    )
+    data = {"a": torch.randn(n_sample, n_time, n_lat, n_lon, device=get_device())}
+    time = xr.DataArray(
+        [
+            [
+                (
+                    cftime.DatetimeProlepticGregorian(2000, 1, 1)
+                    + i * datetime.timedelta(hours=6)
+                )
+                for i in range(n_time)
+            ]
+            for _ in range(n_sample)
+        ],
+        dims=["sample", "time"],
+    )
+    agg.record_batch(time, data)
+    logs = agg.get_logs(label="test")
+    assert len(logs) > 0
+    assert "test/a" in logs
+    assert isinstance(logs["test/a"], plt.Figure)

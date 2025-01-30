@@ -25,7 +25,8 @@ def test_logs_labels_exist():
     area_weights = torch.ones(ny).to(fme.get_device())
     agg = InferenceAggregator(
         LatLonOperations(area_weights),
-        n_timesteps=n_time,
+        n_time,
+        datetime.timedelta(seconds=1),
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
@@ -45,7 +46,7 @@ def test_logs_labels_exist():
             expected_step_keys
         )
     summary_logs = agg.get_summary_logs()
-    expected_summary_keys = ["time_mean/gen_map/a"]
+    expected_summary_keys = ["time_mean/gen_map/a", "annual/a"]
     for key in expected_summary_keys:
         assert key in summary_logs, key
     assert len(summary_logs) == len(expected_summary_keys), set(
@@ -69,7 +70,8 @@ def test_logs_labels_exist_with_reference_time_means():
     )
     agg = InferenceAggregator(
         LatLonOperations(area_weights),
-        n_timesteps=n_time,
+        n_time,
+        datetime.timedelta(seconds=1),
         time_mean_reference_data=reference_time_means,
     )
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -98,6 +100,7 @@ def test_logs_labels_exist_with_reference_time_means():
         "time_mean/ref_bias_map/a",
         "time_mean/ref_bias/a",
         "time_mean/ref_rmse/a",
+        "annual/a",
     ]
     for key in expected_summary_keys:
         assert key in summary_logs, key
