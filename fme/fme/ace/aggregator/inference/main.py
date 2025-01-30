@@ -33,7 +33,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
-from .annual import GlobalMeanAnnualAggregator
+from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
 from .enso import EnsoCoefficientEvaluatorAggregator
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
@@ -323,11 +323,13 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
             )
         if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
-            self._time_dependent_aggregators["annual"] = GlobalMeanAnnualAggregator(
-                ops=ops,
-                timestep=timestep,
-                variable_metadata=variable_metadata,
-                monthly_reference_data=monthly_reference_data,
+            self._time_dependent_aggregators["annual"] = (
+                PairedGlobalMeanAnnualAggregator(
+                    ops=ops,
+                    timestep=timestep,
+                    variable_metadata=variable_metadata,
+                    monthly_reference_data=monthly_reference_data,
+                )
             )
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             self._time_dependent_aggregators["enso_coefficient"] = (
@@ -541,6 +543,7 @@ class InferenceAggregatorConfig:
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
@@ -550,6 +553,7 @@ class InferenceAggregatorConfig:
         return InferenceAggregator(
             gridded_operations=gridded_operations,
             n_timesteps=n_timesteps,
+            timestep=timestep,
             variable_metadata=variable_metadata,
             time_mean_reference_data=time_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
@@ -573,6 +577,7 @@ class InferenceAggregator(
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
+        timestep: datetime.timedelta,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
         log_global_mean_time_series: bool = True,
@@ -581,6 +586,7 @@ class InferenceAggregator(
         Args:
             gridded_operations: Gridded operations for computing horizontal reductions.
             n_timesteps: Number of timesteps in the model.
+            timestep: Timestep of the model.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
@@ -598,8 +604,16 @@ class InferenceAggregator(
             variable_metadata=variable_metadata,
             reference_means=time_mean_reference_data,
         )
+        aggregators["annual"] = GlobalMeanAnnualAggregator(
+            gridded_operations,
+            timestep,
+            variable_metadata,
+        )
         self._aggregators = aggregators
-        self._summary_aggregators = {"time_mean": aggregators["time_mean"]}
+        self._summary_aggregators = {
+            name: aggregators[name] for name in ["time_mean", "annual"]
+        }
+        self._time_dependent_aggregator_names = ["annual"]
         self._n_timesteps_seen = 0
 
     @property
@@ -607,10 +621,7 @@ class InferenceAggregator(
         return self._log_time_series
 
     @torch.no_grad()
-    def record_batch(
-        self,
-        data: BatchData,
-    ) -> InferenceLogs:
+    def record_batch(self, data: BatchData) -> InferenceLogs:
         """
         Record a batch of data.
 
@@ -619,11 +630,14 @@ class InferenceAggregator(
         """
         if len(data.data) == 0:
             raise ValueError("data is empty")
-        for aggregator in self._aggregators.values():
-            aggregator.record_batch(
-                data=data.data,
-                i_time_start=self._n_timesteps_seen,
-            )
+        for name in self._aggregators:
+            if name in self._time_dependent_aggregator_names:
+                self._aggregators[name].record_batch(data.time, data.data)
+            else:
+                self._aggregators[name].record_batch(
+                    data=data.data,
+                    i_time_start=self._n_timesteps_seen,
+                )
         n_times = data.time.shape[1]
         logs = self._get_inference_logs_slice(
             step_slice=slice(self._n_timesteps_seen, self._n_timesteps_seen + n_times),

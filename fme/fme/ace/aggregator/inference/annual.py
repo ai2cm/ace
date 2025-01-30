@@ -14,7 +14,28 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 
-class GlobalMeanAnnualAggregator:
+def _plot_mean_and_samples(
+    ax: Any,
+    data: xr.DataArray,
+    mean_label: str,
+    color: str = "cornflowerblue",
+    plot_samples: bool = True,
+):
+    if "year" in data.dims:
+        data.mean("sample").plot(ax=ax, x="year", label=mean_label, color=color)
+    if "year" in data.dims and plot_samples:
+        for i_sample in range(data.sizes["sample"]):
+            data.isel(sample=i_sample).plot(
+                ax=ax,
+                x="year",
+                color=color,
+                alpha=0.4,
+                linestyle="-.",
+                marker="x",
+            )
+
+
+class PairedGlobalMeanAnnualAggregator:
     def __init__(
         self,
         ops: GriddedOperations,
@@ -24,9 +45,13 @@ class GlobalMeanAnnualAggregator:
     ):
         self._area_weighted_mean = ops.area_weighted_mean
         self.timestep = timestep
-        self.variable_metadata = variable_metadata
-        self._target_datasets: Optional[List[xr.Dataset]] = None
-        self._gen_datasets: Optional[List[xr.Dataset]] = None
+        self.variable_metadata = variable_metadata or {}
+        self._target_aggregator = GlobalMeanAnnualAggregator(
+            ops, timestep, variable_metadata
+        )
+        self._gen_aggregator = GlobalMeanAnnualAggregator(
+            ops, timestep, variable_metadata
+        )
         self._monthly_reference_data = monthly_reference_data
         self._variable_reference_data: Dict[str, VariableReferenceData] = {}
 
@@ -49,50 +74,8 @@ class GlobalMeanAnnualAggregator:
         gen_data: TensorMapping,
     ):
         """Record a batch of data for computing time variability statistics."""
-        target_data_area_mean, gen_data_area_mean = {}, {}
-        for name in gen_data.keys():
-            target_data_area_mean[name] = self._area_weighted_mean(
-                target_data[name]
-            ).cpu()
-            gen_data_area_mean[name] = self._area_weighted_mean(gen_data[name]).cpu()
-        target_ds = to_dataset(target_data_area_mean, time)
-        gen_ds = to_dataset(gen_data_area_mean, time)
-
-        # must keep a separate dataset for each sample to avoid averaging across
-        # samples when we groupby year
-        if self._target_datasets is None:
-            self._target_datasets = []
-            for i_sample in range(target_ds.sizes["sample"]):
-                self._target_datasets.append(
-                    target_ds.isel(sample=i_sample)
-                    .groupby(target_ds["valid_time"].isel(sample=i_sample).dt.year)
-                    .sum()
-                )
-        else:
-            for i_sample in range(target_ds.sizes["sample"]):
-                self._target_datasets[i_sample] = _add_dataarray(
-                    self._target_datasets[i_sample],
-                    target_ds.isel(sample=i_sample)
-                    .groupby(target_ds["valid_time"].isel(sample=i_sample).dt.year)
-                    .sum(),
-                )
-
-        if self._gen_datasets is None:
-            self._gen_datasets = []
-            for i_sample in range(gen_ds.sizes["sample"]):
-                self._gen_datasets.append(
-                    gen_ds.isel(sample=i_sample)
-                    .groupby(gen_ds["valid_time"].isel(sample=i_sample).dt.year)
-                    .sum()
-                )
-        else:
-            for i_sample in range(gen_ds.sizes["sample"]):
-                self._gen_datasets[i_sample] = _add_dataarray(
-                    self._gen_datasets[i_sample],
-                    gen_ds.isel(sample=i_sample)
-                    .groupby(gen_ds["valid_time"].isel(sample=i_sample).dt.year)
-                    .sum(),
-                )
+        self._target_aggregator.record_batch(time, target_data)
+        self._gen_aggregator.record_batch(time, gen_data)
 
     def _get_gathered_means(self) -> Optional[Tuple[xr.Dataset, xr.Dataset]]:
         """
@@ -102,22 +85,10 @@ class GlobalMeanAnnualAggregator:
             A tuple of the target and generated datasets, or None if this is not the
             root rank.
         """
-        if self._target_datasets is None or self._gen_datasets is None:
-            raise ValueError("No data has been recorded yet.")
-        dist = Distributed.get_instance()
-        target = xr.concat(self._target_datasets, dim="sample")
-        gen = xr.concat(self._gen_datasets, dim="sample")
-        if dist.world_size > 1:
-            target = _gather_sample_datasets(dist, target)
-            gen = _gather_sample_datasets(dist, gen)
+        target = self._target_aggregator.get_gathered_means()
+        gen = self._gen_aggregator.get_gathered_means()
         if target is None or gen is None:
-            return None  # we are not root rank
-        # filter out data with insufficient samples
-        min_samples = _get_min_samples(self.timestep)
-        target = target.where(target["counts"] > min_samples, drop=True)
-        gen = gen.where(gen["counts"] > min_samples, drop=True)
-        target = target / target["counts"]
-        gen = gen / gen["counts"]
+            return None
         return target, gen
 
     @torch.no_grad()
@@ -132,6 +103,14 @@ class GlobalMeanAnnualAggregator:
         for name in gen.data_vars.keys():
             if name == "counts":
                 continue
+
+            if name in self.variable_metadata:
+                long_name = self.variable_metadata[name].long_name
+                units = self.variable_metadata[name].units
+            else:
+                long_name = name
+                units = "unknown units"
+
             fig = Figure()  # create directly for cleanup when it leaves scope
             ax = fig.add_subplot(1, 1, 1)  # Add an axes to the figure
             ref = self._get_reference(name)
@@ -159,25 +138,13 @@ class GlobalMeanAnnualAggregator:
                 else:
                     target_label = "target"
                     gen_label = "gen"
-                if "year" in target_ensemble_mean.dims:
-                    target_ensemble_mean.plot(
-                        ax=ax, x="year", label=target_label, color="orange"
-                    )
-                if "year" in gen_ensemble_mean.dims:
-                    gen_ensemble_mean.plot(
-                        ax=ax, x="year", label=gen_label, color="cornflowerblue"
-                    )
-                if "year" in gen[name].dims:
-                    for i_sample in range(gen.sizes["sample"]):
-                        gen[name].isel(sample=i_sample).plot(
-                            ax=ax,
-                            x="year",
-                            color="cornflowerblue",
-                            alpha=0.4,
-                            linestyle="-.",
-                            marker="x",
-                        )
+                _plot_mean_and_samples(
+                    ax, target[name], target_label, color="orange", plot_samples=False
+                )
+                _plot_mean_and_samples(ax, gen[name], gen_label)
+
             ax.set_title(f"{name}")
+            ax.set_ylabel(f"{long_name} [{units}]")
             ax.legend()
             fig.tight_layout()
             plots[name] = fig
@@ -200,6 +167,107 @@ class GlobalMeanAnnualAggregator:
             ],
             dim="source",
         )
+
+
+class GlobalMeanAnnualAggregator:
+    def __init__(
+        self,
+        ops: GriddedOperations,
+        timestep: datetime.timedelta,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    ):
+        self._area_weighted_mean = ops.area_weighted_mean
+        self.timestep = timestep
+        self.variable_metadata = variable_metadata or {}
+        self._datasets: Optional[List[xr.Dataset]] = None
+
+    @torch.no_grad()
+    def record_batch(self, time: xr.DataArray, data: TensorMapping):
+        """Record a batch of data for computing time variability statistics."""
+        data_area_mean = {}
+        for name in data:
+            data_area_mean[name] = self._area_weighted_mean(data[name]).cpu()
+        ds = to_dataset(data_area_mean, time)
+
+        # must keep a separate dataset for each sample to avoid averaging across
+        # samples when we groupby year
+        if self._datasets is None:
+            self._datasets = []
+            for i_sample in range(ds.sizes["sample"]):
+                self._datasets.append(
+                    ds.isel(sample=i_sample)
+                    .groupby(ds["valid_time"].isel(sample=i_sample).dt.year)
+                    .sum()
+                )
+        else:
+            for i_sample in range(ds.sizes["sample"]):
+                self._datasets[i_sample] = _add_dataarray(
+                    self._datasets[i_sample],
+                    ds.isel(sample=i_sample)
+                    .groupby(ds["valid_time"].isel(sample=i_sample).dt.year)
+                    .sum(),
+                )
+
+    def get_gathered_means(self) -> Optional[xr.Dataset]:
+        """
+        Gather the mean data across all processes.
+
+        Returns:
+            The mean dataset, or None if this is not the root rank.
+        """
+        if self._datasets is None:
+            raise ValueError("No data has been recorded yet.")
+        dist = Distributed.get_instance()
+        data = xr.concat(self._datasets, dim="sample")
+        if dist.world_size > 1:
+            data = _gather_sample_datasets(dist, data)
+        if data is None:
+            return None  # we are not root rank
+        # filter out data with insufficient samples
+        min_samples = _get_min_samples(self.timestep)
+        data = data.where(data["counts"] > min_samples, drop=True)
+        data = data / data["counts"]
+        return data
+
+    @torch.no_grad()
+    def get_logs(self, label: str) -> Dict[str, Any]:
+        ds = self.get_gathered_means()
+        if ds is None:  # not the root rank
+            return {}
+        plots = {}
+
+        for name in ds.data_vars.keys():
+            if name == "counts":
+                continue
+
+            if name in self.variable_metadata:
+                long_name = self.variable_metadata[name].long_name
+                units = self.variable_metadata[name].units
+            else:
+                long_name = name
+                units = "unknown units"
+
+            fig = Figure()  # create directly for cleanup when it leaves scope
+            ax = fig.add_subplot(1, 1, 1)  # Add an axes to the figure
+            if ds.sizes["year"] > 1:
+                _plot_mean_and_samples(ax, ds[name], "ensemble mean")
+            ax.set_title(f"{name}")
+            ax.set_ylabel(f"{long_name} [{units}]")
+            ax.legend()
+            fig.tight_layout()
+            plots[name] = fig
+
+        if len(label) > 0:
+            label = label + "/"
+
+        logs = {f"{label}{name}": plot for name, plot in plots.items()}
+        return logs
+
+    def get_dataset(self) -> xr.Dataset:
+        gathered = self.get_gathered_means()
+        if gathered is None:
+            return xr.Dataset()
+        return gathered
 
 
 @dataclasses.dataclass
