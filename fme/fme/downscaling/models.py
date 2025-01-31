@@ -172,7 +172,8 @@ class Model:
         )
         predicted_norm = self.module(inputs_norm)
         loss = self.loss(predicted_norm, targets_norm)
-        optimizer.step_weights(loss)
+        optimizer.accumulate_loss(loss)
+        optimizer.step_weights()
         target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
         prediction = self.normalizer.fine.denormalize(
             self.out_packer.unpack(predicted_norm, axis=channel_axis)
@@ -396,7 +397,8 @@ class DiffusionModel:
 
         denoised_norm = self.module(latents, coarse_norm, sigma)
         loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
-        optimizer.step_weights(loss)
+        optimizer.accumulate_loss(loss)
+        optimizer.step_weights()
 
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction

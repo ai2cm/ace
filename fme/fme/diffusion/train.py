@@ -70,7 +70,6 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput
-from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
@@ -78,6 +77,7 @@ from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.diffusion.train_config import TrainBuilders, TrainConfig
 
 # dask used on individual workers to load batches
 dask.config.set(scheduler="synchronous")

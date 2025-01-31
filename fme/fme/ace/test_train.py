@@ -175,8 +175,11 @@ validation_loader:
   batch_size: 2
   num_data_workers: 0
 optimization:
+  use_gradient_accumulation: true
   optimizer_type: "Adam"
   lr: 0.001
+  kwargs:
+    weight_decay: 0.01
   scheduler:
       type: CosineAnnealingLR
       kwargs:

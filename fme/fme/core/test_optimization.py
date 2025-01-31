@@ -8,7 +8,7 @@ import torch.random
 import yaml
 
 import fme
-from fme.core.optimization import Optimization
+from fme.core.optimization import NullOptimization, Optimization
 from fme.core.scheduler import SchedulerConfig
 
 
@@ -58,7 +58,8 @@ def test_optimization_reload(
             # save the model weights
             model_intermediate_state = copy.deepcopy(model.state_dict())
         loss = model(x).sum()
-        optimization.step_weights(loss)
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
         if scheduler is not None:
             optimization.step_scheduler(loss.item())
     model_first_final_state = copy.deepcopy(model.state_dict())
@@ -81,7 +82,8 @@ def test_optimization_reload(
     optimization.set_mode(model)
     for i in range(max_epochs - checkpoint_epoch):
         loss = model(x).sum()
-        optimization.step_weights(loss)
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
         if scheduler is not None:
             optimization.step_scheduler(loss.item())
     model_second_final_state = model.state_dict()
@@ -136,3 +138,84 @@ def test_adam_reload():
     # check that the final weights are the same
     for k in model_first_final_state.keys():
         assert torch.allclose(model_first_final_state[k], model_second_final_state[k])
+
+
+def test_null_optimization_accumulates_loss():
+    optimizer = NullOptimization()
+    optimizer.accumulate_loss(torch.tensor(1.0))
+    optimizer.accumulate_loss(torch.tensor(2.0))
+    assert optimizer.get_accumulated_loss() == torch.tensor(3.0)
+    optimizer.step_weights()
+    assert optimizer.get_accumulated_loss() == torch.tensor(0.0)
+
+
+def test_adam_optimization_accumulates_loss():
+    model = nn.Linear(1, 1).to(fme.get_device())
+    input = torch.randn(100, 1).to(fme.get_device())
+    output = model(input)
+    loss = output.sum()
+    optimizer = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        kwargs={},
+    )
+    optimizer.accumulate_loss(loss)
+    optimizer.accumulate_loss(loss)
+    assert optimizer.get_accumulated_loss() == loss * 2
+    optimizer.step_weights()
+    assert optimizer.get_accumulated_loss() == torch.tensor(0.0)
+
+
+@pytest.mark.parametrize("use_gradient_accumulation", [True, False])
+def test_detach_if_using_gradient_accumulation(use_gradient_accumulation: bool):
+    model = nn.Linear(1, 1).to(fme.get_device())
+    a = torch.randn(10, 1).to(fme.get_device())
+    data = {"a": model(a)}
+    optimizer = Optimization(
+        parameters=model.parameters(),
+        optimizer_type="Adam",
+        lr=0.001,
+        max_epochs=10,
+        scheduler=SchedulerConfig(),
+        enable_automatic_mixed_precision=False,
+        use_gradient_accumulation=use_gradient_accumulation,
+        kwargs={},
+    )
+    data = optimizer.detach_if_using_gradient_accumulation(data)
+    assert data["a"].requires_grad == (not use_gradient_accumulation)
+
+
+def test_change_identical_with_or_without_gradient_accumulation():
+    def get_change(use_gradient_accumulation: bool):
+        model = nn.Linear(1, 1).to(fme.get_device())
+        model.load_state_dict(
+            {
+                "weight": torch.ones(1, 1).to(fme.get_device()),
+                "bias": torch.zeros(1).to(fme.get_device()),
+            }
+        )
+        optimizer = Optimization(
+            parameters=model.parameters(),
+            optimizer_type="Adam",
+            lr=0.001,
+            max_epochs=10,
+            scheduler=SchedulerConfig(),
+            enable_automatic_mixed_precision=False,
+            use_gradient_accumulation=use_gradient_accumulation,
+            kwargs={},
+        )
+        a = torch.ones(10, 1).to(fme.get_device())
+        loss = model(a).sum()
+        optimizer.accumulate_loss(loss)
+        loss = model(a).sum()
+        optimizer.accumulate_loss(loss)
+        optimizer.step_weights()
+        return model.state_dict()
+
+    state_with_gradient_accumulation = get_change(True)
+    state_without_gradient_accumulation = get_change(False)
+    assert state_with_gradient_accumulation == state_without_gradient_accumulation

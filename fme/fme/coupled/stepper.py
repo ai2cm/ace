@@ -656,7 +656,8 @@ class CoupledStepper(
                 loss += step_loss
                 ocean_metrics[f"loss/ocean_step_{outer_step}"] = step_loss.detach()
 
-        optimization.step_weights(loss)
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
 
         ocean_stepped = TrainOutput(
             metrics={},
