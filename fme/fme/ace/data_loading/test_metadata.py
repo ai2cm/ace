@@ -96,7 +96,7 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
         _save_netcdf(path / "data.nc", variable_metadata)
 
     config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=str(path)) for path in paths],
+        dataset=[XarrayDataConfig(data_path=str(path)) for path in paths],
         batch_size=1,
         num_data_workers=0,
     )

@@ -791,7 +791,7 @@ def test_inference_config_raises_incompatible_timesteps(
         checkpoint_path="./some_dir",
         logging=LoggingConfig(),
         loader=InferenceDataLoaderConfig(
-            XarrayDataConfig(
+            dataset=XarrayDataConfig(
                 data_path="./some_data",
             ),
             start_indices=InferenceInitialConditionIndices(

@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 from math import ceil
-from typing import Optional, Sequence, Union
+from typing import Mapping, Optional, Sequence, Union
 
 import cftime
 import numpy as np
@@ -13,7 +13,12 @@ from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.requirements import DataRequirements
-from fme.core.dataset.xarray import DatasetProperties, XarrayDataset
+from fme.core.dataset.xarray import (
+    DatasetProperties,
+    MergedXarrayDataset,
+    XarrayDataset,
+    get_merged_requirements,
+)
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
 
@@ -119,7 +124,7 @@ class InferenceDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: XarrayDataConfig
+    dataset: Union[XarrayDataConfig, Mapping[str, XarrayDataConfig]]
     start_indices: Union[
         InferenceInitialConditionIndices, ExplicitIndices, TimestampList
     ]
@@ -128,8 +133,17 @@ class InferenceDataLoaderConfig:
     persistence_names: Optional[Sequence[str]] = None
 
     def __post_init__(self):
-        if self.dataset.subset != Slice(None, None, None):
-            raise ValueError("Inference data may not be subset.")
+        if isinstance(self.dataset, XarrayDataConfig):
+            if self.dataset.subset != Slice(None, None, None):
+                raise ValueError("Inference data may not be subset.")
+        elif isinstance(self.dataset, Mapping):
+            for key, data in self.dataset.items():
+                if data.subset != Slice(None, None, None):
+                    raise ValueError(f"Inference data for {key} may not be subset.")
+                if data.renamed_variables is not None:
+                    raise ValueError(
+                        "renamed_variables is not supported for merged datasets"
+                    )
 
     @property
     def n_initial_conditions(self) -> int:
@@ -152,14 +166,23 @@ class ForcingDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: XarrayDataConfig
+    dataset: Union[XarrayDataConfig, Mapping[str, XarrayDataConfig]]
     num_data_workers: int = 0
     perturbations: Optional[SSTPerturbation] = None
     persistence_names: Optional[Sequence[str]] = None
 
     def __post_init__(self):
-        if self.dataset.subset != Slice(None, None, None):
-            raise ValueError("Inference data may not be subset.")
+        if isinstance(self.dataset, XarrayDataConfig):
+            if self.dataset.subset != Slice(None, None, None):
+                raise ValueError("Inference data may not be subset.")
+        elif isinstance(self.dataset, Mapping):
+            for key, data in self.dataset.items():
+                if data.subset != Slice(None, None, None):
+                    raise ValueError(f"Inference data for {key} may not be subset.")
+                if data.renamed_variables is not None:
+                    raise ValueError(
+                        "renamed_variables is not supported for merged datasets"
+                    )
 
     def build_inference_config(self, start_indices: ExplicitIndices):
         return InferenceDataLoaderConfig(
@@ -180,18 +203,22 @@ class InferenceDataset(torch.utils.data.Dataset):
         surface_temperature_name: Optional[str] = None,
         ocean_fraction_name: Optional[str] = None,
     ):
-        dataset = XarrayDataset(config.dataset, requirements=requirements)
-        self._dataset = dataset
-        self._properties = dataset.properties
+        if isinstance(config.dataset, XarrayDataConfig):
+            dataset = XarrayDataset(config.dataset, requirements=requirements)
+            self._dataset = dataset
+        elif isinstance(config.dataset, Mapping):
+            self._dataset = self._resolve_merged_datasets(config.dataset, requirements)
+        self._properties = self._dataset.properties
         self._forward_steps_in_memory = requirements.n_timesteps - 1
         self._total_forward_steps = total_forward_steps
         self._perturbations = config.perturbations
         self._surface_temperature_name = surface_temperature_name
         self._ocean_fraction_name = ocean_fraction_name
         self._n_initial_conditions = config.n_initial_conditions
-
         if isinstance(config.start_indices, TimestampList):
-            self._start_indices = config.start_indices.as_indices(dataset.all_times)
+            self._start_indices = config.start_indices.as_indices(
+                self._dataset.all_times
+            )
         else:
             self._start_indices = config.start_indices.as_indices()
         self._validate_n_forward_steps()
@@ -293,3 +320,21 @@ class InferenceDataset(torch.utils.data.Dataset):
                 f"({max_steps}) in dataset after the last initial condition's "
                 "start index."
             )
+
+    def _resolve_merged_datasets(
+        self,
+        merged_datasets_config: Mapping[str, XarrayDataConfig],
+        requirements: DataRequirements,
+    ):
+        merged_requirements = get_merged_requirements(
+            merged_datasets_config, requirements
+        )
+        merged_xarray_datasets = []
+        for key, config in merged_datasets_config.items():
+            current_dataset = XarrayDataset(
+                config,
+                merged_requirements[key],
+            )
+            merged_xarray_datasets.append(current_dataset)
+        merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
+        return merged_datasets
