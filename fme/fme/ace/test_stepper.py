@@ -181,7 +181,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
-    stepped = stepper.train_on_batch(data=data, optimization=MagicMock())
+    stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
     assert torch.allclose(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
     )  # as std=1, mean=0, no change
@@ -194,7 +194,9 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
-    stepped_double_std = stepper.train_on_batch(data=data, optimization=MagicMock())
+    stepped_double_std = stepper.train_on_batch(
+        data=data, optimization=NullOptimization()
+    )
     assert torch.allclose(
         stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
     )
@@ -240,7 +242,7 @@ def test_train_on_batch_addition_series():
     stepper = config.get_stepper(
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
-    stepped = stepper.train_on_batch(data=data_with_ic, optimization=MagicMock())
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
     assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
 
@@ -302,7 +304,7 @@ def test_train_on_batch_with_prescribed_ocean():
     stepper = config.get_stepper(
         area.shape, gridded_operations, vertical_coordinate, TIMESTEP
     )
-    stepped = stepper.train_on_batch(data, optimization=MagicMock())
+    stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(

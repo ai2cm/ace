@@ -3,7 +3,18 @@ import datetime
 import logging
 import pathlib
 from copy import copy
-from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    Union,
+)
 
 import dacite
 import torch
@@ -341,7 +352,13 @@ class ExistingStepperConfig:
     def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
         return self._stepper_config.get_base_weights()
 
-    def get_stepper(self, img_shape, gridded_operations, vertical_coordinate, timestep):
+    def get_stepper(
+        self,
+        img_shape,
+        gridded_operations,
+        vertical_coordinate,
+        timestep,
+    ):
         del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"])
@@ -707,7 +724,8 @@ class SingleModuleStepper(
         initial_condition: TensorMapping,
         forcing_data: TensorMapping,
         n_forward_steps: int,
-    ) -> TensorDict:
+        optimizer: OptimizationABC,
+    ) -> Generator[TensorDict, None, None]:
         """
         Predict multiple steps forward given initial condition and forcing data.
 
@@ -721,15 +739,15 @@ class SingleModuleStepper(
                 [n_batch, n_forward_steps + self.n_ic_timesteps, <horizontal_dims>].
             n_forward_steps: The number of forward steps to predict, corresponding
                 to the data shapes of forcing_data.
+            optimizer: The optimizer to use for updating the module.
 
         Returns:
-            The output data at each timestep.
+            Generator yielding the output data at each timestep.
         """
         state = {
             k: initial_condition[k].squeeze(self.TIME_DIM) for k in initial_condition
         }
         ml_forcing_names = self._config.forcing_names
-        output_list = []
         for step in range(n_forward_steps):
             ml_input_forcing = {
                 k: (
@@ -747,20 +765,17 @@ class SingleModuleStepper(
                 step >= self._activation_checkpointing.after_n_forward_steps
             )
             state = self.step(
-                input_data, next_step_forcing_data, use_activation_checkpointing
+                input_data,
+                next_step_forcing_data,
+                use_activation_checkpointing,
             )
             if self._multi_call is not None:
                 multi_called_outputs = self._multi_call.step(
                     input_data, next_step_forcing_data, use_activation_checkpointing
                 )
                 state = {**multi_called_outputs, **state}
-            output_list.append(state)
-        output_timeseries = {}
-        for name in state:
-            output_timeseries[name] = torch.stack(
-                [x[name] for x in output_list], dim=self.TIME_DIM
-            )
-        return output_timeseries
+            yield state
+            state = optimizer.detach_if_using_gradient_accumulation(state)
 
     def predict(
         self,
@@ -796,14 +811,37 @@ class SingleModuleStepper(
                     f"{initial_condition_state.time.shape[1]}."
                 )
             n_forward_steps = forcing_data.time.shape[1] - self.n_ic_timesteps
-            output_timeseries = self._predict(
-                initial_condition_state.data, forcing_data.data, n_forward_steps
+            output_list = list(
+                self._predict(
+                    initial_condition_state.data,
+                    forcing_data.data,
+                    n_forward_steps,
+                    NullOptimization(),
+                )
             )
-            data = BatchData.new_on_device(
-                output_timeseries,
-                forcing_data.time[:, self.n_ic_timesteps :],
-                horizontal_dims=forcing_data.horizontal_dims,
+        data = self._process_output_list(
+            output_list, initial_condition, forcing_data, compute_derived_variables
+        )
+        return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
+
+    def _process_output_list(
+        self,
+        output_list: List[TensorDict],
+        initial_condition: PrognosticState,
+        forcing_data: BatchData,
+        compute_derived_variables: bool,
+    ) -> BatchData:
+        timer = GlobalTimer.get_instance()
+        output_timeseries = {}
+        for name in output_list[0]:
+            output_timeseries[name] = torch.stack(
+                [x[name] for x in output_list], dim=self.TIME_DIM
             )
+        data = BatchData.new_on_device(
+            output_timeseries,
+            forcing_data.time[:, self.n_ic_timesteps :],
+            horizontal_dims=forcing_data.horizontal_dims,
+        )
         if compute_derived_variables:
             with timer.context("compute_derived_variables"):
                 data = (
@@ -814,7 +852,7 @@ class SingleModuleStepper(
                     )
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
-        return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        return data
 
     def predict_paired(
         self,
@@ -878,7 +916,12 @@ class SingleModuleStepper(
         compute_derived_variables: bool = False,
     ) -> TrainOutput:
         """
-        Step the model forward multiple steps on a batch of data.
+        Train the model on a batch of data with one or more forward steps.
+
+        If gradient accumulation is used by the optimization, the computational graph is
+        detached between steps to reduce memory consumption. This means the model learns
+        how to deal with inputs on step N but does not try to improve the behavior at
+        step N by modifying the behavior for step N-1.
 
         Args:
             data: The batch data where each tensor in data.data has shape
@@ -893,49 +936,58 @@ class SingleModuleStepper(
                 and the normalized batch data.
         """
         time_dim = self.TIME_DIM
-
-        loss = torch.tensor(0.0, device=get_device())
         metrics: Dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        target_data = self.get_forward_data(data, compute_derived_variables=False)
 
         optimization.set_mode(self.module)
         with optimization.autocast():
             # output from self.predict_paired does not include initial condition
-            output, _ = self.predict_paired(input_data, forcing=data)
-            gen_data = output.prediction
-            target_data = output.target
-            n_forward_steps = output.time.shape[1]
-
-            # compute loss for each timestep
-            for step in range(n_forward_steps):
+            n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
+            output_generator = self._predict(
+                input_data.as_batch_data().data,
+                data.data,
+                n_forward_steps,
+                optimization,
+            )
+            output_list = []
+            for step, gen_step in enumerate(output_generator):
+                output_list.append(gen_step)
                 # Note: here we examine the loss for a single timestep,
                 # not a single model call (which may contain multiple timesteps).
-                gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
                 target_step = {
-                    k: v.select(time_dim, step) for k, v in target_data.items()
+                    k: v.select(time_dim, step) for k, v in target_data.data.items()
                 }
                 gen_norm_step = self.loss_normalizer.normalize(gen_step)
                 target_norm_step = self.loss_normalizer.normalize(target_step)
 
-                if self._multi_call is not None:
-                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
-                    loss += mc_loss
-                    metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
-
-                step_loss = self.loss_obj(gen_norm_step, target_norm_step)
-                loss += step_loss
+                step_loss: torch.Tensor = self.loss_obj(gen_norm_step, target_norm_step)
                 metrics[f"loss_step_{step}"] = step_loss.detach()
 
-        loss += self._l2_sp_tuning_regularizer()
+                if self._multi_call is not None:
+                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
+                    step_loss = step_loss + mc_loss
+                    metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
 
-        metrics["loss"] = loss.detach()
-        optimization.step_weights(loss)
+                optimization.accumulate_loss(step_loss)
+
+        regularizer_loss = self._l2_sp_tuning_regularizer()
+        if torch.any(regularizer_loss > 0):
+            optimization.accumulate_loss(regularizer_loss)
+        metrics["loss"] = optimization.get_accumulated_loss().detach()
+        optimization.step_weights()
+        gen_data = self._process_output_list(
+            output_list,
+            initial_condition=input_data,
+            forcing_data=data,
+            compute_derived_variables=False,
+        ).data
 
         stepped = TrainOutput(
             metrics=metrics,
             gen_data=dict(gen_data),
-            target_data=dict(target_data),
-            time=output.time,
+            target_data=dict(target_data.data),
+            time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
         )

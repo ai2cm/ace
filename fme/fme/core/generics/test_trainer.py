@@ -163,7 +163,8 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization: OptimizationABC,
         compute_derived_variables: bool = False,
     ) -> TrainOutput:
-        optimization.step_weights(torch.tensor(float("inf")))
+        optimization.accumulate_loss(torch.tensor(float("inf")))
+        optimization.step_weights()
         return TrainOutput()
 
 

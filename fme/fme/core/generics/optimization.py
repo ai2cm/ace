@@ -4,6 +4,8 @@ import contextlib
 import torch
 from torch import nn
 
+from fme.core.typing_ import TensorDict, TensorMapping
+
 
 class OptimizationABC(abc.ABC):
     @contextlib.contextmanager
@@ -33,7 +35,41 @@ class OptimizationABC(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def step_weights(self, loss: torch.Tensor): ...
+    def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
+        """
+        Detaches the state if using gradient accumulation.
+        """
+        ...
+
+    @abc.abstractmethod
+    def accumulate_loss(self, loss: torch.Tensor):
+        """
+        Accumulate the loss.
+
+        In order to support gradient accumulation, loss values accumulated after
+        a call to `accumulate_loss` must not depend on any parameter interactions that
+        occurred before the call. For example, if this is called at the end of a model
+        step, later steps must have their graph detached from previous timesteps. This
+        can be done only when gradient accumulation is enabled using the
+        `detach_if_using_gradient_accumulation` method on this object.
+        """
+        ...
+
+    @abc.abstractmethod
+    def get_accumulated_loss(self) -> torch.Tensor:
+        """
+        Get the accumulated loss.
+        """
+        ...
+
+    @abc.abstractmethod
+    def step_weights(self):
+        """
+        Step the weights.
+
+        Resets the accumulated loss to zero.
+        """
+        ...
 
     @abc.abstractmethod
     def get_state(self):

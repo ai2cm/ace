@@ -6,12 +6,12 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
-import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.dataset.requirements import DataRequirements
@@ -20,7 +20,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
+from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -287,88 +287,6 @@ def _combine_normalizers(
         fill_nans_on_normalize=model_normalizer.fill_nans_on_normalize,
         fill_nans_on_denormalize=model_normalizer.fill_nans_on_denormalize,
     )
-
-
-def _prepend_timesteps(
-    data: TensorMapping, timesteps: TensorMapping, time_dim: int = 1
-) -> TensorDict:
-    return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
-
-
-@dataclasses.dataclass
-class TrainOutput(TrainOutputABC):
-    metrics: TensorDict
-    gen_data: TensorDict
-    target_data: TensorDict
-    time: xr.DataArray
-    normalize: Callable[[TensorDict], TensorDict]
-    derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
-        lambda x, _: dict(x)
-    )
-
-    def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
-        return TrainOutput(
-            metrics=self.metrics,
-            gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
-            target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
-            time=self.time[:, n_ic_timesteps:],
-            normalize=self.normalize,
-            derive_func=self.derive_func,
-        )
-
-    def copy(self) -> "TrainOutput":
-        """Creates new dictionaries for the data but with the same tensors."""
-        return TrainOutput(
-            metrics=self.metrics,
-            gen_data={k: v for k, v in self.gen_data.items()},
-            target_data={k: v for k, v in self.target_data.items()},
-            time=self.time,
-            normalize=self.normalize,
-            derive_func=self.derive_func,
-        )
-
-    def prepend_initial_condition(
-        self,
-        initial_condition: PrognosticState,
-    ) -> "TrainOutput":
-        """
-        Prepends an initial condition to the existing stepped data.
-        Assumes data are on the same device.
-        For data windows > 0, the target IC is different from the generated IC
-            and may be provided for correct calculation of tendencies.
-
-        Args:
-            initial_condition: Initial condition data.
-        """
-        batch_data = initial_condition.as_batch_data()
-        return TrainOutput(
-            metrics=self.metrics,
-            gen_data=_prepend_timesteps(self.gen_data, batch_data.data),
-            target_data=_prepend_timesteps(
-                self.target_data,
-                batch_data.data,
-            ),
-            time=xr.concat([batch_data.time, self.time], dim="time"),
-            normalize=self.normalize,
-            derive_func=self.derive_func,
-        )
-
-    def compute_derived_variables(
-        self,
-    ) -> "TrainOutput":
-        gen_data = self.derive_func(self.gen_data, self.target_data)
-        target_data = self.derive_func(self.target_data, self.target_data)
-        return TrainOutput(
-            metrics=self.metrics,
-            gen_data=gen_data,
-            target_data=target_data,
-            time=self.time,
-            normalize=self.normalize,
-            derive_func=self.derive_func,
-        )
-
-    def get_metrics(self) -> TensorDict:
-        return self.metrics
 
 
 class DiffusionStepper(
@@ -795,7 +713,8 @@ class DiffusionStepper(
         loss += self._l2_sp_tuning_regularizer()
 
         metrics["loss"] = loss.detach()
-        optimization.step_weights(loss)
+        optimization.accumulate_loss(loss)
+        optimization.step_weights()
 
         stepped = TrainOutput(
             metrics=metrics,

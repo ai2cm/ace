@@ -8,8 +8,10 @@ import torch
 import torch.cuda.amp as amp
 from torch import nn
 
+from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import SchedulerConfig
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class Optimization(OptimizationABC):
@@ -22,6 +24,7 @@ class Optimization(OptimizationABC):
         scheduler: SchedulerConfig,
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
+        use_gradient_accumulation: bool = False,
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -35,6 +38,8 @@ class Optimization(OptimizationABC):
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
+        self._use_gradient_accumulation = use_gradient_accumulation
 
     @contextlib.contextmanager
     def autocast(self):
@@ -67,19 +72,40 @@ class Optimization(OptimizationABC):
             except TypeError:
                 self.scheduler.step()
 
-    def step_weights(self, loss: torch.Tensor):
-        self._validate_loss(loss)
+    def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
+        if self._use_gradient_accumulation:
+            return {k: v.detach() for k, v in state.items()}
+        return dict(state)
 
+    def accumulate_loss(self, loss: torch.Tensor):
+        self._validate_loss(loss)
+        self._accumulated_loss += loss
+        if self._use_gradient_accumulation:
+            self._backward(loss)
+
+    def get_accumulated_loss(self) -> torch.Tensor:
+        return self._accumulated_loss
+
+    def _backward(self, loss: torch.Tensor):
         if self.gscaler is not None:
             self.gscaler.scale(loss).backward()
-            self.gscaler.step(self.optimizer)
         else:
             loss.backward()
-            self.optimizer.step()
-        self.optimizer.zero_grad()
 
+    def _step_weights(self):
+        if self.gscaler is not None:
+            self.gscaler.step(self.optimizer)
+        else:
+            self.optimizer.step()
+
+    def step_weights(self):
+        if not self._use_gradient_accumulation:
+            self._backward(self._accumulated_loss)
+        self._step_weights()
+        self.optimizer.zero_grad()
         if self.gscaler is not None:
             self.gscaler.update()
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
     def get_state(self):
         """
@@ -125,6 +151,12 @@ class OptimizationConfig:
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
             will be used.
+        use_gradient_accumulation: Whether to use gradient accumulation. This must be
+            supported by the stepper being optimized, which may accumulate gradients
+            from separate losses to reduce memory consumption. The stepper may choose
+            to accumulate gradients differently when this is enabled, such as by
+            detaching the computational graph between steps. See the documentation of
+            your stepper (e.g. SingleModuleStepper) for more details.
     """
 
     optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
@@ -134,6 +166,7 @@ class OptimizationConfig:
     scheduler: SchedulerConfig = dataclasses.field(
         default_factory=lambda: SchedulerConfig()
     )
+    use_gradient_accumulation: bool = False
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
@@ -145,6 +178,7 @@ class OptimizationConfig:
             scheduler=self.scheduler,
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
             kwargs=self.kwargs,
+            use_gradient_accumulation=self.use_gradient_accumulation,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -156,6 +190,9 @@ class OptimizationConfig:
 
 
 class NullOptimization(OptimizationABC):
+    def __init__(self):
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
+
     @contextlib.contextmanager
     def autocast(self):
         yield
@@ -167,7 +204,17 @@ class NullOptimization(OptimizationABC):
     def step_scheduler(self, valid_loss: float):
         return
 
-    def step_weights(self, loss: torch.Tensor):
+    def detach_if_using_gradient_accumulation(self, state: TensorMapping) -> TensorDict:
+        return dict(state)
+
+    def accumulate_loss(self, loss: torch.Tensor):
+        self._accumulated_loss += loss
+
+    def get_accumulated_loss(self) -> torch.Tensor:
+        return self._accumulated_loss
+
+    def step_weights(self):
+        self._accumulated_loss = torch.tensor(0.0, device=get_device())
         return
 
     def get_state(self):
