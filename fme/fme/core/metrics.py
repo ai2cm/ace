@@ -276,7 +276,7 @@ def net_surface_energy_flux(
     return (
         net_surface_radiative_flux
         + net_surface_turbulent_heat_flux
-        + frozen_precip_heat_flux
+        - frozen_precip_heat_flux
     )
 
 

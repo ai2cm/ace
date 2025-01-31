@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import pytest
 import torch
 
@@ -6,6 +8,7 @@ from fme.core.atmosphere_data import (
     _height_at_interface,
     compute_layer_thickness,
 )
+from fme.core.constants import LATENT_HEAT_OF_FREEZING
 
 
 def test_compute_layer_thickness():
@@ -114,3 +117,43 @@ def test_keyerror_when_missing_specific_total_water_layer(missing_water_layer: b
     else:
         with pytest.raises(ValueError):
             _ = atmos_data.specific_total_water
+
+
+@pytest.mark.parametrize("has_frozen_precipitation", [False, True])
+def test_net_surface_energy_flux(has_frozen_precipitation):
+    n_samples, n_time_steps, nlat, nlon = 2, 3, 4, 8
+    shape = (n_samples, n_time_steps, nlat, nlon)
+
+    def _get_data(
+        shape: Tuple[int, ...], has_frozen_precipitation: bool
+    ) -> AtmosphereData:
+        ones = torch.ones(shape)
+        surface_pressure = {"PRESsfc": ones}
+        energy_fluxes = {
+            "LHTFLsfc": ones,
+            "SHTFLsfc": ones,
+            "ULWRFsfc": ones,
+            "DLWRFsfc": ones,
+            "USWRFsfc": ones,
+            "DSWRFsfc": ones,
+        }
+        if has_frozen_precipitation:
+            frozen_precipitation = {
+                "GRAUPELsfc": ones / LATENT_HEAT_OF_FREEZING,
+                "ICEsfc": ones / LATENT_HEAT_OF_FREEZING,
+                "SNOWsfc": ones / LATENT_HEAT_OF_FREEZING,
+            }
+        else:
+            frozen_precipitation = {}
+        data = surface_pressure | energy_fluxes | frozen_precipitation
+        return AtmosphereData(data)
+
+    atmosphere_data = _get_data(shape, has_frozen_precipitation)
+
+    if has_frozen_precipitation:
+        expected = torch.full(shape, -5)
+    else:
+        expected = torch.full(shape, -2)
+
+    result = atmosphere_data.net_surface_energy_flux
+    torch.testing.assert_close(result, expected, check_dtype=False)
