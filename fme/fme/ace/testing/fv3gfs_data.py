@@ -165,7 +165,7 @@ class FV3GFSData:
     @property
     def inference_data_loader_config(self) -> InferenceDataLoaderConfig:
         return InferenceDataLoaderConfig(
-            XarrayDataConfig(
+            dataset=XarrayDataConfig(
                 str(self.data_path),
             ),
             start_indices=InferenceInitialConditionIndices(

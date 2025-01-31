@@ -85,13 +85,14 @@ def _create_dataset_on_disk(
     data_dim_sizes=None,
     n_times: int = 3,
     timestep_size: int = 1,
+    in_variable_names=["foo", "bar", "baz"],
+    out_variable_names=["foo", "bar"],
+    filename="data.nc",
 ) -> pathlib.Path:
     if data_dim_sizes is None:
         data_dim_sizes = {"time": n_times, "grid_yt": 16, "grid_xt": 32}
     seed = 0
     np.random.seed(seed)
-    in_variable_names = ["foo", "bar", "baz"]
-    out_variable_names = ["foo", "bar"]
     mask_name = "mask"
     constant_mask_name = "constant_mask"
     all_variable_names = list(set(in_variable_names + out_variable_names)) + [
@@ -99,7 +100,7 @@ def _create_dataset_on_disk(
         constant_mask_name,
     ]
 
-    data_path = data_dir / "data.nc"
+    data_path = data_dir / filename
     _save_netcdf(data_path, data_dim_sizes, all_variable_names, calendar, timestep_size)
 
     return data_path
@@ -118,7 +119,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=str(path)) for path in netcdfs],
+        dataset=[XarrayDataConfig(data_path=str(path)) for path in netcdfs],
         batch_size=1,
         num_data_workers=0,
     )
@@ -148,7 +149,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        [
+        dataset=[
             XarrayDataConfig(data_path=str(path), subset=Slice(stop=n_samples))
             for path in netcdfs
         ],
@@ -168,7 +169,7 @@ def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=tmp_path, n_repeats=1)],
+        dataset=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)],
         batch_size=1,
         num_data_workers=0,
     )
@@ -179,13 +180,111 @@ def test_xarray_loader(tmp_path):
     assert data.vertical_coordinate.ak.device == fme.get_device()
 
 
+def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        in_variable_names=["foo2", "bar2"],
+        out_variable_names=["foo2", "bar2"],
+        filename="other_source.nc",
+    )
+
+    config = DataLoaderConfig(
+        dataset={
+            "source1": [
+                XarrayDataConfig(
+                    data_path=tmp_path,
+                    file_pattern="data*.nc",
+                    n_repeats=1,
+                ),
+            ],
+            "source2": [
+                XarrayDataConfig(
+                    data_path=other_path, file_pattern="other_source*.nc", n_repeats=1
+                )
+            ],
+        },
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo", "foo2"], window_timesteps)
+    data = get_data_loader(config, True, requirements)  # type: ignore
+    assert "foo" in data.variable_metadata.keys()
+    assert "foo2" in data.variable_metadata.keys()
+
+
+def test_xarray_loader_using_merged_dataset_errors_if_different_time(
+    tmp_path, tmp_path_factory
+):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        in_variable_names=["foo2", "bar2"],
+        out_variable_names=["foo2", "bar2"],
+        filename="other_source.nc",
+        n_times=4,
+    )
+
+    config = DataLoaderConfig(
+        dataset={
+            "source1": [
+                XarrayDataConfig(
+                    data_path=tmp_path,
+                    file_pattern="data*.nc",
+                    n_repeats=1,
+                ),
+            ],
+            "source2": [
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                )
+            ],
+        },
+        batch_size=1,
+        num_data_workers=0,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo", "foo2"], window_timesteps)
+    with pytest.raises(ValueError, match="Inconsistent timestamps between datasets"):
+        get_data_loader(config, True, requirements)  # type: ignore
+
+    # subset source2 to have the same time stamps as source1
+    config = DataLoaderConfig(
+        dataset={
+            "source1": [
+                XarrayDataConfig(
+                    data_path=tmp_path,
+                    file_pattern="data*.nc",
+                    n_repeats=1,
+                ),
+            ],
+            "source2": [
+                XarrayDataConfig(
+                    data_path=other_path,
+                    file_pattern="other_source*.nc",
+                    n_repeats=1,
+                    subset=Slice(stop=3),
+                )
+            ],
+        },
+        batch_size=1,
+        num_data_workers=0,
+    )
+    get_data_loader(config, True, requirements)  # type: ignore
+
+
 def test_xarray_loader_hpx(tmp_path):
     """Checks that vertical coordinates are present."""
     n_times = 3
     data_dim_sizes = {"time": n_times, "face": 12, "width": 16, "height": 16}
     _create_dataset_on_disk(tmp_path, data_dim_sizes=data_dim_sizes, n_times=n_times)
     config = DataLoaderConfig(
-        [
+        dataset=[
             XarrayDataConfig(
                 data_path=tmp_path, n_repeats=1, spatial_dimensions="healpix"
             )
@@ -209,7 +308,9 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
     _create_dataset_on_disk(tmp_path)
     with pytest.raises(ValueError, match="infer_timestep must be True"):
         DataLoaderConfig(
-            [XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False)],
+            dataset=[
+                XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False)
+            ],
             batch_size=1,
             num_data_workers=0,
         )
@@ -220,7 +321,7 @@ def test_inference_data_loader(tmp_path):
     batch_size = 2
     step = 7
     config = InferenceDataLoaderConfig(
-        XarrayDataConfig(
+        dataset=XarrayDataConfig(
             data_path=tmp_path,
             n_repeats=1,
         ),
@@ -284,7 +385,7 @@ def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
     config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=tmp_path, subset=Slice(stop=n_samples))],
+        dataset=[XarrayDataConfig(data_path=tmp_path, subset=Slice(stop=n_samples))],
         batch_size=n_samples,
         num_data_workers=0,
     )
@@ -303,13 +404,7 @@ def test_data_loader_outputs(tmp_path, calendar):
 
 
 @pytest.mark.parametrize(
-    (
-        "first_ic_index,"
-        "n_initial_conditions,"
-        "ic_interval,"
-        "num_forward_steps,"
-        "raises_error"
-    ),
+    ("first_ic_index,n_initial_conditions,ic_interval,num_forward_steps,raises_error"),
     [
         (0, 1, 1, 9, False),
         (0, 1, 1, 10, True),
@@ -338,7 +433,7 @@ def test_inference_data_loader_validate_n_forward_steps(
         interval=ic_interval,
     )
     config = InferenceDataLoaderConfig(
-        XarrayDataConfig(
+        dataset=XarrayDataConfig(
             data_path=tmp_path,
             n_repeats=1,
         ),
@@ -382,7 +477,11 @@ def test_inference_data_loader_validate_n_forward_steps(
 def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_error):
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        [XarrayDataConfig(data_path=tmp_path, n_repeats=10, subset=Slice(start, stop))],
+        dataset=[
+            XarrayDataConfig(
+                data_path=tmp_path, n_repeats=10, subset=Slice(start, stop)
+            )
+        ],
         batch_size=batch_size,
         num_data_workers=0,
     )
@@ -401,7 +500,7 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
     total_forward_steps = 5
     forward_steps_in_memory = 2
     _create_dataset_on_disk(tmp_path, calendar=calendar, n_times=10)
-    config = ForcingDataLoaderConfig(XarrayDataConfig(data_path=tmp_path))
+    config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
     window_requirements = DataRequirements(
         names=["foo"],
         n_timesteps=forward_steps_in_memory + 1,
@@ -443,14 +542,99 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
 def test_inference_loader_raises_if_subset():
     with pytest.raises(ValueError):
         InferenceDataLoaderConfig(
-            XarrayDataConfig(data_path="foo", subset=Slice(stop=1)),
+            dataset=XarrayDataConfig(data_path="foo", subset=Slice(stop=1)),
             start_indices=ExplicitIndices([0, 1]),
         )
 
 
+def test_inference_loader_merged_inputs(tmp_path, tmp_path_factory):
+    _create_dataset_on_disk(tmp_path)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        in_variable_names=["foo2", "bar2"],
+        out_variable_names=["foo2", "bar2"],
+        filename="other_source.nc",
+    )
+    merged = InferenceDataLoaderConfig(
+        dataset={
+            "source1": XarrayDataConfig(data_path=tmp_path),
+            "source2": XarrayDataConfig(data_path=other_path),
+        },
+        start_indices=ExplicitIndices([0, 1]),
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "foo2"],
+        n_timesteps=2,
+    )
+    initial_condition_requirements = PrognosticStateDataRequirements(
+        names=["foo", "foo2"],
+        n_timesteps=1,
+    )
+    data = get_inference_data(
+        merged,
+        total_forward_steps=1,
+        window_requirements=window_requirements,
+        initial_condition=initial_condition_requirements,
+        surface_temperature_name="foo",
+        ocean_fraction_name="constant_mask",
+    )
+    data_loader = data.loader
+    batch_data = next(iter(data_loader))
+    assert "foo" in batch_data.data.keys()
+    assert "foo2" in batch_data.data.keys()
+
+
 def test_forcing_loader_raises_if_subset():
     with pytest.raises(ValueError):
-        ForcingDataLoaderConfig(XarrayDataConfig(data_path="foo", subset=Slice(stop=1)))
+        ForcingDataLoaderConfig(
+            dataset=XarrayDataConfig(data_path="foo", subset=Slice(stop=1))
+        )
+
+
+def test_forcing_loader_config_merged_dataset_inputs():
+    ForcingDataLoaderConfig(
+        dataset={
+            "source1": XarrayDataConfig(data_path="foo"),
+            "source2": XarrayDataConfig(data_path="bar"),
+        },
+    )
+
+
+def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
+    calendar = "proleptic_gregorian"
+    _create_dataset_on_disk(tmp_path, calendar=calendar)
+    other_path = tmp_path_factory.mktemp("other")
+    _create_dataset_on_disk(
+        other_path,
+        calendar=calendar,
+        in_variable_names=["foo2", "bar2"],
+        out_variable_names=["foo2", "bar2"],
+    )
+    config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
+    config = ForcingDataLoaderConfig(
+        dataset={
+            "source1": XarrayDataConfig(data_path=tmp_path),
+            "source2": XarrayDataConfig(data_path=other_path),
+        }
+    )
+    window_requirements = DataRequirements(
+        names=["foo", "foo2"],
+        n_timesteps=2,
+    )
+    time_values = [[cftime.datetime(1970, 1, 1, calendar=calendar)]]
+    initial_condition = BatchData.new_on_cpu(
+        data={"foo": torch.randn(1, 1, 1, 1), "foo2": torch.randn(1, 1, 1, 1)},
+        time=xr.DataArray(time_values, dims=["sample", "time"]),
+    )
+    data = get_forcing_data(
+        config,
+        1,
+        window_requirements=window_requirements,
+        initial_condition=PrognosticState(initial_condition),
+    )
+    assert "foo" in data.variable_metadata.keys()
+    assert "foo2" in data.variable_metadata.keys()
 
 
 @pytest.mark.parametrize(
@@ -502,7 +686,7 @@ def test_inference_data_with_perturbations(tmp_path):
     batch_size = 1
     step = 7
     config = InferenceDataLoaderConfig(
-        XarrayDataConfig(
+        dataset=XarrayDataConfig(
             data_path=tmp_path,
             n_repeats=1,
         ),
@@ -548,7 +732,7 @@ def test_inference_persistence_names(tmp_path):
     _create_dataset_on_disk(tmp_path, n_times=14)
 
     config = InferenceDataLoaderConfig(
-        XarrayDataConfig(data_path=tmp_path),
+        dataset=XarrayDataConfig(data_path=tmp_path),
         start_indices=ExplicitIndices([0, 3]),
         persistence_names=["foo"],
     )
@@ -569,3 +753,23 @@ def test_inference_persistence_names(tmp_path):
     torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
+
+
+def test_loader_error_if_renamed_variables_in_merged_dataset():
+    with pytest.raises(ValueError, match="renamed_variables is not supported"):
+        DataLoaderConfig(
+            dataset={
+                "source1": [
+                    XarrayDataConfig(
+                        data_path="some/path", renamed_variables={"foo": "bar"}
+                    )
+                ],
+                "source2": [
+                    XarrayDataConfig(
+                        data_path="some/other/path", renamed_variables={"foo2": "bar2"}
+                    )
+                ],
+            },
+            batch_size=1,
+            num_data_workers=0,
+        )
