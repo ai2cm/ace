@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import namedtuple
 from functools import lru_cache
-from typing import Dict, List, Mapping, Optional, Tuple, Union
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
 import fsspec
@@ -253,6 +253,13 @@ def _open_file_fh_cached(path, **kwargs):
     )
 
 
+def _get_raw_paths(path, file_pattern):
+    fs = _get_fs(path)
+    glob_paths = sorted(fs.glob(os.path.join(path, file_pattern)))
+    raw_paths = _preserve_protocol(path, glob_paths)
+    return raw_paths
+
+
 class DatasetProperties:
     def __init__(
         self,
@@ -261,12 +268,14 @@ class DatasetProperties:
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         is_remote: bool,
+        times: xr.CFTimeIndex,
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.timestep = timestep
         self.is_remote = is_remote
+        self.times = times
 
     def to_device(self) -> "DatasetProperties":
         device = get_device()
@@ -276,6 +285,7 @@ class DatasetProperties:
             self.horizontal_coordinates.to(device),
             self.timestep,
             self.is_remote,
+            self.times,
         )
 
     def update(self, other: "DatasetProperties"):
@@ -289,6 +299,17 @@ class DatasetProperties:
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
 
+    def update_merged_dataset(self, other: "DatasetProperties"):
+        if isinstance(self.variable_metadata, dict):
+            self.variable_metadata.update(other.variable_metadata)
+        self.is_remote = self.is_remote or other.is_remote
+        if self.timestep != other.timestep:
+            raise ValueError("Inconsistent timesteps between datasets")
+        if self.horizontal_coordinates != other.horizontal_coordinates:
+            raise ValueError("Inconsistent horizontal coordinates between datasets")
+        if not self.times.equals(other.times):
+            raise ValueError("Inconsistent timestamps between datasets")
+
 
 def get_xarray_dataset(
     config: XarrayDataConfig, requirements: DataRequirements
@@ -298,6 +319,15 @@ def get_xarray_dataset(
     index_slice = as_index_selection(config.subset, dataset)
     dataset = dataset.subset(index_slice)
     return dataset, properties
+
+
+def infer_available_variables(config: XarrayDataConfig):
+    """
+    Infer the available variables from a XarrayDataset.
+    """
+    paths = _get_raw_paths(config.data_path, config.file_pattern)
+    dataset = xr.open_dataset(paths[0], decode_times=False, engine=config.engine)
+    return dataset.data_vars
 
 
 class XarrayDataset(Dataset):
@@ -324,9 +354,8 @@ class XarrayDataset(Dataset):
         self.dtype = config.torch_dtype
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
-        fs = _get_fs(self.path)
-        glob_paths = sorted(fs.glob(os.path.join(self.path, config.file_pattern)))
-        self._raw_paths = _preserve_protocol(self.path, glob_paths)
+        self.subset_config = config.subset
+        self._raw_paths = _get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
                 f"No files found matching '{self.path}/{self.file_pattern}'."
@@ -361,6 +390,7 @@ class XarrayDataset(Dataset):
             self._horizontal_coordinates,
             self.timestep,
             self.is_remote,
+            self.subset_times,
         )
 
     def _get_names_to_load(self, names: List[str]) -> List[str]:
@@ -385,6 +415,12 @@ class XarrayDataset(Dataset):
     def all_times(self) -> xr.CFTimeIndex:
         """Time index of all available times in the data."""
         return self._all_times
+
+    @property
+    def subset_times(self) -> xr.CFTimeIndex:
+        """Time index of the speicified subset of all times."""
+        select = as_index_selection(self.subset_config, self)
+        return self._all_times[select]
 
     def _get_variable_metadata(self, ds):
         result = {}
@@ -677,3 +713,113 @@ def get_timestep(time: np.ndarray) -> datetime.timedelta:
         raise ValueError(
             "Time coordinate does not have enough times to infer a timestep."
         )
+
+
+class MergedXarrayDataset:
+    def __init__(
+        self,
+        datasets: Sequence[XarrayDataset],
+    ):
+        self.datasets = datasets
+
+        combined_names = [
+            item for dataset in self.datasets for item in dataset[0][0].keys()
+        ]
+        if len(combined_names) != len(set(combined_names)):
+            duplicates = list(
+                {item for item in combined_names if combined_names.count(item) > 1}
+            )
+            raise ValueError(
+                f"Variable names must be unique across merged datasets. \
+                    \nDuplicates found: {duplicates}"
+            )
+        for dataset in self.datasets:
+            if isinstance(dataset, XarrayDataset):
+                if not dataset.subset_times.equals(self.datasets[0].subset_times):
+                    raise ValueError(
+                        "All datasets in a merged dataset must have the same time."
+                    )
+            elif isinstance(dataset, torch.utils.data.Subset):
+                if not dataset.dataset.subset_times.equals(
+                    self.datasets[0].dataset.subset_times
+                ):
+                    raise ValueError(
+                        "All datasets in a merged dataset must have the same time."
+                    )
+            elif isinstance(dataset, torch.utils.data.ConcatDataset):
+                if not np.array_equal(
+                    self._get_concat_dataset_subset_times(dataset),
+                    self._get_concat_dataset_subset_times(self.datasets[0]),
+                ):
+                    raise ValueError(
+                        "All datasets in a merged dataset must have the same time."
+                    )
+
+    def _get_concat_dataset_subset_times(self, dataset: torch.utils.data.ConcatDataset):
+        subset_times = []
+        for ds in dataset.datasets:
+            subset_times.append(ds.dataset.subset_times)
+        return np.concatenate([*subset_times])
+
+    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+        tensors = {}
+        for dataset in self.datasets:
+            ds_tensors, time = dataset[idx]
+            tensors.update(ds_tensors)
+        return tensors, time
+
+    def __len__(self) -> int:
+        return len(self.datasets[0])
+
+    def get_sample_by_time_slice(
+        self, time_slice: slice
+    ) -> Tuple[TensorDict, xr.DataArray]:
+        tensors = {}
+        for dataset in self.datasets:
+            ds_tensors, time = dataset.get_sample_by_time_slice(time_slice)
+            tensors.update(ds_tensors)
+        return tensors, time
+
+    @property
+    def all_times(self) -> xr.CFTimeIndex:
+        return self.datasets[0].all_times
+
+    @property
+    def properties(self) -> DatasetProperties:
+        data_properties = None
+        for dataset in self.datasets:
+            if data_properties is None:
+                data_properties = dataset.properties
+            else:
+                data_properties.update_merged_dataset(dataset.properties)
+        if data_properties is None:
+            raise ValueError("No dataset available to determine properties")
+        return data_properties
+
+    @property
+    def total_timesteps(self) -> int:
+        return self.datasets[0].total_timesteps
+
+
+def get_merged_requirements(
+    dataset_configs: Mapping[str, Union[XarrayDataConfig, Sequence[XarrayDataConfig]]],
+    requirements: DataRequirements,
+    strict: bool = True,
+) -> Mapping[str, DataRequirements]:
+    merged_required_names = requirements.names.copy()
+    merged_requirements = {}
+    for key, config in dataset_configs.items():
+        if isinstance(config, XarrayDataConfig):
+            current_source_variables = infer_available_variables(config)
+        elif isinstance(config, Sequence):
+            current_source_variables = infer_available_variables(config[0])
+        current_source_names = [
+            name for name in merged_required_names if name in current_source_variables
+        ]
+        current_source_requirements = DataRequirements(
+            names=current_source_names, n_timesteps=requirements.n_timesteps
+        )
+        merged_requirements[key] = current_source_requirements
+        for name in current_source_names:
+            merged_required_names.remove(name)
+    return merged_requirements

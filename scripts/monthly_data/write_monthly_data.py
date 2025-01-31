@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import List, Sequence, Tuple
+from typing import List, Mapping, Sequence, Tuple
 
 import dacite
 import torch.utils.data
@@ -17,7 +17,7 @@ from fme.ace.inference.data_writer.monthly import (
     months_for_timesteps,
 )
 from fme.ace.stepper import AtmosphericDeriveFn
-from fme.core.dataset.getters import get_datasets
+from fme.core.dataset.getters import get_datasets, get_merged_datasets
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import using_gpu
@@ -52,8 +52,12 @@ def get_data_loaders(
             "Data loading for write_monthly_data.py is not "
             "supported in distributed mode."
         )
-
-    datasets, properties = get_datasets(config.dataset, requirements)
+    if isinstance(config.dataset, Sequence):
+        datasets, properties = get_datasets(config.dataset, requirements)
+    elif isinstance(config.dataset, Mapping):
+        dataset, properties = get_merged_datasets(
+            config.dataset, requirements, strict=config.strict_ensemble
+        )
 
     data_loaders = []
     for dataset in datasets:
@@ -191,7 +195,7 @@ def run(config: Config):
             batch_time=window_batch_data.time,
         )
         if i % 10 == 0:
-            logging.info(f"Writing batch {i+1} of {n_batches}.")
+            logging.info(f"Writing batch {i + 1} of {n_batches}.")
             writer.flush()
 
     writer.flush()

@@ -22,6 +22,7 @@ from fme.core.dataset.config import (
 )
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import (
+    MergedXarrayDataset,
     XarrayDataset,
     get_cumulative_timesteps,
     get_file_local_index,
@@ -78,6 +79,8 @@ def _get_data(
     step_freq,
     calendar,
     with_nans=False,
+    var_names=["foo", "bar"],
+    write_extra_vars=True,
 ) -> MockData:
     """Constructs an xarray dataset and saves to disk in netcdf format."""
     obs_times = xr.cftime_range(
@@ -97,7 +100,6 @@ def _get_data(
     obs_delta = obs_times[1] - obs_times[0]
     n_levels = 2
     n_lat, n_lon = 4, 8
-    var_names = ["foo", "bar"]
     constant_var = xr.DataArray(
         np.random.randn(n_lat, n_lon).astype(np.float32),
         dims=("lat", "lon"),
@@ -123,14 +125,15 @@ def _get_data(
             data_vars[var_name] = xr.DataArray(data, dims=("time", "lat", "lon"))
 
         data_varying_scalar = np.random.randn(len(time)).astype(np.float32)
-        data_vars["varying_scalar_var"] = xr.DataArray(
-            data_varying_scalar, dims=("time",)
-        )
-
         if with_nans:
             constant_var[0, 0] = np.nan
-        data_vars["constant_var"] = constant_var
-        data_vars["constant_scalar_var"] = constant_scalar_var
+
+        if write_extra_vars:
+            data_vars["varying_scalar_var"] = xr.DataArray(
+                data_varying_scalar, dims=("time",)
+            )
+            data_vars["constant_var"] = constant_var
+            data_vars["constant_scalar_var"] = constant_scalar_var
 
         coords = {
             "time": xr.DataArray(time, dims=("time",)),
@@ -149,31 +152,64 @@ def _get_data(
 
     initial_condition_names = ()
     start_indices = get_cumulative_timesteps(get_raw_times(filenames, "netcdf4"))
-
-    variable_names = VariableNames(
-        time_dependent_names=("foo", "bar", "varying_scalar_var"),
-        time_invariant_names=("constant_var", "constant_scalar_var"),
-        initial_condition_names=initial_condition_names,
-    )
+    if write_extra_vars:
+        variable_names = VariableNames(
+            time_dependent_names=(*var_names, "varying_scalar_var"),
+            time_invariant_names=("constant_var", "constant_scalar_var"),
+            initial_condition_names=initial_condition_names,
+        )
+    else:
+        variable_names = VariableNames(
+            time_dependent_names=var_names,
+            time_invariant_names=(),
+            initial_condition_names=initial_condition_names,
+        )
     return MockData(tmpdir, obs_times, start_times, start_indices, variable_names)
 
 
-def get_mock_monthly_netcdfs(tmp_path_factory, dirname, with_nans=False) -> MockData:
+def get_mock_monthly_netcdfs(
+    tmp_path_factory,
+    dirname,
+    with_nans=False,
+    end_date="2003-06",
+    var_names=["foo", "bar"],
+    write_extra_vars=True,
+) -> MockData:
     return _get_data(
         tmp_path_factory,
         dirname,
         start=MOCK_DATA_START_DATE,
-        end="2003-06",
+        end=end_date,
         file_freq="MS",
         step_freq=MOCK_DATA_FREQ,
         calendar="standard",
         with_nans=with_nans,
+        var_names=var_names,
+        write_extra_vars=write_extra_vars,
     )
 
 
 @pytest.fixture(scope="session")
 def mock_monthly_netcdfs(tmp_path_factory) -> MockData:
     return get_mock_monthly_netcdfs(tmp_path_factory, "month")
+
+
+@pytest.fixture(scope="session")
+def mock_monthly_netcdfs_another_source(tmp_path_factory) -> MockData:
+    return get_mock_monthly_netcdfs(
+        tmp_path_factory, "month_another_source", var_names=["baz", "qux"]
+    )
+
+
+@pytest.fixture(scope="session")
+def mock_monthly_netcdfs_another_source_diff_time(tmp_path_factory) -> MockData:
+    return get_mock_monthly_netcdfs(
+        tmp_path_factory,
+        "month_another_source",
+        end_date="2003-08",
+        var_names=["baz", "qux"],
+        write_extra_vars=False,
+    )
 
 
 @pytest.fixture(scope="session")
@@ -737,3 +773,78 @@ def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
     # Check that the subset length matches the expected number of intervals
     expected_length = boolean_mask.sum().item()
     assert len(subset) == expected_length
+
+
+def test_multi_source_xarray_dataset_has_no_duplicates(
+    mock_monthly_netcdfs, mock_monthly_netcdfs_another_source
+):
+    monthly_netcdfs = [mock_monthly_netcdfs, mock_monthly_netcdfs_another_source]
+    datasets = []
+
+    for mock_data in monthly_netcdfs:
+        config_source = XarrayDataConfig(data_path=mock_data.tmpdir)
+        requirements_source = DataRequirements(
+            names=mock_data.var_names.all_names, n_timesteps=1
+        )
+        dataset = XarrayDataset(config_source, requirements_source)
+        datasets.append(dataset)
+
+    with pytest.raises(ValueError):
+        # duplicate variable names
+        MergedXarrayDataset(datasets=datasets)
+
+
+def test_multi_source_xarray_dataset_has_same_time(
+    mock_monthly_netcdfs, mock_monthly_netcdfs_another_source_diff_time
+):
+    monthly_netcdfs = [
+        mock_monthly_netcdfs,
+        mock_monthly_netcdfs_another_source_diff_time,
+    ]
+
+    datasets = []
+    for mock_data in monthly_netcdfs:
+        config_source = XarrayDataConfig(data_path=mock_data.tmpdir)
+        requirements_source = DataRequirements(
+            names=mock_data.var_names.all_names, n_timesteps=1
+        )
+        dataset = XarrayDataset(config_source, requirements_source)
+        datasets.append(dataset)
+    # different time index
+    with pytest.raises(ValueError):
+        MergedXarrayDataset(datasets=datasets)
+
+
+def test_multi_source_xarray_returns_merged_data(
+    mock_monthly_netcdfs, mock_monthly_netcdfs_another_source
+):
+    config_source1 = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    requirements_source1 = DataRequirements(
+        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=1
+    )
+    dataset1 = XarrayDataset(config_source1, requirements_source1)
+
+    config_source2 = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_another_source.tmpdir
+    )
+    requirements_source2 = DataRequirements(
+        names=mock_monthly_netcdfs_another_source.var_names.all_names, n_timesteps=1
+    )
+    # remove duplicates in source 2 requirements
+    for name in requirements_source1.names:
+        if name in requirements_source2.names:
+            requirements_source2.names.remove(name)
+    dataset2 = XarrayDataset(config_source2, requirements_source2)
+    merged_dataset = MergedXarrayDataset(datasets=[dataset1, dataset2])
+    assert len(merged_dataset) == len(dataset1)
+    assert type(merged_dataset[0]) is type(dataset1[0])
+    assert type(merged_dataset[0]) is type(dataset2[0])
+    for key in merged_dataset[0][0].keys():
+        if key in dataset1[0][0].keys():
+            assert torch.equal(merged_dataset[0][0][key], dataset1[0][0][key])
+            assert merged_dataset[0][1].equals(dataset1[0][1])
+        if key in dataset2[0][0].keys():
+            assert torch.equal(merged_dataset[0][0][key], dataset2[0][0][key])
+            assert merged_dataset[0][1].equals(dataset2[0][1])
+        else:
+            assert KeyError(f"Key {key} is missing in merged dataset")

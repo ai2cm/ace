@@ -1,10 +1,16 @@
 import warnings
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple
 
 import torch.utils.data
 
 from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.xarray import DatasetProperties, XarrayDataset, get_xarray_dataset
+from fme.core.dataset.xarray import (
+    DatasetProperties,
+    MergedXarrayDataset,
+    XarrayDataset,
+    get_merged_requirements,
+    get_xarray_dataset,
+)
 
 from .requirements import DataRequirements
 
@@ -44,3 +50,32 @@ def get_dataset(
     datasets, properties = get_datasets(dataset_configs, requirements, strict=strict)
     ensemble = torch.utils.data.ConcatDataset(datasets)
     return ensemble, properties
+
+
+def get_merged_datasets(
+    dataset_configs: Mapping[str, Sequence[XarrayDataConfig]],
+    requirements: DataRequirements,
+    strict: bool = True,
+) -> Tuple[MergedXarrayDataset, DatasetProperties]:
+    merged_xarray_datasets = []
+    merged_properties: Optional[DatasetProperties] = None
+    merged_requirements = get_merged_requirements(dataset_configs, requirements)
+    for key, config in dataset_configs.items():
+        current_source_datasets, current_source_properties = get_datasets(
+            config,
+            merged_requirements[key],
+            strict=strict,
+        )
+        current_source_ensemble = torch.utils.data.ConcatDataset(
+            current_source_datasets
+        )
+        merged_xarray_datasets.append(current_source_ensemble)
+        if merged_properties is None:
+            merged_properties = current_source_properties
+        else:
+            merged_properties.update_merged_dataset(current_source_properties)
+
+    if merged_properties is None:
+        raise ValueError("At least one dataset must be provided.")
+    merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
+    return merged_datasets, merged_properties
