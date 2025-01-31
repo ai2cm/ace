@@ -13,7 +13,6 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.device import get_device
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -184,7 +183,7 @@ class AtmosphereData:
                 self._data["ICEsfc"] + self._data["GRAUPELsfc"] + self._data["SNOWsfc"]
             )
         except KeyError:
-            return torch.zeros(self.surface_pressure.shape, device=get_device())
+            return torch.zeros_like(self.surface_pressure)
 
     @property
     def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:
@@ -199,10 +198,6 @@ class AtmosphereData:
 
     @property
     def net_surface_energy_flux(self) -> torch.Tensor:
-        try:
-            frozen_precip_rate = self._get("frozen_precipitation_rate")
-        except KeyError:
-            frozen_precip_rate = None
         return metrics.net_surface_energy_flux(
             self._get("sfc_down_lw_radiative_flux"),
             self._get("sfc_up_lw_radiative_flux"),
@@ -210,7 +205,7 @@ class AtmosphereData:
             self._get("sfc_up_sw_radiative_flux"),
             self._get("latent_heat_flux"),
             self._get("sensible_heat_flux"),
-            frozen_precipitation_rate=frozen_precip_rate,
+            frozen_precipitation_rate=self.frozen_precipitation_rate,
         )
 
     @property
