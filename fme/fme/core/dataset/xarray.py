@@ -346,8 +346,7 @@ class XarrayDataset(Dataset):
         requirements: DataRequirements,
     ):
         self._horizontal_coordinates: HorizontalCoordinates
-        self.renamed_variables = config.renamed_variables or {}
-        self._names = self._get_names_to_load(requirements.names)
+        self._names = requirements.names
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -392,13 +391,6 @@ class XarrayDataset(Dataset):
             self.is_remote,
             self.subset_times,
         )
-
-    def _get_names_to_load(self, names: List[str]) -> List[str]:
-        # requirements.names from stepper config refer to the final set of
-        # variables after any renaming occurs. This returns the set of names
-        # to load from data before renaming.
-        inverted_renaming = {v: k for k, v in self.renamed_variables.items()}
-        return [inverted_renaming.get(n, n) for n in names]
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -648,10 +640,6 @@ class XarrayDataset(Dataset):
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
-
-        # apply renaming
-        for original_name, new_name in self.renamed_variables.items():
-            tensors[new_name] = tensors.pop(original_name)
 
         # Apply field overwrites
         tensors = self.overwrite.apply(tensors)

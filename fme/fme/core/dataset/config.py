@@ -210,9 +210,7 @@ class XarrayDataConfig:
             to be able to infer the full time coordinate.
         dtype: Data type to cast the data to. If None, no casting is done. It is
             required that 'torch.{dtype}' is a valid dtype.
-        overwrite: Optional OverwriteConfig to overwrite loaded field values. If this is
-            configured for a renamed field, the key should be the final updated name.
-        renamed_variables: Optional mapping of {old_name: new_name} to rename variables
+        overwrite: Optional OverwriteConfig to overwrite loaded field values.
         fill_nans: Optional FillNaNsConfig to fill NaNs with a constant value.
 
     Examples:
@@ -242,7 +240,6 @@ class XarrayDataConfig:
     infer_timestep: bool = True
     dtype: Optional[str] = "float32"
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
-    renamed_variables: Optional[Mapping[str, str]] = None
     fill_nans: Optional[FillNaNsConfig] = None
 
     def _default_file_pattern_check(self):
@@ -268,13 +265,4 @@ class XarrayDataConfig:
             if not isinstance(self.torch_dtype, torch.dtype):
                 raise ValueError(f"Invalid dtype '{self.dtype}'")
 
-        # Raise error if overwrite variables are in the keys of renamed variables
-        if self.renamed_variables is not None:
-            overlap = set(self.overwrite.variables) & set(self.renamed_variables.keys())
-            if overlap:
-                raise ValueError(
-                    "Variables in overwrite should not be the original names before "
-                    f"renaming: {overlap}. "
-                    "Please use the final renamed variables in the overwrite config."
-                )
         self._default_file_pattern_check()
