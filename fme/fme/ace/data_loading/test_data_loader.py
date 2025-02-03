@@ -753,23 +753,3 @@ def test_inference_persistence_names(tmp_path):
     torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
-
-
-def test_loader_error_if_renamed_variables_in_merged_dataset():
-    with pytest.raises(ValueError, match="renamed_variables is not supported"):
-        DataLoaderConfig(
-            dataset={
-                "source1": [
-                    XarrayDataConfig(
-                        data_path="some/path", renamed_variables={"foo": "bar"}
-                    )
-                ],
-                "source2": [
-                    XarrayDataConfig(
-                        data_path="some/other/path", renamed_variables={"foo2": "bar2"}
-                    )
-                ],
-            },
-            batch_size=1,
-            num_data_workers=0,
-        )

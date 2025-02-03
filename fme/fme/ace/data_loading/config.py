@@ -45,11 +45,3 @@ class DataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
-        if isinstance(self.dataset, Mapping):
-            for key, configs in self.dataset.items():
-                for config in configs:
-                    if config.renamed_variables is not None:
-                        raise ValueError(
-                            "renamed_variables is not supported \
-                                for merged datasets"
-                        )

@@ -140,10 +140,6 @@ class InferenceDataLoaderConfig:
             for key, data in self.dataset.items():
                 if data.subset != Slice(None, None, None):
                     raise ValueError(f"Inference data for {key} may not be subset.")
-                if data.renamed_variables is not None:
-                    raise ValueError(
-                        "renamed_variables is not supported for merged datasets"
-                    )
 
     @property
     def n_initial_conditions(self) -> int:
@@ -179,10 +175,6 @@ class ForcingDataLoaderConfig:
             for key, data in self.dataset.items():
                 if data.subset != Slice(None, None, None):
                     raise ValueError(f"Inference data for {key} may not be subset.")
-                if data.renamed_variables is not None:
-                    raise ValueError(
-                        "renamed_variables is not supported for merged datasets"
-                    )
 
     def build_inference_config(self, start_indices: ExplicitIndices):
         return InferenceDataLoaderConfig(

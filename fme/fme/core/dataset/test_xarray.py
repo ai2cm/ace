@@ -670,21 +670,6 @@ def test_dataset_config_dtype_raises():
         XarrayDataConfig(data_path="path/to/data", dtype="invalid_dtype")
 
 
-def test_renaming(mock_monthly_netcdfs):
-    # stepper in/out names should be variables after renaming
-    stepper_variables = ["foo", "bar_new"]
-    config = XarrayDataConfig(
-        data_path=mock_monthly_netcdfs.tmpdir, renamed_variables={"bar": "bar_new"}
-    )
-    dataset = XarrayDataset(
-        config,
-        DataRequirements(names=stepper_variables, n_timesteps=2),
-    )
-    data, _ = dataset[0]
-    assert "bar_new" in data
-    assert "bar" not in data
-
-
 def test_fill_nans(mock_monthly_netcdfs_with_nans):
     nan_config = FillNaNsConfig()
     config = XarrayDataConfig(
@@ -746,18 +731,6 @@ def test_overwrite(mock_monthly_netcdfs):
         dataset_overwrite["foo"], torch.ones_like(dataset["foo"]) * const
     )
     assert torch.equal(dataset_overwrite["bar"], dataset["bar"] * multiple)
-
-
-def test_overwrite_raises_error_on_original_name(mock_monthly_netcdfs):
-    overwrite_config = OverwriteConfig(
-        constant={"foo": 3},
-    )
-    with pytest.raises(ValueError):
-        XarrayDataConfig(
-            data_path=mock_monthly_netcdfs.tmpdir,
-            overwrite=overwrite_config,
-            renamed_variables={"foo": "foo_new"},
-        )
 
 
 def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
