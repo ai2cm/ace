@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol
+from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol, Union
 
 import dacite
 import torch
@@ -14,6 +14,24 @@ from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+@dataclasses.dataclass
+class EnergyBudgetConfig:
+    """Configuration for total energy budget correction.
+
+    Parameters:
+        method: Method to use for total energy budget correction. The available option
+            is "constant_temperature", which enforces conservation of total energy by
+            imposing a vertically and horizontally uniform air temperature correction.
+        constant_unaccounted_heating: Column-integrated heating in W/m**2 to be added
+            to the energy flux into the atmosphere when conserving total energy.
+            This can be useful for correcting errors in energy budget in target data.
+            The same additional heating is imposed at all time steps and grid cells.
+    """
+
+    method: Literal["constant_temperature"]
+    constant_unaccounted_heating: float = 0.0
 
 
 @CorrectorSelector.register("atmosphere_corrector")
@@ -92,9 +110,8 @@ class CorrectorConfig(CorrectorConfigProtocol):
         force_positive_names: Names of fields that should be forced to be greater
             than or equal to zero. This is useful for fields like precipitation.
         total_energy_budget_correction: If not None, force the generated data to
-            conserve an idealized version of total energy. Currently, the only way
-            to force this conservation is by imposing a vertically uniform air
-            temperature correction.
+            conserve an idealized version of total energy using the provided
+            configuration.
     """
 
     conserve_dry_air: bool = False
@@ -108,7 +125,9 @@ class CorrectorConfig(CorrectorConfigProtocol):
         ]
     ] = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
-    total_energy_budget_correction: Optional[Literal["constant_temperature"]] = None
+    total_energy_budget_correction: Optional[
+        Union[EnergyBudgetConfig, Literal["constant_temperature"]]
+    ] = None
 
     def build(
         self,
@@ -146,6 +165,30 @@ class Corrector(CorrectorABC):
             self._dry_air_precision = torch.float32
         else:
             self._dry_air_precision = torch.float64
+
+        if config.total_energy_budget_correction is not None:
+            self._do_energy_correction = True
+            # TODO: remove following backwards compatibility code in a future release
+            if isinstance(config.total_energy_budget_correction, str):
+                warnings.warn(
+                    (
+                        "Using a string to activate total energy budget correction is "
+                        "deprecated. Please use a mapping that conforms with "
+                        "EnergyBudgetConfig."
+                    ),
+                    DeprecationWarning,
+                )
+                self._energy_correction_method = config.total_energy_budget_correction
+                self._energy_unaccounted_heating = 0.0
+            else:
+                self._energy_correction_method = (
+                    config.total_energy_budget_correction.method
+                )
+                self._energy_unaccounted_heating = (
+                    config.total_energy_budget_correction.constant_unaccounted_heating
+                )
+        else:
+            self._do_energy_correction = False
 
     def __call__(
         self,
@@ -189,7 +232,7 @@ class Corrector(CorrectorABC):
                 timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
-        if self._config.total_energy_budget_correction is not None:
+        if self._do_energy_correction:
             gen_data = _force_conserve_total_energy(
                 input_data=input_data,
                 gen_data=gen_data,
@@ -197,7 +240,8 @@ class Corrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinates,
                 timestep=self._timestep,
-                method=self._config.total_energy_budget_correction,
+                method=self._energy_correction_method,
+                unaccounted_heating=self._energy_unaccounted_heating,
             )
         return gen_data
 
@@ -397,18 +441,25 @@ def _force_conserve_total_energy(
     vertical_coordinate: HybridSigmaPressureCoordinate,
     timestep: datetime.timedelta,
     method: Literal["constant_temperature"] = "constant_temperature",
+    unaccounted_heating: float = 0.0,
 ) -> TensorDict:
+    """Apply a correction to the generated data to conserve total energy.
+
+    This function also inserts the unaccounted heating into the generated data.
+    """
     if method != "constant_temperature":
         raise NotImplementedError(
             f"Method {method} not implemented for total energy conservation"
         )
     input = AtmosphereData(input_data, vertical_coordinate)
-    gen = AtmosphereData(dict(gen_data) | forcing_data, vertical_coordinate)
+    heating_tensor = torch.full_like(next(iter(gen_data.values())), unaccounted_heating)
+    gen_and_heating_data = dict(gen_data) | {"unaccounted_heating": heating_tensor}
+    gen = AtmosphereData(gen_and_heating_data | forcing_data, vertical_coordinate)
     if torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Surface pressure has a non-positive value, skipping energy correction."
         )
-        return {k: v for k, v in gen.data.items() if k in gen_data}
+        return gen_and_heating_data
 
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
@@ -438,7 +489,7 @@ def _force_conserve_total_energy(
         gen.data[name] = gen.data[name] + temperature_correction
 
     # filter required here because we merged forcing data into gen_data above
-    return {k: v for k, v in gen.data.items() if k in gen_data}
+    return {k: v for k, v in gen.data.items() if k in gen_and_heating_data}
 
 
 def _energy_correction_factor(
