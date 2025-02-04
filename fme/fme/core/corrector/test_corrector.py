@@ -15,6 +15,9 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping
 
 from .corrector import (
+    Corrector,
+    CorrectorConfig,
+    EnergyBudgetConfig,
     _force_conserve_dry_air,
     _force_conserve_moisture,
     _force_conserve_total_energy,
@@ -244,13 +247,10 @@ def test_force_positive():
     torch.testing.assert_close(fixed_data["bar"], data["bar"])
 
 
-def test__force_conserve_total_energy():
-    tensor_shape = (5, 5)
-    vertical_coord = HybridSigmaPressureCoordinate(
-        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
-    )
-    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+def _get_corrector_test_input(tensor_shape):
+    """Generate test input that has necessary variables for all correctors."""
     # debugging a bit easier with realistic scales for input variables
+    # tuples of (name, mean, std) for each variable
     variables = [
         ("PRESsfc", 100000, 1000),
         ("HGTsfc", 500, 50),
@@ -267,6 +267,8 @@ def test__force_conserve_total_energy():
         ("DSWRFsfc", 500, 100),
         ("ULWRFsfc", 500, 100),
         ("DLWRFsfc", 500, 100),
+        ("PRATEsfc", 1e-5, 1e-6),
+        ("tendency_of_total_water_path_due_to_advection", 1e-5, 1e-6),
     ]
     forcing_names = ["HGTsfc", "DSWRFtoa"]
     non_forcing_names = [name for name, _, _ in variables if name not in forcing_names]
@@ -284,7 +286,21 @@ def test__force_conserve_total_energy():
         for name, centering, scale in variables
         if name in forcing_names
     }
+    vertical_coord = HybridSigmaPressureCoordinate(
+        ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
+    )
+    return input_data, gen_data, forcing_data, vertical_coord
+
+
+def test__force_conserve_total_energy():
+    tensor_shape = (5, 5)
+
+    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
     timestep = datetime.timedelta(seconds=3600)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    extra_heating = 10.0
 
     corrected_gen_data = _force_conserve_total_energy(
         input_data=input_data,
@@ -293,10 +309,11 @@ def test__force_conserve_total_energy():
         area_weighted_mean=ops.area_weighted_mean,
         vertical_coordinate=vertical_coord,
         timestep=timestep,
+        unaccounted_heating=extra_heating,
     )
 
     # ensure only temperature is modified
-    for name in non_forcing_names:
+    for name in gen_data:
         if "air_temperature" in name:
             assert not torch.allclose(
                 corrected_gen_data[name], gen_data[name], rtol=1e-6
@@ -305,7 +322,7 @@ def test__force_conserve_total_energy():
             torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
 
     # ensure forcing variables are not in the corrected data
-    for name in forcing_names:
+    for name in forcing_data:
         assert name not in corrected_gen_data
 
     # ensure the corrected global mean MSE path is what we expect
@@ -329,6 +346,12 @@ def test__force_conserve_total_energy():
     )
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
 
+    # ensure the 'unaccounted heating' is added to the MSE budget
+    assert "unaccounted_heating" in corrected_gen_data
+    unaccounted_heating = corrected_gen_data["unaccounted_heating"]
+    expected_heating = torch.full_like(unaccounted_heating, extra_heating)
+    torch.testing.assert_close(unaccounted_heating, expected_heating)
+
 
 def test_corrector_selector():
     selector = CorrectorSelector(
@@ -341,3 +364,22 @@ def test_corrector_selector():
     )
     corrector = selector.build(ops, vertical, TIMESTEP)
     assert isinstance(corrector, OceanCorrector)
+
+
+def test_corrector_integration():
+    """Ensures that the corrector can be called with all methods active
+    but doesn't check results."""
+    config = CorrectorConfig(
+        conserve_dry_air=True,
+        zero_global_mean_moisture_advection=True,
+        moisture_budget_correction="advection_and_precipitation",
+        force_positive_names=["PRESsfc"],
+        total_energy_budget_correction=EnergyBudgetConfig("constant_temperature", 1.0),
+    )
+    tensor_shape = (5, 5)
+    test_input = _get_corrector_test_input(tensor_shape)
+    input_data, gen_data, forcing_data, vertical_coord = test_input
+    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    timestep = datetime.timedelta(seconds=3600)
+    corrector = Corrector(config, ops, vertical_coord, timestep)
+    corrector(input_data, gen_data, forcing_data)
