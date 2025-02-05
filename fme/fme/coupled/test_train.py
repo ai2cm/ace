@@ -69,6 +69,7 @@ optimization:
   optimizer_type: Adam
 stepper:
   sst_name: {ocean_sfc_temp_name}
+  sst_mask_name: {ocean_sfc_mask_name}
   ocean:
     timedelta: 2D
     stepper:
@@ -113,6 +114,7 @@ def _write_test_yaml_files(
     atmos_in_names: List[str],
     atmos_out_names: List[str],
     ocean_sfc_temp_name: str,
+    ocean_sfc_mask_name: str,
     atmos_sfc_temp_name: str,
     ocean_frac_name: str,
     n_coupled_steps: int = 1,
@@ -134,6 +136,7 @@ def _write_test_yaml_files(
         atmos_in_names=atmos_in_names,
         atmos_out_names=atmos_out_names,
         ocean_sfc_temp_name=ocean_sfc_temp_name,
+        ocean_sfc_mask_name=ocean_sfc_mask_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
         log_zonal_mean_images=str(log_zonal_mean_images).lower(),
@@ -167,7 +170,7 @@ def test_train_and_inference_inline(tmp_path, very_fast_only, log_zonal_mean_ima
 
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
-    ocean_names = ["o_exog", "o_prog", "o_sfc"]
+    ocean_names = ["o_exog", "o_prog", "o_sfc", "o_mask"]
     atmos_names = ["a_exog", "a_diag", "a_prog", "a_sfc", "constant_mask"]
 
     outnames = ["o_prog", "o_sfc", "a_diag", "a_prog", "a_sfc"]
@@ -183,7 +186,7 @@ def test_train_and_inference_inline(tmp_path, very_fast_only, log_zonal_mean_ima
         atmosphere_start_time_offset_from_ocean=True,
     )
 
-    ocean_in_names = ["o_exog", "o_prog", "o_sfc"]
+    ocean_in_names = ["o_exog", "o_prog", "o_sfc", "o_mask"]
     ocean_out_names = ["o_prog", "o_sfc"]
     atmos_in_names = ["a_exog", "a_diag", "a_prog", "a_sfc", "constant_mask"]
     atmos_out_names = ["a_diag", "a_prog", "a_sfc"]
@@ -196,6 +199,7 @@ def test_train_and_inference_inline(tmp_path, very_fast_only, log_zonal_mean_ima
         atmos_in_names,
         atmos_out_names,
         ocean_sfc_temp_name="o_sfc",
+        ocean_sfc_mask_name="o_mask",
         atmos_sfc_temp_name="a_sfc",
         ocean_frac_name="constant_mask",
         log_zonal_mean_images=log_zonal_mean_images,
