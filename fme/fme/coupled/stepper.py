@@ -56,12 +56,17 @@ class CoupledStepperConfig:
         ocean: The ocean component configuration.
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
-        sst_name: Name of the sea surface temperature field in the ocean data.
+        sst_name: Name of the liquid sea surface temperature field in the ocean data.
+        sst_mask_name: Name of the static sea surface mask field in the ocean data.
+            Should be non-zero in every grid cell where the target ocean surface data
+            is non-NaN.
     """
 
     ocean: ComponentConfig
     atmosphere: ComponentConfig
+
     sst_name: str = "sst"
+    sst_mask_name: str = "mask_0"
 
     def __post_init__(self):
         if self.atmosphere.stepper.ocean is None:
@@ -71,6 +76,9 @@ class CoupledStepperConfig:
             )
         self.atmosphere_surface_temperature_name = (
             self.atmosphere.stepper.ocean.surface_temperature_name
+        )
+        self.atmosphere_ocean_fraction_name = (
+            self.atmosphere.stepper.ocean.ocean_fraction_name
         )
         self._ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
         self._atmosphere_timestep = pd.Timedelta(
@@ -444,6 +452,7 @@ class CoupledStepper(
         self,
         atmos_data: BatchData,
         ocean_ic: PrognosticState,
+        ocean_forcings: BatchData,
     ) -> BatchData:
         """
         Get the forcings for the atmosphere component.
@@ -451,7 +460,8 @@ class CoupledStepper(
         Args:
             atmos_data: Atmosphere batch data, including initial condition and forward
                 steps.
-            ocean_ic: Ocean initial condition state.
+            ocean_ic: Ocean initial condition state, including SST.
+            ocean_forcings: Ocean forcing data, including the SST mask.
         """
         data = atmos_data.data
         time_dim = self.atmosphere.TIME_DIM
@@ -473,6 +483,18 @@ class CoupledStepper(
         forcings_from_ocean[self._config.atmosphere_surface_temperature_name] = (
             forcings_from_ocean.pop(self._config.sst_name)
         )
+        # get the SST mask (0 if land, 1 if sea surface)
+        assert ocean_forcings.time["time"].values.size == 1
+        sst_mask = ocean_forcings.data[self._config.sst_mask_name].expand(*sizes)
+        # enforce agreement between the atmosphere ocean frac and the SST mask
+        # so that ocean frac is 0 everywhere the ocean target data is NaN
+        forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
+            torch.minimum(
+                forcing_data[self._config.atmosphere_ocean_fraction_name],
+                sst_mask,
+            )
+        )
+        # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return BatchData(forcing_data, time=atmos_data.time)
 
@@ -553,9 +575,13 @@ class CoupledStepper(
                     (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
             )
+            ocean_forcings = forcing.ocean_data.select_time_slice(
+                slice(i_outer, i_outer + 1)
+            )
             atmos_forcings = self._get_atmosphere_forcings(
                 atmos_window,
                 ocean_prognostic,
+                ocean_forcings,
             )
             # predict atmosphere forward n_inner_steps
             output, atmos_prognostic = self.atmosphere.predict(
