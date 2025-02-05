@@ -320,7 +320,8 @@ def _get_stepper_and_batch(
     n_forward_times_atmosphere: int,
     n_samples: int,
     sst_name_in_ocean_data: str = "sst",
-    sst_name_in_atmosphere_data: str = "surface_temperature",
+    sst_mask_name_in_ocean_data: str = "mask_0",
+    sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
     atmosphere_builder: Optional[ModuleSelector] = None,
@@ -330,8 +331,9 @@ def _get_stepper_and_batch(
     # ocean fraction forcing variable
     assert sst_name_in_ocean_data in ocean_in_names
     assert sst_name_in_ocean_data in ocean_out_names
-    assert sst_name_in_atmosphere_data in atmosphere_in_names
-    assert sst_name_in_atmosphere_data in atmosphere_out_names
+    assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
+    assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
+    assert sst_mask_name_in_ocean_data in ocean_in_names
     assert ocean_fraction_name in atmosphere_in_names
 
     ocean_norm_names = set(ocean_in_names + ocean_out_names)
@@ -381,7 +383,7 @@ def _get_stepper_and_batch(
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
                 ocean=OceanConfig(
-                    surface_temperature_name=sst_name_in_atmosphere_data,
+                    surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                     ocean_fraction_name=ocean_fraction_name,
                 ),
             ),
@@ -400,6 +402,7 @@ def _get_stepper_and_batch(
             ),
         ),
         sst_name=sst_name_in_ocean_data,
+        sst_mask_name=sst_mask_name_in_ocean_data,
     )
     coupler = config.get_stepper(
         img_shape=(5, 5),
@@ -410,7 +413,7 @@ def _get_stepper_and_batch(
 
 
 def test_predict_paired():
-    ocean_in_names = ["o_prog", "o_sfc_temp", "a_diag"]
+    ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_prog"]
     atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
@@ -442,7 +445,8 @@ def test_predict_paired():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_name_in_atmosphere_data="a_sfc_temp",
+        sst_mask_name_in_ocean_data="o_mask",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
         ocean_builder=ModuleSelector(type="prebuilt", config={"module": Ocean()}),
         atmosphere_builder=ModuleSelector(type="prebuilt", config={"module": Atmos()}),
@@ -471,7 +475,12 @@ def test_predict_paired():
     # first two predicted atmos surface_temperature replaced by the ocean
     # initial condition sea surface temperature
     for i in range(2):
-        mask = torch.round(data.atmosphere_data.data["ocean_frac"][:, i + 1])
+        mask = torch.round(
+            torch.minimum(
+                data.atmosphere_data.data["ocean_frac"][:, i + 1],
+                data.ocean_data.data["o_mask"][:, 0],
+            )
+        )
         atmos_sst = paired_data.atmosphere_data.prediction["a_sfc_temp"][:, i] * mask
         ocean_sst = data.ocean_data.data["o_sfc_temp"][:, 0] * mask
         assert torch.allclose(atmos_sst, ocean_sst)
@@ -479,7 +488,12 @@ def test_predict_paired():
     # next two predicted atmos surface_temperature replaced by the ocean
     # predicted sea surface temperature
     for i in range(2, 4):
-        mask = torch.round(data.atmosphere_data.data["ocean_frac"][:, i + 1])
+        mask = torch.round(
+            torch.minimum(
+                data.atmosphere_data.data["ocean_frac"][:, i + 1],
+                data.ocean_data.data["o_mask"][:, 1],
+            )
+        )
         atmos_sst = paired_data.atmosphere_data.prediction["a_sfc_temp"][:, i] * mask
         ocean_sst = paired_data.ocean_data.prediction["o_sfc_temp"][:, 0] * mask
         assert torch.allclose(atmos_sst, ocean_sst)
@@ -550,7 +564,7 @@ def test_predict_paired():
     ),
 )
 def test_predict_paired_with_ocean_to_atmos_diag_forcing():
-    ocean_in_names = ["o_prog", "o_sfc_temp", "a_diag"]
+    ocean_in_names = ["o_prog", "o_sfc_temp", "a_diag", "o_mask"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_diag"]
     atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
@@ -563,7 +577,8 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_name_in_atmosphere_data="a_sfc_temp",
+        sst_mask_name_in_ocean_data="o_mask",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
     )
     data = coupled_data.data
@@ -585,7 +600,7 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
 
 
 def test_predict_paired_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "sst"]
+    ocean_in_names = ["thetao_0", "thetao_1", "sst", "mask_0"]
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -627,7 +642,7 @@ def test_predict_paired_with_derived_variables():
 
 
 def test_train_on_batch_loss():
-    ocean_in_names = ["o_sfc", "ext_forcing"]
+    ocean_in_names = ["o_sfc", "ext_forcing", "o_mask"]
     ocean_out_names = ["o_sfc", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc", "ocean_frac"]
     atmos_out_names = ["a_prog", "a_sfc", "a_diag"]
@@ -640,7 +655,8 @@ def test_train_on_batch_loss():
         n_forward_times_atmosphere=2,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc",
-        sst_name_in_atmosphere_data="a_sfc",
+        sst_mask_name_in_ocean_data="o_mask",
+        sfc_temp_name_in_atmosphere_data="a_sfc",
         ocean_fraction_name="ocean_frac",
     )
     output = coupler.train_on_batch(
@@ -663,7 +679,7 @@ def test_train_on_batch_loss():
 
 
 def test_train_on_batch_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "sst"]
+    ocean_in_names = ["thetao_0", "thetao_1", "sst", "mask_0"]
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -717,16 +733,17 @@ def test_reloaded_stepper_gives_same_prediction():
                 builder=ModuleSelector(
                     type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
                 ),
-                in_names=["o", "o_sfc"],
+                in_names=["o", "o_sfc", "o_mask"],
                 out_names=["o", "o_sfc"],
                 normalization=NormalizationConfig(
-                    means={"o": 0.0, "o_sfc": 0.0},
-                    stds={"o": 1.0, "o_sfc": 1.0},
+                    means={"o": 0.0, "o_sfc": 0.0, "o_mask": 0.0},
+                    stds={"o": 1.0, "o_sfc": 1.0, "o_mask": 1.0},
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
             ),
         ),
         sst_name="o_sfc",
+        sst_mask_name="o_mask",
     )
     area = torch.ones((5, 5), device=DEVICE)
     vertical_coordinate = HybridSigmaPressureCoordinate(
@@ -739,7 +756,7 @@ def test_reloaded_stepper_gives_same_prediction():
     )
     new_stepper = CoupledStepper.from_state(stepper.get_state())
     data = get_coupled_data(
-        ["o", "o_sfc"],
+        ["o", "o_sfc", "o_mask"],
         ["a", "a_sfc", "constant_mask"],
         n_forward_times_ocean=2,
         n_forward_times_atmosphere=4,
