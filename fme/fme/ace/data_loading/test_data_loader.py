@@ -250,7 +250,10 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
     )
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo", "foo2"], window_timesteps)
-    with pytest.raises(ValueError, match="Inconsistent timestamps between datasets"):
+    with pytest.raises(
+        ValueError,
+        match="All datasets in a merged dataset must have the same sample start times",
+    ):
         get_data_loader(config, True, requirements)  # type: ignore
 
     # subset source2 to have the same time stamps as source1
@@ -268,7 +271,7 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
                     data_path=other_path,
                     file_pattern="other_source*.nc",
                     n_repeats=1,
-                    subset=Slice(stop=3),
+                    subset=Slice(stop=2),
                 )
             ],
         },

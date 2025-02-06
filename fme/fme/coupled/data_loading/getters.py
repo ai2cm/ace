@@ -44,7 +44,7 @@ def get_dataset(
         config.atmosphere, atmosphere_reqs
     )
     properties = CoupledDatasetProperties(
-        ocean.dataset.all_times, ocean_properties, atmosphere_properties
+        ocean.sample_start_times, ocean_properties, atmosphere_properties
     )
     dataset = CoupledDataset(
         ocean=ocean,
