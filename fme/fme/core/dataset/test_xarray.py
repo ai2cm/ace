@@ -12,7 +12,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.coordinates import LatLonCoordinates
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset.config import (
     FillNaNsConfig,
     OverwriteConfig,
@@ -447,6 +447,7 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     assert isinstance(dataset.horizontal_coordinates, LatLonCoordinates)
     assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
     assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
+    assert isinstance(dataset.vertical_coordinate, HybridSigmaPressureCoordinate)
     assert dataset.vertical_coordinate.ak.dtype == torch.bfloat16
     assert dataset.vertical_coordinate.bk.dtype == torch.bfloat16
     data, _ = dataset[0]

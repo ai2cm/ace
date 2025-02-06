@@ -361,6 +361,7 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
     assert data._n_batches == 2
+    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data.vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
     assert isinstance(initial_condition, BatchData)

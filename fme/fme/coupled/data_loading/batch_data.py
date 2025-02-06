@@ -8,7 +8,10 @@ import torch
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.data_loading.gridded_data import SizedMap
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
@@ -140,7 +143,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self,
         loader: DataLoader[CoupledBatchData],
         variable_metadata: Mapping[str, VariableMetadata],
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         sampler: Optional[torch.utils.data.Sampler] = None,
@@ -181,7 +184,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return self._variable_metadata
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._vertical_coordinates
 
     @property

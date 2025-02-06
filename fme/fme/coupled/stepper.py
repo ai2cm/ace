@@ -12,7 +12,7 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
@@ -218,7 +218,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
     ) -> SingleModuleStepper:
         return self.ocean.stepper.get_stepper(
             img_shape=img_shape,
@@ -231,7 +231,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
     ) -> SingleModuleStepper:
         return self.atmosphere.stepper.get_stepper(
             img_shape=img_shape,
@@ -244,7 +244,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
     ):
         logging.info("Initializing coupler")
         return CoupledStepper(
@@ -399,7 +399,7 @@ class CoupledStepper(
         return 1
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self.atmosphere.vertical_coordinate
 
     @property

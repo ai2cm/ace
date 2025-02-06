@@ -9,7 +9,11 @@ import torch
 import fme
 from fme.core.atmosphere_data import AtmosphereData, compute_layer_thickness
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    NullVerticalCoordinate,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -132,7 +136,7 @@ class CorrectorConfig(CorrectorConfigProtocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ) -> "Corrector":
         return Corrector(
@@ -154,12 +158,13 @@ class Corrector(CorrectorABC):
         self,
         config: CorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ):
         self._config = config
         self._gridded_operations = gridded_operations
-        self._vertical_coordinates = vertical_coordinate
+        self._vertical_coordinate = vertical_coordinate
+
         self._timestep = timestep
         if fme.get_device() == torch.device("mps", 0):
             self._dry_air_precision = torch.float32
@@ -211,11 +216,16 @@ class Corrector(CorrectorABC):
             # otherwise it could end up creating violations of those constraints.
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.conserve_dry_air:
+            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+                raise ValueError(
+                    "conserve_dry_air is set to True, but no vertical coordinate is "
+                    "available."
+                )
             gen_data = _force_conserve_dry_air(
                 input_data=input_data,
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinates,
+                vertical_coordinate=self._vertical_coordinate,
                 precision=self._dry_air_precision,
             )
         if self._config.zero_global_mean_moisture_advection:
@@ -224,21 +234,31 @@ class Corrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
             )
         if self._config.moisture_budget_correction is not None:
+            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+                raise ValueError(
+                    "Moisture budget correction is turned on, but no vertical "
+                    "coordinate is available."
+                )
             gen_data = _force_conserve_moisture(
                 input_data=input_data,
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinates,
+                vertical_coordinate=self._vertical_coordinate,
                 timestep=self._timestep,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
         if self._do_energy_correction:
+            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+                raise ValueError(
+                    "Energy budget correction is turned on, but no vertical coordinate"
+                    " is available."
+                )
             gen_data = _force_conserve_total_energy(
                 input_data=input_data,
                 gen_data=gen_data,
                 forcing_data=forcing_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
-                vertical_coordinate=self._vertical_coordinates,
+                vertical_coordinate=self._vertical_coordinate,
                 timestep=self._timestep,
                 method=self._energy_correction_method,
                 unaccounted_heating=self._energy_unaccounted_heating,
