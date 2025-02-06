@@ -201,6 +201,10 @@ class XarrayDataConfig:
             is lat/lon.
         subset: Slice defining a subset of the XarrayDataset to load. This can
             either be a `Slice` of integer indices or a `TimeSlice` of timestamps.
+            This feature is applied directly to the dataset samples. For example,
+            if the file(s) have the time coordinate (t0, t1, t2, t3) and
+            requirements.n_timesteps=2, then subset=Slice(stop=2) will
+            provide two samples: (t0, t1), (t1, t2).
         infer_timestep: Whether to infer the timestep from the provided data.
             This should be set to True (the default) for ACE training. It may
             be useful to toggle this to False for applications like downscaling,

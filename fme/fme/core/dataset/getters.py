@@ -1,13 +1,12 @@
 import warnings
 from typing import List, Mapping, Optional, Sequence, Tuple
 
-import torch.utils.data
-
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.xarray import (
     DatasetProperties,
     MergedXarrayDataset,
-    XarrayDataset,
+    XarrayConcat,
+    XarraySubset,
     get_merged_requirements,
     get_xarray_dataset,
 )
@@ -19,7 +18,7 @@ def get_datasets(
     dataset_configs: Sequence[XarrayDataConfig],
     requirements: DataRequirements,
     strict: bool = True,
-) -> Tuple[List[XarrayDataset], DatasetProperties]:
+) -> Tuple[List[XarraySubset], DatasetProperties]:
     datasets = []
     properties: Optional[DatasetProperties] = None
     for config in dataset_configs:
@@ -46,9 +45,9 @@ def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
     requirements: DataRequirements,
     strict: bool = True,
-) -> Tuple[torch.utils.data.ConcatDataset[XarrayDataset], DatasetProperties]:
+) -> Tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_datasets(dataset_configs, requirements, strict=strict)
-    ensemble = torch.utils.data.ConcatDataset(datasets)
+    ensemble = XarrayConcat(datasets)
     return ensemble, properties
 
 
@@ -66,9 +65,7 @@ def get_merged_datasets(
             merged_requirements[key],
             strict=strict,
         )
-        current_source_ensemble = torch.utils.data.ConcatDataset(
-            current_source_datasets
-        )
+        current_source_ensemble = XarrayConcat(current_source_datasets)
         merged_xarray_datasets.append(current_source_ensemble)
         if merged_properties is None:
             merged_properties = current_source_properties

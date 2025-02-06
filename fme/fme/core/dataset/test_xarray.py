@@ -20,10 +20,12 @@ from fme.core.dataset.config import (
     TimeSlice,
     XarrayDataConfig,
 )
+from fme.core.dataset.getters import get_dataset
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import (
     MergedXarrayDataset,
     XarrayDataset,
+    XarraySubset,
     get_cumulative_timesteps,
     get_file_local_index,
     get_raw_times,
@@ -536,7 +538,7 @@ def test_time_index(mock_monthly_netcdfs):
     )
     last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
     obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
-    assert dataset.sample_start_time.equals(xr.CFTimeIndex(obs_times))
+    assert dataset.sample_start_times.equals(xr.CFTimeIndex(obs_times))
 
 
 @pytest.mark.parametrize("infer_timestep", [True, False])
@@ -742,7 +744,7 @@ def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
     dataset = XarrayDataset(config, requirements)
     interval = RepeatedInterval(interval_length="1D", block_length="7D", start="3D")
     boolean_mask = interval.get_boolean_mask(len(dataset), dataset.timestep)
-    subset = dataset.subset(boolean_mask)
+    subset = XarraySubset(dataset, boolean_mask)
 
     # Check that the subset length matches the expected number of intervals
     expected_length = boolean_mask.sum().item()
@@ -822,3 +824,44 @@ def test_multi_source_xarray_returns_merged_data(
             assert merged_dataset[0][1].equals(dataset2[0][1])
         else:
             assert KeyError(f"Key {key} is missing in merged dataset")
+
+
+def test_xarray_subset_has_correct_sample(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    config2 = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=1))
+    n_forward_steps = 4
+    requirements = DataRequirements(
+        names=mock_data.var_names.all_names + ["x"],
+        n_timesteps=n_forward_steps + 1,
+    )
+    dataset, _ = get_xarray_dataset(config, requirements)
+    dataset2, _ = get_xarray_dataset(config2, requirements)
+    assert dataset.sample_start_times[0:1].equals(dataset2.sample_start_times)
+    assert dataset[0][0]["foo"].equal(dataset2[0][0]["foo"])
+    assert dataset[0][1].equals(dataset2[0][1])
+
+
+def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    n_forward_steps = 4
+    requirements = DataRequirements(
+        names=mock_data.var_names.all_names + ["x"],
+        n_timesteps=n_forward_steps + 1,
+    )
+
+    config1 = XarrayDataConfig(
+        data_path=mock_data.tmpdir, subset=TimeSlice("2003-03-01", "2003-03-31")
+    )
+
+    config2 = XarrayDataConfig(
+        data_path=mock_data.tmpdir, subset=TimeSlice("2003-05-01", "2003-05-31")
+    )
+    concat, properties = get_dataset([config1, config2], requirements)
+    expected1, _ = get_xarray_dataset(config1, requirements)
+    expected2, _ = get_xarray_dataset(config2, requirements)
+    expected_times = np.concatenate(
+        [expected1.sample_start_times, expected2.sample_start_times]
+    )
+    expected = xr.CFTimeIndex(expected_times)
+    assert concat.sample_start_times.equals(expected)

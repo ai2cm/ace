@@ -38,6 +38,7 @@ def get_data_loader(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
+    dataset: torch.utils.data.Dataset
     if isinstance(config.dataset, Sequence):
         dataset, properties = get_dataset(
             config.dataset, requirements, strict=config.strict_ensemble
