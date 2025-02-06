@@ -30,6 +30,7 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
 )
 from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
@@ -210,11 +211,17 @@ class SingleModuleStepperConfig:
     ):
         logging.info("Initializing stepper from provided config")
         derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
+        corrector = self.corrector.build(
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        )
         return SingleModuleStepper(
             config=self,
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
+            corrector=corrector,
             timestep=timestep,
             derive_func=derive_func,
         )
@@ -489,6 +496,7 @@ class SingleModuleStepper(
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        corrector: CorrectorABC,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -499,6 +507,7 @@ class SingleModuleStepper(
             img_shape: Shape of domain as (n_lat, n_lon).
             gridded_operations: The gridded operations, e.g. for area weighting.
             vertical_coordinate: The vertical coordinate.
+            corrector: The corrector to use at the end of each step.
             derive_func: Function to compute derived variables.
             timestep: Timestep of the model.
             init_weights: Whether to initialize the weights. Should pass False if
@@ -533,18 +542,14 @@ class SingleModuleStepper(
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(self.module)
 
-        self._vertical_coordinates = vertical_coordinate.to(get_device())
+        self._vertical_coordinate = vertical_coordinate.to(get_device())
         self._timestep = timestep
 
         self.loss_obj = config.loss.build(
             gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
         )
 
-        self._corrector = config.corrector.build(
-            gridded_operations=gridded_operations,
-            vertical_coordinate=self.vertical_coordinate,
-            timestep=timestep,
-        )
+        self._corrector = corrector
         if config.loss_normalization is not None:
             self.loss_normalizer = config.loss_normalization.build(
                 names=config.normalize_names
@@ -593,7 +598,7 @@ class SingleModuleStepper(
 
     @property
     def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
-        return self._vertical_coordinates
+        return self._vertical_coordinate
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -1013,7 +1018,7 @@ class SingleModuleStepper(
             "img_shape": self._img_shape,
             "config": self._config.get_state(),
             "gridded_operations": self._gridded_operations.to_state(),
-            "vertical_coordinate": self.vertical_coordinate.as_dict(),
+            "vertical_coordinate": self._vertical_coordinate.as_dict(),
             "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
         }
@@ -1043,17 +1048,17 @@ class SingleModuleStepper(
         Returns:
             The stepper.
         """
-        config = {**state["config"]}  # make a copy to avoid mutating input
-        config["normalization"] = state["normalizer"]
+        config_data = {**state["config"]}  # make a copy to avoid mutating input
+        config_data["normalization"] = state["normalizer"]
 
         # for backwards compatibility with previous steppers created w/o
         # loss_normalization or residual_normalization
         loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
-        config["loss_normalization"] = loss_normalizer_state
+        config_data["loss_normalization"] = loss_normalizer_state
 
         # Overwrite the residual_normalization key if it exists, since the combined
         # loss scalings are saved in initial training as the loss_normalization
-        config["residual_normalization"] = None
+        config_data["residual_normalization"] = None
 
         if "area" in state:
             # backwards-compatibility, these older checkpoints are always lat-lon
@@ -1089,11 +1094,18 @@ class SingleModuleStepper(
                 img_shape = v[-2:]
                 break
         derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
+        config = SingleModuleStepperConfig.from_state(config_data)
+        corrector = config.corrector.build(
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        )
         stepper = cls(
-            config=SingleModuleStepperConfig.from_state(config),
+            config=config,
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
+            corrector=corrector,
             timestep=timestep,
             derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
