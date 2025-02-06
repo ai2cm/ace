@@ -271,14 +271,12 @@ class DatasetProperties:
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         is_remote: bool,
-        times: xr.CFTimeIndex,
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.timestep = timestep
         self.is_remote = is_remote
-        self.times = times
 
     def to_device(self) -> "DatasetProperties":
         device = get_device()
@@ -288,7 +286,6 @@ class DatasetProperties:
             self.horizontal_coordinates.to(device),
             self.timestep,
             self.is_remote,
-            self.times,
         )
 
     def update(self, other: "DatasetProperties"):
@@ -310,17 +307,15 @@ class DatasetProperties:
             raise ValueError("Inconsistent timesteps between datasets")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
-        if not self.times.equals(other.times):
-            raise ValueError("Inconsistent timestamps between datasets")
 
 
 def get_xarray_dataset(
     config: XarrayDataConfig, requirements: DataRequirements
-) -> Tuple["Dataset", DatasetProperties]:
+) -> Tuple["XarraySubset", DatasetProperties]:
     dataset = XarrayDataset(config, requirements)
     properties = dataset.properties
     index_slice = as_index_selection(config.subset, dataset)
-    dataset = dataset.subset(index_slice)
+    dataset = XarraySubset(dataset, index_slice)
     return dataset, properties
 
 
@@ -392,7 +387,6 @@ class XarrayDataset(Dataset):
             self._horizontal_coordinates,
             self.timestep,
             self.is_remote,
-            self.subset_times,
         )
 
     @property
@@ -410,12 +404,6 @@ class XarrayDataset(Dataset):
     def all_times(self) -> xr.CFTimeIndex:
         """Time index of all available times in the data."""
         return self._all_times
-
-    @property
-    def subset_times(self) -> xr.CFTimeIndex:
-        """Time index of the speicified subset of all times."""
-        select = as_index_selection(self.subset_config, self)
-        return self._all_times[select]
 
     def _get_variable_metadata(self, ds):
         result = {}
@@ -445,7 +433,7 @@ class XarrayDataset(Dataset):
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
         self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
-        self._sample_start_time = xr.CFTimeIndex(
+        self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coord)[: self._n_initial_conditions]
         )
         self._all_times = xr.CFTimeIndex(np.concatenate(time_coord))
@@ -566,9 +554,9 @@ class XarrayDataset(Dataset):
         return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
 
     @property
-    def sample_start_time(self) -> xr.CFTimeIndex:
+    def sample_start_times(self) -> xr.CFTimeIndex:
         """Return cftime index corresponding to start time of each sample."""
-        return self._sample_start_time
+        return self._sample_start_times
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
@@ -653,12 +641,56 @@ class XarrayDataset(Dataset):
 
         return tensors, time
 
-    def subset(self, subset: Union[slice, np.ndarray]) -> Dataset:
-        """Returns a subset of the dataset and propagates other properties."""
-        indices = np.arange(len(self))[subset]
+
+class XarraySubset(torch.utils.data.Dataset):
+    def __init__(self, dataset: XarrayDataset, subset: Union[slice, np.ndarray]):
+        indices = np.arange(len(dataset))[subset]
         logging.info(f"Subsetting dataset samples according to {subset}.")
-        subsetted_dataset = torch.utils.data.Subset(self, indices)
-        return subsetted_dataset
+        self._dataset = torch.utils.data.Subset(dataset, indices)
+        self._sample_start_times = dataset.sample_start_times[indices]
+        self.properties = dataset.properties
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+        return self._dataset[idx]
+
+    @property
+    def sample_start_times(self):
+        return self._sample_start_times
+
+    @property
+    def n_steps(self) -> int:
+        """The length of the time dimension of each sample."""
+        return self._dataset.dataset.n_steps
+
+
+class XarrayConcat(torch.utils.data.Dataset):
+    def __init__(self, datasets: Sequence[Union[XarrayDataset, XarraySubset]]):
+        self._dataset = torch.utils.data.ConcatDataset(datasets)
+        sample_start_times = datasets[0].sample_start_times
+        for dataset in datasets[1:]:
+            sample_start_times = sample_start_times.append(dataset.sample_start_times)
+            assert dataset.n_steps == datasets[0].n_steps
+        self._sample_start_times = sample_start_times
+        assert len(self._dataset) == len(sample_start_times)
+        self._n_steps = datasets[0].n_steps
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+        return self._dataset[idx]
+
+    @property
+    def sample_start_times(self):
+        return self._sample_start_times
+
+    @property
+    def n_steps(self) -> int:
+        """The length of the time dimension of each sample."""
+        return self._n_steps
 
 
 def as_index_selection(
@@ -670,7 +702,7 @@ def as_index_selection(
     if isinstance(subset, Slice):
         index_selection = subset.slice
     elif isinstance(subset, TimeSlice):
-        index_selection = subset.slice(dataset.sample_start_time)
+        index_selection = subset.slice(dataset.sample_start_times)
     elif isinstance(subset, RepeatedInterval):
         try:
             index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
@@ -708,8 +740,7 @@ def get_timestep(time: np.ndarray) -> datetime.timedelta:
 
 class MergedXarrayDataset:
     def __init__(
-        self,
-        datasets: Sequence[XarrayDataset],
+        self, datasets: Sequence[Union[XarrayDataset, XarraySubset, XarrayConcat]]
     ):
         self.datasets = datasets
 
@@ -725,32 +756,18 @@ class MergedXarrayDataset:
                     \nDuplicates found: {duplicates}"
             )
         for dataset in self.datasets:
-            if isinstance(dataset, XarrayDataset):
-                if not dataset.subset_times.equals(self.datasets[0].subset_times):
-                    raise ValueError(
-                        "All datasets in a merged dataset must have the same time."
-                    )
-            elif isinstance(dataset, torch.utils.data.Subset):
-                if not dataset.dataset.subset_times.equals(
-                    self.datasets[0].dataset.subset_times
-                ):
-                    raise ValueError(
-                        "All datasets in a merged dataset must have the same time."
-                    )
-            elif isinstance(dataset, torch.utils.data.ConcatDataset):
-                if not np.array_equal(
-                    self._get_concat_dataset_subset_times(dataset),
-                    self._get_concat_dataset_subset_times(self.datasets[0]),
-                ):
-                    raise ValueError(
-                        "All datasets in a merged dataset must have the same time."
-                    )
-
-    def _get_concat_dataset_subset_times(self, dataset: torch.utils.data.ConcatDataset):
-        subset_times = []
-        for ds in dataset.datasets:
-            subset_times.append(ds.dataset.subset_times)
-        return np.concatenate([*subset_times])
+            if not dataset.sample_start_times.equals(
+                self.datasets[0].sample_start_times
+            ):
+                raise ValueError(
+                    "All datasets in a merged dataset must have the same sample "
+                    "start times."
+                )
+            if not dataset.n_steps == self.datasets[0].n_steps:
+                raise ValueError(
+                    "All datasets in the merged datasets \
+                         must have the same number of steps."
+                )
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
         tensors = {}
@@ -765,7 +782,7 @@ class MergedXarrayDataset:
     def get_sample_by_time_slice(
         self, time_slice: slice
     ) -> Tuple[TensorDict, xr.DataArray]:
-        tensors = {}
+        tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time = dataset.get_sample_by_time_slice(time_slice)
             tensors.update(ds_tensors)
