@@ -5,7 +5,7 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.config import Slice
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -196,7 +196,7 @@ class TrainBuilders:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        atmosphere_vertical_coordinate: HybridSigmaPressureCoordinate,
+        atmosphere_vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ) -> CoupledStepper:
         if timestep != self.config.stepper.timestep:

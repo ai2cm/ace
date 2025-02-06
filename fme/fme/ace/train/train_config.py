@@ -16,7 +16,7 @@ from fme.ace.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
 )
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -197,7 +197,7 @@ class TrainBuilders:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ) -> SingleModuleStepper:
         return self.config.stepper.get_stepper(
