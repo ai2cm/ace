@@ -25,7 +25,10 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.multi_call import MultiCallConfig
 from fme.ace.requirements import PrognosticStateDataRequirements
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    OptionalHybridSigmaPressureCordinate,
+    SerializableVerticalCoordinate,
+)
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.utils import decode_timestep, encode_timestep
@@ -52,7 +55,7 @@ DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 class AtmosphericDeriveFn:
     def __init__(
         self,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ):
         self.vertical_coordinate = vertical_coordinate.to(
@@ -202,7 +205,7 @@ class SingleModuleStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         timestep: datetime.timedelta,
     ):
         logging.info("Initializing stepper from provided config")
@@ -485,7 +488,7 @@ class SingleModuleStepper(
         config: SingleModuleStepperConfig,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -589,7 +592,7 @@ class SingleModuleStepper(
         ] = self.predict_paired
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._vertical_coordinates
 
     @property
@@ -1065,10 +1068,11 @@ class SingleModuleStepper(
             state["vertical_coordinate"] = state["sigma_coordinates"]
 
         vertical_coordinate = dacite.from_dict(
-            data_class=HybridSigmaPressureCoordinate,
-            data=state["vertical_coordinate"],
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["vertical_coordinate"]},
             config=dacite.Config(strict=True),
-        )
+        ).vertical_coordinate
+
         # for backwards compatibility with original ACE checkpoint which
         # serialized vertical coordinates as float64
         if vertical_coordinate.ak.dtype == torch.float64:

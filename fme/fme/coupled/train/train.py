@@ -12,7 +12,10 @@ import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -91,7 +94,7 @@ class CoupledAggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: timedelta,
         atmosphere_timestep: timedelta,

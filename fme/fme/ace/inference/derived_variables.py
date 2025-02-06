@@ -5,7 +5,7 @@ from typing import Callable, Dict, MutableMapping, Optional, Tuple
 import torch
 
 from fme.core.atmosphere_data import AtmosphereData
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.data_typing import VariableMetadata
 
 DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
@@ -169,7 +169,7 @@ def unaccounted_heating(data: AtmosphereData, timestep: datetime.timedelta):
 
 def _compute_derived_variable(
     data: Dict[str, torch.Tensor],
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    vertical_coordinate: OptionalHybridSigmaPressureCordinate,
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: DerivedVariableFunc,
@@ -219,7 +219,7 @@ def _compute_derived_variable(
 
 def compute_derived_quantities(
     data: Dict[str, torch.Tensor],
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    vertical_coordinate: OptionalHybridSigmaPressureCordinate,
     timestep: datetime.timedelta,
     forcing_data: Optional[Dict[str, torch.Tensor]] = None,
 ) -> Dict[str, torch.Tensor]:

@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Callable, List, Mapping, Optional
+from typing import Callable, List, Mapping
 
 import torch
 
@@ -12,7 +12,11 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    NullVerticalCoordinate,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -48,7 +52,9 @@ class AtmosphereData:
     def __init__(
         self,
         atmosphere_data: TensorMapping,
-        vertical_coordinate: Optional[HybridSigmaPressureCoordinate] = None,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate = (
+            NullVerticalCoordinate()
+        ),
         atmosphere_field_name_prefixes: Mapping[
             str, List[str]
         ] = ATMOSPHERE_FIELD_NAME_PREFIXES,
@@ -156,7 +162,7 @@ class AtmosphereData:
 
     @property
     def surface_pressure_due_to_dry_air(self) -> torch.Tensor:
-        if self._vertical_coordinate is None:
+        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
             raise ValueError("Vertical coordinate must be provided to compute dry air.")
         return metrics.surface_pressure_due_to_dry_air(
             self.specific_total_water,
@@ -166,7 +172,7 @@ class AtmosphereData:
 
     @property
     def total_water_path(self) -> torch.Tensor:
-        if self._vertical_coordinate is None:
+        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
             raise ValueError(
                 "Vertical coordinate must be provided to compute total water path."
             )
@@ -283,7 +289,7 @@ class AtmosphereData:
         """
         Compute vertical height at layer log midpoints.
         """
-        if self._vertical_coordinate is None:
+        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
             raise ValueError(
                 "Vertical coordinate must be provided to compute height at log midpoint"
             )
@@ -301,7 +307,7 @@ class AtmosphereData:
     @property
     def height_at_midpoint(self) -> torch.Tensor:
         """Compute vertical height at layer midpoints with linear interpolation."""
-        if self._vertical_coordinate is None:
+        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
             raise ValueError(
                 "Vertical coordinate must be provided to compute height at mmidpoint"
             )
@@ -347,7 +353,7 @@ class AtmosphereData:
     @property
     def total_energy_ace2_path(self) -> torch.Tensor:
         """Compute vertical integral of total energy."""
-        if self._vertical_coordinate is None:
+        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
             raise ValueError(
                 "Vertical coordinate must be provided to compute total energy ACE2 path"
             )

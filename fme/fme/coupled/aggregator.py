@@ -10,7 +10,10 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -161,7 +164,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,
@@ -225,7 +228,7 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,

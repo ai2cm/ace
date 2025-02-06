@@ -20,7 +20,10 @@ import torch
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import PrognosticStateDataRequirements
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
@@ -96,7 +99,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._properties.vertical_coordinate
 
     @property
@@ -225,7 +228,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._properties.vertical_coordinate
 
     @property

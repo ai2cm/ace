@@ -70,7 +70,10 @@ from fme.ace.aggregator.inference.main import (
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.ace.stepper import TrainOutput
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -145,7 +148,7 @@ class AggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
         initial_inference_time: xr.DataArray,

@@ -18,6 +18,8 @@ from fme.core.coordinates import (
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    NullVerticalCoordinate,
+    OptionalHybridSigmaPressureCordinate,
 )
 from fme.core.device import get_device
 from fme.core.typing_ import Slice, TensorDict
@@ -47,7 +49,7 @@ VariableNames = namedtuple(
 
 def _get_vertical_coordinates(
     ds: xr.Dataset, dtype: Optional[torch.dtype]
-) -> HybridSigmaPressureCoordinate:
+) -> OptionalHybridSigmaPressureCordinate:
     """
     Get hybrid sigma-pressure coordinates from a dataset.
 
@@ -58,6 +60,10 @@ def _get_vertical_coordinates(
         ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
+
+    Returns:
+        HybridSigmaPressureCoordinate if the dataset contains the required
+        variables, otherwise returns null vertical coordinate.
     """
     ak_mapping = {
         int(v[3:]): torch.as_tensor(ds[v].values)
@@ -74,10 +80,7 @@ def _get_vertical_coordinates(
 
     if len(ak_list) == 0 or len(bk_list) == 0:
         logger.warning("Dataset does not contain ak and bk coordinates.")
-        return HybridSigmaPressureCoordinate(
-            ak=torch.tensor([]),
-            bk=torch.tensor([]),
-        )
+        return NullVerticalCoordinate()
 
     return HybridSigmaPressureCoordinate(
         ak=torch.as_tensor(ak_list, dtype=dtype),
@@ -264,7 +267,7 @@ class DatasetProperties:
     def __init__(
         self,
         variable_metadata: Mapping[str, VariableMetadata],
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         is_remote: bool,
@@ -541,7 +544,7 @@ class XarrayDataset(Dataset):
         return self._variable_metadata
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._vertical_coordinates
 
     @property

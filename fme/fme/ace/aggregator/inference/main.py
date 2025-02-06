@@ -19,8 +19,8 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.coordinates import (
     HorizontalCoordinates,
-    HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    OptionalHybridSigmaPressureCordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import (
@@ -143,7 +143,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -211,7 +211,7 @@ class InferenceEvaluatorAggregator(
 
     def __init__(
         self,
-        vertical_coordinate: HybridSigmaPressureCoordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,

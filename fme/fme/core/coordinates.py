@@ -115,6 +115,43 @@ class HybridSigmaPressureCoordinate:
 
 
 @dataclasses.dataclass
+class NullVerticalCoordinate:
+    """
+    A null vertical coordinate system.
+    """
+
+    type: Literal["null"] = "null"
+
+    def __eq__(self, other) -> bool:
+        return isinstance(other, NullVerticalCoordinate)
+
+    def __len__(self) -> int:
+        return 0
+
+    def to(self, device: str) -> "NullVerticalCoordinate":
+        return self
+
+    def as_dict(self) -> TensorMapping:
+        return {}
+
+    @property
+    def coords(self) -> Mapping[str, np.ndarray]:
+        return {}
+
+
+OptionalHybridSigmaPressureCordinate = (
+    HybridSigmaPressureCoordinate | NullVerticalCoordinate
+)
+
+
+@dataclasses.dataclass
+class SerializableVerticalCoordinate:
+    """Only for use in serializing/deserializing coordinates with dacite."""
+
+    vertical_coordinate: OptionalHybridSigmaPressureCordinate
+
+
+@dataclasses.dataclass
 class DimSize:
     name: str
     size: int

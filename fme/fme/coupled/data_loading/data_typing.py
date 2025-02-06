@@ -4,7 +4,10 @@ from typing import Dict, Mapping, Tuple
 import torch
 import xarray as xr
 
-from fme.core.coordinates import HorizontalCoordinates, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    HorizontalCoordinates,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.data_typing import Dataset, VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.typing_ import TensorDict
@@ -22,7 +25,7 @@ class CoupledDatasetProperties:
         self.atmosphere = atmosphere
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self.atmosphere.vertical_coordinate
 
     @property
@@ -107,7 +110,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> HybridSigmaPressureCoordinate:
+    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
         return self._properties.vertical_coordinate
 
     @property
