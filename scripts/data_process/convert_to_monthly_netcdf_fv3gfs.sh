@@ -54,3 +54,5 @@ for IC in $(seq 1 $(( N_IC ))); do
         --start-date $START_DATE \
         --end-date $END_DATE &
 done
+
+wait  # Wait for all background processes to complete
