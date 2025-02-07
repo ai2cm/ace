@@ -71,13 +71,13 @@ class RepeatedInterval:
     Examples:
         To return values from the first 3 items of every 6 items, use:
 
-        >>> RepeatedInterval(interval_length=3, repeat=6, start=0)
+        >>> fme.ace.RepeatedInterval(interval_length=3, block_length=6, start=0)  # doctest: +IGNORE_OUTPUT
 
         To return a days worth of values starting after 2 days from every 7-day
         block, use:
 
-        >>> RepeatedInterval(interval_length="1d", repeat="7d", start="2d")
-    """
+        >>> fme.ace.RepeatedInterval(interval_length="1d", block_length="7d", start="2d")  # doctest: +IGNORE_OUTPUT
+    """  # noqa: E501
 
     interval_length: Union[int, str]
     start: Union[int, str]

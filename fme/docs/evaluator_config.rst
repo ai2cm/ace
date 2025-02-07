@@ -93,6 +93,6 @@ The sub-configurations are:
    :show-inheritance:
    :noindex:
 
-.. autoclass:: fme.ace.OceanConfig
+.. autoclass:: fme.ace.StepperOverrideConfig
    :show-inheritance:
    :noindex:
