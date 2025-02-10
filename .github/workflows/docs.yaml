@@ -37,18 +37,18 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/docs/requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('docs/requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e ./fme[docs]
+          uv pip install --system -c constraints.txt -e .[docs]
       - name: Build docs
         run: |
-          cd fme/docs && make doctest html
+          cd docs && make doctest html
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: fme/docs/_build/html
+          path: docs/_build/html
   deploy:
     runs-on: ubuntu-latest
     # Only deploy on manual trigger or push to main
