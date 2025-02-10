@@ -1,5 +1,5 @@
-fme/docs/available_modules.rst
-fme/docs/_build
+docs/available_modules.rst
+docs/_build
 filtered_repo/
 
 .vscode

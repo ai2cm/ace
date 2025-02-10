@@ -42,9 +42,8 @@ from fme.core.generics.trainer import (
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
 
-REPOSITORY_PATH = pathlib.PurePath(__file__).parent.parent.parent.parent
 JOB_SUBMISSION_SCRIPT_PATH = (
-    REPOSITORY_PATH / "fme" / "fme" / "ace" / "run-train-and-inference.sh"
+    pathlib.PurePath(__file__).parent / "run-train-and-inference.sh"
 )
 
 
