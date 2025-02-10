@@ -17,7 +17,7 @@ FROM base AS production
 
 # copy local code and install
 COPY fme ${FME_DIR}/fme
-RUN cd $FME_DIR && pip install --no-deps -e fme
+RUN cd $FME_DIR && pip install --no-deps -e .
 
 # copy after install so editing scripts does not trigger reinstall
 COPY scripts ${FME_DIR}/scripts

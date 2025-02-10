@@ -39,7 +39,7 @@ test_image:
 create_environment:
 	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
-	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e ./fme[dev,docs]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs]
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
