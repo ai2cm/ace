@@ -88,7 +88,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     env:
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
-      BEAKER_IMAGE: oliverwm/fme-deps-only-2025-01-16
+      BEAKER_IMAGE: oliverwm/fme-deps-only-2025-02-10
       BEAKER_WORKSPACE: ai2/ace-ci-tests
     steps:
       - name: Determine current commit SHA (pull request)
