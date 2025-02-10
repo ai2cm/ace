@@ -40,5 +40,5 @@ cd $REPO_ROOT && gantry run \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --no-conda \
-    --install "pip install --no-deps ./fme" \
+    --install "pip install --no-deps ." \
     -- torchrun --nproc_per_node $N_GPUS -m fme.ace.train $CONFIG_PATH

@@ -21,7 +21,7 @@ mkdir fme && cd fme
 gh repo clone ai2cm/full-model .
 git checkout --quiet "$COMMIT_SHA"
 
-pip install --no-deps -e ./fme
+pip install --no-deps -e .
 
 yq eval '.experiment_dir="/results" | .n_forward_steps=40 | .forward_steps_in_memory=10 | .checkpoint_path="/test-default/ckpt.tar" | .loader.dataset.data_path="/test-default/data"' docs/evaluator-config.yaml > /workspace/evaluator-config.yaml
 
