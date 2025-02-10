@@ -1,0 +1,25 @@
+experiment_dir: inference_output
+n_forward_steps: 400 # 100 days
+forward_steps_in_memory: 50
+checkpoint_path: ace_ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace
+initial_condition:
+  path: climSST/ic_2021.zarr
+  start_indices:
+    n_initial_conditions: 2
+    first: 0
+    interval: 3
+  engine: zarr
+forcing_loader:
+  dataset:
+    data_path: climSST
+    file_pattern: forcing_2021.zarr
+    engine: zarr
+    n_repeats: 2 # use this to extend the 1-year of forcing data to desired length
+  num_data_workers: 2
+data_writer:
+  save_prediction_files: false
