@@ -394,8 +394,8 @@ def test_resume_two_workers(default_trainer_config, tmp_path, skip_slow: bool):
     default_trainer_config["max_epochs"] = 1
     train_config_path = _store_config(tmp_path, default_trainer_config)
 
-    repo_path = pathlib.PurePath(__file__).parent.parent.parent.parent
-    train_script_path = repo_path / "fme" / "fme" / "downscaling" / "train.py"
+    file_dir = pathlib.PurePath(__file__).parent
+    train_script_path = file_dir / "train.py"
     command = [
         "torchrun",
         "--nproc_per_node",

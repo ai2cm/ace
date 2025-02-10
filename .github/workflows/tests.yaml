@@ -25,11 +25,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e ./fme[dev]
+          uv pip install --system -c constraints.txt -e .[dev]
       - name: Run pytest
         run: |
           make test
@@ -46,11 +46,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e ./fme[dev]
+          uv pip install --system -c constraints.txt -e .[dev]
       - name: Run pytest
         run: |
           make test_very_fast
@@ -69,18 +69,18 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('fme/requirements.txt') }}-${{ hashFiles('fme/dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('dev-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make git
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e ./fme[dev]
+          uv pip install --system -c constraints.txt -e .[dev]
       - name: Run CUDA check and pytest
         run: |
             export PATH=/usr/local/nvidia/bin:${PATH}
             export LD_LIBRARY_PATH=/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
-            python3 fme/fme/require_gpu.py
+            python3 fme/require_gpu.py
             make test
   beaker-evaluator:
     runs-on: ubuntu-latest

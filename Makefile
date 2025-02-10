@@ -62,11 +62,11 @@ run_ace_train:
 # requires fme[deploy] to be installed
 
 build_pypi:
-	rm -rf fme/dist
-	cd fme && python -m build
+	rm -rf dist
+	python -m build
 
 deploy_pypi: build_pypi
-	cd fme && twine upload --repository $(DEPLOY_TARGET) dist/*
+	twine upload --repository $(DEPLOY_TARGET) dist/*
 
 deploy_test_pypi: DEPLOY_TARGET = testpypi
 deploy_test_pypi: deploy_pypi
