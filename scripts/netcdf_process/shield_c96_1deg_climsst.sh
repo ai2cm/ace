@@ -19,5 +19,5 @@ cd $REPO_ROOT && gantry run \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --no-conda \
-    --install "pip install --no-deps ./fme" \
+    --install "pip install --no-deps ." \
     -- bash -c "cd /gantry-runtime/scripts/data_process && make fv3gfs_1deg_climSST_monthly_netcdfs"
