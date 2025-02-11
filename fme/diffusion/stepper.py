@@ -12,7 +12,10 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.ace.stepper import TrainOutput
-from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.utils import decode_timestep, encode_timestep
@@ -804,10 +807,11 @@ class DiffusionStepper(
         )
         # for backwards compatibility with original ACE checkpoint which
         # serialized vertical coordinates as float64
-        if vertical_coordinate.ak.dtype == torch.float64:
-            vertical_coordinate.ak = vertical_coordinate.ak.to(dtype=torch.float32)
-        if vertical_coordinate.bk.dtype == torch.float64:
-            vertical_coordinate.bk = vertical_coordinate.bk.to(dtype=torch.float32)
+        if isinstance(vertical_coordinate, HybridSigmaPressureCoordinate):
+            if vertical_coordinate.ak.dtype == torch.float64:
+                vertical_coordinate.ak = vertical_coordinate.ak.to(dtype=torch.float32)
+            if vertical_coordinate.bk.dtype == torch.float64:
+                vertical_coordinate.bk = vertical_coordinate.bk.to(dtype=torch.float32)
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
         if "img_shape" in state:
