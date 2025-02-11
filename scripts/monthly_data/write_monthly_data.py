@@ -153,7 +153,6 @@ class Data:
 
 
 def merge_loaders(loaders: List[torch.utils.data.DataLoader]):
-    window_batch_data_list: List[BatchData]
     for window_batch_data_list in zip(*loaders):
         tensors = [item.data for item in window_batch_data_list]
         time = [item.time for item in window_batch_data_list]
