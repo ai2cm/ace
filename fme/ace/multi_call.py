@@ -107,7 +107,9 @@ class MultiCall:
         predictions = {}
         unscaled_forcing = input[self.forcing_name]
         for suffix, multiplier in self.forcing_multipliers.items():
-            scaled_input = input | {self.forcing_name: multiplier * unscaled_forcing}
+            scaled_input = dict(input) | {
+                self.forcing_name: multiplier * unscaled_forcing
+            }
             output = self._step(
                 scaled_input, next_step_forcing_data, use_activation_checkpointing
             )
