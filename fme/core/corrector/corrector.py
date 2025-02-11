@@ -474,7 +474,7 @@ def _force_conserve_total_energy(
     input = AtmosphereData(input_data, vertical_coordinate)
     heating_tensor = torch.full_like(next(iter(gen_data.values())), unaccounted_heating)
     gen_and_heating_data = dict(gen_data) | {"unaccounted_heating": heating_tensor}
-    gen = AtmosphereData(gen_and_heating_data | forcing_data, vertical_coordinate)
+    gen = AtmosphereData(gen_and_heating_data | dict(forcing_data), vertical_coordinate)
     if torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Surface pressure has a non-positive value, skipping energy correction."

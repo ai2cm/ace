@@ -3,6 +3,7 @@ import logging
 from typing import (
     Any,
     Callable,
+    Dict,
     Generic,
     Iterable,
     Iterator,
@@ -95,7 +96,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         return SizedMap(modify_and_on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
@@ -224,7 +225,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return SizedMap(on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
