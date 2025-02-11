@@ -51,7 +51,7 @@ def create_evaluator_config(tmp_path, model: Mapping[str, Any], n_samples: int):
 
 
 class LinearDownscalingDiffusion(LinearDownscaling):
-    def forward(self, latent, coarse, noise_level):
+    def forward(self, latent, coarse, noise_level):  # type: ignore
         return super().forward(coarse)
 
 

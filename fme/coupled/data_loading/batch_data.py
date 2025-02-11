@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import List, Literal, Mapping, Optional, Sequence, TypeVar, Union
+from typing import Dict, List, Literal, Mapping, Optional, Sequence, TypeVar, Union
 
 import numpy as np
 import torch
@@ -142,7 +142,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
         loader: DataLoader[CoupledBatchData],
-        variable_metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Dict[str, VariableMetadata],
         vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -180,7 +180,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return SizedMap(to_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._variable_metadata
 
     @property
@@ -282,5 +282,5 @@ class InferenceData(InferenceDataABC[CoupledPrognosticState, CoupledBatchData]):
         return SizedMap(on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
