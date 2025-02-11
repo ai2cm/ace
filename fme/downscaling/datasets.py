@@ -2,7 +2,7 @@
 
 import dataclasses
 import random
-from typing import Mapping, Optional, Sequence, Tuple, Union
+from typing import Dict, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.utils.data
@@ -293,7 +293,7 @@ class HorizontalSubsetDataset(Dataset):
         )
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property

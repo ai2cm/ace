@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Mapping, Tuple
+from typing import Dict, Tuple
 
 import torch
 import xarray as xr
@@ -106,7 +106,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         self._n_steps_fast = n_steps_fast
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property

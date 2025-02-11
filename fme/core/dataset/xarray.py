@@ -266,7 +266,7 @@ def _get_raw_paths(path, file_pattern):
 class DatasetProperties:
     def __init__(
         self,
-        variable_metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Dict[str, VariableMetadata],
         vertical_coordinate: OptionalHybridSigmaPressureCordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -528,7 +528,7 @@ class XarrayDataset(Dataset):
         return horizontal_coordinates, static_derived_data
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._variable_metadata
 
     @property
