@@ -63,7 +63,7 @@ It is possible to download a portion of the dataset only, but it is necessary to
 .. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
 .. _requester pays: https://cloud.google.com/storage/docs/requester-pays
 
-Save a ``inference-config.yaml`` file based on the :ref:`example config <inference-config>` with updated paths for the downloaded data.
+Save a ``config-inference.yaml`` file based on the :ref:`example config <inference-config>` with updated paths for the downloaded data.
 Then in the ``fme`` conda environment, run inference with:
 
 .. code-block:: bash
