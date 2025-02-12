@@ -1,12 +1,10 @@
-import argparse
 import dataclasses
 import logging
 import os
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 import dacite
 import torch
-import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
@@ -30,6 +28,7 @@ from fme.ace.stepper import (
     load_stepper,
     load_stepper_config,
 )
+from fme.core.cli import prepare_config, prepare_directory
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
@@ -132,18 +131,14 @@ class InferenceEvaluatorConfig:
         )
 
 
-def main(yaml_config: str):
-    with open(yaml_config, "r") as f:
-        data = yaml.safe_load(f)
+def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+    config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,
-        data=data,
+        data=config_data,
         config=dacite.Config(strict=True),
     )
-    if not os.path.isdir(config.experiment_dir):
-        os.makedirs(config.experiment_dir, exist_ok=True)
-    with open(os.path.join(config.experiment_dir, "config.yaml"), "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    prepare_directory(config.experiment_dir, config_data)
     with GlobalTimer():
         return run_evaluator_from_config(config)
 
@@ -298,14 +293,3 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         **aggregator.get_summary_logs(),
     }
     record_logs([summary_logs])
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("yaml_config", type=str)
-
-    args = parser.parse_args()
-
-    main(
-        yaml_config=args.yaml_config,
-    )

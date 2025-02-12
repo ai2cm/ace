@@ -58,7 +58,6 @@ import dacite
 import dask
 import torch
 import xarray as xr
-import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
@@ -71,7 +70,7 @@ from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
-from fme.core.config import update_dict_with_dotlist
+from fme.core.cli import prepare_config, prepare_directory
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalHybridSigmaPressureCordinate,
@@ -227,18 +226,9 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
 
 
 def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
-    with open(yaml_config, "r") as f:
-        data = yaml.safe_load(f)
-
-    data = update_dict_with_dotlist(data, override_dotlist)
-
-    train_config: TrainConfig = dacite.from_dict(
-        data_class=TrainConfig,
-        data=data,
-        config=dacite.Config(strict=True),
+    config_data = prepare_config(yaml_config, override=override_dotlist)
+    config = dacite.from_dict(
+        data_class=TrainConfig, data=config_data, config=dacite.Config(strict=True)
     )
-    if not os.path.isdir(train_config.experiment_dir):
-        os.makedirs(train_config.experiment_dir, exist_ok=True)
-    with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
-    run_train_from_config(train_config)
+    prepare_directory(config.experiment_dir, config_data)
+    run_train_from_config(config)
