@@ -2,16 +2,16 @@ import dataclasses
 import logging
 import os
 from datetime import timedelta
-from typing import Callable, Mapping, Optional
+from typing import Callable, Mapping, Optional, Sequence
 
 import dacite
 import dask
 import torch
 import xarray as xr
-import yaml
 
 import fme
 import fme.core.logging_utils as logging_utils
+from fme.core.cli import prepare_config, prepare_directory
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalHybridSigmaPressureCordinate,
@@ -171,16 +171,12 @@ def run_train_from_config(config: TrainConfig):
     run_train(TrainBuilders(config), config)
 
 
-def main(yaml_config: str):
-    with open(yaml_config, "r") as f:
-        data = yaml.safe_load(f)
+def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+    data = prepare_config(yaml_config, override=override_dotlist)
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,
         data=data,
         config=dacite.Config(strict=True),
     )
-    if not os.path.isdir(train_config.experiment_dir):
-        os.makedirs(train_config.experiment_dir, exist_ok=True)
-    with open(os.path.join(train_config.experiment_dir, "config.yaml"), "w") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    prepare_directory(train_config.experiment_dir, data)
     run_train_from_config(train_config)
