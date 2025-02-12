@@ -12,11 +12,13 @@ RUN echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] http://packages.c
 # install python deps
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
+COPY healpix-requirements.txt /tmp/healpix-requirements.txt
+RUN python3 -m pip install --no-build-isolation -r /tmp/healpix-requirements.txt
 
 FROM base AS production
 
 # copy local code and install
-COPY fme ${FME_DIR}/fme
+COPY . ${FME_DIR}
 RUN cd $FME_DIR && pip install --no-deps -e .
 
 # copy after install so editing scripts does not trigger reinstall
