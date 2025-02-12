@@ -12,21 +12,21 @@ import fme
 from fme.ace.aggregator import OneStepAggregator
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.stepper import (
-    SingleModuleStepper,
-    SingleModuleStepperConfig,
-    TrainOutput,
-    _combine_normalizers,
-)
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
-from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.registry.module import ModuleSelector
 from fme.core.typing_ import TensorDict
+from fme.diffusion.loss import WeightedMappingLossConfig
+from fme.diffusion.stepper import (
+    DiffusionStepper,
+    DiffusionStepperConfig,
+    TrainOutput,
+    _combine_normalizers,
+)
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
 TIMESTEP = datetime.timedelta(hours=6)
@@ -87,7 +87,7 @@ def get_scalar_data(names, value):
 def test_stepper_config_all_names_property(
     in_names, out_names, ocean_config, expected_all_names
 ):
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=MagicMock(),
         in_names=in_names,
         out_names=out_names,
@@ -112,7 +112,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 1.0),
     )
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
         in_names=["a", "b"],
         out_names=["a", "b"],
@@ -170,7 +170,7 @@ def test_train_on_batch_addition_series():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
         in_names=["a", "b"],
         out_names=["a", "b"],
@@ -232,7 +232,7 @@ def test_train_on_batch_with_prescribed_ocean():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
         in_names=["a", "b"],
         out_names=["a", "b"],
@@ -267,7 +267,7 @@ def test_train_on_batch_with_prescribed_ocean():
 
 def test_reloaded_stepper_gives_same_prediction():
     torch.manual_seed(0)
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
@@ -293,7 +293,7 @@ def test_reloaded_stepper_gives_same_prediction():
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
-    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
+    new_stepper = DiffusionStepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.train_on_batch(
         data=data,
@@ -353,7 +353,7 @@ def _setup_and_train_on_batch(
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": module}),
         in_names=in_names,
         out_names=out_names,
@@ -499,7 +499,7 @@ def _get_stepper(
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(type="prebuilt", config=module_config),
         in_names=in_names,
         out_names=out_names,
@@ -755,7 +755,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     # should detect which prognostic variables to use from the set
     residual_means = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
     residual_stds = {"a": 2.0, "b": 2.0, "diagnostic": 2.0}
-    config = SingleModuleStepperConfig(
+    config = DiffusionStepperConfig(
         builder=ModuleSelector(
             type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
         ),
@@ -781,7 +781,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
+    stepper_from_state = DiffusionStepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
         assert stepper.loss_normalizer.means == {
