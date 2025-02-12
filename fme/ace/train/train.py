@@ -71,10 +71,7 @@ from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import (
-    HorizontalCoordinates,
-    OptionalHybridSigmaPressureCordinate,
-)
+from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -150,7 +147,7 @@ class AggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
         initial_inference_time: xr.DataArray,
