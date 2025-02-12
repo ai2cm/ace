@@ -37,13 +37,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ${{ env.pythonLocation }}
-          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('docs/requirements.txt') }}-${{ hashFiles('constraints.txt') }}
+          key: ${{ env.CURRENT_WEEK }}-${{ env.pythonLocation }}-${{ hashFiles('requirements.txt') }}-${{ hashFiles('docs/requirements.txt') }}-${{ hashFiles('healpix-requirements.txt') }}-${{ hashFiles('constraints.txt') }}
       - name: Install dependencies
         run: |
           python -m pip install uv
-          uv pip install --system -c constraints.txt -e .[docs]
+          # can't use --system here because it doesn't work with --no-build-isolation and a healpix dependency
+          uv venv --python 3.10
+          uv pip install -c constraints.txt -e .[docs]
+          uv pip install --no-build-isolation -c constraints.txt -e .[docs,healpix]
       - name: Build docs
         run: |
+          source .venv/bin/activate
           cd docs && make doctest html
       - name: Upload to GitHub Pages
         uses: actions/upload-pages-artifact@v3
