@@ -17,6 +17,7 @@ from fme.ace.inference.data_writer.monthly import (
     months_for_timesteps,
 )
 from fme.ace.stepper import AtmosphericDeriveFn
+from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.getters import get_datasets, get_merged_datasets
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import DatasetProperties
@@ -173,6 +174,9 @@ def run(config: Config):
     data = config.get_data()
     writer = config.get_data_writer(data)
 
+    assert isinstance(
+        data.properties.vertical_coordinate, OptionalHybridSigmaPressureCordinate
+    )
     derive_func = AtmosphericDeriveFn(
         vertical_coordinate=data.properties.vertical_coordinate,
         timestep=data.properties.timestep,

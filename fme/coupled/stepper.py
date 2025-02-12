@@ -12,7 +12,10 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
-from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
+from fme.core.coordinates import (
+    OptionalDepthCoordinate,
+    OptionalHybridSigmaPressureCordinate,
+)
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
@@ -25,6 +28,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -218,7 +222,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: OptionalDepthCoordinate,
     ) -> SingleModuleStepper:
         return self.ocean.stepper.get_stepper(
             img_shape=img_shape,
@@ -244,7 +248,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: CoupledVerticalCoordinate,
     ):
         logging.info("Initializing coupler")
         return CoupledStepper(
@@ -252,12 +256,12 @@ class CoupledStepperConfig:
             ocean=self._get_ocean_stepper(
                 img_shape=img_shape,
                 gridded_operations=gridded_operations,
-                vertical_coordinate=vertical_coordinate,
+                vertical_coordinate=vertical_coordinate.ocean,
             ),
             atmosphere=self._get_atmosphere_stepper(
                 img_shape=img_shape,
                 gridded_operations=gridded_operations,
-                vertical_coordinate=vertical_coordinate,
+                vertical_coordinate=vertical_coordinate.atmosphere,
             ),
         )
 
@@ -368,6 +372,12 @@ class CoupledStepper(
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
+        self._atmos_vertical_coord = atmosphere.vertical_coordinate
+        self._ocean_vertical_coord = ocean.vertical_coordinate
+        assert isinstance(
+            self._atmos_vertical_coord, OptionalHybridSigmaPressureCordinate
+        )
+        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -399,8 +409,14 @@ class CoupledStepper(
         return 1
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
-        return self.atmosphere.vertical_coordinate
+    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
+        assert isinstance(
+            self._atmos_vertical_coord, OptionalHybridSigmaPressureCordinate
+        )
+        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
+        return CoupledVerticalCoordinate(
+            self._ocean_vertical_coord, self._atmos_vertical_coord
+        )
 
     @property
     def timestep(self) -> datetime.timedelta:
