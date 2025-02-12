@@ -13,6 +13,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     NullVerticalCoordinate,
     OptionalHybridSigmaPressureCordinate,
+    VerticalCoordinate,
 )
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
@@ -136,9 +137,10 @@ class CorrectorConfig(CorrectorConfigProtocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
     ) -> "Corrector":
+        assert isinstance(vertical_coordinate, OptionalHybridSigmaPressureCordinate)
         return Corrector(
             config=self,
             gridded_operations=gridded_operations,

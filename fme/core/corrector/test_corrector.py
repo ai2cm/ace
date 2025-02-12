@@ -8,7 +8,7 @@ import torch
 from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import AtmosphereData, metrics
 from fme.core.atmosphere_data import compute_dry_air_absolute_differences
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.corrector.ocean import OceanCorrector
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.registry.corrector import CorrectorSelector
@@ -359,9 +359,7 @@ def test_corrector_selector():
         config={"masking": {"mask_name": "mask", "mask_value": 1}},
     )
     ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
-    vertical: HybridSigmaPressureCoordinate = HybridSigmaPressureCoordinate(
-        ak=torch.tensor([1.0, 0.5, 0.0]), bk=torch.tensor([0.0, 0.5, 1.0])
-    )
+    vertical = DepthCoordinate(torch.tensor([1.0, 0.5, 0.0]))
     corrector = selector.build(ops, vertical, TIMESTEP)
     assert isinstance(corrector, OceanCorrector)
 

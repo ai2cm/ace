@@ -1,19 +1,27 @@
 from collections import namedtuple
-from typing import List, Optional
+from typing import Iterable, List, Literal, Optional
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 import torch
+import xarray as xr
 
 import fme
+from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.ace.test_stepper import get_data, get_scalar_data
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.ace.test_stepper import get_scalar_data
+from fme.core.coordinates import (
+    DepthCoordinate,
+    HybridSigmaPressureCoordinate,
+    VerticalCoordinate,
+)
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
+from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 
 from .data_loading.batch_data import (
@@ -21,6 +29,7 @@ from .data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
 DEVICE = fme.get_device()
@@ -292,6 +301,32 @@ SphericalData = namedtuple(
 )
 
 
+def get_data(
+    names: Iterable[str], n_samples, n_time, realm: Literal["atmosphere", "ocean"]
+) -> SphericalData:
+    data_dict = {}
+    n_lat, n_lon, nz = 5, 5, 7
+
+    lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
+    for name in names:
+        data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
+    area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
+    vertical_coord: VerticalCoordinate
+    if realm == "atmosphere":
+        ak, bk = torch.arange(nz), torch.arange(nz)
+        vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
+    elif realm == "ocean":
+        vertical_coord = DepthCoordinate(torch.arange(nz))
+    data = BatchData.new_on_device(
+        data=data_dict,
+        time=xr.DataArray(
+            np.zeros((n_samples, n_time)),
+            dims=["sample", "time"],
+        ),
+    )
+    return SphericalData(data, area_weights, vertical_coord)
+
+
 def get_coupled_data(
     ocean_names: List[str],
     atmosphere_names: List[str],
@@ -299,15 +334,19 @@ def get_coupled_data(
     n_forward_times_atmosphere: int,
     n_samples: int,
 ) -> SphericalData:
-    ocean_data = get_data(ocean_names, n_samples, n_forward_times_ocean + 1)
-    atmos_data = get_data(atmosphere_names, n_samples, n_forward_times_atmosphere + 1)
+    ocean_data = get_data(ocean_names, n_samples, n_forward_times_ocean + 1, "ocean")
+    atmos_data = get_data(
+        atmosphere_names, n_samples, n_forward_times_atmosphere + 1, "atmosphere"
+    )
     data = CoupledBatchData(ocean_data=ocean_data.data, atmosphere_data=atmos_data.data)
     nz = len(atmos_data.vertical_coord)
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
         atmos_data.area_weights,
-        atmos_data.vertical_coord,
+        CoupledVerticalCoordinate(
+            ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
+        ),
     )
 
 
@@ -399,6 +438,7 @@ def _get_stepper_and_batch(
                     stds=get_scalar_data(ocean_norm_names, 1.0),
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
+                corrector=CorrectorSelector("ocean_corrector", {}),
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -740,14 +780,18 @@ def test_reloaded_stepper_gives_same_prediction():
                     stds={"o": 1.0, "o_sfc": 1.0, "o_mask": 1.0},
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
+                corrector=CorrectorSelector("ocean_corrector", {}),
             ),
         ),
         sst_name="o_sfc",
         sst_mask_name="o_mask",
     )
     area = torch.ones((5, 5), device=DEVICE)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+    vertical_coordinate = CoupledVerticalCoordinate(
+        ocean=DepthCoordinate(torch.arange(1)),
+        atmosphere=HybridSigmaPressureCoordinate(
+            ak=torch.arange(7), bk=torch.arange(7)
+        ),
     )
     stepper = config.get_stepper(
         img_shape=(5, 5),

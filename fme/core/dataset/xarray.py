@@ -14,12 +14,13 @@ import torch
 import xarray as xr
 
 from fme.core.coordinates import (
+    DepthCoordinate,
     HEALPixCoordinates,
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
     NullVerticalCoordinate,
-    OptionalHybridSigmaPressureCordinate,
+    VerticalCoordinate,
 )
 from fme.core.device import get_device
 from fme.core.typing_ import Slice, TensorDict
@@ -47,23 +48,22 @@ VariableNames = namedtuple(
 )
 
 
-def _get_vertical_coordinates(
+def _get_vertical_coordinate(
     ds: xr.Dataset, dtype: Optional[torch.dtype]
-) -> OptionalHybridSigmaPressureCordinate:
+) -> VerticalCoordinate:
     """
-    Get hybrid sigma-pressure coordinates from a dataset.
+    Get vertical coordinate from a dataset.
 
-    Assumes that the dataset contains variables named `ak_N` and `bk_N` where
-    `N` is the level number. The returned tensors are sorted by level number.
+    If the dataset contains variables named `ak_N` and `bk_N` where
+    `N` is the level number, then a hybrid sigma-pressure coordinate
+    will be returned. If the dataset contains variables named
+    `idepth_N` then a depth coordinate will be returned. If neither thing
+    is true, a hybrid sigma-pressure coordinate of lenght 0 is returned.
 
     Args:
         ds: Dataset to get vertical coordinates from.
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
-
-    Returns:
-        HybridSigmaPressureCoordinate if the dataset contains the required
-        variables, otherwise returns null vertical coordinate.
     """
     ak_mapping = {
         int(v[3:]): torch.as_tensor(ds[v].values)
@@ -78,14 +78,32 @@ def _get_vertical_coordinates(
     ak_list = [ak_mapping[k] for k in sorted(ak_mapping.keys())]
     bk_list = [bk_mapping[k] for k in sorted(bk_mapping.keys())]
 
-    if len(ak_list) == 0 or len(bk_list) == 0:
-        logger.warning("Dataset does not contain ak and bk coordinates.")
-        return NullVerticalCoordinate()
+    idepth_mapping = {
+        int(v[7:]): torch.as_tensor(ds[v].values)
+        for v in ds.variables
+        if v.startswith("idepth_")
+    }
+    idepth_list = [idepth_mapping[k] for k in sorted(idepth_mapping.keys())]
 
-    return HybridSigmaPressureCoordinate(
-        ak=torch.as_tensor(ak_list, dtype=dtype),
-        bk=torch.as_tensor(bk_list, dtype=dtype),
-    )
+    if len(ak_list) > 0 and len(bk_list) > 0 and len(idepth_list) > 0:
+        raise ValueError(
+            "Dataset contains both hybrid sigma-pressure and depth coordinates. "
+            "Can only provide one, or else the vertical coordinate is ambiguous."
+        )
+
+    coordinate: VerticalCoordinate
+    if len(idepth_list) > 0:
+        coordinate = DepthCoordinate(torch.as_tensor(idepth_list, dtype=dtype))
+    elif len(ak_list) > 0 and len(bk_list) > 0:
+        coordinate = HybridSigmaPressureCoordinate(
+            ak=torch.as_tensor(ak_list, dtype=dtype),
+            bk=torch.as_tensor(bk_list, dtype=dtype),
+        )
+    else:
+        logger.warning("Dataset does not contain a vertical coordinate.")
+        coordinate = NullVerticalCoordinate()
+
+    return coordinate
 
 
 def get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
@@ -267,7 +285,7 @@ class DatasetProperties:
     def __init__(
         self,
         variable_metadata: Dict[str, VariableMetadata],
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         is_remote: bool,
@@ -374,16 +392,14 @@ class XarrayDataset(Dataset):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._vertical_coordinates = _get_vertical_coordinates(
-            first_dataset, self.dtype
-        )
+        self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
 
     @property
     def properties(self) -> DatasetProperties:
         return DatasetProperties(
             self._variable_metadata,
-            self._vertical_coordinates,
+            self._vertical_coordinate,
             self._horizontal_coordinates,
             self.timestep,
             self.is_remote,
@@ -532,8 +548,8 @@ class XarrayDataset(Dataset):
         return self._variable_metadata
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
-        return self._vertical_coordinates
+    def vertical_coordinate(self) -> VerticalCoordinate:
+        return self._vertical_coordinate
 
     @property
     def timestep(self) -> datetime.timedelta:

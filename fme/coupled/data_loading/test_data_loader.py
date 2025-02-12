@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import List
+from typing import List, Literal
 
 import cftime
 import numpy as np
@@ -9,7 +9,7 @@ import pytest
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.data_loading.test_data_loader import _save_netcdf
+from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.testing import save_scalar_netcdf
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.requirements import DataRequirements
@@ -18,6 +18,38 @@ from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
 from .getters import get_data_loader
+
+
+def _save_netcdf(
+    filename,
+    dim_sizes,
+    variable_names,
+    calendar,
+    realm: Literal["ocean", "atmosphere"],
+    timestep_size=1,
+    timestep_start=0,
+):
+    data_vars = {}
+    for name in variable_names:
+        if name == "constant_mask":
+            data = np.ones(list(dim_sizes.values()))
+        else:
+            data = np.random.randn(*list(dim_sizes.values()))
+        if len(dim_sizes) > 0:
+            data = data.astype(np.float32)  # type: ignore
+        data_vars[name] = xr.DataArray(
+            data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
+        )
+    coords = _get_coords(dim_sizes, calendar, timestep_size, timestep_start)
+    for i in range(7):
+        if realm == "atmosphere":
+            data_vars[f"ak_{i}"] = float(i)
+            data_vars[f"bk_{i}"] = float(i + 1)
+        elif realm == "ocean":
+            data_vars[f"depth_{i}"] = float(i)
+    ds = xr.Dataset(data_vars=data_vars, coords=coords)
+    ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    return ds
 
 
 @dataclasses.dataclass
@@ -66,6 +98,7 @@ def create_coupled_data_on_disk(
         dim_sizes=ocean_dim_sizes,
         variable_names=ocean_names,
         calendar="proleptic_gregorian",
+        realm="ocean",
         # _save_netcdf has a default timestep of 1 day which we interpret as the
         # atmosphere timestep, so the ocean data needs
         timestep_size=ocean_timestep_size,
@@ -88,6 +121,7 @@ def create_coupled_data_on_disk(
         dim_sizes=atmos_dim_sizes,
         variable_names=atmosphere_names,
         calendar="proleptic_gregorian",
+        realm="atmosphere",
         timestep_size=1,
         timestep_start=timestep_start_atmosphere,
     )

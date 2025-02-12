@@ -72,6 +72,7 @@ from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalHybridSigmaPressureCordinate,
+    VerticalCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
@@ -99,6 +100,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
             break
         break
     logging.info("Starting model initialization")
+    # diffusion only supports atmospheric vertical coordinate for now
+    assert isinstance(
+        train_data.vertical_coordinate, OptionalHybridSigmaPressureCordinate
+    )
     stepper = builder.get_stepper(
         img_shape=img_shape,
         gridded_operations=train_data.gridded_operations,
@@ -147,7 +152,7 @@ class AggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
         initial_inference_time: xr.DataArray,
