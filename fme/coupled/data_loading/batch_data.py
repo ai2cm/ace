@@ -8,16 +8,14 @@ import torch
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.data_loading.gridded_data import SizedMap
-from fme.core.coordinates import (
-    HorizontalCoordinates,
-    OptionalHybridSigmaPressureCordinate,
-)
+from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledDatasetProperties,
+    CoupledVerticalCoordinate,
 )
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
 
@@ -143,7 +141,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self,
         loader: DataLoader[CoupledBatchData],
         variable_metadata: Dict[str, VariableMetadata],
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         sampler: Optional[torch.utils.data.Sampler] = None,
@@ -166,7 +164,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         """
         self._loader = loader
         self._variable_metadata = variable_metadata
-        self._vertical_coordinates = vertical_coordinate
+        self._vertical_coordinate = vertical_coordinate
         self._horizontal_coordinates = horizontal_coordinates
         self._timestep = timestep
         self._sampler = sampler
@@ -184,8 +182,8 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return self._variable_metadata
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
-        return self._vertical_coordinates
+    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
+        return self._vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:

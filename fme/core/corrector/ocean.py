@@ -5,7 +5,7 @@ from typing import Any, List, Mapping, Optional
 
 import dacite
 
-from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
+from fme.core.coordinates import OptionalDepthCoordinate, VerticalCoordinate
 from fme.core.corrector.corrector import force_positive
 from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
 from fme.core.gridded_ops import GriddedOperations
@@ -35,9 +35,10 @@ class OceanCorrectorConfig(CorrectorConfigProtocol):
     def build(
         self,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
     ):
+        assert isinstance(vertical_coordinate, OptionalDepthCoordinate)
         return OceanCorrector(
             config=self,
             gridded_operations=gridded_operations,
@@ -57,7 +58,7 @@ class OceanCorrector(CorrectorABC):
         self,
         config: OceanCorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: OptionalDepthCoordinate,
         timestep: datetime.timedelta,
     ):
         self._config = config
