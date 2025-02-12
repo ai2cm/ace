@@ -409,7 +409,15 @@ def compute_lazy_dataset(
             "grid_latt": "lat",
         }
     )
+    # fill nans in sea_ice_fraction to be
+    # consistent with ocean fraction in ocean_emulators
+    if ocean_names.sea_ice_fraction in ds.data_vars:
+        ds[ocean_names.sea_ice_fraction] = ds[ocean_names.sea_ice_fraction].fillna(0.0)
     ds_regridded = horizontal_regrid(ds, ds_target_grid).astype("float32")
+    if ocean_names.sea_ice_fraction in ds_regridded.data_vars:
+        ds_regridded[ocean_names.sea_ice_fraction] = ds_regridded[
+            ocean_names.sea_ice_fraction
+        ].fillna(0.0)
     print(f"Regridded size: {ds_regridded.nbytes / 1e9:.1f} GB")
 
     ds = ds_regridded
