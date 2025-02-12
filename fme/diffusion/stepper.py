@@ -15,6 +15,7 @@ from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     OptionalHybridSigmaPressureCordinate,
+    SerializableVerticalCoordinate,
 )
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.dataset.requirements import DataRequirements
@@ -801,10 +802,11 @@ class DiffusionStepper(
             state["vertical_coordinate"] = state["sigma_coordinates"]
 
         vertical_coordinate = dacite.from_dict(
-            data_class=OptionalHybridSigmaPressureCordinate,
-            data=state["vertical_coordinate"],
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["vertical_coordinate"]},
             config=dacite.Config(strict=True),
-        )
+        ).vertical_coordinate
+
         # for backwards compatibility with original ACE checkpoint which
         # serialized vertical coordinates as float64
         if isinstance(vertical_coordinate, HybridSigmaPressureCoordinate):
