@@ -5,7 +5,6 @@ from typing import List, Optional, Tuple
 
 import torch
 
-from fme.core.coordinates import OptionalHybridSigmaPressureCordinate
 from fme.core.dataset.config import Slice
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -17,6 +16,7 @@ from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.batch_data import GriddedData, InferenceData
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
+from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.requirements import (
@@ -196,7 +196,7 @@ class TrainBuilders:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        atmosphere_vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: CoupledVerticalCoordinate,
         timestep: datetime.timedelta,
     ) -> CoupledStepper:
         if timestep != self.config.stepper.timestep:
@@ -207,7 +207,7 @@ class TrainBuilders:
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            vertical_coordinate=atmosphere_vertical_coordinate,
+            vertical_coordinate=vertical_coordinate,
         )
 
     def get_ema(self, modules) -> EMATracker:

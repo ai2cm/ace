@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from typing import List, Literal, Mapping, Optional, Tuple, TypeVar
+from typing import Dict, List, Literal, Mapping, Optional, Tuple, TypeVar
 
 import numpy as np
 import torch
@@ -45,14 +45,32 @@ class HybridSigmaPressureCoordinate:
                 f"ak and bk must have the same length. Got len(ak)={len(self.ak)} and "
                 f"len(bk)={len(self.bk)}."
             )
+        if self.ak.dtype != self.bk.dtype:
+            raise ValueError(
+                f"ak and bk must have the same dtype. Got ak.dtype={self.ak.dtype} and "
+                f"bk.dtype={self.bk.dtype}."
+            )
+        if self.ak.device != self.bk.device:
+            raise ValueError(
+                f"ak and bk must be on the same device. Got ak.device={self.ak.device} "
+                f"and bk.device={self.bk.device}."
+            )
 
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.ak)
 
     @property
-    def coords(self) -> Mapping[str, np.ndarray]:
+    def coords(self) -> Dict[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.ak.dtype
+
+    @property
+    def device(self) -> str:
+        return self.ak.device
 
     def to(self, device: str) -> "HybridSigmaPressureCoordinate":
         return HybridSigmaPressureCoordinate(
@@ -115,6 +133,72 @@ class HybridSigmaPressureCoordinate:
 
 
 @dataclasses.dataclass
+class DepthCoordinate:
+    """
+    Defines depth in meters at interface levels.
+    Parameters:
+        idepth: depth in meters at interface levels as a 1-dimensional tensor.
+    """
+
+    idepth: torch.Tensor
+
+    def __post_init__(self):
+        if len(self.idepth.shape) != 1:
+            raise ValueError(
+                f"idepth must be a 1-dimensional tensor. Got shape: {self.idepth.shape}"
+            )
+
+    def __len__(self):
+        """The number of vertical layer interfaces."""
+        return len(self.idepth)
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.idepth.dtype
+
+    @property
+    def device(self) -> str:
+        return self.idepth.device
+
+    @property
+    def coords(self) -> Dict[str, np.ndarray]:
+        return {"idepth": self.idepth.cpu().numpy()}
+
+    def to(self, device: str) -> "DepthCoordinate":
+        return DepthCoordinate(self.idepth.to(device))
+
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, DepthCoordinate):
+            return False
+        return torch.allclose(self.idepth, other.idepth)
+
+    def as_dict(self) -> TensorMapping:
+        return {"idepth": self.idepth}
+
+    def integral(self, integrand: torch.Tensor) -> torch.Tensor:
+        """Compute the vertical integral of the integrand.
+
+        ∫ x dz
+        where
+        - x = integrand
+        - z = depth
+
+        Args:
+            integrand: A tensor whose last dimension is the vertical.
+
+        Returns:
+            A tensor of same shape as integrand but without the last dimension.
+        """
+        if len(self.idepth) != integrand.shape[-1] + 1:
+            raise ValueError(
+                "The last dimension of integrand must match the number of vertical "
+                "layers in the depth vertical coordinate."
+            )
+        layer_thickness = self.idepth.diff(dim=-1)
+        return (integrand * layer_thickness).sum(dim=-1)
+
+
+@dataclasses.dataclass
 class NullVerticalCoordinate:
     """
     A null vertical coordinate system.
@@ -135,20 +219,26 @@ class NullVerticalCoordinate:
         return {}
 
     @property
-    def coords(self) -> Mapping[str, np.ndarray]:
+    def coords(self) -> Dict[str, np.ndarray]:
         return {}
 
+
+VerticalCoordinate = (
+    HybridSigmaPressureCoordinate | DepthCoordinate | NullVerticalCoordinate
+)
 
 OptionalHybridSigmaPressureCordinate = (
     HybridSigmaPressureCoordinate | NullVerticalCoordinate
 )
+
+OptionalDepthCoordinate = DepthCoordinate | NullVerticalCoordinate
 
 
 @dataclasses.dataclass
 class SerializableVerticalCoordinate:
     """Only for use in serializing/deserializing coordinates with dacite."""
 
-    vertical_coordinate: OptionalHybridSigmaPressureCordinate
+    vertical_coordinate: VerticalCoordinate
 
 
 @dataclasses.dataclass

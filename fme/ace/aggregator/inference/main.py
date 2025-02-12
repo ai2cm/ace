@@ -20,7 +20,7 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.core.coordinates import (
     HorizontalCoordinates,
     LatLonCoordinates,
-    OptionalHybridSigmaPressureCordinate,
+    VerticalCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import (
@@ -143,7 +143,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -211,7 +211,7 @@ class InferenceEvaluatorAggregator(
 
     def __init__(
         self,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,

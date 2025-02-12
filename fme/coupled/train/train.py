@@ -12,10 +12,7 @@ import xarray as xr
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import (
-    HorizontalCoordinates,
-    OptionalHybridSigmaPressureCordinate,
-)
+from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -31,6 +28,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
@@ -49,7 +47,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     stepper = builder.get_stepper(
         img_shape=img_shape,
         gridded_operations=train_data.gridded_operations,
-        atmosphere_vertical_coordinate=train_data.vertical_coordinate,
+        vertical_coordinate=train_data.vertical_coordinate,
         timestep=train_data.timestep,
     )
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
@@ -94,7 +92,7 @@ class CoupledAggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: timedelta,
         atmosphere_timestep: timedelta,

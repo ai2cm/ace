@@ -1,16 +1,37 @@
 import dataclasses
 from typing import Dict, Tuple
 
+import numpy as np
 import torch
 import xarray as xr
 
 from fme.core.coordinates import (
     HorizontalCoordinates,
+    OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCordinate,
 )
 from fme.core.dataset.data_typing import Dataset, VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.typing_ import TensorDict
+
+
+class CoupledVerticalCoordinate:
+    def __init__(
+        self,
+        ocean: OptionalDepthCoordinate,
+        atmosphere: OptionalHybridSigmaPressureCordinate,
+    ):
+        self.ocean = ocean
+        self.atmosphere = atmosphere
+
+    def __eq__(self, other):
+        if not isinstance(other, CoupledVerticalCoordinate):
+            return False
+        return self.ocean == other.ocean and self.atmosphere == other.atmosphere
+
+    @property
+    def coords(self) -> Dict[str, np.ndarray]:
+        return self.ocean.coords | self.atmosphere.coords
 
 
 class CoupledDatasetProperties:
@@ -23,10 +44,15 @@ class CoupledDatasetProperties:
         self.all_ic_times = all_ic_times
         self.ocean = ocean
         self.atmosphere = atmosphere
+        ocean_coord = ocean.vertical_coordinate
+        atmos_coord = atmosphere.vertical_coordinate
+        assert isinstance(ocean_coord, OptionalDepthCoordinate)
+        assert isinstance(atmos_coord, OptionalHybridSigmaPressureCordinate)
+        self._vertical_coordinate = CoupledVerticalCoordinate(ocean_coord, atmos_coord)
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
-        return self.atmosphere.vertical_coordinate
+    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
+        return self._vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -110,7 +136,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
+    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
         return self._properties.vertical_coordinate
 
     @property
