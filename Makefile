@@ -7,6 +7,12 @@ DEPLOY_TARGET ?= pypi
 BEAKER_WORKSPACE = ai2/ace
 CURRENT_DATE = $(shell date +'%Y-%m-%d')
 
+ifeq ($(shell uname), Linux)
+	CONDA_PACKAGES=gxx_linux-64 pip
+else
+	CONDA_PACKAGES=pip
+endif
+
 build_docker_image:
 	DOCKER_BUILDKIT=1 docker build --platform=linux/amd64 -f docker/Dockerfile -t $(IMAGE):$(VERSION) --target production .
 
@@ -37,9 +43,10 @@ test_image:
 
 # recommended to deactivate current conda environment before running this
 create_environment:
-	conda create -n $(ENVIRONMENT_NAME) python=3.10 pip
+	conda create -n $(ENVIRONMENT_NAME) python=3.10 $(CONDA_PACKAGES)
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) python -m pip install uv
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -c constraints.txt -e .[dev,docs]
+	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install --no-build-isolation -c constraints.txt -e .[dev,docs,healpix]
 	conda run --no-capture-output -n $(ENVIRONMENT_NAME) uv pip install -r analysis-deps.txt
 
 test:
