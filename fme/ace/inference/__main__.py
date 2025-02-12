@@ -1,9 +1,8 @@
-import argparse
+from fme.core.cli import get_parser
 
 from .inference import main
 
-parser = argparse.ArgumentParser()
-parser.add_argument("yaml_config", type=str)
+parser = get_parser()
 parser.add_argument(
     "--segments",
     type=int,
@@ -13,4 +12,4 @@ parser.add_argument(
     "WARNING: this feature is experimental and its API is subject to change.",
 )
 args = parser.parse_args()
-main(yaml_config=args.yaml_config, segments=args.segments)
+main(args.yaml_config, segments=args.segments, override_dotlist=args.override)
