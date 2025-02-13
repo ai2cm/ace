@@ -118,6 +118,18 @@ class CoupledStepperConfig:
                 self.atmosphere.stepper.out_names
             )
         )
+        missing_next_step_forcings = list(
+            set(self._atmosphere_to_ocean_forcing_names).difference(
+                self.ocean.stepper.next_step_forcing_names
+            )
+        )
+        if len(missing_next_step_forcings) > 0:
+            raise ValueError(
+                "The following variables which are atmosphere component outputs "
+                "and ocean component inputs were not found among the ocean's "
+                f"next_step_forcing_names: {missing_next_step_forcings}."
+            )
+
         # include the ocean surface temperature variable as forcing for the atmosphere
         if self.sst_name not in self.ocean.stepper.out_names:
             raise ValueError(
@@ -537,12 +549,12 @@ class CoupledStepper(
             k: atmos_data.data[k].mean(time_dim, keepdim=True)
             for k in self._atmosphere_to_ocean_forcing_names
         }
-        # append nans to match external forcings which have forward step values
-        # as there is no atmospheric forward-step value.
+        # all forcings from the atmosphere are next_step_forcings in the ocean
+        # stepper, so prepend nans in the initial condition position
         # NOTE: only n_ic_timesteps = 1 is currently supported
         assert ocean_data.time["time"].values.size == 2
         forcings_from_atmosphere = {
-            k: torch.cat([v, torch.full_like(v, fill_value=np.nan)], dim=time_dim)
+            k: torch.cat([torch.full_like(v, fill_value=np.nan), v], dim=time_dim)
             for k, v in forcings_from_atmosphere.items()
         }
         forcing_data.update(forcings_from_atmosphere)
