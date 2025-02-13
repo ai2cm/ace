@@ -14,10 +14,10 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
-from fme.coupled.data_loading.batch_data import GriddedData, InferenceData
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
 from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
+from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -181,7 +181,7 @@ class TrainBuilders:
             train=False,
         )
 
-    def get_evaluation_inference_data(self) -> InferenceData:
+    def get_evaluation_inference_data(self) -> InferenceGriddedData:
         return get_inference_data(
             config=self.config.inference.loader,
             total_coupled_steps=self.config.inference.n_coupled_steps,

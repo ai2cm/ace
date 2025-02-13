@@ -9,12 +9,7 @@ from torch.utils.data.sampler import RandomSampler
 from fme.core.dataset.getters import get_xarray_dataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
-from fme.coupled.data_loading.batch_data import (
-    CoupledBatchData,
-    CoupledPrognosticState,
-    GriddedData,
-    InferenceData,
-)
+from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.config import (
     CoupledDataLoaderConfig,
     CoupledDatasetConfig,
@@ -24,6 +19,7 @@ from fme.coupled.data_loading.data_typing import (
     CoupledDatasetItem,
     CoupledDatasetProperties,
 )
+from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceDataset,
@@ -162,7 +158,7 @@ def get_inference_data(
     initial_condition: Union[
         CoupledPrognosticState, CoupledPrognosticStateDataRequirements
     ],
-) -> InferenceData:
+) -> InferenceGriddedData:
     dataset = InferenceDataset(
         config,
         total_coupled_steps,
@@ -191,7 +187,7 @@ def get_inference_data(
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
     )
-    inference_data = InferenceData(
+    inference_data = InferenceGriddedData(
         loader=loader,
         initial_condition=initial_condition,
         properties=properties,
