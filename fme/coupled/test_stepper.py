@@ -129,6 +129,7 @@ def test_config_names(inputs, expectations):
             builder=MagicMock(),
             in_names=ocean_in,
             out_names=ocean_out,
+            next_step_forcing_names=expectations.atmos_to_ocean_forcings,
             normalization=MagicMock(),
             loss=MagicMock(),
         ),
@@ -193,6 +194,7 @@ def test_config_names_diff_sfc_temp_names(inputs, expectations):
             builder=MagicMock(),
             in_names=ocean_in,
             out_names=ocean_out,
+            next_step_forcing_names=expectations.atmos_to_ocean_forcings,
             normalization=MagicMock(),
             loss=MagicMock(),
         ),
@@ -255,9 +257,10 @@ def test_config_init_atmos_stepper_missing_ocean_error():
         stepper=OCEAN_STEPPER_CONFIG,
     )
 
-    with pytest.raises(ValueError) as err:
+    with pytest.raises(
+        ValueError, match=r".* atmosphere stepper 'ocean' config is missing .*"
+    ):
         _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
-    assert "atmosphere stepper 'ocean' config is missing" in str(err.value)
 
 
 def test_config_init_timedelta_comparison_error():
@@ -271,9 +274,10 @@ def test_config_init_timedelta_comparison_error():
         stepper=OCEAN_STEPPER_CONFIG,
     )
 
-    with pytest.raises(ValueError) as err:
+    with pytest.raises(
+        ValueError, match=r"Atmosphere timedelta must not be larger than ocean's."
+    ):
         _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
-    assert "Atmosphere timedelta must not be larger" in str(err.value)
 
 
 def test_config_init_incompatible_timedelta_error():
@@ -286,9 +290,32 @@ def test_config_init_incompatible_timedelta_error():
         timedelta="5h",
         stepper=OCEAN_STEPPER_CONFIG,
     )
-    with pytest.raises(ValueError) as err:
+    with pytest.raises(
+        ValueError, match="Ocean timedelta must be a multiple of the atmosphere's."
+    ):
         _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
-    assert "Ocean timedelta must be a multiple" in str(err.value)
+
+
+def test_config_missing_next_step_forcings_error():
+    # ocean stepper config with input names overlapping with atmosphere output
+    # names but missing next_step_forcing_names raises error
+    atmosphere = ComponentConfig(
+        timedelta="6h",
+        stepper=ATMOS_STEPPER_CONFIG,
+    )
+    ocean = ComponentConfig(
+        timedelta="5D",
+        stepper=SingleModuleStepperConfig(
+            builder=MagicMock(),
+            in_names=["sst", "a", "b"],
+            out_names=["sst"],
+            next_step_forcing_names=["b"],
+            normalization=MagicMock(),
+            loss=MagicMock(),
+        ),
+    )
+    with pytest.raises(ValueError, match=r".* next_step_forcing_names: \['a'\]\."):
+        _ = CoupledStepperConfig(atmosphere=atmosphere, ocean=ocean)
 
 
 SphericalData = namedtuple(
@@ -382,6 +409,7 @@ def _get_stepper_and_batch(
     ocean_names = list(ocean_norm_names - set(atmosphere_out_names))
     # variables with smaller atmosphere timestep
     atmos_names = list(atmos_norm_names - set(ocean_out_names))
+    next_step_forcing_names = list(set(atmosphere_out_names) & set(ocean_in_names))
 
     # get the dataset
     coupled_data = get_coupled_data(
@@ -433,6 +461,7 @@ def _get_stepper_and_batch(
                 builder=ocean_builder,
                 in_names=ocean_in_names,
                 out_names=ocean_out_names,
+                next_step_forcing_names=next_step_forcing_names,
                 normalization=NormalizationConfig(
                     means=get_scalar_data(ocean_norm_names, 0.0),
                     stds=get_scalar_data(ocean_norm_names, 1.0),
