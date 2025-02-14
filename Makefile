@@ -58,13 +58,6 @@ test_fast:
 test_very_fast:
 	pytest --durations 40 --very-fast .
 
-# beaker experiment submission rules
-run_ace_evaluator:
-	./gantry_examples/run-ace-evaluator.sh
-
-run_ace_train:
-	./gantry_examples/run-ace-train.sh
-
 # For maintainer use only
 # requires fme[deploy] to be installed
 
