@@ -30,7 +30,15 @@ from .initialization import trunc_normal_
 # wrap fft, to unify interface to spectral transforms
 # import global convolution and non-linear spectral layers
 # helpers
-from .layers import MLP, DropPath, RealFFT2, SpectralAttention2d, ConditionalLayerNorm
+from .layers import (
+    MLP,
+    ContextConfig,
+    DropPath,
+    RealFFT2,
+    SpectralAttention2d,
+    ConditionalLayerNorm,
+    Context,
+)
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 
 
@@ -120,7 +128,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         forward_transform,
         inverse_transform,
         embed_dim,
-        conditional_embed_dim: int,
+        context_config: ContextConfig,
         filter_type="linear",
         operator_type="diagonal",
         global_layer_norm: bool = False,
@@ -152,7 +160,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             embed_dim,
             img_shape=self.input_shape_loc,
             global_layer_norm=global_layer_norm,
-            n_context_embedding=conditional_embed_dim,
+            context_config=context_config,
         )
 
         # convolution layer
@@ -195,7 +203,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             embed_dim,
             img_shape=self.output_shape_loc,
             global_layer_norm=global_layer_norm,
-            n_context_embedding=conditional_embed_dim,
+            context_config=context_config,
         )
 
         if use_mlp == True:
@@ -283,6 +291,9 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of output channels, by default 2
     embed_dim : int, optional
         Dimension of the embeddings, by default 256
+    context_config : ContextConfig, optional
+        Context configuration, by default
+        ContextConfig(embed_dim_scalar=0, embed_dim_2d=0)
     num_layers : int, optional
         Number of layers in the network, by default 12
     use_mlp : int, optional
@@ -349,14 +360,17 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self,
         params,
         spectral_transform: str = "sht",
-        filter_type: str = "non-linear",
+        filter_type: str = "linear",
         operator_type: str = "diagonal",
         img_shape: Tuple[int, int] = (721, 1440),
-        scale_factor: int = 16,
+        scale_factor: int = 1,
         in_chans: int = 2,
         out_chans: int = 2,
         embed_dim: int = 256,
-        conditional_embed_dim: int = 256,
+        context_config: ContextConfig = ContextConfig(
+            embed_dim_scalar=0,
+            embed_dim_2d=0,
+        ),
         global_layer_norm: bool = False,
         num_layers: int = 12,
         use_mlp: int = True,
@@ -401,6 +415,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.scale_factor = (
             params.scale_factor if hasattr(params, "scale_factor") else scale_factor
         )
+        if self.scale_factor != 1:
+            raise NotImplementedError(
+                "scale factor must be 1 as it is not implemented for "
+                "conditional layer normalization"
+            )
         self.in_chans = (
             params.N_in_channels if hasattr(params, "N_in_channels") else in_chans
         )
@@ -410,7 +429,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.embed_dim = self.num_features = (
             params.embed_dim if hasattr(params, "embed_dim") else embed_dim
         )
-        self.conditional_embed_dim = conditional_embed_dim
         self.num_layers = (
             params.num_layers if hasattr(params, "num_layers") else num_layers
         )
@@ -573,7 +591,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 forward_transform,
                 inverse_transform,
                 self.embed_dim,
-                self.conditional_embed_dim,
+                context_config=context_config,
                 filter_type=filter_type,
                 operator_type=operator_type,
                 mlp_ratio=mlp_ratio,
@@ -638,16 +656,16 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         """Helper"""
         return {"pos_embed", "cls_token"}
 
-    def _forward_features(self, x: torch.Tensor, context_embedding: torch.Tensor):
+    def _forward_features(self, x: torch.Tensor, context: Context):
         for blk in self.blocks:
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x, context_embedding)
+                x = checkpoint(blk, x, context)
             else:
-                x = blk(x, context_embedding)
+                x = blk(x, context)
 
         return x
 
-    def forward(self, x: torch.Tensor, context_embedding: torch.Tensor):
+    def forward(self, x: torch.Tensor, context: Context):
         # save big skip
         if self.big_skip:
             residual = x
@@ -673,7 +691,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         x = self.pos_drop(x)
 
-        x = self._forward_features(x, context_embedding)
+        x = self._forward_features(x, context)
 
         if self.big_skip:
             x = torch.cat((x, residual), dim=1)

@@ -14,8 +14,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 import math
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.fft
@@ -26,6 +27,40 @@ from torch.utils.checkpoint import checkpoint
 
 from .activations import ComplexReLU
 from .contractions import compl_mul2d_fwd, compl_muladd2d_fwd
+
+
+@dataclasses.dataclass
+class ContextConfig:
+    """
+    Configuration for the context.
+    """
+
+    embed_dim_scalar: int
+    embed_dim_2d: int
+
+
+@dataclasses.dataclass
+class Context:
+    """
+    Context for the conditional layer normalization.
+
+    Parameters:
+        embedding_scalar: The scalar embedding to condition on. The
+            last dimension is the channel dimension.
+        embedding_2d: The 2D embedding to condition on. The last
+            three dimensions are (channels, height, width).
+    """
+
+    embedding_scalar: torch.Tensor
+    embedding_2d: torch.Tensor
+
+    def __post_init__(self):
+        if self.embedding_scalar.ndim != 2:
+            raise ValueError("embedding_scalar must have 2 dimensions")
+        if self.embedding_2d.ndim != self.embedding_scalar.ndim + 2:
+            raise ValueError(
+                "embedding_2d must have 2 more dimensions than embedding_scalar"
+            )
 
 
 class ConditionalLayerNorm(nn.Module):
@@ -40,16 +75,36 @@ class ConditionalLayerNorm(nn.Module):
         self,
         n_channels: int,
         img_shape: Tuple[int, int],
+        context_config: ContextConfig,
         global_layer_norm: bool = False,
-        n_context_embedding: int = 256,
         epsilon: float = 1e-5,
     ):
         super(ConditionalLayerNorm, self).__init__()
         self.n_channels = n_channels
-        self.n_context_embedding = n_context_embedding
+        self.embed_dim_scalar = context_config.embed_dim_scalar
+        self.embed_dim_2d = context_config.embed_dim_2d
         self.epsilon = epsilon
-        self.W_scale = nn.Linear(self.n_context_embedding, self.n_channels)
-        self.W_bias = nn.Linear(self.n_context_embedding, self.n_channels)
+        if self.embed_dim_scalar > 0:
+            self.W_scale: Optional[nn.Linear] = nn.Linear(
+                self.embed_dim_scalar, self.n_channels
+            )
+            self.W_bias: Optional[nn.Linear] = nn.Linear(
+                self.embed_dim_scalar, self.n_channels
+            )
+        else:
+            self.W_scale = None
+            self.W_bias = None
+        if self.embed_dim_2d > 0:
+            # no bias as it is already handled in the non-2d layers
+            self.W_scale_2d = nn.Conv2d(
+                self.embed_dim_2d, self.n_channels, kernel_size=1, bias=False
+            )
+            self.W_bias_2d = nn.Conv2d(
+                self.embed_dim_2d, self.n_channels, kernel_size=1, bias=False
+            )
+        else:
+            self.W_scale_2d = None
+            self.W_bias_2d = None
         if global_layer_norm:
             self.norm = nn.LayerNorm(
                 (self.n_channels, img_shape[0], img_shape[1]),
@@ -66,12 +121,19 @@ class ConditionalLayerNorm(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.constant_(self.W_scale.weight, 0.0)
-        torch.nn.init.constant_(self.W_scale.bias, 1.0)
-        torch.nn.init.constant_(self.W_bias.weight, 0.0)
-        torch.nn.init.constant_(self.W_bias.bias, 0.0)
+        if self.W_scale is not None:
+            torch.nn.init.constant_(self.W_scale.weight, 0.0)
+            torch.nn.init.constant_(self.W_scale.bias, 1.0)
+        if self.W_bias is not None:
+            torch.nn.init.constant_(self.W_bias.weight, 0.0)
+            torch.nn.init.constant_(self.W_bias.bias, 0.0)
+        if self.W_scale_2d is not None:
+            torch.nn.init.constant_(self.W_scale_2d.weight, 0.0)
+        if self.W_bias_2d is not None:
+            torch.nn.init.constant_(self.W_bias_2d.weight, 0.0)
+        # no bias on 2d layers as it is already handled in the non-2d layers
 
-    def forward(self, x: torch.Tensor, context_embedding: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, context: Context) -> torch.Tensor:
         """
         Conditional Layer Normalization
 
@@ -81,19 +143,30 @@ class ConditionalLayerNorm(nn.Module):
         Args:
             x: The input tensor to normalize, of shape
                 (batch_size, channels, height, width).
-            context_embedding: The context embedding to condition on, of shape
-                (batch_size, n_context_embedding).
+            context: The context to condition on.
 
         Returns:
             The normalized tensor, of shape (batch_size, channels, height, width).
         """
-        scale: torch.Tensor = (
-            self.W_scale(context_embedding).unsqueeze(-1).unsqueeze(-1)
-        )
-        bias: torch.Tensor = self.W_bias(context_embedding).unsqueeze(-1).unsqueeze(-1)
+        if self.W_scale is not None:
+            scale: torch.Tensor = (
+                self.W_scale(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+            )
+        else:
+            scale = torch.ones_like(x)
+        if self.W_scale_2d is not None:
+            scale = scale + self.W_scale_2d(context.embedding_2d)
+        if self.W_bias is not None:
+            bias: torch.Tensor = (
+                self.W_bias(context.embedding_scalar).unsqueeze(-1).unsqueeze(-1)
+            )
+        else:
+            bias = torch.zeros_like(x)
+        if self.W_bias_2d is not None:
+            bias = bias + self.W_bias_2d(context.embedding_2d)
         if not self._global_layer_norm:
             x = x.transpose(1, -1)
-        x_norm = self.norm(x)
+        x_norm: torch.Tensor = self.norm(x)
         if not self._global_layer_norm:
             x_norm = x_norm.transpose(1, -1)
         return x_norm * scale + bias
