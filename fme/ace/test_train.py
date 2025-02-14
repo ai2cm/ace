@@ -364,7 +364,7 @@ def _setup(
         "SphericalFourierNeuralOperatorNet",
         "HEALPixRecUNet",
         "Samudra",
-        "SFNO-v0.1.0",
+        "NoiseConditionedSFNO",
     ],
 )
 def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):

@@ -1,0 +1,39 @@
+import pytest
+import torch
+
+from fme.core.device import get_device
+
+from .layers import Context, ContextConfig
+from .sfnonet import SphericalFourierNeuralOperatorNet
+
+
+@pytest.mark.parametrize("conditional_embed_dim_scalar", [16, 0])
+@pytest.mark.parametrize("conditional_embed_dim_2d", [16, 0])
+def test_can_call_sfnonet(
+    conditional_embed_dim_scalar: int, conditional_embed_dim_2d: int
+):
+    input_channels = 2
+    output_channels = 3
+    img_shape = (9, 18)
+    n_samples = 4
+    device = get_device()
+    model = SphericalFourierNeuralOperatorNet(
+        params=None,
+        img_shape=img_shape,
+        in_chans=input_channels,
+        out_chans=output_channels,
+        context_config=ContextConfig(
+            embed_dim_scalar=conditional_embed_dim_scalar,
+            embed_dim_2d=conditional_embed_dim_2d,
+        ),
+    ).to(device)
+    x = torch.randn(n_samples, input_channels, *img_shape, device=device)
+    context_embedding = torch.randn(
+        n_samples, conditional_embed_dim_scalar, device=device
+    )
+    context_embedding_2d = torch.randn(
+        n_samples, conditional_embed_dim_2d, *img_shape, device=device
+    )
+    context = Context(context_embedding, context_embedding_2d)
+    output = model(x, context)
+    assert output.shape == (n_samples, output_channels, *img_shape)
