@@ -5,13 +5,10 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.inference.derived_variables import total_water_path_budget_residual
 from fme.core import AtmosphereData, metrics
-from fme.core.atmosphere_data import compute_dry_air_absolute_differences
-from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
-from fme.core.corrector.ocean import OceanCorrector
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.derived_variables import total_water_path_budget_residual
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping
 
 from .corrector import (
@@ -26,6 +23,32 @@ from .corrector import (
 )
 
 TIMESTEP = datetime.timedelta(hours=6)
+
+
+def compute_dry_air_absolute_differences(
+    atmosphere_data: AtmosphereData,
+    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+) -> torch.Tensor:
+    """
+    Computes the absolute value of the dry air tendency of each time step.
+
+    Args:
+        atmosphere_data: AtmosphereData object.
+        area_weighted_mean: Function which returns an area-weighted mean.
+        vertical_coordinate: The vertical coordinate of the model.
+
+    Returns:
+        A tensor of shape (time,) of the absolute value of the dry air tendency
+            of each time step.
+    """
+    try:
+        surface_pressure = atmosphere_data.surface_pressure
+        total_water_path = atmosphere_data.total_water_path
+    except KeyError:
+        return torch.tensor([torch.nan])
+    ps_dry = metrics.surface_pressure_due_to_dry_air(surface_pressure, total_water_path)
+    ps_dry_mean = area_weighted_mean(ps_dry)
+    return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 
 
 def get_dry_air_nonconservation(
@@ -46,9 +69,8 @@ def get_dry_air_nonconservation(
         vertical_coordinate: The vertical coordinates of the model.
     """
     return compute_dry_air_absolute_differences(
-        AtmosphereData(data),
+        AtmosphereData(data, vertical_coordinate),
         area_weighted_mean=area_weighted_mean,
-        vertical_coordinate=vertical_coordinate,
     ).mean()
 
 
@@ -351,17 +373,6 @@ def test__force_conserve_total_energy():
     unaccounted_heating = corrected_gen_data["unaccounted_heating"]
     expected_heating = torch.full_like(unaccounted_heating, extra_heating)
     torch.testing.assert_close(unaccounted_heating, expected_heating)
-
-
-def test_corrector_selector():
-    selector = CorrectorSelector(
-        type="ocean_corrector",
-        config={"masking": {"mask_name": "mask", "mask_value": 1}},
-    )
-    ops: GriddedOperations = LatLonOperations(1.0 + torch.rand(size=(5, 5)))
-    vertical = DepthCoordinate(torch.tensor([1.0, 0.5, 0.0]))
-    corrector = selector.build(ops, vertical, TIMESTEP)
-    assert isinstance(corrector, OceanCorrector)
 
 
 def test_corrector_integration():

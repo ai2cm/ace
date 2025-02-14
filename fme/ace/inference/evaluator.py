@@ -15,7 +15,6 @@ from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.inference.loop import (
     DeriverABC,
     run_dataset_comparison,
@@ -29,6 +28,7 @@ from fme.ace.stepper import (
     load_stepper_config,
 )
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
@@ -218,7 +218,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         break
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     aggregator = aggregator_config.build(
-        vertical_coordinate=data.vertical_coordinate,
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
         record_step_20=config.n_forward_steps >= 20,

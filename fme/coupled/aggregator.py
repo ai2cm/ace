@@ -26,7 +26,6 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.stepper import CoupledTrainOutput
 
 
@@ -162,7 +161,6 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,
@@ -196,7 +194,6 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            vertical_coordinate=vertical_coordinate,
             horizontal_coordinates=horizontal_coordinates,
             ocean_timestep=ocean_timestep,
             atmosphere_timestep=atmosphere_timestep,
@@ -226,7 +223,6 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,
@@ -250,7 +246,6 @@ class InferenceEvaluatorAggregator(
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
-                vertical_coordinate=vertical_coordinate.ocean,
                 horizontal_coordinates=horizontal_coordinates,
                 timestep=ocean_timestep,
                 n_timesteps=n_timesteps_ocean,
@@ -270,7 +265,6 @@ class InferenceEvaluatorAggregator(
                 normalize=ocean_normalize,
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
-                vertical_coordinate=vertical_coordinate.atmosphere,
                 horizontal_coordinates=horizontal_coordinates,
                 timestep=atmosphere_timestep,
                 n_timesteps=n_timesteps_atmosphere,

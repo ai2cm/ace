@@ -22,14 +22,10 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.multi_call import MultiCallConfig
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import (
-    DepthCoordinate,
     HybridSigmaPressureCoordinate,
-    OptionalDepthCoordinate,
-    OptionalHybridSigmaPressureCordinate,
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
@@ -55,55 +51,6 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
-
-
-class NullDeriveFn:
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        return dict(data)
-
-
-class AtmosphericDeriveFn:
-    def __init__(
-        self,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
-        timestep: datetime.timedelta,
-    ):
-        self.vertical_coordinate = vertical_coordinate.to(
-            "cpu"
-        )  # must be on cpu for multiprocessing fork context
-        self.timestep = timestep
-
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        return compute_derived_quantities(
-            dict(data),
-            vertical_coordinate=self.vertical_coordinate.to(get_device()),
-            timestep=self.timestep,
-            forcing_data=dict(forcing_data),
-        )
-
-
-class OceanDeriveFn:
-    def __init__(
-        self,
-        vertical_coordinate: OptionalDepthCoordinate,
-        timestep: datetime.timedelta,
-    ):
-        pass
-
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        # TODO: implement derived variables for ocean
-        return dict(data)
-
-
-def get_derive_func(
-    vertical_coordinate: VerticalCoordinate, timestep: datetime.timedelta
-):
-    if isinstance(vertical_coordinate, HybridSigmaPressureCoordinate):
-        return AtmosphericDeriveFn(vertical_coordinate, timestep)
-    elif isinstance(vertical_coordinate, DepthCoordinate):
-        return OceanDeriveFn(vertical_coordinate, timestep)
-    else:
-        return NullDeriveFn()
 
 
 @dataclasses.dataclass
@@ -243,10 +190,10 @@ class SingleModuleStepperConfig:
         timestep: datetime.timedelta,
     ):
         logging.info("Initializing stepper from provided config")
-        derive_func = get_derive_func(vertical_coordinate, timestep)
-        corrector = self.corrector.build(
+        derive_func = vertical_coordinate.build_derive_function(timestep)
+        corrector = vertical_coordinate.build_corrector(
+            config=self.corrector,
             gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
         return SingleModuleStepper(
@@ -1127,11 +1074,11 @@ class SingleModuleStepper(
             for v in state["data_shapes"].values():
                 img_shape = v[-2:]
                 break
-        derive_func = get_derive_func(vertical_coordinate, timestep)
+        derive_func = vertical_coordinate.build_derive_function(timestep)
         config = SingleModuleStepperConfig.from_state(config_data)
-        corrector = config.corrector.build(
+        corrector = vertical_coordinate.build_corrector(
+            config=config.corrector,
             gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
         stepper = cls(
