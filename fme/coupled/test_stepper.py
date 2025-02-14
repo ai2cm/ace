@@ -10,7 +10,6 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.ace.test_stepper import get_scalar_data
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -34,6 +33,8 @@ from .stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
 DEVICE = fme.get_device()
 NZ = 7  # number of vertical interface levels in mock data from get_data
+N_LAT = 5
+N_LON = 5
 
 ATMOS_STEPPER_CONFIG = SingleModuleStepperConfig(
     builder=MagicMock(),
@@ -332,18 +333,17 @@ def get_data(
     names: Iterable[str], n_samples, n_time, realm: Literal["atmosphere", "ocean"]
 ) -> SphericalData:
     data_dict = {}
-    n_lat, n_lon, nz = 5, 5, 7
 
-    lats = torch.linspace(-89.5, 89.5, n_lat)  # arbitary choice
+    lats = torch.linspace(-89.5, 89.5, N_LAT)  # arbitary choice
     for name in names:
-        data_dict[name] = torch.rand(n_samples, n_time, n_lat, n_lon, device=DEVICE)
-    area_weights = fme.spherical_area_weights(lats, n_lon).to(DEVICE)
+        data_dict[name] = torch.rand(n_samples, n_time, N_LAT, N_LON, device=DEVICE)
+    area_weights = fme.spherical_area_weights(lats, N_LON).to(DEVICE)
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
-        ak, bk = torch.arange(nz), torch.arange(nz)
+        ak, bk = torch.arange(NZ), torch.arange(NZ)
         vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     elif realm == "ocean":
-        vertical_coord = DepthCoordinate(torch.arange(nz))
+        vertical_coord = DepthCoordinate(torch.arange(NZ))
     data = BatchData.new_on_device(
         data=data_dict,
         time=xr.DataArray(
@@ -377,6 +377,92 @@ def get_coupled_data(
     )
 
 
+# default atmosphere module
+class AddOne(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+# default ocean module
+class TimesTwo(torch.nn.Module):
+    def forward(self, x):
+        return 2 * x
+
+
+def get_stepper_config(
+    ocean_in_names: List[str],
+    ocean_out_names: List[str],
+    atmosphere_in_names: List[str],
+    atmosphere_out_names: List[str],
+    sst_name_in_ocean_data: str = "sst",
+    sst_mask_name_in_ocean_data: str = "mask_0",
+    sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
+    ocean_fraction_name: str = "ocean_fraction",
+    ocean_builder: Optional[ModuleSelector] = None,
+    atmosphere_builder: Optional[ModuleSelector] = None,
+    ocean_timedelta: str = "2D",
+    atmosphere_timedelta: str = "1D",
+):
+    # CoupledStepper requires that both component datasets include prognostic
+    # surface temperature variables and that the atmosphere data includes an
+    # ocean fraction forcing variable
+    assert sst_name_in_ocean_data in ocean_in_names
+    assert sst_name_in_ocean_data in ocean_out_names
+    assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
+    assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
+    assert sst_mask_name_in_ocean_data in ocean_in_names
+    assert ocean_fraction_name in atmosphere_in_names
+
+    ocean_norm_names = set(ocean_in_names + ocean_out_names)
+    atmos_norm_names = set(atmosphere_in_names + atmosphere_out_names)
+    next_step_forcing_names = list(set(atmosphere_out_names) & set(ocean_in_names))
+
+    if atmosphere_builder is None:
+        atmosphere_builder = ModuleSelector(
+            type="prebuilt", config={"module": AddOne()}
+        )
+    if ocean_builder is None:
+        ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
+
+    config = CoupledStepperConfig(
+        atmosphere=ComponentConfig(
+            timedelta=atmosphere_timedelta,
+            stepper=SingleModuleStepperConfig(
+                builder=atmosphere_builder,
+                in_names=atmosphere_in_names,
+                out_names=atmosphere_out_names,
+                normalization=NormalizationConfig(
+                    means={name: 0.0 for name in atmos_norm_names},
+                    stds={name: 1.0 for name in atmos_norm_names},
+                ),
+                loss=WeightedMappingLossConfig(type="MSE"),
+                ocean=OceanConfig(
+                    surface_temperature_name=sfc_temp_name_in_atmosphere_data,
+                    ocean_fraction_name=ocean_fraction_name,
+                ),
+            ),
+        ),
+        ocean=ComponentConfig(
+            timedelta=ocean_timedelta,
+            stepper=SingleModuleStepperConfig(
+                builder=ocean_builder,
+                in_names=ocean_in_names,
+                out_names=ocean_out_names,
+                next_step_forcing_names=next_step_forcing_names,
+                normalization=NormalizationConfig(
+                    means={name: 0.0 for name in ocean_norm_names},
+                    stds={name: 1.0 for name in ocean_norm_names},
+                ),
+                loss=WeightedMappingLossConfig(type="MSE"),
+                corrector=CorrectorSelector("ocean_corrector", {}),
+            ),
+        ),
+        sst_name=sst_name_in_ocean_data,
+        sst_mask_name=sst_mask_name_in_ocean_data,
+    )
+    return config
+
+
 def _get_stepper_and_batch(
     ocean_in_names: List[str],
     ocean_out_names: List[str],
@@ -392,24 +478,13 @@ def _get_stepper_and_batch(
     ocean_builder: Optional[ModuleSelector] = None,
     atmosphere_builder: Optional[ModuleSelector] = None,
 ):
-    # CoupledStepper requires that both component datasets include prognostic
-    # surface temperature variables and that the atmosphere data includes an
-    # ocean fraction forcing variable
-    assert sst_name_in_ocean_data in ocean_in_names
-    assert sst_name_in_ocean_data in ocean_out_names
-    assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
-    assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
-    assert sst_mask_name_in_ocean_data in ocean_in_names
-    assert ocean_fraction_name in atmosphere_in_names
-
-    ocean_norm_names = set(ocean_in_names + ocean_out_names)
-    atmos_norm_names = set(atmosphere_in_names + atmosphere_out_names)
+    all_ocean_names = set(ocean_in_names + ocean_out_names)
+    all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
 
     # variables with larger ocean timestep
-    ocean_names = list(ocean_norm_names - set(atmosphere_out_names))
+    ocean_names = list(all_ocean_names - set(atmosphere_out_names))
     # variables with smaller atmosphere timestep
-    atmos_names = list(atmos_norm_names - set(ocean_out_names))
-    next_step_forcing_names = list(set(atmosphere_out_names) & set(ocean_in_names))
+    atmos_names = list(all_atmos_names - set(ocean_out_names))
 
     # get the dataset
     coupled_data = get_coupled_data(
@@ -420,61 +495,27 @@ def _get_stepper_and_batch(
         n_samples=n_samples,
     )
 
-    # default atmosphere module
-    class AddOne(torch.nn.Module):
-        def forward(self, x):
-            return x + 1
-
-    # default ocean module
-    class TimesTwo(torch.nn.Module):
-        def forward(self, x):
-            return 2 * x
-
-    if atmosphere_builder is None:
-        atmosphere_builder = ModuleSelector(
-            type="prebuilt", config={"module": AddOne()}
-        )
-    if ocean_builder is None:
-        ocean_builder = ModuleSelector(type="prebuilt", config={"module": TimesTwo()})
-
-    config = CoupledStepperConfig(
-        atmosphere=ComponentConfig(
-            timedelta="1D",
-            stepper=SingleModuleStepperConfig(
-                builder=atmosphere_builder,
-                in_names=atmosphere_in_names,
-                out_names=atmosphere_out_names,
-                normalization=NormalizationConfig(
-                    means=get_scalar_data(atmos_norm_names, 0.0),
-                    stds=get_scalar_data(atmos_norm_names, 1.0),
-                ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                ocean=OceanConfig(
-                    surface_temperature_name=sfc_temp_name_in_atmosphere_data,
-                    ocean_fraction_name=ocean_fraction_name,
-                ),
-            ),
-        ),
-        ocean=ComponentConfig(
-            timedelta="2D",
-            stepper=SingleModuleStepperConfig(
-                builder=ocean_builder,
-                in_names=ocean_in_names,
-                out_names=ocean_out_names,
-                next_step_forcing_names=next_step_forcing_names,
-                normalization=NormalizationConfig(
-                    means=get_scalar_data(ocean_norm_names, 0.0),
-                    stds=get_scalar_data(ocean_norm_names, 1.0),
-                ),
-                loss=WeightedMappingLossConfig(type="MSE"),
-                corrector=CorrectorSelector("ocean_corrector", {}),
-            ),
-        ),
-        sst_name=sst_name_in_ocean_data,
-        sst_mask_name=sst_mask_name_in_ocean_data,
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmosphere_in_names,
+        atmosphere_out_names=atmosphere_out_names,
+        sst_name_in_ocean_data=sst_name_in_ocean_data,
+        sst_mask_name_in_ocean_data=sst_mask_name_in_ocean_data,
+        sfc_temp_name_in_atmosphere_data=sfc_temp_name_in_atmosphere_data,
+        ocean_fraction_name=ocean_fraction_name,
+        ocean_builder=ocean_builder,
+        atmosphere_builder=atmosphere_builder,
+        # NOTE: these values don't actually matter here because they aren't used
+        # when stepping the batch forward... if you need consistency between the
+        # timedeltas and batch time dims then you should use
+        # n_forward_times_atmosphere = 2 * n_forward_times_ocean
+        ocean_timedelta="2D",
+        atmosphere_timedelta="1D",
     )
+
     coupler = config.get_stepper(
-        img_shape=(5, 5),
+        img_shape=(N_LAT, N_LON),
         gridded_operations=LatLonOperations(coupled_data.area_weights),
         vertical_coordinate=coupled_data.vertical_coord,
     )
@@ -815,7 +856,7 @@ def test_reloaded_stepper_gives_same_prediction():
         sst_name="o_sfc",
         sst_mask_name="o_mask",
     )
-    area = torch.ones((5, 5), device=DEVICE)
+    area = torch.ones((N_LAT, N_LON), device=DEVICE)
     vertical_coordinate = CoupledVerticalCoordinate(
         ocean=DepthCoordinate(torch.arange(1)),
         atmosphere=HybridSigmaPressureCoordinate(
@@ -823,7 +864,7 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
     )
     stepper = config.get_stepper(
-        img_shape=(5, 5),
+        img_shape=(N_LAT, N_LON),
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
     )

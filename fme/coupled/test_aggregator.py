@@ -3,6 +3,7 @@ import pathlib
 
 import cftime
 import numpy as np
+import pytest
 import torch
 import xarray as xr
 
@@ -11,10 +12,109 @@ from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
 from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.device import get_device
-from fme.coupled.aggregator import InferenceEvaluatorAggregator
+from fme.coupled.aggregator import InferenceEvaluatorAggregator, _combine_logs
 from fme.coupled.data_loading.batch_data import CoupledPairedData
 
 TIMESTEP = datetime.timedelta(days=5)
+
+
+@pytest.mark.parametrize(
+    "ocean_logs, atmos_logs, expected_logs",
+    [
+        ([{}], [{}], [{}]),  # empty gives empty
+        (  # initial condition
+            [
+                {"mean/forecast_step": 0, "o": 0},
+            ],
+            [
+                {"mean/forecast_step": 0, "a": 0},
+            ],
+            [
+                {"mean/forecast_step": 0, "o": 0, "a": 0},
+            ],
+        ),
+        (  # doubled inner timestep frequency
+            [
+                {"mean/forecast_step": 1, "o": 1},
+                {"mean/forecast_step": 2, "o": 2},
+            ],
+            [
+                {"mean/forecast_step": 1, "a": 1},
+                {"mean/forecast_step": 2, "a": 2},
+                {"mean/forecast_step": 3, "a": 3},
+                {"mean/forecast_step": 4, "a": 4},
+            ],
+            [
+                {"mean/forecast_step": 1, "a": 1},
+                {"mean/forecast_step": 2, "o": 1, "a": 2},
+                {"mean/forecast_step": 3, "a": 3},
+                {"mean/forecast_step": 4, "o": 2, "a": 4},
+            ],
+        ),
+        (  # tripled inner timestep frequency
+            [
+                {"mean/forecast_step": 1, "o": 1},
+                {"mean/forecast_step": 2, "o": 2},
+            ],
+            [
+                {"mean/forecast_step": 1, "a": 1},
+                {"mean/forecast_step": 2, "a": 2},
+                {"mean/forecast_step": 3, "a": 3},
+                {"mean/forecast_step": 4, "a": 4},
+                {"mean/forecast_step": 5, "a": 5},
+                {"mean/forecast_step": 6, "a": 6},
+            ],
+            [
+                {"mean/forecast_step": 1, "a": 1},
+                {"mean/forecast_step": 2, "a": 2},
+                {"mean/forecast_step": 3, "o": 1, "a": 3},
+                {"mean/forecast_step": 4, "a": 4},
+                {"mean/forecast_step": 5, "a": 5},
+                {"mean/forecast_step": 6, "o": 2, "a": 6},
+            ],
+        ),
+        (  # start from larger step
+            [
+                {"mean/forecast_step": 3, "o": 3},
+                {"mean/forecast_step": 4, "o": 4},
+            ],
+            [
+                {"mean/forecast_step": 5, "a": 5},
+                {"mean/forecast_step": 6, "a": 6},
+                {"mean/forecast_step": 7, "a": 7},
+                {"mean/forecast_step": 8, "a": 8},
+            ],
+            [
+                {"mean/forecast_step": 5, "a": 5},
+                {"mean/forecast_step": 6, "o": 3, "a": 6},
+                {"mean/forecast_step": 7, "a": 7},
+                {"mean/forecast_step": 8, "o": 4, "a": 8},
+            ],
+        ),
+        (  # misaligned forecast steps
+            [
+                {"mean/forecast_step": 1, "o": 1},
+                {"mean/forecast_step": 3, "o": 2},
+            ],
+            [
+                {"mean/forecast_step": 1, "a": 1},
+                {"mean/forecast_step": 2, "a": 2},
+                {"mean/forecast_step": 3, "a": 3},
+                {"mean/forecast_step": 4, "a": 4},
+            ],
+            "ocean step (3)",
+        ),
+    ],
+)
+def test_combine_logs(ocean_logs, atmos_logs, expected_logs):
+    ratio = len(atmos_logs) // len(ocean_logs)
+    if isinstance(expected_logs, str):
+        with pytest.raises(AssertionError) as err:
+            _combine_logs(ocean_logs, atmos_logs, ratio)
+        assert expected_logs in str(err)
+    else:
+        result = _combine_logs(ocean_logs, atmos_logs, ratio)
+        assert result == expected_logs
 
 
 def test_inference_logs_labels_exist(tmpdir):
@@ -106,7 +206,12 @@ def test_inference_logs_labels_exist(tmpdir):
     )
 
     logs = agg.record_batch(data=coupled_data)
-    assert len(logs) == 0, "TODO: test for correct keys here"
+    assert len(logs) == n_time
+    for i, log in enumerate(logs):
+        assert "mean/forecast_step" in log
+        assert log["mean/forecast_step"] == i
+        assert "mean/weighted_bias/ocean_var" in log
+        assert "mean/weighted_bias/atmos_var" in log
 
     summary_logs = agg.get_summary_logs()
     expected_keys = [
@@ -162,3 +267,26 @@ def test_inference_logs_labels_exist(tmpdir):
     assert len(summary_logs) == len(
         expected_keys
     ), f"unexpected keys: {set(summary_logs).difference(expected_keys)}"
+
+    datasets = agg.get_datasets(excluded_aggregators=["video"])
+    assert len(datasets) == 2
+    assert "ocean" in datasets
+    assert "atmosphere" in datasets
+    expected_keys = [
+        "mean",
+        "mean_norm",
+        "mean_step_20",
+        "zonal_mean",
+        "spherical_power_spectrum",
+        "time_mean",
+        "time_mean_norm",
+        "annual",
+    ]
+    for key in expected_keys:
+        assert key in datasets["ocean"]
+        assert key in datasets["atmosphere"]
+
+    assert "weighted_bias-ocean_var" in datasets["ocean"]["mean"].data_vars
+    assert datasets["ocean"]["mean"]["weighted_bias-ocean_var"].size == n_time
+    assert "weighted_bias-atmos_var" in datasets["atmosphere"]["mean"].data_vars
+    assert datasets["atmosphere"]["mean"]["weighted_bias-atmos_var"].size == n_time

@@ -116,7 +116,3 @@ class InferenceDataset(torch.utils.data.Dataset):
     @property
     def properties(self) -> CoupledDatasetProperties:
         return self._properties
-
-    @property
-    def n_coupled_steps(self) -> int:
-        return self._total_coupled_steps

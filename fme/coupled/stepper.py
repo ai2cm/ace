@@ -37,7 +37,8 @@ from fme.coupled.requirements import (
 
 @dataclasses.dataclass
 class ComponentConfig:
-    """Configuration for one of the components (ocean or atmosphere) within a
+    """
+    Configuration for one of the components (ocean or atmosphere) within a
     CoupledStepper.
 
     Parameters:
