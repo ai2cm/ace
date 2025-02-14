@@ -1,14 +1,15 @@
 import dataclasses
-import datetime
-from typing import Any, Callable, ClassVar, Mapping, Type
+from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
 
 import dacite
 
-from fme.core.coordinates import VerticalCoordinate
-from fme.core.corrector.registry import CorrectorConfigProtocol
-from fme.core.gridded_ops import GriddedOperations
-
 from .registry import Registry
+
+# Note we can either type hint register, which prevents registering
+# from overwriting the type with a generic type or Any, _or_ we can
+# type hint the registry attribute below, which prevents `instance`
+# in `build` from being typed as `Any`. We cannot do both, unfortunately.
+T = TypeVar("T")
 
 
 @dataclasses.dataclass
@@ -36,32 +37,18 @@ class CorrectorSelector:
 
     type: str
     config: Mapping[str, Any]
-    registry: ClassVar[Registry[CorrectorConfigProtocol]] = Registry[
-        CorrectorConfigProtocol
-    ]()
+    # Note this registry is no longer used, but is kept for backwards compatibility.
+    # In practice the corrector is selected based on the type of the vertical
+    # coordinate in the loaded data.
+    registry: ClassVar[Registry] = Registry()
 
     def __post_init__(self):
         if not isinstance(self.registry, Registry):
             raise ValueError("CorrectorSelector.registry should not be set manually")
 
     @classmethod
-    def register(
-        cls, type_name
-    ) -> Callable[[Type[CorrectorConfigProtocol]], Type[CorrectorConfigProtocol]]:
+    def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:
         return cls.registry.register(type_name)
-
-    def build(
-        self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
-    ):
-        instance = self.registry.from_dict(self.get_state())
-        return instance.build(
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
 
     def get_state(self) -> Mapping[str, Any]:
         """

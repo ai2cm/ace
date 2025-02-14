@@ -17,11 +17,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.core.coordinates import (
-    HorizontalCoordinates,
-    LatLonCoordinates,
-    VerticalCoordinate,
-)
+from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
@@ -143,7 +139,6 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -175,7 +170,6 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            vertical_coordinate=vertical_coordinate,
             horizontal_coordinates=horizontal_coordinates,
             timestep=timestep,
             n_timesteps=n_timesteps,
@@ -211,7 +205,6 @@ class InferenceEvaluatorAggregator(
 
     def __init__(
         self,
-        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
         n_timesteps: int,
@@ -232,7 +225,6 @@ class InferenceEvaluatorAggregator(
     ):
         """
         Args:
-            vertical_coordinate: Data vertical coordinate.
             horizontal_coordinates: Data horizontal coordinates
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.

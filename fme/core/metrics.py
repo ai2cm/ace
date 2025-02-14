@@ -6,7 +6,6 @@ import torch_harmonics
 from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY, LATENT_HEAT_OF_FREEZING
-from fme.core.coordinates import HybridSigmaPressureCoordinate
 
 Dimension: TypeAlias = Union[int, Iterable[int]]
 Array: TypeAlias = Union[np.ndarray, torch.Tensor]
@@ -221,25 +220,19 @@ def time_and_global_mean_bias(
 
 
 def surface_pressure_due_to_dry_air(
-    specific_total_water: torch.Tensor,
     surface_pressure: torch.Tensor,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    total_water_path: torch.Tensor,
 ) -> torch.Tensor:
     """Computes the dry air (Pa).
 
     Args:
-        specific_total_water: last dimension is vertical level (kg/kg)
         surface_pressure: the surface preessure in Pa.
-        vertical_coordinate: the vertical coordinate for computing vertical integral.
+        total_water_path: the total water path in kg/m^2.
 
     Returns:
         The surface pressure due to dry air mass only. (Pa)
     """
-    total_water_path = vertical_coordinate.vertical_integral(
-        specific_total_water, surface_pressure
-    )
-    dry_air = surface_pressure - GRAVITY * total_water_path
-    return dry_air
+    return surface_pressure - GRAVITY * total_water_path
 
 
 def net_surface_energy_flux(

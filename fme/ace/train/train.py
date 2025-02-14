@@ -67,12 +67,12 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
+from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
@@ -113,7 +113,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
         gridded_operations=train_data.gridded_operations,
-        vertical_coordinate=train_data.vertical_coordinate,
         horizontal_coordinates=train_data.horizontal_coordinates,
         timestep=train_data.timestep,
         initial_inference_time=initial_inference_times,
@@ -147,7 +146,6 @@ class AggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
         initial_inference_time: xr.DataArray,
@@ -160,7 +158,6 @@ class AggregatorBuilder(
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
-        self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.timestep = timestep
         self.initial_inference_time = initial_inference_time
@@ -185,7 +182,6 @@ class AggregatorBuilder(
         self,
     ) -> InferenceEvaluatorAggregator:
         return self.inference_config.build(
-            vertical_coordinate=self.vertical_coordinate,
             horizontal_coordinates=self.horizontal_coordinates,
             timestep=self.timestep,
             initial_time=self.initial_inference_time,

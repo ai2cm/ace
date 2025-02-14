@@ -1,22 +1,112 @@
 import abc
 import dataclasses
-from typing import Dict, List, Literal, Mapping, Optional, Tuple, TypeVar
+from datetime import timedelta
+from typing import Dict, List, Literal, Mapping, Optional, Tuple, TypeVar, Union
 
+import dacite
 import numpy as np
 import torch
 from astropy_healpix import HEALPix
 
 from fme.core import metrics
 from fme.core.constants import GRAVITY
+from fme.core.corrector.corrector import Corrector, CorrectorConfig
+from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
+from fme.core.corrector.registry import CorrectorABC
+from fme.core.derived_variables import compute_derived_quantities
+from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.typing_ import TensorMapping
+from fme.core.registry.corrector import CorrectorSelector
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
 
 HC = TypeVar("HC", bound="HorizontalCoordinates")
 
 
+class DeriveFnABC(abc.ABC):
+    @abc.abstractmethod
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        pass
+
+
+class NullDeriveFn(DeriveFnABC):
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        return dict(data)
+
+
+class AtmosphericDeriveFn(DeriveFnABC):
+    def __init__(
+        self,
+        vertical_coordinate: "OptionalHybridSigmaPressureCoordinate",
+        timestep: timedelta,
+    ):
+        self.vertical_coordinate = vertical_coordinate.to(
+            "cpu"
+        )  # must be on cpu for multiprocessing fork context
+        self.timestep = timestep
+
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        if isinstance(self.vertical_coordinate, NullVerticalCoordinate):
+            vertical_coord: Optional["HybridSigmaPressureCoordinate"] = None
+        else:
+            vertical_coord = self.vertical_coordinate.to(get_device())
+        return compute_derived_quantities(
+            dict(data),
+            vertical_coordinate=vertical_coord,
+            timestep=self.timestep,
+            forcing_data=dict(forcing_data),
+        )
+
+
+class OceanDeriveFn(DeriveFnABC):
+    def __init__(
+        self,
+        vertical_coordinate: "DepthCoordinate",
+        timestep: timedelta,
+    ):
+        pass
+
+    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
+        # TODO: implement derived variables for ocean
+        return dict(data)
+
+
+class VerticalCoordinate(abc.ABC):
+    """
+    A vertical coordinate system for use in the stepper.
+    """
+
+    SelfType = TypeVar("SelfType", bound="VerticalCoordinate")
+
+    @abc.abstractmethod
+    def to(self: SelfType, device: str) -> SelfType:
+        pass
+
+    @abc.abstractmethod
+    def build_corrector(
+        self,
+        config: Union[CorrectorConfig, CorrectorSelector],
+        gridded_operations: GriddedOperations,
+        timestep: timedelta,
+    ) -> CorrectorABC:
+        pass
+
+    @abc.abstractmethod
+    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def coords(self) -> Dict[str, np.ndarray]:
+        pass
+
+    @abc.abstractmethod
+    def as_dict(self) -> TensorMapping:
+        pass
+
+
 @dataclasses.dataclass
-class HybridSigmaPressureCoordinate:
+class HybridSigmaPressureCoordinate(VerticalCoordinate):
     """
     Defines pressure at interface levels according to the following formula:
         p(k) = a(k) + b(k)*ps.
@@ -59,6 +149,44 @@ class HybridSigmaPressureCoordinate:
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.ak)
+
+    def build_corrector(
+        self,
+        config: Union[CorrectorConfig, CorrectorSelector],
+        gridded_operations: GriddedOperations,
+        timestep: timedelta,
+    ) -> Corrector:
+        if (
+            isinstance(config, CorrectorSelector)
+            and config.type != "atmosphere_corrector"
+        ):
+            raise ValueError(
+                f"Cannot build corrector for vertical coordinate {self} with "
+                f"corrector selector {config}."
+            )
+        if isinstance(config, CorrectorSelector):
+            config_instance = dacite.from_dict(
+                data_class=CorrectorConfig,
+                data=config.config,
+                config=dacite.Config(strict=True),
+            )
+        else:
+            config_instance = config
+        return Corrector(
+            config=config_instance,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=self,
+            timestep=timestep,
+        )
+
+    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+        return AtmosphericDeriveFn(self, timestep)
+
+    def get_ak(self) -> torch.Tensor:
+        return self.ak
+
+    def get_bk(self) -> torch.Tensor:
+        return self.bk
 
     @property
     def coords(self) -> Dict[str, np.ndarray]:
@@ -133,7 +261,7 @@ class HybridSigmaPressureCoordinate:
 
 
 @dataclasses.dataclass
-class DepthCoordinate:
+class DepthCoordinate(VerticalCoordinate):
     """
     Defines depth in meters at interface levels.
     Parameters:
@@ -151,6 +279,34 @@ class DepthCoordinate:
     def __len__(self):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
+
+    def build_corrector(
+        self,
+        config: Union[CorrectorConfig, CorrectorSelector],
+        gridded_operations: GriddedOperations,
+        timestep: timedelta,
+    ) -> OceanCorrector:
+        if isinstance(config, CorrectorConfig):
+            raise ValueError(
+                "Cannot build corrector for depth coordinate with an "
+                "atmosphere CorrectorConfig."
+            )
+        elif config.type != "ocean_corrector":
+            raise ValueError(
+                f"Cannot build corrector for vertical coordinate {self} with "
+                f"corrector selector {config}."
+            )
+        config_instance = dacite.from_dict(
+            data_class=OceanCorrectorConfig,
+            data=config.config,
+            config=dacite.Config(strict=True),
+        )
+        return OceanCorrector(
+            config=config_instance,
+        )
+
+    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+        return OceanDeriveFn(self, timestep)
 
     @property
     def dtype(self) -> torch.dtype:
@@ -199,18 +355,59 @@ class DepthCoordinate:
 
 
 @dataclasses.dataclass
-class NullVerticalCoordinate:
+class NullVerticalCoordinate(VerticalCoordinate):
     """
     A null vertical coordinate system.
     """
-
-    type: Literal["null"] = "null"
 
     def __eq__(self, other) -> bool:
         return isinstance(other, NullVerticalCoordinate)
 
     def __len__(self) -> int:
         return 0
+
+    def build_corrector(
+        self,
+        config: Union[CorrectorConfig, CorrectorSelector],
+        gridded_operations: GriddedOperations,
+        timestep: timedelta,
+    ) -> CorrectorABC:
+        if isinstance(config, CorrectorConfig):
+            return Corrector(
+                config=config,
+                gridded_operations=gridded_operations,
+                vertical_coordinate=None,
+                timestep=timestep,
+            )
+        if config.type == "atmosphere_corrector":
+            config_instance = dacite.from_dict(
+                data_class=CorrectorConfig,
+                data=config.config,
+                config=dacite.Config(strict=True),
+            )
+            return Corrector(
+                config=config_instance,
+                gridded_operations=gridded_operations,
+                vertical_coordinate=None,
+                timestep=timestep,
+            )
+        elif config.type == "ocean_corrector":
+            config_instance = dacite.from_dict(
+                data_class=OceanCorrectorConfig,
+                data=config.config,
+                config=dacite.Config(strict=True),
+            )
+            return OceanCorrector(
+                config=config_instance,
+            )
+        else:
+            raise ValueError(
+                f"Invalid corrector type: {config.type}. "
+                "Must be either 'atmosphere_corrector' or 'ocean_corrector'."
+            )
+
+    def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+        return NullDeriveFn()
 
     def to(self, device: str) -> "NullVerticalCoordinate":
         return self
@@ -223,11 +420,7 @@ class NullVerticalCoordinate:
         return {}
 
 
-VerticalCoordinate = (
-    HybridSigmaPressureCoordinate | DepthCoordinate | NullVerticalCoordinate
-)
-
-OptionalHybridSigmaPressureCordinate = (
+OptionalHybridSigmaPressureCoordinate = (
     HybridSigmaPressureCoordinate | NullVerticalCoordinate
 )
 
@@ -238,7 +431,9 @@ OptionalDepthCoordinate = DepthCoordinate | NullVerticalCoordinate
 class SerializableVerticalCoordinate:
     """Only for use in serializing/deserializing coordinates with dacite."""
 
-    vertical_coordinate: VerticalCoordinate
+    vertical_coordinate: (
+        HybridSigmaPressureCoordinate | DepthCoordinate | NullVerticalCoordinate
+    )
 
 
 @dataclasses.dataclass
