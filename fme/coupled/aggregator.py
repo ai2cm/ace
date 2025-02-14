@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Callable, Dict, Mapping, Optional, Union
+from typing import Callable, Dict, Iterable, Mapping, Optional, Union
 
 import torch
 import xarray as xr
@@ -153,12 +153,6 @@ class InferenceEvaluatorAggregatorConfig:
     monthly_reference_data: Optional[str] = None
     time_mean_reference_data: Optional[str] = None
 
-    def __post_init__(self):
-        if self.log_global_mean_time_series or self.log_global_mean_norm_time_series:
-            warnings.warn("Time series logging is not implemented for coupled models.")
-            self.log_global_mean_time_series = False
-            self.log_global_mean_norm_time_series = False
-
     def build(
         self,
         horizontal_coordinates: HorizontalCoordinates,
@@ -213,6 +207,60 @@ class InferenceEvaluatorAggregatorConfig:
             ocean_normalize=ocean_normalize,
             atmosphere_normalize=atmosphere_normalize,
         )
+
+
+def _combine_logs(
+    ocean_logs: InferenceLogs,
+    atmos_logs: InferenceLogs,
+    n_atmos_steps_per_ocean_step: int,
+    step_key="mean/forecast_step",
+) -> InferenceLogs:
+    """
+    Combines ocean and atmosphere logs into a single list of logs such that
+    the ocean logs are aligned to the atmosphere's faster timestep, e.g.
+
+    _combine_logs(
+        ocean_logs=[
+            {"mean/forecast_step": 0, "o": 0},
+            {"mean/forecast_step": 1, "o": 1},
+        ],
+        atmos_logs=[
+            {"mean/forecast_step": 0, "a": 0},
+            {"mean/forecast_step": 1, "a": 1},
+            {"mean/forecast_step": 2, "a": 2},
+            {"mean/forecast_step": 3, "a": 3},
+        ],
+        n_atmos_steps_per_ocean_step=2,
+    )
+
+    results in
+
+    [
+        {"mean/forecast_step": 0, "o": 0, "a": 0},
+        {"mean/forecast_step": 1, "a": 1},
+        {"mean/forecast_step": 2, "o": 1, "a": 2},
+        {"mean/forecast_step": 3, "a": 3},
+    ]
+
+    """
+    combined_logs = []
+    for i, log in enumerate(atmos_logs):
+        if step_key in log and log[step_key] % n_atmos_steps_per_ocean_step == 0:
+            # this is an ocean output step
+            ocean_log = ocean_logs[i // n_atmos_steps_per_ocean_step]
+            # sanity check
+            assert (
+                ocean_log[step_key] * n_atmos_steps_per_ocean_step == log[step_key]
+            ), (
+                f"Atmosphere forecast step ({log[step_key]}) is not a "
+                f"multiple of the ocean step ({ocean_log[step_key]})."
+            )
+
+            combined_logs.append({**ocean_log, **log})
+        else:
+            # this is an atmosphere-only output step
+            combined_logs.append(log)
+    return combined_logs
 
 
 class InferenceEvaluatorAggregator(
@@ -287,6 +335,14 @@ class InferenceEvaluatorAggregator(
         self._num_channels_ocean: Optional[int] = None
         self._num_channels_atmos: Optional[int] = None
 
+    @property
+    def ocean(self) -> InferenceEvaluatorAggregator_:
+        return self._aggregators["ocean"]
+
+    @property
+    def atmosphere(self) -> InferenceEvaluatorAggregator_:
+        return self._aggregators["atmosphere"]
+
     def _init_num_channels(self, data: CoupledPairedData):
         if self._num_channels_ocean is None:
             self._num_channels_ocean = len(data.ocean_data.prediction)
@@ -294,11 +350,12 @@ class InferenceEvaluatorAggregator(
 
     @torch.no_grad()
     def record_batch(self, data: CoupledPairedData) -> InferenceLogs:
-        # TODO: combine and return log sequences
         self._init_num_channels(data)
-        _ = self._aggregators["ocean"].record_batch(data.ocean_data)
-        _ = self._aggregators["atmosphere"].record_batch(data.atmosphere_data)
-        return []
+        ocean_logs = self.ocean.record_batch(data.ocean_data)
+        atmos_logs = self.atmosphere.record_batch(data.atmosphere_data)
+        n_times_ocean = data.ocean_data.time["time"].size
+        n_times_atmos = data.atmosphere_data.time["time"].size
+        return _combine_logs(ocean_logs, atmos_logs, n_times_atmos // n_times_ocean)
 
     @torch.no_grad()
     def record_initial_condition(
@@ -310,21 +367,19 @@ class InferenceEvaluatorAggregator(
 
         May only be recorded once, before any calls to record_batch.
         """
-        # TODO: combine and return initial condition logs
-        _ = self._aggregators["ocean"].record_initial_condition(
-            initial_condition.ocean_data
-        )
-        _ = self._aggregators["atmosphere"].record_initial_condition(
+        ocean_logs = self.ocean.record_initial_condition(initial_condition.ocean_data)
+        atmos_logs = self.atmosphere.record_initial_condition(
             initial_condition.atmosphere_data
         )
-        return [{}]
+        # initial condition "steps" must align, so record both
+        return _combine_logs(ocean_logs, atmos_logs, n_atmos_steps_per_ocean_step=1)
 
     @torch.no_grad()
     def get_summary_logs(self) -> InferenceLog:
         if self._num_channels_ocean is None or self._num_channels_atmos is None:
             raise ValueError("No data recorded.")
-        ocean_logs = self._aggregators["ocean"].get_summary_logs()
-        atmos_logs = self._aggregators["atmosphere"].get_summary_logs()
+        ocean_logs = self.ocean.get_summary_logs()
+        atmos_logs = self.atmosphere.get_summary_logs()
         ocean_channel_mean = ocean_logs.pop("time_mean_norm/rmse/channel_mean")
         atmos_channel_mean = atmos_logs.pop("time_mean_norm/rmse/channel_mean")
         ocean_logs["time_mean_norm/rmse/ocean_channel_mean"] = ocean_channel_mean
@@ -348,3 +403,21 @@ class InferenceEvaluatorAggregator(
             **ocean_logs,
             **atmos_logs,
         }
+
+    @torch.no_grad()
+    def get_datasets(
+        self, excluded_aggregators: Optional[Iterable[str]] = None
+    ) -> Dict[str, Dict[str, xr.Dataset]]:
+        """
+        Returns datasets from combined aggregators.
+
+        Args:
+            excluded_aggregators: aggregator names for which `get_dataset`
+                should not be called and no output should be returned.
+
+        Returns:
+            Dictionary of datasets from aggregators.
+        """
+        ocean_datasets = self.ocean.get_datasets(excluded_aggregators)
+        atmos_datasets = self.atmosphere.get_datasets(excluded_aggregators)
+        return {"ocean": ocean_datasets, "atmosphere": atmos_datasets}

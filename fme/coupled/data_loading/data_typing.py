@@ -15,6 +15,25 @@ from fme.core.dataset.xarray import DatasetProperties
 from fme.core.typing_ import TensorDict
 
 
+@dataclasses.dataclass
+class CoupledCoords:
+    """
+    Convenience wrapper for the coords in dict format.
+    """
+
+    ocean_vertical: Dict[str, np.ndarray]
+    atmosphere_vertical: Dict[str, np.ndarray]
+    horizontal: Dict[str, np.ndarray]
+
+    @property
+    def ocean(self) -> Dict[str, np.ndarray]:
+        return {**self.ocean_vertical, **self.horizontal}
+
+    @property
+    def atmosphere(self) -> Dict[str, np.ndarray]:
+        return {**self.atmosphere_vertical, **self.horizontal}
+
+
 class CoupledVerticalCoordinate:
     def __init__(
         self,
@@ -28,10 +47,6 @@ class CoupledVerticalCoordinate:
         if not isinstance(other, CoupledVerticalCoordinate):
             return False
         return self.ocean == other.ocean and self.atmosphere == other.atmosphere
-
-    @property
-    def coords(self) -> Dict[str, np.ndarray]:
-        return self.ocean.coords | self.atmosphere.coords
 
 
 class CoupledDatasetProperties:
@@ -68,6 +83,18 @@ class CoupledDatasetProperties:
     @property
     def is_remote(self) -> bool:
         return self.ocean.is_remote or self.atmosphere.is_remote
+
+    @property
+    def n_inner_steps(self) -> int:
+        return self.ocean.timestep // self.atmosphere.timestep
+
+    @property
+    def coords(self) -> CoupledCoords:
+        return CoupledCoords(
+            ocean_vertical=self.vertical_coordinate.ocean.coords,
+            atmosphere_vertical=self.vertical_coordinate.atmosphere.coords,
+            horizontal=dict(self.horizontal_coordinates.coords),
+        )
 
     def to_device(self) -> "CoupledDatasetProperties":
         return CoupledDatasetProperties(
