@@ -7,15 +7,13 @@ import dacite
 import torch
 
 import fme
-from fme.core.atmosphere_data import AtmosphereData, compute_layer_thickness
-from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
-from fme.core.coordinates import (
-    HybridSigmaPressureCoordinate,
-    NullVerticalCoordinate,
-    OptionalHybridSigmaPressureCordinate,
-    VerticalCoordinate,
+from fme.core.atmosphere_data import (
+    AtmosphereData,
+    HasAtmosphereVerticalIntegral,
+    compute_layer_thickness,
 )
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
+from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
+from fme.core.corrector.registry import CorrectorABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -41,7 +39,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class CorrectorConfig(CorrectorConfigProtocol):
+class CorrectorConfig:
     r"""
     Configuration for the post-step state corrector.
 
@@ -134,20 +132,6 @@ class CorrectorConfig(CorrectorConfigProtocol):
         Union[EnergyBudgetConfig, Literal["constant_temperature"]]
     ] = None
 
-    def build(
-        self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
-    ) -> "Corrector":
-        assert isinstance(vertical_coordinate, OptionalHybridSigmaPressureCordinate)
-        return Corrector(
-            config=self,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
-
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "CorrectorConfig":
         return dacite.from_dict(
@@ -160,7 +144,7 @@ class Corrector(CorrectorABC):
         self,
         config: CorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
         timestep: datetime.timedelta,
     ):
         self._config = config
@@ -218,7 +202,7 @@ class Corrector(CorrectorABC):
             # otherwise it could end up creating violations of those constraints.
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         if self._config.conserve_dry_air:
-            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            if self._vertical_coordinate is None:
                 raise ValueError(
                     "conserve_dry_air is set to True, but no vertical coordinate is "
                     "available."
@@ -236,7 +220,7 @@ class Corrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
             )
         if self._config.moisture_budget_correction is not None:
-            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            if self._vertical_coordinate is None:
                 raise ValueError(
                     "Moisture budget correction is turned on, but no vertical "
                     "coordinate is available."
@@ -250,7 +234,7 @@ class Corrector(CorrectorABC):
                 terms_to_modify=self._config.moisture_budget_correction,
             )
         if self._do_energy_correction:
-            if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+            if self._vertical_coordinate is None:
                 raise ValueError(
                     "Energy budget correction is turned on, but no vertical coordinate"
                     " is available."
@@ -284,7 +268,7 @@ def _force_conserve_dry_air(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    vertical_coordinate: HasAtmosphereVerticalIntegral,
     precision: torch.dtype = torch.float64,
 ) -> TensorDict:
     """
@@ -328,8 +312,8 @@ def _force_conserve_dry_air(
         wat = gen.specific_total_water.to(precision)
     except KeyError:
         raise ValueError("specific_total_water is required for conservation")
-    ak_diff = vertical_coordinate.ak.diff().to(precision)
-    bk_diff = vertical_coordinate.bk.diff().to(precision)
+    ak_diff = vertical_coordinate.get_ak().diff().to(precision)
+    bk_diff = vertical_coordinate.get_bk().diff().to(precision)
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
@@ -367,7 +351,7 @@ def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    vertical_coordinate: HasAtmosphereVerticalIntegral,
     timestep: datetime.timedelta,
     terms_to_modify: Literal[
         "precipitation",
@@ -460,7 +444,7 @@ def _force_conserve_total_energy(
     gen_data: TensorMapping,
     forcing_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
-    vertical_coordinate: HybridSigmaPressureCoordinate,
+    vertical_coordinate: HasAtmosphereVerticalIntegral,
     timestep: datetime.timedelta,
     method: Literal["constant_temperature"] = "constant_temperature",
     unaccounted_heating: float = 0.0,
@@ -515,7 +499,7 @@ def _force_conserve_total_energy(
 
 
 def _energy_correction_factor(
-    gen: AtmosphereData, vertical_coordinate: HybridSigmaPressureCoordinate
+    gen: AtmosphereData, vertical_coordinate: HasAtmosphereVerticalIntegral
 ) -> torch.Tensor:
     """
     Compute the factor to get a vertically-uniform temperature correction that

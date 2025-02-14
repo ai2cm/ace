@@ -14,7 +14,7 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
 from fme.core.coordinates import (
     OptionalDepthCoordinate,
-    OptionalHybridSigmaPressureCordinate,
+    OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
@@ -247,7 +247,7 @@ class CoupledStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: OptionalHybridSigmaPressureCoordinate,
     ) -> SingleModuleStepper:
         return self.atmosphere.stepper.get_stepper(
             img_shape=img_shape,
@@ -387,7 +387,7 @@ class CoupledStepper(
         self._atmos_vertical_coord = atmosphere.vertical_coordinate
         self._ocean_vertical_coord = ocean.vertical_coordinate
         assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCordinate
+            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
         )
         assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
 
@@ -423,7 +423,7 @@ class CoupledStepper(
     @property
     def vertical_coordinate(self) -> CoupledVerticalCoordinate:
         assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCordinate
+            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
         )
         assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
         return CoupledVerticalCoordinate(
