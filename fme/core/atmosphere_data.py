@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import Callable, List, Mapping
+from typing import List, Mapping, Optional, Protocol
 
 import torch
 
@@ -11,11 +11,6 @@ from fme.core.constants import (
     RVGAS,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
-)
-from fme.core.coordinates import (
-    HybridSigmaPressureCoordinate,
-    NullVerticalCoordinate,
-    OptionalHybridSigmaPressureCordinate,
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -44,6 +39,24 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
+class HasAtmosphereVerticalIntegral(Protocol):
+    def vertical_integral(
+        self,
+        field: torch.Tensor,
+        surface_pressure: torch.Tensor,
+    ) -> torch.Tensor:
+        pass
+
+    def interface_pressure(self, surface_pressure: torch.Tensor) -> torch.Tensor:
+        pass
+
+    def get_ak(self) -> torch.Tensor:
+        pass
+
+    def get_bk(self) -> torch.Tensor:
+        pass
+
+
 class AtmosphereData:
     """Container for atmospheric data for accessing variables and providing
     torch.Tensor views on data with multiple vertical levels.
@@ -52,9 +65,7 @@ class AtmosphereData:
     def __init__(
         self,
         atmosphere_data: TensorMapping,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate = (
-            NullVerticalCoordinate()
-        ),
+        vertical_coordinate: Optional[HasAtmosphereVerticalIntegral] = None,
         atmosphere_field_name_prefixes: Mapping[
             str, List[str]
         ] = ATMOSPHERE_FIELD_NAME_PREFIXES,
@@ -162,17 +173,16 @@ class AtmosphereData:
 
     @property
     def surface_pressure_due_to_dry_air(self) -> torch.Tensor:
-        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+        if self._vertical_coordinate is None:
             raise ValueError("Vertical coordinate must be provided to compute dry air.")
         return metrics.surface_pressure_due_to_dry_air(
-            self.specific_total_water,
             self.surface_pressure,
-            self._vertical_coordinate,
+            self.total_water_path,
         )
 
     @property
     def total_water_path(self) -> torch.Tensor:
-        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+        if self._vertical_coordinate is None:
             raise ValueError(
                 "Vertical coordinate must be provided to compute total water path."
             )
@@ -289,7 +299,7 @@ class AtmosphereData:
         """
         Compute vertical height at layer log midpoints.
         """
-        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+        if self._vertical_coordinate is None:
             raise ValueError(
                 "Vertical coordinate must be provided to compute height at log midpoint"
             )
@@ -307,7 +317,7 @@ class AtmosphereData:
     @property
     def height_at_midpoint(self) -> torch.Tensor:
         """Compute vertical height at layer midpoints with linear interpolation."""
-        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+        if self._vertical_coordinate is None:
             raise ValueError(
                 "Vertical coordinate must be provided to compute height at mmidpoint"
             )
@@ -353,42 +363,13 @@ class AtmosphereData:
     @property
     def total_energy_ace2_path(self) -> torch.Tensor:
         """Compute vertical integral of total energy."""
-        if isinstance(self._vertical_coordinate, NullVerticalCoordinate):
+        if self._vertical_coordinate is None:
             raise ValueError(
                 "Vertical coordinate must be provided to compute total energy ACE2 path"
             )
         return self._vertical_coordinate.vertical_integral(
             self.total_energy_ace2, self.surface_pressure
         )
-
-
-def compute_dry_air_absolute_differences(
-    atmosphere_data: AtmosphereData,
-    area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-    vertical_coordinate: HybridSigmaPressureCoordinate,
-) -> torch.Tensor:
-    """
-    Computes the absolute value of the dry air tendency of each time step.
-
-    Args:
-        atmosphere_data: AtmosphereData object.
-        area_weighted_mean: Function which returns an area-weighted mean.
-        vertical_coordinate: The vertical coordinate of the model.
-
-    Returns:
-        A tensor of shape (time,) of the absolute value of the dry air tendency
-            of each time step.
-    """
-    try:
-        water = atmosphere_data.specific_total_water
-        pressure = atmosphere_data.surface_pressure
-    except KeyError:
-        return torch.tensor([torch.nan])
-    ps_dry = metrics.surface_pressure_due_to_dry_air(
-        water, pressure, vertical_coordinate
-    )
-    ps_dry_mean = area_weighted_mean(ps_dry)
-    return ps_dry_mean.diff(dim=-1).abs().mean(dim=0)
 
 
 def compute_layer_thickness(

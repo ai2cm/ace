@@ -28,7 +28,6 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
@@ -57,7 +56,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
         gridded_operations=train_data.gridded_operations,
-        vertical_coordinate=train_data.vertical_coordinate,
         horizontal_coordinates=train_data.horizontal_coordinates,
         ocean_timestep=stepper.ocean_timestep,
         atmosphere_timestep=stepper.atmosphere_timestep,
@@ -92,7 +90,6 @@ class CoupledAggregatorBuilder(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         ocean_timestep: timedelta,
         atmosphere_timestep: timedelta,
@@ -107,7 +104,6 @@ class CoupledAggregatorBuilder(
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
-        self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
         self.ocean_timestep = ocean_timestep
         self.atmosphere_timestep = atmosphere_timestep
@@ -133,7 +129,6 @@ class CoupledAggregatorBuilder(
 
     def get_inference_aggregator(self):
         return self.inference_config.build(
-            vertical_coordinate=self.vertical_coordinate,
             horizontal_coordinates=self.horizontal_coordinates,
             ocean_timestep=self.ocean_timestep,
             atmosphere_timestep=self.atmosphere_timestep,

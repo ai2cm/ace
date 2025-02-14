@@ -9,16 +9,10 @@ import xarray as xr
 from fme.ace.aggregator.inference.test_evaluator import get_zero_time
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.testing import DimSizes, MonthlyReferenceData
-from fme.core.coordinates import (
-    DepthCoordinate,
-    DimSize,
-    HybridSigmaPressureCoordinate,
-    LatLonCoordinates,
-)
+from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.device import get_device
 from fme.coupled.aggregator import InferenceEvaluatorAggregator
 from fme.coupled.data_loading.batch_data import CoupledPairedData
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 
 TIMESTEP = datetime.timedelta(days=5)
 
@@ -31,12 +25,6 @@ def test_inference_logs_labels_exist(tmpdir):
     ny = 2
     nz = 3
 
-    vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(1)),
-        atmosphere=HybridSigmaPressureCoordinate(
-            ak=torch.arange(nz + 1), bk=torch.arange(nz + 1)
-        ),
-    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -71,7 +59,6 @@ def test_inference_logs_labels_exist(tmpdir):
     monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
 
     agg = InferenceEvaluatorAggregator(
-        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         ocean_timestep=TIMESTEP,
         atmosphere_timestep=TIMESTEP,

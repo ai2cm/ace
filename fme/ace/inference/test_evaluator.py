@@ -30,6 +30,7 @@ from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
@@ -37,8 +38,6 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
-
-from .derived_variables import compute_derived_quantities
 
 DIR = pathlib.Path(__file__).parent
 TIMESTEP = datetime.timedelta(hours=6)

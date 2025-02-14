@@ -1,14 +1,11 @@
 import dataclasses
-import datetime
 from types import MappingProxyType
 from typing import Any, List, Mapping, Optional
 
 import dacite
 
-from fme.core.coordinates import OptionalDepthCoordinate, VerticalCoordinate
 from fme.core.corrector.corrector import force_positive
-from fme.core.corrector.registry import CorrectorABC, CorrectorConfigProtocol
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.corrector.registry import CorrectorABC
 from fme.core.masking import MaskingConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.stacker import Stacker
@@ -28,23 +25,9 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
-class OceanCorrectorConfig(CorrectorConfigProtocol):
+class OceanCorrectorConfig:
     masking: Optional[MaskingConfig] = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
-
-    def build(
-        self,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
-    ):
-        assert isinstance(vertical_coordinate, OptionalDepthCoordinate)
-        return OceanCorrector(
-            config=self,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
@@ -57,14 +40,8 @@ class OceanCorrector(CorrectorABC):
     def __init__(
         self,
         config: OceanCorrectorConfig,
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalDepthCoordinate,
-        timestep: datetime.timedelta,
     ):
         self._config = config
-        self._gridded_operations = gridded_operations
-        self._vertical_coordinates = vertical_coordinate
-        self._timestep = timestep
 
         if config.masking is not None:
             self._masking = config.masking.build()

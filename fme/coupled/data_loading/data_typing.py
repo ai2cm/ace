@@ -8,7 +8,7 @@ import xarray as xr
 from fme.core.coordinates import (
     HorizontalCoordinates,
     OptionalDepthCoordinate,
-    OptionalHybridSigmaPressureCordinate,
+    OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import Dataset, VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
@@ -19,7 +19,7 @@ class CoupledVerticalCoordinate:
     def __init__(
         self,
         ocean: OptionalDepthCoordinate,
-        atmosphere: OptionalHybridSigmaPressureCordinate,
+        atmosphere: OptionalHybridSigmaPressureCoordinate,
     ):
         self.ocean = ocean
         self.atmosphere = atmosphere
@@ -47,7 +47,7 @@ class CoupledDatasetProperties:
         ocean_coord = ocean.vertical_coordinate
         atmos_coord = atmosphere.vertical_coordinate
         assert isinstance(ocean_coord, OptionalDepthCoordinate)
-        assert isinstance(atmos_coord, OptionalHybridSigmaPressureCordinate)
+        assert isinstance(atmos_coord, OptionalHybridSigmaPressureCoordinate)
         self._vertical_coordinate = CoupledVerticalCoordinate(ocean_coord, atmos_coord)
 
     @property

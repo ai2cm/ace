@@ -9,13 +9,13 @@ import torch
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.inference.derived_variables import compute_derived_quantities
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import (
+    AtmosphericDeriveFn,
     HybridSigmaPressureCoordinate,
-    OptionalHybridSigmaPressureCordinate,
     SerializableVerticalCoordinate,
+    VerticalCoordinate,
 )
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.dataset.requirements import DataRequirements
@@ -38,26 +38,6 @@ from fme.diffusion.loss import WeightedMappingLossConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
-
-
-class AtmosphericDeriveFn:
-    def __init__(
-        self,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
-        timestep: datetime.timedelta,
-    ):
-        self.vertical_coordinate = vertical_coordinate.to(
-            "cpu"
-        )  # must be on cpu for multiprocessing fork context
-        self.timestep = timestep
-
-    def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        return compute_derived_quantities(
-            dict(data),
-            vertical_coordinate=self.vertical_coordinate.to(get_device()),
-            timestep=self.timestep,
-            forcing_data=dict(forcing_data),
-        )
 
 
 @dataclasses.dataclass
@@ -175,11 +155,11 @@ class DiffusionStepperConfig:
         self,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
     ):
         logging.info("Initializing stepper from provided config")
-        derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
+        derive_func = vertical_coordinate.build_derive_function(timestep)
         return DiffusionStepper(
             config=self,
             img_shape=img_shape,
@@ -314,7 +294,7 @@ class DiffusionStepper(
         config: DiffusionStepperConfig,
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCordinate,
+        vertical_coordinate: VerticalCoordinate,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         init_weights: bool = True,
@@ -367,9 +347,9 @@ class DiffusionStepper(
             gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
         )
 
-        self._corrector = config.corrector.build(
+        self._corrector = vertical_coordinate.build_corrector(
+            config=config.corrector,
             gridded_operations=gridded_operations,
-            vertical_coordinate=self.vertical_coordinate,
             timestep=timestep,
         )
         if config.loss_normalization is not None:
@@ -403,7 +383,7 @@ class DiffusionStepper(
         ] = self.predict_paired
 
     @property
-    def vertical_coordinate(self) -> OptionalHybridSigmaPressureCordinate:
+    def vertical_coordinate(self) -> VerticalCoordinate:
         return self._vertical_coordinates
 
     @property
