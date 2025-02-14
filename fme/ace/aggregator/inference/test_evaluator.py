@@ -7,7 +7,7 @@ import xarray as xr
 
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregator
 from fme.ace.data_loading.batch_data import BatchData, PairedData
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -22,10 +22,6 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    nz = 3
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        torch.arange(nz + 1), torch.arange(nz + 1)
-    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -35,7 +31,6 @@ def test_logs_labels_exist():
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     agg = InferenceEvaluatorAggregator(
-        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
@@ -109,10 +104,6 @@ def test_inference_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    nz = 3
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        torch.arange(nz + 1), torch.arange(nz + 1)
-    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -121,7 +112,6 @@ def test_inference_logs_labels_exist():
     )
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=n_time,
@@ -169,11 +159,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     Test that the inference logs are the correct length when using one or more
     windows.
     """
-    nz = 3
     nx, ny = 4, 4
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        torch.arange(nz + 1), torch.arange(nz + 1)
-    )
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
@@ -182,7 +168,6 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     )
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
-        vertical_coordinate=vertical_coordinate,
         horizontal_coordinates=horizontal_coordinates,
         timestep=TIMESTEP,
         n_timesteps=window_len * n_windows,

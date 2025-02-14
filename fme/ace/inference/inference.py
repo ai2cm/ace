@@ -21,7 +21,6 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
-from fme.ace.inference.derived_variables import get_derived_variable_metadata
 from fme.ace.inference.loop import write_reduced_metrics
 from fme.ace.stepper import (
     SingleModuleStepper,
@@ -31,6 +30,7 @@ from fme.ace.stepper import (
     load_stepper_config,
 )
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
