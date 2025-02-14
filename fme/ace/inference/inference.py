@@ -233,7 +233,8 @@ def run_inference_from_config(config: InferenceConfig):
     beaker_url = logging_utils.log_beaker_url()
     config.configure_wandb(env_vars=env_vars, notes=beaker_url)
 
-    torch.backends.cudnn.benchmark = True
+    if fme.using_gpu():
+        torch.backends.cudnn.benchmark = True
 
     logging_utils.log_versions()
     logging.info(f"Current device is {fme.get_device()}")
