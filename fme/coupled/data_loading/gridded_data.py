@@ -1,8 +1,7 @@
 import datetime
 import logging
-from typing import Literal, Mapping, Optional, Union
+from typing import Dict, Literal, Optional, Union
 
-import numpy as np
 import torch
 
 from fme.ace.data_loading.gridded_data import SizedMap
@@ -12,6 +11,7 @@ from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
+    CoupledCoords,
     CoupledDatasetProperties,
     CoupledVerticalCoordinate,
 )
@@ -22,7 +22,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
         loader: DataLoader[CoupledBatchData],
-        variable_metadata: Mapping[str, VariableMetadata],
+        variable_metadata: Dict[str, VariableMetadata],
         vertical_coordinate: CoupledVerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: datetime.timedelta,
@@ -60,7 +60,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return SizedMap(to_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._variable_metadata
 
     @property
@@ -76,11 +76,12 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return self._timestep
 
     @property
-    def coords(self) -> Mapping[str, np.ndarray]:
-        return {
-            **self.horizontal_coordinates.coords,
-            **self.vertical_coordinate.coords,
-        }
+    def coords(self) -> CoupledCoords:
+        return CoupledCoords(
+            ocean_vertical=self.vertical_coordinate.ocean.coords,
+            atmosphere_vertical=self.vertical_coordinate.atmosphere.coords,
+            horizontal=dict(self.horizontal_coordinates.coords),
+        )
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
@@ -162,5 +163,29 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return SizedMap(on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+    def variable_metadata(self) -> Dict[str, VariableMetadata]:
         return self._properties.variable_metadata
+
+    @property
+    def ocean_timestep(self) -> datetime.timedelta:
+        return self._properties.ocean.timestep
+
+    @property
+    def atmosphere_timestep(self) -> datetime.timedelta:
+        return self._properties.atmosphere.timestep
+
+    @property
+    def n_inner_steps(self) -> int:
+        return self._properties.n_inner_steps
+
+    @property
+    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
+        return self._properties.vertical_coordinate
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        return self._properties.horizontal_coordinates
+
+    @property
+    def coords(self) -> CoupledCoords:
+        return self._properties.coords

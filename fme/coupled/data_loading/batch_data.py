@@ -1,7 +1,8 @@
 import dataclasses
-from typing import List, Sequence, TypeVar
+from typing import Callable, List, Sequence, TypeVar
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
 
@@ -107,6 +108,28 @@ class CoupledBatchData:
             atmosphere_data=self.atmosphere_data.get_start(
                 requirements.atmosphere.names,
                 requirements.atmosphere.n_timesteps,
+            ),
+        )
+
+    def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
+        return self.__class__(
+            ocean_data=self.ocean_data.remove_initial_condition(n_ic_timesteps),
+            atmosphere_data=self.atmosphere_data.remove_initial_condition(
+                n_ic_timesteps
+            ),
+        )
+
+    def compute_derived_variables(
+        self: SelfType,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        forcing_data: SelfType,
+    ) -> SelfType:
+        return self.__class__(
+            ocean_data=self.ocean_data.compute_derived_variables(
+                derive_func, forcing_data.ocean_data
+            ),
+            atmosphere_data=self.atmosphere_data.compute_derived_variables(
+                derive_func, forcing_data.atmosphere_data
             ),
         )
 

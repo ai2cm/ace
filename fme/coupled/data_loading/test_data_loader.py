@@ -46,7 +46,7 @@ def _save_netcdf(
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
         elif realm == "ocean":
-            data_vars[f"depth_{i}"] = float(i)
+            data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
     return ds
@@ -60,6 +60,8 @@ class MockCoupledData:
     atmosphere_dir: str
     means_path: str
     stds_path: str
+    ocean_timedelta: str
+    atmosphere_timedelta: str
 
     def __post_init__(self):
         self.ocean["time"] = cftime.num2date(
@@ -72,6 +74,18 @@ class MockCoupledData:
             units=self.atmosphere["time"].units,
             calendar=self.atmosphere["time"].calendar,
         )
+
+    @property
+    def n_times_ocean(self):
+        return len(self.ocean["time"])
+
+    @property
+    def n_times_atmosphere(self):
+        return len(self.atmosphere["time"])
+
+    @property
+    def img_shape(self) -> List[int]:
+        return list(self.ocean[next(iter(self.ocean.data_vars))].shape[-2:])
 
 
 def create_coupled_data_on_disk(
@@ -125,6 +139,9 @@ def create_coupled_data_on_disk(
         timestep_size=1,
         timestep_start=timestep_start_atmosphere,
     )
+    # _save_netcdf creates integer times in units of "days since 1970-01-01"
+    timedelta_atmos = "1D"
+    timedelta_ocean = f"{ocean_timestep_size}D"
 
     stats_dir = data_dir / "stats"
     stats_dir.mkdir()
@@ -139,6 +156,8 @@ def create_coupled_data_on_disk(
         atmosphere_dir=str(atmos_dir),
         means_path=str(stats_dir / "means.nc"),
         stds_path=str(stats_dir / "stds.nc"),
+        ocean_timedelta=timedelta_ocean,
+        atmosphere_timedelta=timedelta_atmos,
     )
 
 

@@ -53,6 +53,11 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
 
     batch = next(iter(inference_data.loader))
     initial_inference_times = batch.ocean_data.time.isel(time=0)
+    n_timesteps_ocean = config.inference_n_coupled_steps + stepper.ocean.n_ic_timesteps
+    n_timesteps_atmosphere = (
+        config.inference_n_coupled_steps * stepper.n_inner_steps
+        + stepper.atmosphere.n_ic_timesteps
+    )
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
         gridded_operations=train_data.gridded_operations,
@@ -60,10 +65,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         ocean_timestep=stepper.ocean_timestep,
         atmosphere_timestep=stepper.atmosphere_timestep,
         initial_inference_times=initial_inference_times,
-        n_timesteps_ocean=config.inference_n_coupled_steps
-        + stepper.ocean.n_ic_timesteps,
-        n_timesteps_atmosphere=stepper.n_inner_steps
-        + stepper.atmosphere.n_ic_timesteps,
+        n_timesteps_ocean=n_timesteps_ocean,
+        n_timesteps_atmosphere=n_timesteps_atmosphere,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
