@@ -11,19 +11,20 @@ inference:
   loader:
     start_indices:
       times:
-        - '1940-01-01T12:00:00'
-        - '1950-01-01T00:00:00'
-        - '1960-01-01T00:00:00'
-        - '1970-01-01T00:00:00'
-        - '1980-01-01T00:00:00'
-        - '1990-01-01T00:00:00'
         - '1996-01-01T00:00:00'
-        - '2015-01-01T00:00:00'
+        - '1996-02-15T00:00:00'
+        - '1996-04-01T00:00:00'
+        - '1996-05-15T00:00:00'
+        - '1996-07-01T00:00:00'
+        - '1996-08-15T00:00:00'
+        - '1996-10-01T00:00:00'
+        - '1996-11-15T00:00:00'
     dataset:
       data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
     num_data_workers: 32
   aggregator:
     log_histograms: true
+    time_mean_reference_data: /statsdata/time-mean.nc
 logging:
   log_to_screen: true
   log_to_wandb: true
