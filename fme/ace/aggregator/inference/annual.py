@@ -13,26 +13,7 @@ from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
-
-def _plot_mean_and_samples(
-    ax: Any,
-    data: xr.DataArray,
-    mean_label: str,
-    color: str = "cornflowerblue",
-    plot_samples: bool = True,
-):
-    if "year" in data.dims:
-        data.mean("sample").plot(ax=ax, x="year", label=mean_label, color=color)
-    if "year" in data.dims and plot_samples:
-        for i_sample in range(data.sizes["sample"]):
-            data.isel(sample=i_sample).plot(
-                ax=ax,
-                x="year",
-                color=color,
-                alpha=0.4,
-                linestyle="-.",
-                marker="x",
-            )
+from ..plotting import plot_mean_and_samples
 
 
 class PairedGlobalMeanAnnualAggregator:
@@ -138,10 +119,10 @@ class PairedGlobalMeanAnnualAggregator:
                 else:
                     target_label = "target"
                     gen_label = "gen"
-                _plot_mean_and_samples(
+                plot_mean_and_samples(
                     ax, target[name], target_label, color="orange", plot_samples=False
                 )
-                _plot_mean_and_samples(ax, gen[name], gen_label)
+                plot_mean_and_samples(ax, gen[name], gen_label)
 
             ax.set_title(f"{name}")
             ax.set_ylabel(f"{long_name} [{units}]")
@@ -250,7 +231,7 @@ class GlobalMeanAnnualAggregator:
             fig = Figure()  # create directly for cleanup when it leaves scope
             ax = fig.add_subplot(1, 1, 1)  # Add an axes to the figure
             if ds.sizes["year"] > 1:
-                _plot_mean_and_samples(ax, ds[name], "ensemble mean")
+                plot_mean_and_samples(ax, ds[name], "ensemble mean")
             ax.set_title(f"{name}")
             ax.set_ylabel(f"{long_name} [{units}]")
             ax.legend()

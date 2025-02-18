@@ -15,7 +15,7 @@ from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
 
-from .index import INDEX_CALENDAR, NINO34_INDEX
+from .historical_index import INDEX_CALENDAR, NINO34_INDEX
 
 OVERLAP_THRESHOLD = 0.9
 

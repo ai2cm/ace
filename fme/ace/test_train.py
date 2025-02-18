@@ -282,9 +282,15 @@ def _setup(
         "PRESsfc",
         "specific_total_water_0",
         "specific_total_water_1",
+        "surface_temperature",
         "baz",
     ]
-    out_variable_names = ["PRESsfc", "specific_total_water_0", "specific_total_water_1"]
+    out_variable_names = [
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "surface_temperature",
+    ]
     mask_name = "mask"
     all_variable_names = list(set(in_variable_names + out_variable_names))
 

@@ -1,8 +1,9 @@
 import gc
-from typing import List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
 from matplotlib.colors import Colormap
 from matplotlib.figure import Figure
 
@@ -175,3 +176,28 @@ def _stitch_data_panels(data: List[List[np.ndarray]], fill_value) -> np.ndarray:
             stitched_data[start_row:end_row, start_col:end_col] = arr
 
     return stitched_data
+
+
+def plot_mean_and_samples(
+    ax: Any,
+    data: xr.DataArray,
+    mean_label: str,
+    color: str = "cornflowerblue",
+    plot_samples: bool = True,
+    time_series_dim: str = "year",
+    sample_dim: str = "sample",
+):
+    if time_series_dim in data.dims:
+        data.mean(sample_dim).plot(
+            ax=ax, x=time_series_dim, label=mean_label, color=color
+        )
+    if time_series_dim in data.dims and plot_samples:
+        for i_sample in range(data.sizes[sample_dim]):
+            data.isel(sample=i_sample).plot(
+                ax=ax,
+                x=time_series_dim,
+                color=color,
+                alpha=0.4,
+                linestyle="-.",
+                marker="x",
+            )
