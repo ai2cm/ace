@@ -18,9 +18,9 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     """
 
     spectral_transform: str = "sht"
-    filter_type: str = "non-linear"
+    filter_type: str = "linear"
     operator_type: str = "diagonal"
-    scale_factor: int = 16
+    scale_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12
     hard_thresholding_fraction: float = 1.0
