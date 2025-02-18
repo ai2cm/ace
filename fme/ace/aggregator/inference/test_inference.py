@@ -4,11 +4,10 @@ import numpy as np
 import torch
 import xarray as xr
 
-import fme
 from fme.ace.aggregator.inference import InferenceAggregator
 from fme.ace.data_loading.batch_data import BatchData
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -22,9 +21,9 @@ def test_logs_labels_exist():
     n_time = 22
     nx = 2
     ny = 2
-    area_weights = torch.ones(ny).to(fme.get_device())
+    lat, lon = torch.linspace(-90, 90, ny), torch.linspace(-180, 180, nx)
     agg = InferenceAggregator(
-        LatLonOperations(area_weights),
+        LatLonCoordinates(lat, lon).to(device=get_device()),
         n_time,
         datetime.timedelta(seconds=1),
     )
@@ -59,7 +58,7 @@ def test_logs_labels_exist_with_reference_time_means():
     n_time = 22
     nx = 2
     ny = 2
-    area_weights = torch.ones(ny).to(fme.get_device())
+    lat, lon = torch.linspace(-90, 90, ny), torch.linspace(-180, 180, nx)
     reference_time_means = xr.Dataset(
         {
             "a": xr.DataArray(
@@ -69,7 +68,7 @@ def test_logs_labels_exist_with_reference_time_means():
         }
     )
     agg = InferenceAggregator(
-        LatLonOperations(area_weights),
+        LatLonCoordinates(lat, lon).to(device=get_device()),
         n_time,
         datetime.timedelta(seconds=1),
         time_mean_reference_data=reference_time_means,

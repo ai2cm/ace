@@ -10,7 +10,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 
-from .enso import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggregator
+from .enso_coefficient import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggregator
 
 
 @contextmanager

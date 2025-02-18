@@ -34,6 +34,14 @@ class GriddedOperations(abc.ABC):
         self, truth: torch.Tensor, predicted: torch.Tensor
     ): ...
 
+    @abc.abstractmethod
+    def regional_area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+    ) -> torch.Tensor: ...
+
     def to_state(self) -> Dict[str, Any]:
         return {
             "type": self.__class__.__name__,
@@ -95,7 +103,10 @@ def get_all_subclasses(cls: Type[T]) -> List[Type[T]]:
 class LatLonOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-2, -1)
 
-    def __init__(self, area_weights: torch.Tensor):
+    def __init__(
+        self,
+        area_weights: torch.Tensor,
+    ):
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
 
@@ -108,6 +119,22 @@ class LatLonOperations(GriddedOperations):
             area_weights = self._device_area
         return metrics.weighted_mean(
             data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+
+    def regional_area_weighted_mean(
+        self, data: torch.Tensor, regional_weights: torch.Tensor, keepdim: bool = False
+    ) -> torch.Tensor:
+        if regional_weights.device.type != data.device.type:
+            regional_weights = regional_weights.to(data.device)
+        if data.device.type == "cpu":
+            regional_area_weights = regional_weights * self._cpu_area
+        else:
+            regional_area_weights = regional_weights * self._device_area
+        return metrics.weighted_mean(
+            data,
+            regional_area_weights,
+            dim=self.HORIZONTAL_DIMS,
+            keepdim=keepdim,
         )
 
     def area_weighted_gradient_magnitude_percent_diff(
@@ -138,6 +165,13 @@ class HEALPixOperations(GriddedOperations):
     ):
         return metrics.gradient_magnitude_percent_diff(
             truth, predicted, weights=None, dim=self.HORIZONTAL_DIMS
+        )
+
+    def regional_area_weighted_mean(
+        self, data: torch.Tensor, weights: torch.Tensor, keepdim: bool = False
+    ) -> torch.Tensor:
+        raise NotImplementedError(
+            "Regional area weighted mean is not implemented for HEALPix."
         )
 
     def get_initialization_kwargs(self) -> Dict[str, Any]:
