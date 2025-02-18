@@ -265,7 +265,7 @@ def run_inference_from_config(config: InferenceConfig):
 
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     aggregator = config.aggregator.build(
-        gridded_operations=data.gridded_operations,
+        horizontal_coordinates=data.horizontal_coordinates,
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
         timestep=data.timestep,
         variable_metadata=variable_metadata,

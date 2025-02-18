@@ -24,13 +24,18 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import Table, WandB
 
 from ..one_step.reduced import MeanAggregator as OneStepMeanAggregator
 from .annual import GlobalMeanAnnualAggregator, PairedGlobalMeanAnnualAggregator
-from .enso import EnsoCoefficientEvaluatorAggregator
+from .enso import (
+    EnsoCoefficientEvaluatorAggregator,
+    LatLonRegion,
+    PairedRegionalIndexAggregator,
+    RegionalIndexAggregator,
+)
 from .histogram import HistogramAggregator
 from .reduced import MeanAggregator, SingleTargetMeanAggregator
 from .seasonal import SeasonalAggregator
@@ -42,6 +47,8 @@ from .zonal_mean import ZonalMeanAggregator
 wandb = WandB.get_instance()
 APPROXIMATELY_TWO_YEARS = datetime.timedelta(days=730)
 SLIGHTLY_LESS_THAN_FIVE_YEARS = datetime.timedelta(days=1800)
+NINO34_LAT = (-5, 5)
+NINO34_LON = (190, 240)
 
 
 class _Aggregator(Protocol):
@@ -323,6 +330,29 @@ class InferenceEvaluatorAggregator(
                     monthly_reference_data=monthly_reference_data,
                 )
             )
+            if isinstance(horizontal_coordinates, LatLonCoordinates) and isinstance(
+                ops, LatLonOperations
+            ):
+                nino34_region = LatLonRegion(
+                    lat_bounds=NINO34_LAT,
+                    lon_bounds=NINO34_LON,
+                    lat=horizontal_coordinates.lat,
+                    lon=horizontal_coordinates.lon,
+                )
+                self._time_dependent_aggregators["enso_index"] = (
+                    PairedRegionalIndexAggregator(
+                        target_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                            variable_name="surface_temperature",
+                        ),
+                        prediction_aggregator=RegionalIndexAggregator(
+                            regional_weights=nino34_region.regional_weights,
+                            regional_mean=ops.regional_area_weighted_mean,
+                            variable_name="surface_temperature",
+                        ),
+                    )
+                )
         if n_timesteps * timestep > SLIGHTLY_LESS_THAN_FIVE_YEARS:
             self._time_dependent_aggregators["enso_coefficient"] = (
                 EnsoCoefficientEvaluatorAggregator(
@@ -533,7 +563,7 @@ class InferenceAggregatorConfig:
 
     def build(
         self,
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: HorizontalCoordinates,
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
@@ -543,7 +573,7 @@ class InferenceAggregatorConfig:
         else:
             time_means = None
         return InferenceAggregator(
-            gridded_operations=gridded_operations,
+            horizontal_coordinates=horizontal_coordinates,
             n_timesteps=n_timesteps,
             timestep=timestep,
             variable_metadata=variable_metadata,
@@ -567,7 +597,7 @@ class InferenceAggregator(
 
     def __init__(
         self,
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: HorizontalCoordinates,
         n_timesteps: int,
         timestep: datetime.timedelta,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
@@ -576,7 +606,7 @@ class InferenceAggregator(
     ):
         """
         Args:
-            gridded_operations: Gridded operations for computing horizontal reductions.
+            horizontal_coordinates: Data horizontal coordinates.
             n_timesteps: Number of timesteps in the model.
             timestep: Timestep of the model.
             variable_metadata: Mapping of variable names their metadata that will
@@ -586,6 +616,7 @@ class InferenceAggregator(
         """
         self._log_time_series = log_global_mean_time_series
         aggregators: Dict[str, _Aggregator] = {}
+        gridded_operations = horizontal_coordinates.gridded_operations
         if log_global_mean_time_series:
             aggregators["mean"] = SingleTargetMeanAggregator(
                 gridded_operations,
@@ -601,11 +632,29 @@ class InferenceAggregator(
             timestep,
             variable_metadata,
         )
+        if (
+            isinstance(horizontal_coordinates, LatLonCoordinates)
+            and isinstance(gridded_operations, LatLonOperations)
+            and n_timesteps * timestep > APPROXIMATELY_TWO_YEARS
+        ):
+            nino34_region = LatLonRegion(
+                lat_bounds=NINO34_LAT,
+                lon_bounds=NINO34_LON,
+                lat=horizontal_coordinates.lat,
+                lon=horizontal_coordinates.lon,
+            )
+            aggregators["enso_index"] = RegionalIndexAggregator(
+                regional_weights=nino34_region.regional_weights,
+                regional_mean=gridded_operations.regional_area_weighted_mean,
+                variable_name="surface_temperature",
+            )
         self._aggregators = aggregators
         self._summary_aggregators = {
-            name: aggregators[name] for name in ["time_mean", "annual"]
+            name: aggregators[name]
+            for name in ["time_mean", "annual", "enso_index"]
+            if name in aggregators
         }
-        self._time_dependent_aggregator_names = ["annual"]
+        self._time_dependent_aggregator_names = ["annual", "enso_index"]
         self._n_timesteps_seen = 0
 
     @property

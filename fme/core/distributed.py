@@ -228,7 +228,7 @@ def gather_irregular(
 ) -> Optional[List[torch.Tensor]]:
     """
     Gather a tensor from all processes to the root process. The rank tensors
-    may have diferent dimension lengths, but must have the same number of dimesions.
+    may have diferent dimension lengths, but must have the same number of dimensions.
     temporarily padded with `fill_value` where its dimension length is smaller than the
     maxmimum dimension length, but the padding is removed prior to returning the
     gathered tensors.
