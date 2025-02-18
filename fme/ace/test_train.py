@@ -314,7 +314,7 @@ def _setup(
         data_dir / "data.nc",
         dim_sizes,
         variable_names=all_variable_names + [mask_name],
-        timestep_days=1,
+        timestep_days=timestep_days,
     )
     save_scalar_netcdf(
         stats_dir / "stats-mean.nc",
@@ -327,27 +327,23 @@ def _setup(
 
     monthly_dim_sizes: DimSizes
     if use_healpix:
-        hpx_coords = HEALPixCoordinates(
-            face=torch.Tensor(np.arange(12)),
-            width=torch.Tensor(np.arange(16)),
-            height=torch.Tensor(np.arange(16)),
-        )
-        monthly_dim_sizes = get_sizes(
-            spatial_dims=hpx_coords, n_time=10 * 12, nz_interface=1
-        )
+        # monthly reference functionality not supported for HEALPix
+        # see https://github.com/ai2cm/full-model/issues/1561
+        monthly_data_filename = "null"
     else:
         monthly_dim_sizes = get_sizes(n_time=10 * 12, nz_interface=1)
-    monthly_reference_data = MonthlyReferenceData(
-        path=data_dir,
-        names=out_variable_names,
-        dim_sizes=monthly_dim_sizes,
-        n_ensemble=3,
-    )
+        monthly_reference_data = MonthlyReferenceData(
+            path=data_dir,
+            names=out_variable_names,
+            dim_sizes=monthly_dim_sizes,
+            n_ensemble=3,
+        )
+        monthly_data_filename = monthly_reference_data.data_filename
 
     train_config_filename, inference_config_filename = _get_test_yaml_files(
         train_data_path=data_dir,
         valid_data_path=data_dir,
-        monthly_data_filename=monthly_reference_data.data_filename,
+        monthly_data_filename=monthly_data_filename,
         results_dir=results_dir,
         global_means_path=stats_dir / "stats-mean.nc",
         global_stds_path=stats_dir / "stats-stddev.nc",
