@@ -20,7 +20,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.ace.inference.data_writer import DataWriter, DataWriterConfig
+from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.loop import write_reduced_metrics
 from fme.ace.stepper import (
     SingleModuleStepper,
@@ -188,9 +188,9 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> DataWriter:
+    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
         variable_metadata = get_derived_variable_metadata() | data.variable_metadata
-        return self.data_writer.build(
+        return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
             n_initial_conditions=data.n_initial_conditions,
@@ -277,7 +277,7 @@ def run_inference_from_config(config: InferenceConfig):
     logging.info("Starting inference")
     record_logs = get_record_to_wandb(label="inference")
     run_inference(
-        predict=stepper.predict,
+        predict=stepper.predict_paired,
         data=data,
         writer=writer,
         aggregator=aggregator,

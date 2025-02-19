@@ -5,7 +5,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.batch_data import BatchData, PairedData
 from fme.core.device import get_device
 
 
@@ -145,3 +145,31 @@ def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int
         assert np.all(
             np.isnan(prepended.data[name][:, :n_ic_timesteps, ...].cpu().numpy())
         )
+
+
+def test_paired_data_forcing_target_data():
+    n_samples = 2
+    n_times = 5
+    n_lat = 8
+    n_lon = 16
+    horizontal_dims = ["lat", "lon"]
+    target_data = get_batch_data(
+        names=["foo", "bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    gen_data = get_batch_data(
+        names=["bar"],
+        n_samples=n_samples,
+        n_times=n_times,
+        horizontal_dims=horizontal_dims,
+        n_lat=n_lat,
+        n_lon=n_lon,
+    )
+    gen_data.time = target_data.time
+    paired_data = PairedData.from_batch_data(prediction=gen_data, reference=target_data)
+    assert paired_data.forcing == {"foo": target_data.data["foo"]}
+    assert paired_data.target == {"bar": target_data.data["bar"]}

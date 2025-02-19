@@ -617,7 +617,7 @@ class DiffusionStepper(
         return (
             PairedData.from_batch_data(
                 prediction=prediction,
-                target=self.get_forward_data(
+                reference=self.get_forward_data(
                     forcing, compute_derived_variables=compute_derived_variables
                 ),
             ),
@@ -676,7 +676,7 @@ class DiffusionStepper(
                 forcing=data,
             )
             gen_data = output.prediction
-            target_data = output.target
+            target_data = output.reference
             n_forward_steps = output.time.shape[1]
 
             # compute loss for each timestep
