@@ -42,6 +42,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     spectral_transform: str = "sht"
     filter_type: str = "non-linear"
     operator_type: str = "diagonal"
+    residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
     num_layers: int = 12
