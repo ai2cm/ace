@@ -217,9 +217,8 @@ def _write_test_yaml_files(
         ),
     ],
 )
-def test_train_and_inference_inline(
-    tmp_path, log_zonal_mean_images, very_fast_only: bool
-):
+def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bool):
+    """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
 

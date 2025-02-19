@@ -369,8 +369,8 @@ def _setup(
         "NoiseConditionedSFNO",
     ],
 )
-def test_train_and_inference_inline(tmp_path, nettype, very_fast_only: bool):
-    """Make sure that training and inference run without errors
+def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
+    """Ensure that ACE training and subsequent standalone inference run without errors.
 
     Args:
         tmp_path: pytext fixture for temporary workspace.
