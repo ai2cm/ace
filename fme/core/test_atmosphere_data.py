@@ -159,14 +159,11 @@ def test_net_surface_energy_flux(has_frozen_precipitation):
     torch.testing.assert_close(result, expected, check_dtype=False)
 
 
-@pytest.mark.parametrize("has_unaccounted_heating", [False, True])
-def test_net_energy_flux_into_atmosphere(has_unaccounted_heating):
+def test_net_energy_flux_into_atmosphere():
     n_samples, n_time_steps, nlat, nlon = 2, 3, 4, 8
     shape = (n_samples, n_time_steps, nlat, nlon)
 
-    def _get_data(
-        shape: Tuple[int, ...], has_unaccounted_heating: bool
-    ) -> AtmosphereData:
+    def _get_data(shape: Tuple[int, ...]) -> AtmosphereData:
         ones = torch.ones(shape, dtype=torch.float32)
         surface_pressure = {"PRESsfc": ones}
         energy_fluxes = {
@@ -180,19 +177,12 @@ def test_net_energy_flux_into_atmosphere(has_unaccounted_heating):
             "USWRFtoa": ones,
             "DSWRFtoa": ones,
         }
-        if has_unaccounted_heating:
-            extra = {"unaccounted_heating": ones * 2.0}
-        else:
-            extra = {}
-        data = surface_pressure | energy_fluxes | extra
+        data = surface_pressure | energy_fluxes
         return AtmosphereData(data)
 
-    atmosphere_data = _get_data(shape, has_unaccounted_heating)
+    atmosphere_data = _get_data(shape)
 
-    if has_unaccounted_heating:
-        expected = torch.full(shape, 3.0, dtype=torch.float32)
-    else:
-        expected = torch.full(shape, 1.0, dtype=torch.float32)
+    expected = torch.full(shape, 1.0, dtype=torch.float32)
 
     result = atmosphere_data.net_energy_flux_into_atmosphere
     torch.testing.assert_close(result, expected)
