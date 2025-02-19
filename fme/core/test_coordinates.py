@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from fme.core.coordinates import (
+    DepthCoordinate,
     HEALPixCoordinates,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
@@ -34,6 +35,10 @@ from fme.core.coordinates import (
                 height=torch.tensor([4, 5, 6]),
                 width=torch.tensor([7, 8, 9]),
             ),
+        ),
+        (
+            DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
+            DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
         ),
     ],
 )
@@ -76,6 +81,14 @@ def test_equality(first, second):
                 width=torch.tensor([7, 8, 9]),
             ),
         ),
+        (
+            DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
+            DepthCoordinate(idepth=torch.tensor([2, 2, 3]), mask=torch.tensor([4, 5])),
+        ),
+        (
+            DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([4, 5])),
+            DepthCoordinate(idepth=torch.tensor([1, 2, 3]), mask=torch.tensor([5, 5])),
+        ),
     ],
 )
 def test_inequality(first, second):
@@ -94,7 +107,7 @@ def test_vertical_integral_shape():
 
 def test_vertical_coordinates_raises_value_error():
     ak, bk = torch.arange(3), torch.arange(4)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="ak and bk must have the same length"):
         HybridSigmaPressureCoordinate(ak, bk)
 
 
@@ -113,3 +126,62 @@ def test_interface_pressure():
     assert pinterface.shape == (2, 2, 3)
     assert pinterface[0, 0, 0] == ak[0]
     assert pinterface[0, 0, -1] == bk[-1] * psfc[0, 0]
+
+
+@pytest.mark.parametrize(
+    "idepth, mask, msg",
+    [
+        (torch.tensor([[1, 2, 3]]), torch.tensor([4, 5]), "1-dimensional tensor"),
+        (torch.tensor([1, 2, 3]), torch.tensor([4, 5, 6]), "last dimension of mask"),
+        (torch.tensor([1]), torch.tensor([]), "idepth must have at least two"),
+    ],
+    ids=["idepth 2D", "mask inconsistent with idepth", "idepth too short"],
+)
+def test_depth_coordinate_validation(idepth, mask, msg):
+    with pytest.raises(ValueError, match=msg):
+        DepthCoordinate(idepth, mask)
+
+
+def test_depth_coordinate_integral_raises():
+    idepth = torch.tensor([1, 2, 3])
+    mask = torch.tensor([1, 1])
+    data = torch.tensor([1, 1, 4])
+    coords = DepthCoordinate(idepth, mask)
+    with pytest.raises(ValueError, match="dimension of integrand must match"):
+        coords.integral(data)
+
+
+@pytest.mark.parametrize(
+    "idepth, mask, expected",
+    [
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 1]), torch.tensor(3)),
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 0]), torch.tensor(1)),
+        (torch.tensor([1, 2, 3]), torch.tensor([0, 0]), torch.tensor(0)),
+        (torch.tensor([1, 2, 4]), torch.tensor([1, 1]), torch.tensor(5)),
+    ],
+    ids=[
+        "mask is all ones",
+        "second layer is masked out",
+        "all layers masked out",
+        "varying depth",
+    ],
+)
+def test_depth_integral_1d_data(idepth, mask, expected):
+    data = torch.arange(1, len(idepth))
+    result = DepthCoordinate(idepth, mask).integral(data)
+    torch.testing.assert_close(result, expected)
+
+
+def test_depth_integral_3d_data():
+    img_shape = 2, 4
+    idepth = torch.tensor([1, 2, 4])
+    mask = torch.tensor([1, 1])
+    nz = len(mask)
+    data = torch.arange(1, img_shape[0] * img_shape[1] * nz + 1).reshape(
+        img_shape + (nz,)
+    )
+    depth_0 = idepth[1] - idepth[0]
+    depth_1 = idepth[2] - idepth[1]
+    expected = data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1
+    result = DepthCoordinate(idepth, mask).integral(data)
+    torch.testing.assert_close(result, expected)
