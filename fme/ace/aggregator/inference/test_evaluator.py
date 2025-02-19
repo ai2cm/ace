@@ -47,7 +47,7 @@ def test_logs_labels_exist():
             prediction={
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
-            target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
             time=time,
         ),
     )
@@ -125,7 +125,7 @@ def test_inference_logs_labels_exist():
             prediction={
                 "a": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
-            target={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
+            reference={"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())},
             time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
         ),
     )
@@ -185,7 +185,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
             sample_data["a"][..., i, :, :] = float(i_start + i)
         paired_data = PairedData.new_on_device(
             prediction=sample_data,
-            target=target_data.data,
+            reference=target_data.data,
             time=xr.DataArray(np.zeros((2, window_len)), dims=["sample", "time"]),
         )
         logs = agg.record_batch(

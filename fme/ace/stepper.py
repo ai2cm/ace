@@ -863,9 +863,9 @@ class SingleModuleStepper(
                 prediction.
 
         Returns:
-            A paired data containing the prediction paired with all forcing data at the
-            same timesteps and the prediction's final state which can be used as a
-            new initial condition.
+            A tuple of 1) a paired data object, containing the prediction paired with
+            all target/forcing data at the same timesteps, and 2) the prediction's
+            final state, which can be used as a new initial condition.
         """
         prediction, new_initial_condition = self.predict(
             initial_condition, forcing, compute_derived_variables
@@ -873,7 +873,7 @@ class SingleModuleStepper(
         return (
             PairedData.from_batch_data(
                 prediction=prediction,
-                target=self.get_forward_data(
+                reference=self.get_forward_data(
                     forcing, compute_derived_variables=compute_derived_variables
                 ),
             ),

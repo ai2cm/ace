@@ -252,7 +252,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         """
         for writer in self._writers:
             writer.append_batch(
-                target=dict(batch.target),
+                target=dict(batch.reference),
                 prediction=dict(batch.prediction),
                 start_timestep=self._n_timesteps_seen,
                 batch_time=batch.time,
@@ -316,7 +316,7 @@ def _write(
     ds.to_netcdf(str(Path(path) / filename))
 
 
-class DataWriter(WriterABC[PrognosticState, BatchData]):
+class DataWriter(WriterABC[PrognosticState, PairedData]):
     def __init__(
         self,
         path: str,
@@ -389,13 +389,22 @@ class DataWriter(WriterABC[PrognosticState, BatchData]):
         self.coords = coords
         self._n_timesteps_seen = 0
 
-    def append_batch(self, batch: BatchData):
+    def append_batch(self, batch: PairedData):
         """
-        Append prediction data to the file.
+        Append prediction data to the file. The prognostic data
+        and forcing data are merged before writing.
 
         Args:
-            batch: Data to be written.
+            batch: Paired data to be written.
         """
+        merged = {**batch.prediction, **batch.forcing}
+        unpaired_batch = BatchData.new_on_device(
+            data=merged,
+            time=batch.time,
+        )
+        self._append_batch(unpaired_batch)
+
+    def _append_batch(self, batch: BatchData):
         for writer in self._writers:
             writer.append_batch(
                 data=dict(batch.data),
