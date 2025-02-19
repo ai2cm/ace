@@ -16,7 +16,7 @@ from typing import (
 import torch
 import xarray as xr
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.aggregator import (
@@ -385,7 +385,7 @@ class InferenceEvaluatorAggregator(
             raise ValueError("No prediction values in data")
         if len(data.target) == 0:
             raise ValueError("No target values in data")
-        target_data = {k: v for k, v in data.target.items() if k in data.prediction}
+        target_data = data.target
         target_data_norm = self._normalize(target_data)
         gen_data_norm = self._normalize(data.prediction)
         for aggregator in self._aggregators.values():
@@ -585,7 +585,7 @@ class InferenceAggregatorConfig:
 class InferenceAggregator(
     InferenceAggregatorABC[
         PrognosticState,
-        BatchData,
+        PairedData,
     ]
 ):
     """
@@ -662,21 +662,21 @@ class InferenceAggregator(
         return self._log_time_series
 
     @torch.no_grad()
-    def record_batch(self, data: BatchData) -> InferenceLogs:
+    def record_batch(self, data: PairedData) -> InferenceLogs:
         """
         Record a batch of data.
 
         Args:
             data: Batch of data to record.
         """
-        if len(data.data) == 0:
+        if len(data.prediction) == 0:
             raise ValueError("data is empty")
         for name in self._aggregators:
             if name in self._time_dependent_aggregator_names:
-                self._aggregators[name].record_batch(data.time, data.data)
+                self._aggregators[name].record_batch(data.time, data.prediction)
             else:
                 self._aggregators[name].record_batch(
-                    data=data.data,
+                    data=data.prediction,
                     i_time_start=self._n_timesteps_seen,
                 )
         n_times = data.time.shape[1]
