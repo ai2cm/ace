@@ -32,12 +32,12 @@ from .initialization import trunc_normal_
 # helpers
 from .layers import (
     MLP,
+    ConditionalLayerNorm,
+    Context,
     ContextConfig,
     DropPath,
     RealFFT2,
     SpectralAttention2d,
-    ConditionalLayerNorm,
-    Context,
 )
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
 
@@ -364,6 +364,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         operator_type: str = "diagonal",
         img_shape: Tuple[int, int] = (721, 1440),
         scale_factor: int = 1,
+        residual_filter_factor: int = 1,
         in_chans: int = 2,
         out_chans: int = 2,
         embed_dim: int = 256,
@@ -414,6 +415,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         )
         self.scale_factor = (
             params.scale_factor if hasattr(params, "scale_factor") else scale_factor
+        )
+        self.residual_filter_factor = (
+            params.residual_filter_factor
+            if hasattr(params, "residual_filter_factor")
+            else residual_filter_factor
         )
         if self.scale_factor != 1:
             raise NotImplementedError(
@@ -486,9 +492,30 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # Compute the maximum frequencies in h and in w
         modes_lat = int(self.h * self.hard_thresholding_fraction)
         modes_lon = int((self.w // 2 + 1) * self.hard_thresholding_fraction)
+        modes_lat_residual = int(self.img_shape[0] // self.residual_filter_factor)
+        modes_lon_residual = int(
+            self.img_shape[1] // self.residual_filter_factor // 2 + 1
+        )
 
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
+
+        if residual_filter_factor == 1:
+            self.residual_filter_down = nn.Identity()
+            self.residual_filter_up = nn.Identity()
+        else:
+            self.residual_filter_down = th.RealSHT(
+                *self.img_shape,
+                lmax=modes_lat_residual,
+                mmax=modes_lon_residual,
+                grid=data_grid,
+            ).float()
+            self.residual_filter_up = th.InverseRealSHT(
+                *self.img_shape,
+                lmax=modes_lat_residual,
+                mmax=modes_lon_residual,
+                grid=data_grid,
+            ).float()
 
         # prepare the spectral transforms
         if self.spectral_transform == "sht":
@@ -668,7 +695,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     def forward(self, x: torch.Tensor, context: Context):
         # save big skip
         if self.big_skip:
-            residual = x
+            residual = self.residual_filter_up(self.residual_filter_down(x))
 
         if self.checkpointing >= 1:
             x = checkpoint(self.encoder, x)
