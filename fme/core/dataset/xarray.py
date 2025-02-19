@@ -23,6 +23,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.device import get_device
+from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .config import RepeatedInterval, TimeSlice, XarrayDataConfig
@@ -93,7 +94,24 @@ def _get_vertical_coordinate(
 
     coordinate: VerticalCoordinate
     if len(idepth_list) > 0:
-        coordinate = DepthCoordinate(torch.as_tensor(idepth_list, dtype=dtype))
+        if "mask_0" in ds.data_vars:
+            mask_layers = {
+                name: torch.as_tensor(ds[name].values, dtype=dtype)
+                for name in ds.data_vars
+                if "mask_" in name
+            }
+            for name in mask_layers:
+                if "time" in ds[name].dims:
+                    raise ValueError("The ocean mask must by time-independent.")
+            stacker = Stacker({"mask": ["mask_"]})
+            mask = stacker("mask", mask_layers)
+        else:
+            logger.warning(
+                "Dataset does not contain a mask. Providing a DepthCoordinate with "
+                "mask set to 1 at all layers."
+            )
+            mask = torch.ones(len(idepth_list) - 1, dtype=dtype)
+        coordinate = DepthCoordinate(torch.as_tensor(idepth_list, dtype=dtype), mask)
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(
             ak=torch.as_tensor(ak_list, dtype=dtype),

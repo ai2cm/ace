@@ -61,7 +61,8 @@ def save_coupled_stepper(
     )
     area = torch.ones(data_shape[-2:], device=get_device())
     ocean_vertical_coordinate = DepthCoordinate(
-        idepth=torch.arange(nz_interface, device=get_device())
+        idepth=torch.arange(nz_interface, device=get_device()),
+        mask=torch.ones(nz_interface - 1),
     )
     atmos_vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(nz_interface, device=get_device()),
