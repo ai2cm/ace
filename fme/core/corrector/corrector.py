@@ -458,14 +458,12 @@ def _force_conserve_total_energy(
             f"Method {method} not implemented for total energy conservation"
         )
     input = AtmosphereData(input_data, vertical_coordinate)
-    heating_tensor = torch.full_like(next(iter(gen_data.values())), unaccounted_heating)
-    gen_and_heating_data = dict(gen_data) | {"unaccounted_heating": heating_tensor}
-    gen = AtmosphereData(gen_and_heating_data | dict(forcing_data), vertical_coordinate)
+    gen = AtmosphereData(dict(gen_data) | dict(forcing_data), vertical_coordinate)
     if torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Surface pressure has a non-positive value, skipping energy correction."
         )
-        return gen_and_heating_data
+        return dict(gen_data)
 
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
@@ -479,7 +477,7 @@ def _force_conserve_total_energy(
 
     desired_energy_path_global_mean = (
         input_energy_path_global_mean
-        + energy_flux_global_mean * timestep.total_seconds()
+        + (energy_flux_global_mean + unaccounted_heating) * timestep.total_seconds()
     )
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
@@ -494,8 +492,8 @@ def _force_conserve_total_energy(
         name = f"air_temperature_{k}"
         gen.data[name] = gen.data[name] + temperature_correction
 
-    # filter required here because we merged forcing data into gen_data above
-    return {k: v for k, v in gen.data.items() if k in gen_and_heating_data}
+    # filter required here because we merged forcing data into gen above
+    return {k: v for k, v in gen.data.items() if k in gen_data}
 
 
 def _energy_correction_factor(

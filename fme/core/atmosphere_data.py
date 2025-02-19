@@ -233,21 +233,8 @@ class AtmosphereData:
         )
 
     @property
-    def unaccounted_heating(self) -> torch.Tensor:
-        # this represents some column-integrated heating which is not accounted for
-        # in other surface/TOA terms of the energy budget. Units are W/m**2.
-        try:
-            return self._data["unaccounted_heating"]
-        except KeyError:
-            return torch.zeros_like(self.surface_pressure)
-
-    @property
     def net_energy_flux_into_atmosphere(self) -> torch.Tensor:
-        return (
-            self.net_top_of_atmosphere_energy_flux
-            - self.net_surface_energy_flux
-            + self.unaccounted_heating
-        )
+        return self.net_top_of_atmosphere_energy_flux - self.net_surface_energy_flux
 
     @property
     def precipitation_rate(self) -> torch.Tensor:

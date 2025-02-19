@@ -153,19 +153,6 @@ def implied_tendency_of_total_energy_ace2_path_due_to_advection(
     return implied_column_heating
 
 
-@register(
-    VariableMetadata(
-        "W/m**2",
-        "Column-integrated heating due to unaccounted sources",
-    )
-)
-def unaccounted_heating(data: AtmosphereData, timestep: datetime.timedelta):
-    """Represents some column-integrated heating which is not accounted for
-    in other surface/TOA terms of the energy budget.
-    """
-    return data.unaccounted_heating
-
-
 def _compute_derived_variable(
     data: Dict[str, torch.Tensor],
     vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
