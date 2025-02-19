@@ -28,24 +28,31 @@ def _save_netcdf(
     realm: Literal["ocean", "atmosphere"],
     timestep_size=1,
     timestep_start=0,
+    nz=2,
 ):
     data_vars = {}
+    dim_sizes_without_time = {k: v for k, v in dim_sizes.items() if k != "time"}
     for name in variable_names:
-        if name == "constant_mask":
-            data = np.ones(list(dim_sizes.values()))
+        if name.startswith("mask_"):
+            dim_sizes_to_use = dim_sizes_without_time
         else:
-            data = np.random.randn(*list(dim_sizes.values()))
+            dim_sizes_to_use = dim_sizes
+        if name == "constant_mask":
+            data = np.ones(list(dim_sizes_to_use.values()))
+        else:
+            data = np.random.randn(*list(dim_sizes_to_use.values()))
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)  # type: ignore
         data_vars[name] = xr.DataArray(
-            data, dims=list(dim_sizes), attrs={"units": "m", "long_name": name}
+            data, dims=list(dim_sizes_to_use), attrs={"units": "m", "long_name": name}
         )
     coords = _get_coords(dim_sizes, calendar, timestep_size, timestep_start)
-    for i in range(7):
-        if realm == "atmosphere":
+    if realm == "atmosphere":
+        for i in range(nz):
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
-        elif realm == "ocean":
+    elif realm == "ocean":
+        for i in range(nz):
             data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
