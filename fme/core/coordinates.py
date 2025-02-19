@@ -263,17 +263,34 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 @dataclasses.dataclass
 class DepthCoordinate(VerticalCoordinate):
     """
-    Defines depth in meters at interface levels.
+    Defines depth in meters at interface levels and accounts for a constant mask.
+
     Parameters:
         idepth: depth in meters at interface levels as a 1-dimensional tensor.
+        mask: mask indicating valid vertical layers at each spatial point. Must be equal
+            to 1 in valid points and 0 elsewhere. The last dimension is the vertical and
+            it must be one shorter than idepth. The mask may have additional dimensions
+            before the vertical, which are assumed to be broadcastable to match the
+            integrand when computing integrals.
     """
 
     idepth: torch.Tensor
+    mask: torch.Tensor
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
             raise ValueError(
                 f"idepth must be a 1-dimensional tensor. Got shape: {self.idepth.shape}"
+            )
+        if len(self.idepth) < 2:
+            raise ValueError(
+                f"idepth must have at least two elements. Got {self.idepth}."
+            )
+        if self.idepth.shape[0] != self.mask.shape[-1] + 1:
+            raise ValueError(
+                "The last dimension of mask must be one shorter than length of idepth."
+                f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
+                f"{self.mask.shape}."
             )
 
     def __len__(self):
@@ -321,15 +338,19 @@ class DepthCoordinate(VerticalCoordinate):
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
-        return DepthCoordinate(self.idepth.to(device))
+        idepth_on_device = self.idepth.to(device)
+        mask_on_device = self.mask.to(device)
+        return DepthCoordinate(idepth_on_device, mask_on_device)
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
             return False
-        return torch.allclose(self.idepth, other.idepth)
+        idepth_equals = torch.allclose(self.idepth, other.idepth)
+        mask_equals = torch.allclose(self.mask, other.mask)
+        return idepth_equals and mask_equals
 
     def as_dict(self) -> TensorMapping:
-        return {"idepth": self.idepth}
+        return {"idepth": self.idepth, "mask": self.mask}
 
     def integral(self, integrand: torch.Tensor) -> torch.Tensor:
         """Compute the vertical integral of the integrand.
@@ -344,6 +365,9 @@ class DepthCoordinate(VerticalCoordinate):
 
         Returns:
             A tensor of same shape as integrand but without the last dimension.
+
+        Note:
+            NaNs in the integrand are treated as zeros.
         """
         if len(self.idepth) != integrand.shape[-1] + 1:
             raise ValueError(
@@ -351,7 +375,7 @@ class DepthCoordinate(VerticalCoordinate):
                 "layers in the depth vertical coordinate."
             )
         layer_thickness = self.idepth.diff(dim=-1)
-        return (integrand * layer_thickness).sum(dim=-1)
+        return (integrand * layer_thickness * self.mask).nansum(dim=-1)
 
 
 @dataclasses.dataclass
