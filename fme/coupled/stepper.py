@@ -300,12 +300,14 @@ def _concat_list_of_paired_data(
     paired_data_list: List[PairedData], dim: int
 ) -> PairedData:
     data_list = [paired_data.prediction for paired_data in paired_data_list]
-    target_list = [paired_data.target for paired_data in paired_data_list]
+    target_list = [paired_data.reference for paired_data in paired_data_list]
     data_concat = _concat_list_of_dicts(data_list, dim=dim)
     target_concat = _concat_list_of_dicts(target_list, dim=dim)
     times_list = [paired_data.time for paired_data in paired_data_list]
     times_concat = xr.concat(times_list, dim="time")
-    return PairedData(prediction=data_concat, target=target_concat, time=times_concat)
+    return PairedData(
+        prediction=data_concat, reference=target_concat, time=times_concat
+    )
 
 
 @dataclasses.dataclass
@@ -619,7 +621,7 @@ class CoupledStepper(
             output_atmos.append(
                 PairedData.from_batch_data(
                     prediction=output,
-                    target=self.atmosphere.get_forward_data(
+                    reference=self.atmosphere.get_forward_data(
                         atmos_window,
                         compute_derived_variables=compute_derived_variables,
                     ),
@@ -645,7 +647,7 @@ class CoupledStepper(
             output_ocean.append(
                 PairedData.from_batch_data(
                     prediction=output,
-                    target=self.ocean.get_forward_data(
+                    reference=self.ocean.get_forward_data(
                         ocean_window,
                         compute_derived_variables=False,
                     ),
@@ -704,7 +706,7 @@ class CoupledStepper(
                 # compute ocean step metrics
                 step_loss = self._get_step_loss(
                     output.ocean_data.prediction,
-                    output.ocean_data.target,
+                    output.ocean_data.reference,
                     0,
                     self.ocean,
                 )
@@ -717,7 +719,7 @@ class CoupledStepper(
         ocean_stepped = TrainOutput(
             metrics={},
             gen_data=dict(output.ocean_data.prediction),
-            target_data=dict(output.ocean_data.target),
+            target_data=dict(output.ocean_data.reference),
             time=output.ocean_data.time,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
@@ -725,7 +727,7 @@ class CoupledStepper(
         atmos_stepped = TrainOutput(
             metrics={},
             gen_data=dict(output.atmosphere_data.prediction),
-            target_data=dict(output.atmosphere_data.target),
+            target_data=dict(output.atmosphere_data.reference),
             time=output.atmosphere_data.time,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,

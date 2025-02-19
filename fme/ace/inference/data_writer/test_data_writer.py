@@ -8,7 +8,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData
+from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
@@ -174,7 +174,7 @@ class TestDataWriter:
         writer.append_batch(
             batch=PairedData(
                 prediction=sample_prediction_data,
-                target=sample_target_data,
+                reference=sample_target_data,
                 time=batch_time,
             ),
         )
@@ -190,7 +190,7 @@ class TestDataWriter:
         writer.append_batch(
             batch=PairedData(
                 prediction=sample_prediction_data,
-                target=sample_target_data,
+                reference=sample_target_data,
                 time=batch_time,
             ),
         )
@@ -331,7 +331,7 @@ class TestDataWriter:
         writer.append_batch(
             batch=PairedData(
                 prediction=sample_prediction_data,
-                target=sample_target_data,
+                reference=sample_target_data,
                 time=batch_time,
             ),
         )
@@ -401,7 +401,7 @@ class TestDataWriter:
             writer.append_batch(
                 batch=PairedData(
                     prediction=sample_prediction_data,
-                    target=sample_target_data,
+                    reference=sample_target_data,
                     time=batch_time,
                 ),
             )
@@ -416,6 +416,11 @@ class TestDataWriter:
                 (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
             ),
             "pressure": torch.rand(
+                (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
+            ),
+        }
+        reference_data = {
+            "insolation": torch.rand(
                 (n_samples, n_timesteps // coarsen_factor, 4, 5), device=device
             ),
         }
@@ -441,8 +446,9 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=BatchData(
-                data=prediction_data,
+            batch=PairedData(
+                prediction=prediction_data,
+                reference=reference_data,
                 time=batch_time,
             ),
         )
@@ -456,8 +462,9 @@ class TestDataWriter:
             calendar=calendar,
         )
         writer.append_batch(
-            batch=BatchData(
-                data=prediction_data,
+            batch=PairedData(
+                prediction=prediction_data,
+                reference=reference_data,
                 time=batch_time,
             ),
         )
@@ -468,6 +475,7 @@ class TestDataWriter:
             expected_shape = (n_samples, n_timesteps // coarsen_factor, 4, 5)
             assert ds.temp.shape == expected_shape
             assert ds.valid_time.shape == expected_shape[:2]
+            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
 
         with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
             assert ds.counts.sum() == n_samples * n_timesteps
@@ -476,6 +484,7 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
+            assert set(ds.data_vars) == {"counts", "temp", "pressure", "insolation"}
 
 
 @pytest.mark.parametrize(

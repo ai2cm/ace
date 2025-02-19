@@ -5,7 +5,7 @@ import torch
 import xarray as xr
 
 from fme.ace.aggregator.inference import InferenceAggregator
-from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.batch_data import PairedData
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
 
@@ -27,10 +27,11 @@ def test_logs_labels_exist():
         n_time,
         datetime.timedelta(seconds=1),
     )
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     logs = agg.record_batch(
-        BatchData(data=gen_data, time=time),
+        PairedData(reference=target_data, prediction=gen_data, time=time),
     )
     assert len(logs) == n_time
     expected_step_keys = [
@@ -73,11 +74,13 @@ def test_logs_labels_exist_with_reference_time_means():
         datetime.timedelta(seconds=1),
         time_mean_reference_data=reference_time_means,
     )
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
     logs = agg.record_batch(
-        BatchData(
-            data=gen_data,
+        PairedData(
+            reference=target_data,
+            prediction=gen_data,
             time=time,
         ),
     )
