@@ -352,8 +352,9 @@ def test__force_conserve_total_energy():
     corrected_gen = AtmosphereData(corrected_gen_data | forcing_data, vertical_coord)
     input_gm_mse = ops.area_weighted_mean(input.total_energy_ace2_path)
     corrected_gen_gm_mse = ops.area_weighted_mean(corrected_gen.total_energy_ace2_path)
-    predicted_mse_tendency = ops.area_weighted_mean(
-        corrected_gen.net_energy_flux_into_atmosphere
+    predicted_mse_tendency = (
+        ops.area_weighted_mean(corrected_gen.net_energy_flux_into_atmosphere)
+        + extra_heating
     )
     expected_gm_mse = input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
     torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
@@ -367,12 +368,6 @@ def test__force_conserve_total_energy():
         corrected_gen_data["air_temperature_0"] - gen_data["air_temperature_0"]
     )
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
-
-    # ensure the 'unaccounted heating' is added to the MSE budget
-    assert "unaccounted_heating" in corrected_gen_data
-    unaccounted_heating = corrected_gen_data["unaccounted_heating"]
-    expected_heating = torch.full_like(unaccounted_heating, extra_heating)
-    torch.testing.assert_close(unaccounted_heating, expected_heating)
 
 
 def test_corrector_integration():
