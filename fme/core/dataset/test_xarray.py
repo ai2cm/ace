@@ -12,7 +12,12 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.coordinates import (
+    DepthCoordinate,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.config import (
     FillNaNsConfig,
     OverwriteConfig,
@@ -26,6 +31,7 @@ from fme.core.dataset.xarray import (
     MergedXarrayDataset,
     XarrayDataset,
     XarraySubset,
+    _get_vertical_coordinate,
     get_cumulative_timesteps,
     get_file_local_index,
     get_raw_times,
@@ -865,3 +871,68 @@ def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     )
     expected = xr.CFTimeIndex(expected_times)
     assert concat.sample_start_times.equals(expected)
+
+
+def test__get_vertical_coordinate_raises():
+    data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "idepth_0": 1.0})
+    with pytest.raises(ValueError, match="Dataset contains both hybrid"):
+        _get_vertical_coordinate(data, dtype=None)
+
+
+def test__get_vertical_coordinate_null():
+    data = xr.Dataset()
+    vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
+    assert vertical_coordinate == NullVerticalCoordinate()
+
+
+def test__get_vertical_coordinate_hybrid_sigma_pressure():
+    data = xr.Dataset({"ak_0": 1.0, "bk_0": 0.5, "ak_1": 2.0, "bk_1": 1.5})
+    vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
+    assert isinstance(vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert vertical_coordinate.ak[0] == 1.0
+    assert vertical_coordinate.bk[0] == 0.5
+
+
+def test__get_vertical_coordinate_depth_no_mask():
+    data = xr.Dataset({"idepth_0": 1.0, "idepth_1": 2.0})
+    vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
+    assert isinstance(vertical_coordinate, DepthCoordinate)
+    assert vertical_coordinate.idepth[0] == 1.0
+    assert vertical_coordinate.mask[0] == 1.0
+
+
+def test__get_vertical_coordinate_depth_with_lat_dependent_mask():
+    data = xr.Dataset(
+        data_vars={
+            "idepth_0": 1.0,
+            "idepth_1": 2.0,
+            "idepth_2": 3.0,
+            "mask_0": ("lat", np.array([1.0, 1.0])),
+            "mask_1": ("lat", np.array([0.0, 1.0])),
+        },
+        coords={
+            "lat": np.array([1.0, 2.0]),
+        },
+    )
+    vertical_coordinate = _get_vertical_coordinate(data, dtype=None)
+    assert isinstance(vertical_coordinate, DepthCoordinate)
+    assert vertical_coordinate.idepth[0] == 1.0
+    assert vertical_coordinate.idepth.shape == (3,)
+    assert vertical_coordinate.mask.shape == (2, 2)
+
+
+def test__get_vertical_coordinate_depth_with_time_dependent_mask():
+    data = xr.Dataset(
+        data_vars={
+            "idepth_0": 1.0,
+            "idepth_1": 2.0,
+            "idepth_2": 3.0,
+            "mask_0": ("time", np.array([1.0, 1.0])),
+            "mask_1": ("time", np.array([0.0, 1.0])),
+        },
+        coords={
+            "time": np.array([1.0, 2.0]),
+        },
+    )
+    with pytest.raises(ValueError, match="The ocean mask must by time-independent."):
+        _get_vertical_coordinate(data, dtype=None)
