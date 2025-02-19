@@ -80,7 +80,7 @@ def run_dataset_comparison(
                 logs = aggregator.record_initial_condition(
                     initial_condition=PairedData.from_batch_data(
                         prediction=prediction_data.initial_condition.as_batch_data(),
-                        target=target_data.initial_condition.as_batch_data(),
+                        reference=target_data.initial_condition.as_batch_data(),
                     ),
                 )
             with timer.context("wandb_logging"):
@@ -93,7 +93,7 @@ def run_dataset_comparison(
         )
         pred = deriver.get_forward_data(pred, compute_derived_variables=True)
         target = deriver.get_forward_data(target, compute_derived_variables=True)
-        paired_data = PairedData.from_batch_data(prediction=pred, target=target)
+        paired_data = PairedData.from_batch_data(prediction=pred, reference=target)
 
         with timer.context("data_writer"):
             writer.append_batch(

@@ -263,38 +263,48 @@ class PairedData:
     """
 
     prediction: TensorMapping
-    target: TensorMapping
+    reference: TensorMapping
     time: xr.DataArray
+
+    @property
+    def forcing(self) -> TensorMapping:
+        return {k: v for k, v in self.reference.items() if k not in self.prediction}
+
+    @property
+    def target(self) -> TensorMapping:
+        return {k: v for k, v in self.reference.items() if k in self.prediction}
 
     @classmethod
     def from_batch_data(
         cls,
         prediction: BatchData,
-        target: BatchData,
+        reference: BatchData,
     ) -> "PairedData":
-        if not np.all(prediction.time.values == target.time.values):
+        if not np.all(prediction.time.values == reference.time.values):
             raise ValueError("Prediction and target time coordinate must be the same.")
-        return PairedData(prediction.data, target.data, prediction.time)
+        return PairedData(
+            prediction=prediction.data, reference=reference.data, time=prediction.time
+        )
 
     @classmethod
     def new_on_device(
         cls,
         prediction: TensorMapping,
-        target: TensorMapping,
+        reference: TensorMapping,
         time: xr.DataArray,
     ) -> "PairedData":
         device = get_device()
         _check_device(prediction, device)
-        _check_device(target, device)
-        return PairedData(prediction, target, time)
+        _check_device(reference, device)
+        return PairedData(prediction, reference, time)
 
     @classmethod
     def new_on_cpu(
         cls,
         prediction: TensorMapping,
-        target: TensorMapping,
+        reference: TensorMapping,
         time: xr.DataArray,
     ) -> "PairedData":
         _check_device(prediction, torch.device("cpu"))
-        _check_device(target, torch.device("cpu"))
-        return PairedData(prediction, target, time)
+        _check_device(reference, torch.device("cpu"))
+        return PairedData(prediction, reference, time)

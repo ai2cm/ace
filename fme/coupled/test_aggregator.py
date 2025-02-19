@@ -189,7 +189,7 @@ def test_inference_logs_labels_exist(tmpdir):
             prediction={
                 "ocean_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
-            target={
+            reference={
                 "ocean_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,
@@ -198,7 +198,7 @@ def test_inference_logs_labels_exist(tmpdir):
             prediction={
                 "atmos_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
-            target={
+            reference={
                 "atmos_var": torch.randn(n_sample, n_time, nx, ny, device=get_device())
             },
             time=time,

@@ -180,11 +180,11 @@ def test_looper_paired():
     expected_output_shape = (shape[0], shape[1] - 1, shape[2], shape[3])
     for batch in looper:
         assert set(out_names) == set(batch.prediction)
-        assert set(forcing_names) == set(batch.target)
+        assert set(forcing_names) == set(batch.reference)
         for name in out_names:
             assert batch.prediction[name].shape == expected_output_shape
         for name in forcing_names:
-            assert batch.target[name].shape == expected_output_shape
+            assert batch.reference[name].shape == expected_output_shape
 
 
 def _mock_compute_derived_quantities(data, forcing_data):
@@ -217,7 +217,7 @@ def test_looper_paired_with_derived_variables():
 
     for batch in looper:
         assert "derived" in batch.prediction
-        assert "derived" in batch.target
+        assert "derived" in batch.reference
     mock_derive_func.assert_called()
 
 
@@ -240,7 +240,7 @@ def test_looper_paired_with_target_data():
 
     for batch in looper:
         assert set(out_names) == set(batch.prediction)
-        assert set(all_names) == set(batch.target)
+        assert set(all_names) == set(batch.reference)
 
 
 def test_looper_paired_with_target_data_and_derived_variables():
@@ -266,7 +266,7 @@ def test_looper_paired_with_target_data_and_derived_variables():
 
     for batch in looper:
         assert set(out_names + ["derived"]) == set(batch.prediction)
-        assert set(all_names + ["derived"]) == set(batch.target)
+        assert set(all_names + ["derived"]) == set(batch.reference)
     mock_derive_func.assert_called()
 
 
