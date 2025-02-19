@@ -12,10 +12,20 @@ from .sfnonet import SphericalFourierNeuralOperatorNet
 DIR = os.path.abspath(os.path.dirname(__file__))
 
 
-@pytest.mark.parametrize("conditional_embed_dim_scalar", [16, 0])
-@pytest.mark.parametrize("conditional_embed_dim_2d", [16, 0])
+@pytest.mark.parametrize(
+    "conditional_embed_dim_scalar, conditional_embed_dim_2d, residual_filter_factor",
+    [
+        (0, 0, 1),
+        (16, 0, 1),
+        (16, 16, 1),
+        (0, 16, 1),
+        (16, 0, 4),
+    ],
+)
 def test_can_call_sfnonet(
-    conditional_embed_dim_scalar: int, conditional_embed_dim_2d: int
+    conditional_embed_dim_scalar: int,
+    conditional_embed_dim_2d: int,
+    residual_filter_factor: int,
 ):
     input_channels = 2
     output_channels = 3
@@ -31,6 +41,7 @@ def test_can_call_sfnonet(
             embed_dim_scalar=conditional_embed_dim_scalar,
             embed_dim_2d=conditional_embed_dim_2d,
         ),
+        residual_filter_factor=residual_filter_factor,
     ).to(device)
     x = torch.randn(n_samples, input_channels, *img_shape, device=device)
     context_embedding = torch.randn(
