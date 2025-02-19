@@ -21,6 +21,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     filter_type: str = "linear"
     operator_type: str = "diagonal"
     scale_factor: int = 1
+    residual_filter_factor: int = 1
     embed_dim: int = 256
     num_layers: int = 12
     hard_thresholding_fraction: float = 1.0
