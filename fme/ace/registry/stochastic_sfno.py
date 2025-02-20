@@ -36,7 +36,9 @@ class NoiseConditionedSFNO(torch.nn.Module):
 @dataclasses.dataclass
 class NoiseConditionedSFNOBuilder(ModuleConfig):
     """
-    Configuration for the SFNO architecture used in FourCastNet-SFNO.
+    Configuration for a noise-conditioned SFNO model.
+
+    Noise is provided as conditioning input to conditional layer normalization.
     """
 
     spectral_transform: str = "sht"
@@ -45,8 +47,8 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
+    global_layer_norm: bool = False
     num_layers: int = 12
-    normalization_layer: str = "instance_norm"
     use_mlp: bool = True
     activation_function: str = "gelu"
     encoder_layers: int = 1
