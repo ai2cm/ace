@@ -22,7 +22,7 @@ from typing import Literal, Optional, Tuple, Union, cast
 import torch as th
 import torch.nn as nn
 
-from .healpix_activations import CappedGELUConfig
+from .healpix_activations import CappedGELUConfig, UpsamplingBlockConfig
 from .healpix_layers import HEALPixLayer
 
 # RECURRENT BLOCKS
@@ -99,9 +99,10 @@ class ConvBlockConfig:
     kernel_size: int = 3
     dilation: int = 1
     n_layers: int = 1
-    upsampling: int = 2
+    stride: int = 2
     upscale_factor: int = 4
     latent_channels: Optional[int] = None
+    upsampling: Optional[UpsamplingBlockConfig] = None
     activation: Optional[CappedGELUConfig] = None
     enable_nhwc: bool = False
     enable_healpixpad: bool = False
@@ -109,6 +110,7 @@ class ConvBlockConfig:
         "BasicConvBlock",
         "ConvNeXtBlock",
         "SymmetricConvNeXtBlock",
+        "ConvThenUpsample",
         "TransposedConvUpsample",
     ] = "BasicConvBlock"
 
@@ -159,11 +161,21 @@ class ConvBlockConfig:
                 enable_nhwc=self.enable_nhwc,
                 enable_healpixpad=self.enable_healpixpad,
             )
+        elif self.block_type == "ConvThenUpsample":
+            return ConvThenUpsample(
+                in_channels=self.in_channels,
+                out_channels=self.out_channels,
+                stride=self.stride,
+                upsampling=self.upsampling,
+                activation=self.activation,
+                enable_nhwc=self.enable_nhwc,
+                enable_healpixpad=self.enable_healpixpad,
+            )
         elif self.block_type == "TransposedConvUpsample":
             return TransposedConvUpsample(
                 in_channels=self.in_channels,
                 out_channels=self.out_channels,
-                upsampling=self.upsampling,
+                upsampling=self.stride,
                 activation=self.activation,
                 enable_nhwc=self.enable_nhwc,
                 enable_healpixpad=self.enable_healpixpad,
@@ -837,6 +849,55 @@ class SymmetricConvNeXtBlock(nn.Module):
         return self.skip_module(x) + self.convblock(x)
 
 
+class ConvThenUpsample(nn.Module):
+    """Wrapper for upsampling and then applying a convolution using HEALPix or other tensor data.
+    Allows more control over the type of upsampling (smooth with bilinear or pixelated
+    with nearest-neighbor) and feature extraction.
+    This class wraps the `nn.Upsample` and `nn.Conv2d` classes to replace ConvTranspose2d and handle tensor data with
+    HEALPix or other geometry layers.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        out_channels: int = 1,
+        stride: int = 2,
+        upsampling: Optional[UpsamplingBlockConfig] = None,
+        activation: Optional[CappedGELUConfig] = None,
+        enable_nhwc: bool = False,
+        enable_healpixpad: bool = False,
+    ):
+        super().__init__()
+        upsampler = []
+        if upsampling is not None:
+            upsampler.append(upsampling.build())
+        # Upsample transpose conv
+        upsampler.append(
+            HEALPixLayer(
+                layer=nn.Conv2d,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=stride,
+                stride=stride,
+                padding=0,
+                enable_nhwc=enable_nhwc,
+                enable_healpixpad=enable_healpixpad,
+            )
+        )
+        if activation is not None:
+            upsampler.append(activation.build())
+        self.upsampler = nn.Sequential(*upsampler)
+
+    def forward(self, x):
+        """Forward pass of the ConvThenUpsample layer.
+        Args:
+            x: The values to upsample.
+        Returns:
+            th.Tensor: The upsampled values.
+        """
+        return self.upsampler(x)
+
+
 class TransposedConvUpsample(nn.Module):
     """Wrapper for upsampling with a transposed convolution using HEALPix or other tensor data.
 
@@ -857,7 +918,7 @@ class TransposedConvUpsample(nn.Module):
         Args:
             in_channels: The number of input channels.
             out_channels: The number of output channels.
-            upsampling: Size used for upsampling.
+            upsampling: Stride size that will be used for upsampling.
             activation: ModuleConfig for the activation function used in upsampling.
             enable_nhwc: Enable nhwc format, passed to wrapper.
             enable_healpixpad: If HEALPixPadding should be enabled, passed to wrapper.

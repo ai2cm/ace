@@ -68,7 +68,7 @@ def up_sampling_block_config(in_channels=3, out_channels=1):
         in_channels=in_channels,
         out_channels=out_channels,
         activation=activation_block_config,
-        upsampling=2,
+        stride=2,
         block_type="TransposedConvUpsample",
     )
     return transposed_conv_upsample_block_config
@@ -576,7 +576,7 @@ def test_UNetDecoder_initilization():
     up_sampling_block_config = ConvBlockConfig(
         in_channels=in_channels,
         out_channels=out_channels,
-        upsampling=2,
+        stride=2,
         block_type="TransposedConvUpsample",
     )
 
@@ -632,7 +632,7 @@ def test_UNetDecoder_forward():
     up_sampling_block_config = ConvBlockConfig(
         in_channels=in_channels,
         out_channels=out_channels,
-        upsampling=2,
+        stride=2,
         block_type="TransposedConvUpsample",
     )
     output_layer_config = ConvBlockConfig(
