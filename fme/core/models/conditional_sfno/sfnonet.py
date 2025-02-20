@@ -314,8 +314,6 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of blocks in the network, by default 16
     sparsity_threshold : float, optional
         Threshold for sparsity, by default 0.0
-    normalization_layer : str, optional
-        Type of normalization layer to use ("layer_norm", "instance_norm", "none"), by default "instance_norm"
     hard_thresholding_fraction : float, optional
         Fraction of hard thresholding to apply, by default 1.0
     use_complex_kernels : bool, optional
@@ -426,6 +424,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 "scale factor must be 1 as it is not implemented for "
                 "conditional layer normalization"
             )
+        self.global_layer_norm = (
+            params.global_layer_norm
+            if hasattr(params, "global_layer_norm")
+            else global_layer_norm
+        )
         self.in_chans = (
             params.N_in_channels if hasattr(params, "N_in_channels") else in_chans
         )
@@ -610,23 +613,19 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             inner_skip = "linear"
             outer_skip = "identity"
 
-            filter_type = self.filter_type
-
-            operator_type = self.operator_type
-
             block = FourierNeuralOperatorBlock(
                 forward_transform,
                 inverse_transform,
                 self.embed_dim,
                 context_config=context_config,
-                filter_type=filter_type,
-                operator_type=operator_type,
+                filter_type=self.filter_type,
+                operator_type=self.operator_type,
                 mlp_ratio=mlp_ratio,
                 drop_rate=drop_rate,
                 drop_path=dpr[i],
                 act_layer=self.activation_function,
                 sparsity_threshold=sparsity_threshold,
-                global_layer_norm=global_layer_norm,
+                global_layer_norm=self.global_layer_norm,
                 use_complex_kernels=use_complex_kernels,
                 inner_skip=inner_skip,
                 outer_skip=outer_skip,
