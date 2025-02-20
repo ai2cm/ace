@@ -26,7 +26,6 @@ from fme.core.dataset.config import (
     XarrayDataConfig,
 )
 from fme.core.dataset.getters import get_dataset
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import (
     MergedXarrayDataset,
     XarrayDataset,
@@ -301,8 +300,7 @@ def _test_monthly_values(
     config = XarrayDataConfig(
         data_path=mock_data.tmpdir, file_pattern=file_pattern, engine=engine
     )
-    requirements = DataRequirements(names=var_names.all_names, n_timesteps=2)
-    dataset = XarrayDataset(config=config, requirements=requirements)
+    dataset = XarrayDataset(config, var_names.all_names, 2)
     if expected_n_samples is None:
         expected_n_samples = len(mock_data.obs_times) - 1
 
@@ -368,11 +366,9 @@ def test_XarrayDataset_monthly_n_timesteps(mock_monthly_netcdfs, n_samples):
         return
     config = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=n_samples))
     n_forward_steps = 4
-    requirements = DataRequirements(
-        names=mock_data.var_names.all_names + ["x"],
-        n_timesteps=n_forward_steps + 1,
+    dataset, _ = get_xarray_dataset(
+        config, mock_data.var_names.all_names + ["x"], n_forward_steps + 1
     )
-    dataset, _ = get_xarray_dataset(config, requirements)
     if n_samples is None:
         assert len(dataset) == len(mock_data.obs_times) - n_forward_steps
     else:
@@ -422,11 +418,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
         coords="minimal",
     ) as ds:
         for n_steps in [3, 50]:
-            requirements = DataRequirements(
-                names=mock_data.var_names.all_names,
-                n_timesteps=n_steps,
-            )
-            dataset = XarrayDataset(config=config, requirements=requirements)
+            dataset = XarrayDataset(config, mock_data.var_names.all_names, n_steps)
             assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
             lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
             dims = ("time", lat_dim, lon_dim)
@@ -450,8 +442,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
 def test_dataset_dtype_casting(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir, dtype="bfloat16")
-    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=2)
-    dataset = XarrayDataset(config=config, requirements=requirements)
+    dataset = XarrayDataset(config, mock_data.var_names.all_names, 2)
     assert isinstance(dataset.horizontal_coordinates, LatLonCoordinates)
     assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
     assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
@@ -466,8 +457,7 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
 def test_time_invariant_variable_is_repeated(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
-    requirements = DataRequirements(names=mock_data.var_names.all_names, n_timesteps=15)
-    dataset = XarrayDataset(config=config, requirements=requirements)
+    dataset = XarrayDataset(config, mock_data.var_names.all_names, 15)
     data = dataset[0][0]
     assert data["constant_var"].shape[0] == 15
     assert data["constant_scalar_var"].shape == (15, 4, 8)
@@ -477,10 +467,7 @@ def _get_repeat_dataset(
     mock_data: MockData, n_timesteps: int, n_repeats: int
 ) -> XarrayDataset:
     config = XarrayDataConfig(data_path=mock_data.tmpdir, n_repeats=n_repeats)
-    requirements = DataRequirements(
-        names=mock_data.var_names.all_names, n_timesteps=n_timesteps
-    )
-    return XarrayDataset(config, requirements)
+    return XarrayDataset(config, mock_data.var_names.all_names, n_timesteps)
 
 
 @pytest.mark.parametrize("n_timesteps", [1, 4])
@@ -513,10 +500,7 @@ def test_glob_file_pattern(
     config = XarrayDataConfig(
         data_path=mock_monthly_netcdfs.tmpdir, file_pattern=glob_pattern
     )
-    requirements = DataRequirements(
-        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=2
-    )
-    dataset = XarrayDataset(config, requirements)
+    dataset = XarrayDataset(config, mock_monthly_netcdfs.var_names.all_names, 2)
     if expected_num_files is None:
         expected_num_files = len(mock_monthly_netcdfs.start_times)
     assert expected_num_files == len(dataset.full_paths)
@@ -536,12 +520,8 @@ def test_time_slice():
 def test_time_index(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
     n_timesteps = 2
-    dataset = XarrayDataset(
-        config,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
-        ),
-    )
+    names = mock_monthly_netcdfs.var_names.all_names
+    dataset = XarrayDataset(config, names, n_timesteps)
     last_sample_init_time = len(mock_monthly_netcdfs.obs_times) - n_timesteps + 1
     obs_times = mock_monthly_netcdfs.obs_times[:last_sample_init_time]
     assert dataset.sample_start_times.equals(xr.CFTimeIndex(obs_times))
@@ -552,13 +532,9 @@ def test_XarrayDataset_timestep(mock_monthly_netcdfs, infer_timestep):
     config = XarrayDataConfig(
         data_path=mock_monthly_netcdfs.tmpdir, infer_timestep=infer_timestep
     )
+    names = mock_monthly_netcdfs.var_names.all_names
     n_timesteps = 2
-    dataset = XarrayDataset(
-        config,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
-        ),
-    )
+    dataset = XarrayDataset(config, names, n_timesteps)
     if infer_timestep:
         expected_timestep = pd.Timedelta(MOCK_DATA_FREQ).to_pytimedelta()
         assert dataset.timestep == expected_timestep
@@ -684,10 +660,8 @@ def test_fill_nans(mock_monthly_netcdfs_with_nans):
     config = XarrayDataConfig(
         data_path=mock_monthly_netcdfs_with_nans.tmpdir, fill_nans=nan_config
     )
-    requirements = DataRequirements(
-        names=mock_monthly_netcdfs_with_nans.var_names.all_names, n_timesteps=2
-    )
-    dataset = XarrayDataset(config, requirements)
+    names = mock_monthly_netcdfs_with_nans.var_names.all_names
+    dataset = XarrayDataset(config, names, 2)
     data, _ = dataset[0]
     assert torch.all(data["foo"][0, :, 0] == 0)
     assert torch.all(data["constant_var"][:, 0, 0] == 0)
@@ -695,10 +669,8 @@ def test_fill_nans(mock_monthly_netcdfs_with_nans):
 
 def test_keep_nans(mock_monthly_netcdfs_with_nans):
     config_keep_nan = XarrayDataConfig(data_path=mock_monthly_netcdfs_with_nans.tmpdir)
-    requirements = DataRequirements(
-        names=mock_monthly_netcdfs_with_nans.var_names.all_names, n_timesteps=2
-    )
-    dataset = XarrayDataset(config_keep_nan, requirements)
+    names = mock_monthly_netcdfs_with_nans.var_names.all_names
+    dataset = XarrayDataset(config_keep_nan, names, 2)
     data_with_nan, _ = dataset[0]
     assert torch.all(torch.isnan(data_with_nan["foo"][0, :, 0]))
     assert torch.all(torch.isnan(data_with_nan["constant_var"][:, 0, 0]))
@@ -715,23 +687,14 @@ def test_overwrite(mock_monthly_netcdfs):
 
     config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
     n_timesteps = 2
-    dataset = XarrayDataset(
-        config,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
-        ),
-    )[0][0]
+    names = mock_monthly_netcdfs.var_names.all_names
+    dataset = XarrayDataset(config, names, n_timesteps)[0][0]
 
     config_overwrite = XarrayDataConfig(
         data_path=mock_monthly_netcdfs.tmpdir, overwrite=overwrite_config
     )
     n_timesteps = 2
-    dataset_overwrite = XarrayDataset(
-        config_overwrite,
-        DataRequirements(
-            names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=n_timesteps
-        ),
-    )[0][0]
+    dataset_overwrite = XarrayDataset(config_overwrite, names, n_timesteps)[0][0]
 
     for v in ["foo", "bar"]:
         assert dataset_overwrite[v].dtype == dataset[v].dtype
@@ -744,10 +707,8 @@ def test_overwrite(mock_monthly_netcdfs):
 
 def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
     config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
-    requirements = DataRequirements(
-        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=1
-    )
-    dataset = XarrayDataset(config, requirements)
+    names = mock_monthly_netcdfs.var_names.all_names
+    dataset = XarrayDataset(config, names, 1)
     interval = RepeatedInterval(interval_length="1D", block_length="7D", start="3D")
     boolean_mask = interval.get_boolean_mask(len(dataset), dataset.timestep)
     subset = XarraySubset(dataset, boolean_mask)
@@ -765,10 +726,8 @@ def test_multi_source_xarray_dataset_has_no_duplicates(
 
     for mock_data in monthly_netcdfs:
         config_source = XarrayDataConfig(data_path=mock_data.tmpdir)
-        requirements_source = DataRequirements(
-            names=mock_data.var_names.all_names, n_timesteps=1
-        )
-        dataset = XarrayDataset(config_source, requirements_source)
+        names = mock_data.var_names.all_names
+        dataset = XarrayDataset(config_source, names, 1)
         datasets.append(dataset)
 
     with pytest.raises(ValueError):
@@ -787,10 +746,8 @@ def test_multi_source_xarray_dataset_has_same_time(
     datasets = []
     for mock_data in monthly_netcdfs:
         config_source = XarrayDataConfig(data_path=mock_data.tmpdir)
-        requirements_source = DataRequirements(
-            names=mock_data.var_names.all_names, n_timesteps=1
-        )
-        dataset = XarrayDataset(config_source, requirements_source)
+        names = mock_data.var_names.all_names
+        dataset = XarrayDataset(config_source, names, 1)
         datasets.append(dataset)
     # different time index
     with pytest.raises(ValueError):
@@ -801,22 +758,18 @@ def test_multi_source_xarray_returns_merged_data(
     mock_monthly_netcdfs, mock_monthly_netcdfs_another_source
 ):
     config_source1 = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
-    requirements_source1 = DataRequirements(
-        names=mock_monthly_netcdfs.var_names.all_names, n_timesteps=1
-    )
-    dataset1 = XarrayDataset(config_source1, requirements_source1)
+    names1 = mock_monthly_netcdfs.var_names.all_names
+    dataset1 = XarrayDataset(config_source1, names1, 1)
 
     config_source2 = XarrayDataConfig(
         data_path=mock_monthly_netcdfs_another_source.tmpdir
     )
-    requirements_source2 = DataRequirements(
-        names=mock_monthly_netcdfs_another_source.var_names.all_names, n_timesteps=1
-    )
+    names2 = mock_monthly_netcdfs_another_source.var_names.all_names
     # remove duplicates in source 2 requirements
-    for name in requirements_source1.names:
-        if name in requirements_source2.names:
-            requirements_source2.names.remove(name)
-    dataset2 = XarrayDataset(config_source2, requirements_source2)
+    for name in names1:
+        if name in names2:
+            names2.remove(name)
+    dataset2 = XarrayDataset(config_source2, names2, 1)
     merged_dataset = MergedXarrayDataset(datasets=[dataset1, dataset2])
     assert len(merged_dataset) == len(dataset1)
     assert type(merged_dataset[0]) is type(dataset1[0])
@@ -836,13 +789,10 @@ def test_xarray_subset_has_correct_sample(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
     config2 = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(stop=1))
-    n_forward_steps = 4
-    requirements = DataRequirements(
-        names=mock_data.var_names.all_names + ["x"],
-        n_timesteps=n_forward_steps + 1,
-    )
-    dataset, _ = get_xarray_dataset(config, requirements)
-    dataset2, _ = get_xarray_dataset(config2, requirements)
+    n_timesteps = 5
+    names = mock_data.var_names.all_names + ["x"]
+    dataset, _ = get_xarray_dataset(config, names, n_timesteps)
+    dataset2, _ = get_xarray_dataset(config2, names, n_timesteps)
     assert dataset.sample_start_times[0:1].equals(dataset2.sample_start_times)
     assert dataset[0][0]["foo"].equal(dataset2[0][0]["foo"])
     assert dataset[0][1].equals(dataset2[0][1])
@@ -850,12 +800,8 @@ def test_xarray_subset_has_correct_sample(mock_monthly_netcdfs):
 
 def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
-    n_forward_steps = 4
-    requirements = DataRequirements(
-        names=mock_data.var_names.all_names + ["x"],
-        n_timesteps=n_forward_steps + 1,
-    )
-
+    n_timesteps = 5
+    names = mock_data.var_names.all_names + ["x"]
     config1 = XarrayDataConfig(
         data_path=mock_data.tmpdir, subset=TimeSlice("2003-03-01", "2003-03-31")
     )
@@ -863,9 +809,9 @@ def test_xarray_concat_has_correct_sample(mock_monthly_netcdfs):
     config2 = XarrayDataConfig(
         data_path=mock_data.tmpdir, subset=TimeSlice("2003-05-01", "2003-05-31")
     )
-    concat, properties = get_dataset([config1, config2], requirements)
-    expected1, _ = get_xarray_dataset(config1, requirements)
-    expected2, _ = get_xarray_dataset(config2, requirements)
+    concat, properties = get_dataset([config1, config2], names, n_timesteps)
+    expected1, _ = get_xarray_dataset(config1, names, n_timesteps)
+    expected2, _ = get_xarray_dataset(config2, names, n_timesteps)
     expected_times = np.concatenate(
         [expected1.sample_start_times, expected2.sample_start_times]
     )

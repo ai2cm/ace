@@ -59,9 +59,15 @@ class InferenceDataset(torch.utils.data.Dataset):
     ):
         ocean_reqs = requirements.ocean_requirements
         atmosphere_reqs = requirements.atmosphere_requirements
-        ocean, ocean_properties = get_xarray_dataset(config.dataset.ocean, ocean_reqs)
+        ocean, ocean_properties = get_xarray_dataset(
+            config.dataset.ocean,
+            ocean_reqs.names,
+            ocean_reqs.n_timesteps,
+        )
         atmosphere, atmosphere_properties = get_xarray_dataset(
-            config.dataset.atmosphere, atmosphere_reqs
+            config.dataset.atmosphere,
+            atmosphere_reqs.names,
+            atmosphere_reqs.n_timesteps,
         )
         properties = CoupledDatasetProperties(
             ocean.sample_start_times, ocean_properties, atmosphere_properties

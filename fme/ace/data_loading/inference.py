@@ -10,14 +10,14 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.perturbation import SSTPerturbation
+from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import (
     DatasetProperties,
     MergedXarrayDataset,
     XarrayDataset,
-    get_merged_requirements,
+    get_per_dataset_names,
 )
 from fme.core.distributed import Distributed
 from fme.core.typing_ import Slice
@@ -196,7 +196,9 @@ class InferenceDataset(torch.utils.data.Dataset):
         ocean_fraction_name: Optional[str] = None,
     ):
         if isinstance(config.dataset, XarrayDataConfig):
-            dataset = XarrayDataset(config.dataset, requirements=requirements)
+            dataset = XarrayDataset(
+                config.dataset, requirements.names, requirements.n_timesteps
+            )
             self._dataset = dataset
         elif isinstance(config.dataset, Mapping):
             self._dataset = self._resolve_merged_datasets(config.dataset, requirements)
@@ -318,14 +320,15 @@ class InferenceDataset(torch.utils.data.Dataset):
         merged_datasets_config: Mapping[str, XarrayDataConfig],
         requirements: DataRequirements,
     ):
-        merged_requirements = get_merged_requirements(
-            merged_datasets_config, requirements
+        per_dataset_names = get_per_dataset_names(
+            merged_datasets_config, requirements.names
         )
         merged_xarray_datasets = []
         for key, config in merged_datasets_config.items():
             current_dataset = XarrayDataset(
                 config,
-                merged_requirements[key],
+                per_dataset_names[key],
+                requirements.n_timesteps,
             )
             merged_xarray_datasets.append(current_dataset)
         merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)

@@ -16,12 +16,12 @@ from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
 )
+from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.getters import get_datasets, get_merged_datasets
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -56,10 +56,15 @@ def get_data_loaders(
             "supported in distributed mode."
         )
     if isinstance(config.dataset, Sequence):
-        datasets, properties = get_datasets(config.dataset, requirements)
+        datasets, properties = get_datasets(
+            config.dataset, requirements.names, requirements.n_timesteps
+        )
     elif isinstance(config.dataset, Mapping):
         dataset, properties = get_merged_datasets(
-            config.dataset, requirements, strict=config.strict_ensemble
+            config.dataset,
+            requirements.names,
+            requirements.n_timesteps,
+            strict=config.strict_ensemble,
         )
 
     data_loaders = []

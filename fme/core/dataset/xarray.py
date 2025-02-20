@@ -28,7 +28,6 @@ from fme.core.typing_ import Slice, TensorDict
 
 from .config import RepeatedInterval, TimeSlice, XarrayDataConfig
 from .data_typing import Dataset, VariableMetadata
-from .requirements import DataRequirements
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_dimensions,
@@ -346,9 +345,9 @@ class DatasetProperties:
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, requirements: DataRequirements
+    config: XarrayDataConfig, names: List[str], n_timesteps: int
 ) -> Tuple["XarraySubset", DatasetProperties]:
-    dataset = XarrayDataset(config, requirements)
+    dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
     index_slice = as_index_selection(config.subset, dataset)
     dataset = XarraySubset(dataset, index_slice)
@@ -366,21 +365,17 @@ def infer_available_variables(config: XarrayDataConfig):
 
 class XarrayDataset(Dataset):
     """Load data from a directory of files matching a pattern using xarray. The
-    number of contiguous timesteps to load for each sample is specified by
-    requirements.n_timesteps.
+    number of contiguous timesteps to load for each sample is specified by the
+    n_timesteps argument.
 
     For example, if the file(s) have the time coordinate
-    (t0, t1, t2, t3, t4) and requirements.n_timesteps=3, then this dataset will
+    (t0, t1, t2, t3, t4) and n_timesteps=3, then this dataset will
     provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4).
     """
 
-    def __init__(
-        self,
-        config: XarrayDataConfig,
-        requirements: DataRequirements,
-    ):
+    def __init__(self, config: XarrayDataConfig, names: List[str], n_timesteps: int):
         self._horizontal_coordinates: HorizontalCoordinates
-        self._names = requirements.names
+        self._names = names
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -394,7 +389,7 @@ class XarrayDataset(Dataset):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-        self.n_steps = requirements.n_timesteps  # one input, n_steps - 1 outputs
+        self.n_steps = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0],
@@ -843,13 +838,12 @@ class MergedXarrayDataset:
         return self.datasets[0].total_timesteps
 
 
-def get_merged_requirements(
+def get_per_dataset_names(
     dataset_configs: Mapping[str, Union[XarrayDataConfig, Sequence[XarrayDataConfig]]],
-    requirements: DataRequirements,
-    strict: bool = True,
-) -> Mapping[str, DataRequirements]:
-    merged_required_names = requirements.names.copy()
-    merged_requirements = {}
+    names: List[str],
+) -> Mapping[str, List[str]]:
+    merged_required_names = names.copy()
+    per_dataset_names = {}
     for key, config in dataset_configs.items():
         if isinstance(config, XarrayDataConfig):
             current_source_variables = infer_available_variables(config)
@@ -858,10 +852,7 @@ def get_merged_requirements(
         current_source_names = [
             name for name in merged_required_names if name in current_source_variables
         ]
-        current_source_requirements = DataRequirements(
-            names=current_source_names, n_timesteps=requirements.n_timesteps
-        )
-        merged_requirements[key] = current_source_requirements
+        per_dataset_names[key] = current_source_names
         for name in current_source_names:
             merged_required_names.remove(name)
-    return merged_requirements
+    return per_dataset_names
