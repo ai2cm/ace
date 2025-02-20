@@ -3,11 +3,11 @@ import torch
 
 import fme
 from fme.core.masking import MaskingConfig
-from fme.core.stacker import Stacker
 
 
 def test_masking_config():
     config = MaskingConfig(
+        variable_names_and_prefixes=["c"],
         mask_name="a",
         surface_mask_name="b",
         mask_value=1,
@@ -20,6 +20,7 @@ def test_masking_config():
 
     with pytest.raises(ValueError) as err:
         _ = MaskingConfig(
+            variable_names_and_prefixes=["c"],
             mask_name="a",
             surface_mask_name="b",
             mask_value=3,
@@ -49,19 +50,14 @@ _DATA = {
 
 def test_masking():
     config = MaskingConfig(
+        variable_names_and_prefixes=["PRESsfc", "specific_total_water_"],
         mask_name="mask",
         surface_mask_name="surface_mask",
         mask_value=0,
         fill_value=0.0,
     )
     mask = config.build()
-    stacker = Stacker(
-        {
-            "surface_pressure": ["PRESsfc", "PS"],
-            "specific_total_water": ["specific_total_water_"],
-        }
-    )
-    output = mask(stacker, _DATA, _MASK_DATA)
+    output = mask(_DATA, _MASK_DATA)
     assert output["PRESsfc"][1, 1] == 0.0
     assert output["PRESsfc"][0, 1] != 0.0
     assert torch.all(output["specific_total_water_0"][0, :] == 0.0)
@@ -71,13 +67,13 @@ def test_masking():
 
 def test_masking_no_3d_masking():
     config = MaskingConfig(
+        variable_names_and_prefixes=["PRESsfc"],
         mask_name="surface_mask",
         mask_value=0,
         fill_value=0.0,
     )
     mask = config.build()
-    stacker = Stacker({"surface_pressure": ["PRESsfc", "PS"]})
-    output = mask(stacker, _DATA, _MASK_DATA)
+    output = mask(_DATA, _MASK_DATA)
     assert output["PRESsfc"][1, 1] == 0.0
     assert output["PRESsfc"][0, 1] != 0.0
     assert torch.all(output["specific_total_water_0"][0, :] != 0.0)
@@ -87,13 +83,13 @@ def test_masking_no_3d_masking():
 
 def test_masking_no_surface_masking():
     config = MaskingConfig(
+        variable_names_and_prefixes=["specific_total_water_"],
         mask_name="mask",
         mask_value=0,
         fill_value=0.0,
     )
     mask = config.build()
-    stacker = Stacker({"specific_total_water": ["specific_total_water_"]})
-    output = mask(stacker, _DATA, _MASK_DATA)
+    output = mask(_DATA, _MASK_DATA)
     assert output["PRESsfc"][1, 1] != 0.0
     assert output["PRESsfc"][0, 1] != 0.0
     assert torch.all(output["specific_total_water_0"][0, :] == 0.0)
@@ -103,18 +99,13 @@ def test_masking_no_surface_masking():
 
 def test_masking_missing_2d_mask():
     config = MaskingConfig(
+        variable_names_and_prefixes=["PRESsfc"],
         mask_name="mask",
         mask_value=0,
         fill_value=0.0,
     )
     mask = config.build()
-    stacker = Stacker(
-        {
-            "surface_pressure": ["PRESsfc", "PS"],
-            "specific_total_water": ["specific_total_water_"],
-        }
-    )
     with pytest.raises(RuntimeError) as err:
-        _ = mask(stacker, _DATA, _MASK_DATA)
+        _ = mask(_DATA, _MASK_DATA)
     assert "surface_mask_name is None" in str(err.value)
-    assert "surface_pressure" in str(err.value)
+    assert "PRESsfc" in str(err.value)
