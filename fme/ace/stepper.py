@@ -23,7 +23,7 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.multi_call import MultiCallConfig
-from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     SerializableVerticalCoordinate,
@@ -31,7 +31,6 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.corrector import CorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed

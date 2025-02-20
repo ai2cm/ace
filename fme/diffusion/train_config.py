@@ -9,10 +9,9 @@ from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
-from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.train.train_config import InlineInferenceConfig
 from fme.core.coordinates import VerticalCoordinate
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
 from fme.core.gridded_ops import GriddedOperations

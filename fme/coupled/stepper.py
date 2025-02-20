@@ -11,12 +11,12 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.requirements import DataRequirements
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
 from fme.core.coordinates import (
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC

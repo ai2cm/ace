@@ -1,8 +1,7 @@
 import dataclasses
 import datetime
 
-from fme.ace.requirements import PrognosticStateDataRequirements
-from fme.core.dataset.requirements import DataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 
 
 @dataclasses.dataclass

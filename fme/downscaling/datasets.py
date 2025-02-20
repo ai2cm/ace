@@ -15,7 +15,6 @@ from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import Dataset, VariableMetadata
 from fme.core.dataset.getters import get_dataset
-from fme.core.dataset.requirements import DataRequirements as CoreDataRequirements
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -41,9 +40,7 @@ def get_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
         The normalized height of the topography of shape (latitude, longitude).
     """
     topography_name = "HGTsfc"
-    dataset = get_dataset(
-        configs, CoreDataRequirements(names=[topography_name], n_timesteps=1)
-    )
+    dataset = get_dataset(configs, [topography_name], n_timesteps=1)
     example, _ = dataset[0]
     topography = example[topography_name]
     topography = topography.squeeze()
@@ -400,12 +397,14 @@ class DataLoaderConfig:
 
         dataset_fine, properties_fine = get_dataset(
             self.fine,
-            CoreDataRequirements(requirements.fine_names, requirements.n_timesteps),
+            requirements.fine_names,
+            requirements.n_timesteps,
             strict=self.strict_ensemble,
         )
         dataset_coarse, properties_coarse = get_dataset(
             self.coarse,
-            CoreDataRequirements(requirements.coarse_names, requirements.n_timesteps),
+            requirements.coarse_names,
+            requirements.n_timesteps,
             strict=self.strict_ensemble,
         )
 
