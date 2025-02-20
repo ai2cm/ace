@@ -7,22 +7,21 @@ from fme.core.dataset.xarray import (
     MergedXarrayDataset,
     XarrayConcat,
     XarraySubset,
-    get_merged_requirements,
+    get_per_dataset_names,
     get_xarray_dataset,
 )
-
-from .requirements import DataRequirements
 
 
 def get_datasets(
     dataset_configs: Sequence[XarrayDataConfig],
-    requirements: DataRequirements,
+    names: List[str],
+    n_timesteps: int,
     strict: bool = True,
 ) -> Tuple[List[XarraySubset], DatasetProperties]:
     datasets = []
     properties: Optional[DatasetProperties] = None
     for config in dataset_configs:
-        dataset, new_properties = get_xarray_dataset(config, requirements)
+        dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
         datasets.append(dataset)
         if properties is None:
             properties = new_properties
@@ -43,26 +42,31 @@ def get_datasets(
 
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
-    requirements: DataRequirements,
+    names: List[str],
+    n_timesteps: int,
     strict: bool = True,
 ) -> Tuple[XarrayConcat, DatasetProperties]:
-    datasets, properties = get_datasets(dataset_configs, requirements, strict=strict)
+    datasets, properties = get_datasets(
+        dataset_configs, names, n_timesteps, strict=strict
+    )
     ensemble = XarrayConcat(datasets)
     return ensemble, properties
 
 
 def get_merged_datasets(
     dataset_configs: Mapping[str, Sequence[XarrayDataConfig]],
-    requirements: DataRequirements,
+    names: List[str],
+    n_timesteps: int,
     strict: bool = True,
 ) -> Tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: Optional[DatasetProperties] = None
-    merged_requirements = get_merged_requirements(dataset_configs, requirements)
+    per_dataset_names = get_per_dataset_names(dataset_configs, names)
     for key, config in dataset_configs.items():
         current_source_datasets, current_source_properties = get_datasets(
             config,
-            merged_requirements[key],
+            per_dataset_names[key],
+            n_timesteps,
             strict=strict,
         )
         current_source_ensemble = XarrayConcat(current_source_datasets)

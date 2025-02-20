@@ -29,10 +29,9 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
-from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.typing_ import Slice
 
 
