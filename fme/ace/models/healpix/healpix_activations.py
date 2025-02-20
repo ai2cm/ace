@@ -148,6 +148,46 @@ class DownsamplingBlockConfig:
 
 
 @dataclasses.dataclass
+class UpsamplingBlockConfig:
+    """
+    Configuration for the upsampling block.
+    Should be compatible with torch.nn.Upsample block configs.
+    Attributes:
+        block_type (str) – the upsampling algorithm: one of 'nearest', 'linear', 'bilinear',
+            'bicubic' and 'trilinear'. Default: 'nearest'.
+        scale_factor (float or Tuple[float]) - multiplier for spatial size. Has to match input size
+            if it is a tuple.
+        align_corners (bool, optional) – if True, the corner pixels of the input and output tensors are aligned,
+            and thus preserving the values at those pixels. Only has effect when mode is 'linear', 'bilinear',
+            'bicubic', or 'trilinear'. Default: False
+    """
+
+    scale_factor: int
+    block_type: Literal["nearest", "linear", "bilinear", "bicubic", "trilinear"] = (
+        "bilinear"
+    )
+    align_corners: bool = False
+
+    def build(self) -> nn.Module:
+        """
+        Builds the upsampling block model.
+        Returns:
+            Upsampling block.
+        """
+        if self.align_corners == False:
+            return nn.Upsample(
+                scale_factor=self.scale_factor,
+                mode=self.block_type,
+            )  # Interpolate will complain about the align_corners option being passed at all, bad API design IMO
+        else:
+            return nn.Upsample(
+                scale_factor=self.scale_factor,
+                mode=self.block_type,
+                align_corners=self.align_corners,
+            )
+
+
+@dataclasses.dataclass
 class CappedGELUConfig:
     """
     Configuration for the CappedGELU activation function.
