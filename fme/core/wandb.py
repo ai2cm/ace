@@ -138,7 +138,6 @@ class WandB:
                 "must call WandB.configure before WandB init can be called"
             )
         if self._enabled:
-            wandb.require("core")
             if resumable:
                 if experiment_dir is None:
                     raise ValueError(
