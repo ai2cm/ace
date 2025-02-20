@@ -10,9 +10,9 @@ import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.test_data_loader import _get_coords
+from fme.ace.requirements import DataRequirements
 from fme.ace.testing import save_scalar_netcdf
 from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.typing_ import Slice
 from fme.coupled.requirements import CoupledDataRequirements
 
