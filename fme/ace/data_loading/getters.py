@@ -6,9 +6,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
-from fme.ace.requirements import PrognosticStateDataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.dataset.getters import get_dataset, get_merged_datasets
-from fme.core.dataset.requirements import DataRequirements
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -41,11 +40,17 @@ def get_data_loader(
     dataset: torch.utils.data.Dataset
     if isinstance(config.dataset, Sequence):
         dataset, properties = get_dataset(
-            config.dataset, requirements, strict=config.strict_ensemble
+            config.dataset,
+            requirements.names,
+            requirements.n_timesteps,
+            strict=config.strict_ensemble,
         )
     elif isinstance(config.dataset, Mapping):
         dataset, properties = get_merged_datasets(
-            config.dataset, requirements, strict=config.strict_ensemble
+            config.dataset,
+            requirements.names,
+            requirements.n_timesteps,
+            strict=config.strict_ensemble,
         )
     dist = Distributed.get_instance()
 
@@ -198,13 +203,16 @@ def get_forcing_data(
     if initial_time.shape[1] != 1:
         raise NotImplementedError("code assumes initial time only has 1 timestep")
     if isinstance(config.dataset, XarrayDataConfig):
-        available_times = XarrayDataset(config.dataset, window_requirements).all_times
+        available_times = XarrayDataset(
+            config.dataset, window_requirements.names, window_requirements.n_timesteps
+        ).all_times
     elif isinstance(config.dataset, Mapping):
         # Some forcing variables may not be in the first dataset,
         # use an empty data requirements to get all times
         available_times = XarrayDataset(
             config.dataset[next(iter(config.dataset))],
-            DataRequirements(names=[], n_timesteps=window_requirements.n_timesteps),
+            names=[],
+            n_timesteps=window_requirements.n_timesteps,
         ).all_times
     start_time_indices = []
     for time in initial_time.values[:, 0]:
