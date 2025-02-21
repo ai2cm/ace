@@ -160,7 +160,7 @@ def test_compared_dynamic_histograms(shape, percentiles):
         ),
         pytest.param(
             {},
-            {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 8)},
+            {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 16)},
             id="empty_target_non_empty_prediction",
         ),
         pytest.param({}, {}, id="empty_target_empty_prediction"),
@@ -181,7 +181,7 @@ def test_compared_dynamic_histogram_varying_variables_with_record_batch():
     n_bins = 300
     histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
     target = {"x": torch.ones(2, 8, 16), "y": torch.zeros(2, 8, 16)}
-    prediction = {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 8)}
+    prediction = {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 16)}
 
     # record one batch to set the recorded variables
     histogram.record_batch(target, prediction)
@@ -199,3 +199,18 @@ def test_compared_dynamic_histogram_varying_variables_with_record_batch():
 
     # ignores non-matching variables
     histogram.record_batch(target_extra_z, prediction_extra_w)
+
+
+def test_compared_dynamic_histogram_with_nans_record_batch():
+    n_bins = 300
+    histogram = ComparedDynamicHistograms(n_bins, percentiles=[99.0])
+    target = {"x": torch.ones(2, 8, 16), "y": torch.zeros(2, 8, 16)}
+    target["x"][0, 0] = float("nan")
+    prediction = {"x": torch.rand(2, 8, 16), "y": torch.rand(2, 8, 16)}
+    prediction["x"][0, 0] = float("nan")
+
+    # record one batch
+    histogram.record_batch(target, prediction)
+    wandb_result = histogram.get_wandb()
+    assert not np.isnan(wandb_result["target/99.0th-percentile/x"])
+    assert not np.isnan(wandb_result["prediction/99.0th-percentile/x"])
