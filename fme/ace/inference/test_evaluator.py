@@ -706,8 +706,12 @@ def test_compute_derived_quantities(has_required_fields):
         assert not existence_check
 
 
-def test_derived_metrics_run_without_errors(tmp_path: pathlib.Path):
+def test_derived_metrics_run_without_errors(
+    tmp_path: pathlib.Path, very_fast_only: bool
+):
     """Checks that derived metrics are computed during inferece without errors."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
 
     n_forward_steps = 2
 
