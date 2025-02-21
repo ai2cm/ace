@@ -111,6 +111,10 @@ fv3gfs_climSST_dataset:
 fv3gfs_1deg_climSST_monthly_netcdfs:
 	$(MAKE) fv3gfs_climSST_monthly_netcdfs RESOLUTION=1deg
 
+.PHONY: fv3gfs_4deg_climSST_monthly_netcdfs
+fv3gfs_4deg_climSST_monthly_netcdfs:
+	$(MAKE) fv3gfs_climSST_monthly_netcdfs RESOLUTION=4deg
+
 .PHONY: enable_coldline_check
 enable_coldline_check:
 	@if [ "$(ENABLE_COLDLINE)" != "true" ]; then \
