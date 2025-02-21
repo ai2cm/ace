@@ -2,12 +2,12 @@
 
 set -e
 
-JOB_NAME="shield-c96-1deg-climsst"
+JOB_NAME="shield-c96-4deg-climsst"
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
-    --description 'Convert 1-degree C96 FV3GFS climSST ensemble to monthly netcdfs' \
+    --description 'Convert 4-degree C96 FV3GFS climSST ensemble to monthly netcdfs' \
     --beaker-image oliverwm/fme-deps-only-2025-01-16 \
     --workspace ai2/ace \
     --priority normal \
@@ -20,4 +20,4 @@ cd $REPO_ROOT && gantry run \
     --budget ai2/climate \
     --no-conda \
     --install "pip install --no-deps ." \
-    -- bash -c "cd /gantry-runtime/scripts/data_process && make fv3gfs_1deg_climSST_monthly_netcdfs"
+    -- bash -c "cd /gantry-runtime/scripts/data_process && make fv3gfs_4deg_climSST_monthly_netcdfs"
