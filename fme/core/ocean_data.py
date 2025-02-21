@@ -1,0 +1,120 @@
+from types import MappingProxyType
+from typing import List, Mapping, Optional
+
+import torch
+
+from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
+from fme.core.coordinates import DepthCoordinate
+from fme.core.stacker import Stacker
+from fme.core.typing_ import TensorDict, TensorMapping
+
+OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
+    {
+        "sea_water_potential_temperature": ["thetao_"],
+        "sea_water_salinity": ["so_"],
+        "sea_water_x_velocity": ["uo_"],
+        "sea_water_y_velocity": ["vo_"],
+        "sea_surface_height_above_geoid": ["zos"],
+        "sea_surface_temperature": ["sst"],
+    }
+)
+
+
+class OceanData:
+    """Container for ocean data for accessing variables and providing
+    torch.Tensor views on data with multiple depth levels.
+    """
+
+    def __init__(
+        self,
+        ocean_data: TensorMapping,
+        depth_coordinate: Optional[DepthCoordinate] = None,
+        ocean_field_name_prefixes: Mapping[str, List[str]] = OCEAN_FIELD_NAME_PREFIXES,
+    ):
+        """
+        Initializes the instance based on the provided data and prefixes.
+
+        Args:
+            ocean_data: Mapping from field names to tensors.
+            depth_coordinate: The depth coordinate of the model.
+            ocean_field_name_prefixes: Mapping which defines the correspondence
+                between an arbitrary set of "standard" names (e.g.,
+                "potential_temperature" or "salinity") and lists of possible
+                names or prefix variants (e.g., ["thetao_"] or
+                ["zos"]) found in the data.
+        """
+        self._data = dict(ocean_data)
+        self._prefix_map = ocean_field_name_prefixes
+        self._depth_coordinate = depth_coordinate
+        self._stacker = Stacker(ocean_field_name_prefixes)
+
+    @property
+    def data(self) -> TensorDict:
+        """Mapping from field names to tensors."""
+        return self._data
+
+    def __getitem__(self, name: str):
+        return getattr(self, name)
+
+    def _get_prefix(self, prefix):
+        return self.data[prefix]
+
+    def _set(self, name, value):
+        for prefix in self._prefix_map[name]:
+            if prefix in self.data.keys():
+                self._set_prefix(prefix, value)
+                return
+        raise KeyError(name)
+
+    def _set_prefix(self, prefix, value):
+        self.data[prefix] = value
+
+    def _get(self, name):
+        for prefix in self._prefix_map[name]:
+            if prefix in self.data.keys():
+                return self._get_prefix(prefix)
+        raise KeyError(name)
+
+    @property
+    def sea_water_potential_temperature(self) -> torch.Tensor:
+        """Returns all depth levels of potential temperature."""
+        return self._stacker("sea_water_potential_temperature", self.data)
+
+    @property
+    def sea_water_salinity(self) -> torch.Tensor:
+        """Returns all depth levels of salinity."""
+        return self._stacker("sea_water_salinity", self.data)
+
+    @property
+    def sea_water_x_velocity(self) -> torch.Tensor:
+        """Returns all depth levels of x-velocity."""
+        return self._stacker("sea_water_x_velocity", self.data)
+
+    @property
+    def sea_water_y_velocity(self) -> torch.Tensor:
+        """Returns all depth levels of y-velocity."""
+        return self._stacker("sea_water_y_velocity", self.data)
+
+    @property
+    def sea_surface_temperature(self) -> torch.Tensor:
+        """Returns surface temperature."""
+        return self._get("sea_surface_temperature")
+
+    @property
+    def sea_surface_height_above_geoid(self) -> torch.Tensor:
+        """Returns sea surface height above geoid."""
+        return self._get("sea_surface_height_above_geoid")
+
+    @property
+    def ocean_heat_content(self) -> torch.Tensor:
+        """Returns column-integrated ocean heat content."""
+        if self._depth_coordinate is None:
+            raise ValueError(
+                "Depth coordinate must be provided to compute column-integrated "
+                "ocean heat content."
+            )
+        return self._depth_coordinate.integral(
+            self.sea_water_potential_temperature
+            * SPECIFIC_HEAT_OF_WATER_CM4
+            * DENSITY_OF_WATER_CM4
+        )
