@@ -71,6 +71,40 @@ def test_weighted_mean(variable, time, lats, n_lon):
     ), "The weighted mean of a constant should be that constant."
 
 
+@pytest.mark.parametrize(*test_cases)
+def test_weighted_mean_with_nans(variable, time, lats, n_lon):
+    """Tests the weighted mean for a few simple test cases, with NaNs in the
+    input tensor."""
+    x = torch.randn(time, variable, len(lats), n_lon)
+    x_nan = x.clone()
+    x_nan[0, 0, 0, 0] = float("nan")
+
+    mask = ~torch.isnan(x_nan)
+    expected_result = (x * mask).sum(dim=(0, 2, 3)) / mask.sum(dim=(0, 2, 3))
+
+    result = fme.weighted_mean(x_nan, dim=(0, 2, 3))
+    assert torch.allclose(
+        result, expected_result
+    ), "unweighted mean with NaNs should ignore NaNs"
+
+    # weighting with ones shouldn't change the result
+    weights = torch.ones(len(lats), n_lon)
+    result = fme.weighted_mean(x_nan, weights, dim=(0, 2, 3))
+    assert torch.allclose(
+        result, expected_result
+    ), "weighted mean with NaNs weights by ones should be the same as unweighted"
+
+    weights = torch.randn(len(lats), n_lon)
+    weights_like_nan = weights.expand(x.shape).clone()
+    weights_like_nan[0, 0, 0, 0] = 0.0
+
+    expected_result = fme.weighted_mean(x, weights_like_nan, dim=(0, 2, 3))
+    result = fme.weighted_mean(x_nan, weights, dim=(0, 2, 3))
+    assert torch.allclose(
+        result, expected_result
+    ), "weighted mean of NaNs should act like zero weight in masked regions"
+
+
 def test_weighted_std_constant_weights():
     """Tests the weighted std with constant weights."""
     torch.manual_seed(0)

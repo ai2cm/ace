@@ -47,11 +47,13 @@ def weighted_mean(
         a tensor of the weighted mean averaged over the specified dimensions `dim`.
     """
     if weights is None:
-        return tensor.mean(dim=dim, keepdim=keepdim)
+        return tensor.nanmean(dim=dim, keepdim=keepdim)
 
-    return (tensor * weights).sum(dim=dim, keepdim=keepdim) / weights.expand(
-        tensor.shape
-    ).sum(dim=dim, keepdim=keepdim)
+    denom = torch.where(torch.isnan(tensor), 0.0, weights.expand(tensor.shape)).sum(
+        dim=dim, keepdim=keepdim
+    )
+
+    return (tensor * weights).nansum(dim=dim, keepdim=keepdim) / denom
 
 
 def weighted_std(
