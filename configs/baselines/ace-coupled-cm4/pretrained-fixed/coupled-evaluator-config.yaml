@@ -1,0 +1,32 @@
+experiment_dir: /output
+n_coupled_steps: 2920
+coupled_steps_in_memory: 4
+checkpoint_path:
+  ocean:
+    timedelta: 5D
+    path: /pretrained_ocean/training_checkpoints/best_inference_ckpt.tar
+  atmosphere:
+    timedelta: 6h
+    path: /pretrained_atmos/training_checkpoints/best_inference_ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: true
+  atmosphere:
+    save_prediction_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-coupled-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '0311-01-01T00:00:00'
+  dataset:
+    ocean:
+      data_path: /climate-default/2024-11-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
+    atmosphere:
+      data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+      subset:
+          start_time: '0151-01-06' # NOTE: aligns atmosphere start time to ocean start time
