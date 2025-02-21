@@ -180,6 +180,7 @@ class ComparedDynamicHistograms:
         self.percentiles = [p for p in percentiles]
         self.target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
         self.prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
+        self._nan_masks: Optional[Mapping[str, Optional[torch.Tensor]]] = None
         self._time_dim = -2
         self._variables: Set[str] = set()
 
@@ -206,24 +207,44 @@ class ComparedDynamicHistograms:
 
         target = {k: v for k, v in target.items() if k in self._variables}
         prediction = {k: v for k, v in prediction.items() if k in self._variables}
+        if self._nan_masks is None:
+            self._nan_masks = {
+                k: v.flatten().unsqueeze(0).isnan() if torch.any(v.isnan()) else None
+                for k, v in target.items()
+                if k in self._variables
+            }
 
         if self.target_histograms is None or self.prediction_histograms is None:
             self.target_histograms = {}
             for k in target:
                 self.target_histograms[k] = DynamicHistogram(
-                    n_times=1, n_bins=self.n_bins
+                    n_times=1,
+                    n_bins=self.n_bins,
                 )
             self.prediction_histograms = {}
             for k in prediction:
                 self.prediction_histograms[k] = DynamicHistogram(
-                    n_times=1, n_bins=self.n_bins
+                    n_times=1,
+                    n_bins=self.n_bins,
                 )
-
         for k in target:
             # no matter what data shape is given, combine it all into one histogram
-            self.target_histograms[k].add(target[k].flatten().unsqueeze(0))
+            value = self._remove_nans(k, target[k].flatten().unsqueeze(0))
+            self.target_histograms[k].add(value)
         for k in prediction:
-            self.prediction_histograms[k].add(prediction[k].flatten().unsqueeze(0))
+            value = self._remove_nans(k, prediction[k].flatten().unsqueeze(0))
+            self.prediction_histograms[k].add(value)
+
+    def _remove_nans(self, key: str, value: torch.Tensor):
+        if self._nan_masks is None:
+            raise ValueError(
+                "record_batch must be called at least once before removing NaNs"
+            )
+        nan_mask = self._nan_masks[key]
+        if nan_mask is not None:
+            mask = ~nan_mask.to(value.device)
+            value = torch.masked_select(value, mask).unsqueeze(0)
+        return value
 
     def _get_histograms(
         self,
