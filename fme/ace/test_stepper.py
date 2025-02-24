@@ -1,7 +1,9 @@
+import dataclasses
 import datetime
+import os
 import pathlib
 from collections import namedtuple
-from typing import Iterable, List, Literal, Optional, Tuple, Union
+from typing import Dict, Iterable, List, Literal, Mapping, Optional, Tuple, Union
 from unittest.mock import MagicMock, patch
 
 import cftime
@@ -20,6 +22,7 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_ocean,
 )
 from fme.ace.multi_call import MultiCallConfig
+from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper import (
     CorrectorConfig,
     SingleModuleStepper,
@@ -34,6 +37,7 @@ from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.device import get_device
+from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -45,7 +49,10 @@ from fme.core.optimization import (
     OptimizationConfig,
 )
 from fme.core.registry.module import ModuleSelector
+from fme.core.testing.regression import validate_tensor_dict
 from fme.core.typing_ import TensorDict
+
+DIR = os.path.abspath(os.path.dirname(__file__))
 
 SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_coord"])
 TIMESTEP = datetime.timedelta(hours=6)
@@ -1104,3 +1111,136 @@ def test_load_stepper_and_load_stepper_config(
     stepper = load_stepper(stepper_path, stepper_override)
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
+
+
+def get_regression_stepper_and_data():
+    in_names = ["a", "b"]
+    out_names = ["b", "c"]
+    n_forward_steps = 2
+    n_samples = 3
+    img_shape = (9, 18)
+    device = get_device()
+
+    all_names = list(set(in_names + out_names))
+    area = torch.ones((5, 5))
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet",
+            config=dataclasses.asdict(
+                SphericalFourierNeuralOperatorBuilder(
+                    embed_dim=16,
+                    num_layers=2,
+                )
+            ),
+        ),
+        in_names=in_names,
+        out_names=out_names,
+        normalization=NormalizationConfig(
+            means={n: np.array([0.1], dtype=np.float32) for n in all_names},
+            stds={n: np.array([1.1], dtype=np.float32) for n in all_names},
+        ),
+        ocean=None,
+    )
+    stepper = config.get_stepper(
+        img_shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
+    )
+    data = BatchData(
+        data={
+            "a": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
+            "b": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
+            "c": torch.randn(n_samples, n_forward_steps + 1, *img_shape).to(device),
+        },
+        time=xr.DataArray(
+            np.zeros((n_samples, n_forward_steps + 1)),
+            dims=["sample", "time"],
+        ),
+    )
+    return stepper, data
+
+
+@pytest.mark.parametrize("use_optimization", [True, False])
+def test_stepper_train_on_batch_regression(use_optimization: bool):
+    torch.manual_seed(0)
+    stepper, data = get_regression_stepper_and_data()
+    if use_optimization:
+        optimization_config = OptimizationConfig(
+            optimizer_type="Adam",
+            lr=0.0001,
+        )
+        optimization: OptimizationABC = optimization_config.build(
+            stepper.modules, max_epochs=1
+        )
+    else:
+        optimization = NullOptimization()
+    result1 = stepper.train_on_batch(data, optimization)
+    result2 = stepper.train_on_batch(data, optimization)
+    output_dict = get_train_outputs_tensor_dict(result1, result2)
+    validate_tensor_dict(
+        output_dict,
+        os.path.join(
+            DIR, f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
+        ),
+    )
+
+
+def test_stepper_predict_regression():
+    torch.manual_seed(0)
+    stepper, data = get_regression_stepper_and_data()
+    initial_condition = data.get_start(
+        prognostic_names=["b"],
+        n_ic_timesteps=1,
+    )
+    output, next_state = stepper.predict(
+        initial_condition, data, compute_derived_variables=True
+    )
+    output_dict = get_predict_output_tensor_dict(output, next_state)
+    validate_tensor_dict(
+        output_dict,
+        os.path.join(DIR, f"testdata/stepper_predict_regression.pt"),
+    )
+
+
+def get_predict_output_tensor_dict(
+    output: BatchData, next_state: PrognosticState
+) -> Dict[str, torch.Tensor]:
+    return flatten_dict(
+        {
+            "output": output.data,
+            "next_state": next_state.as_batch_data().data,
+        }
+    )
+
+
+def get_train_outputs_tensor_dict(
+    step_1: TrainOutput, step_2: TrainOutput
+) -> Dict[str, torch.Tensor]:
+    return flatten_dict(
+        {
+            "step_1": _get_train_output_tensor_dict(step_1),
+            "step_2": _get_train_output_tensor_dict(step_2),
+        }
+    )
+
+
+def flatten_dict(
+    d: Mapping[str, Mapping[str, torch.Tensor]],
+) -> Dict[str, torch.Tensor]:
+    return_dict = {}
+    for k, v in d.items():
+        for k2, v2 in v.items():
+            return_dict[f"{k}.{k2}"] = v2
+    return return_dict
+
+
+def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
+    return_dict = {}
+    for k, v in data.metrics.items():
+        return_dict[f"metrics.{k}"] = v
+    for k, v in data.gen_data.items():
+        return_dict[f"gen_data.{k}"] = v
+    for k, v in data.target_data.items():
+        return_dict[f"target_data.{k}"] = v
+    return return_dict
