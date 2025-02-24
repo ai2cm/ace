@@ -297,6 +297,15 @@ class DepthCoordinate(VerticalCoordinate):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
 
+    def get_mask(self) -> torch.Tensor:
+        return self.mask
+
+    def get_mask_level(self, level: int) -> torch.Tensor:
+        return self.mask.select(dim=-1, index=level)
+
+    def get_idepth(self) -> torch.Tensor:
+        return self.idepth
+
     def build_corrector(
         self,
         config: Union[CorrectorConfig, CorrectorSelector],
@@ -320,6 +329,9 @@ class DepthCoordinate(VerticalCoordinate):
         )
         return OceanCorrector(
             config=config_instance,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=self,
+            timestep=timestep,
         )
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
@@ -423,6 +435,9 @@ class NullVerticalCoordinate(VerticalCoordinate):
             )
             return OceanCorrector(
                 config=config_instance,
+                gridded_operations=gridded_operations,
+                vertical_coordinate=None,
+                timestep=timestep,
             )
         else:
             raise ValueError(
