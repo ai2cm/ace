@@ -145,11 +145,8 @@ def get_data_loader(
 
     return GriddedData(
         loader=dataloader,
-        variable_metadata=properties.variable_metadata,
+        properties=properties,
         sampler=sampler,
-        vertical_coordinate=properties.vertical_coordinate,
-        timestep=requirements.ocean_timestep,
-        horizontal_coordinates=properties.horizontal_coordinates,
     )
 
 
