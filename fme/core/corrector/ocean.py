@@ -8,7 +8,7 @@ from fme.core.corrector.corrector import force_positive
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.masking import StaticMaskingConfig
-from fme.core.ocean_data import HasOceanIntegral
+from fme.core.ocean_data import HasOceanDepthIntegral
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorMapping
 
@@ -31,7 +31,7 @@ class OceanCorrector(CorrectorABC):
         self,
         config: OceanCorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: Optional[HasOceanIntegral],
+        vertical_coordinate: Optional[HasOceanDepthIntegral],
         timestep: datetime.timedelta,
     ):
         self._config = config

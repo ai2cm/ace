@@ -6,6 +6,8 @@ import torch
 
 from fme.core.atmosphere_data import AtmosphereData, HasAtmosphereVerticalIntegral
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.ocean_derived_variables import get_ocean_derived_variable_metadata
+from fme.core.typing_ import TensorDict
 
 DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tensor]
 
@@ -16,6 +18,13 @@ _DERIVED_VARIABLE_REGISTRY: MutableMapping[
 
 
 def get_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+    return {
+        **get_atmosphere_derived_variable_metadata(),
+        **get_ocean_derived_variable_metadata(),
+    }
+
+
+def get_atmosphere_derived_variable_metadata() -> Dict[str, VariableMetadata]:
     return {
         label: metadata for label, (_, metadata) in _DERIVED_VARIABLE_REGISTRY.items()
     }
@@ -154,13 +163,13 @@ def implied_tendency_of_total_energy_ace2_path_due_to_advection(
 
 
 def _compute_derived_variable(
-    data: Dict[str, torch.Tensor],
+    data: TensorDict,
     vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: DerivedVariableFunc,
-    forcing_data: Optional[Dict[str, torch.Tensor]] = None,
-) -> Dict[str, torch.Tensor]:
+    forcing_data: Optional[TensorDict] = None,
+) -> TensorDict:
     """Computes a derived variable and adds it to the given data.
 
     The derived variable name must not already exist in the data.
@@ -204,11 +213,11 @@ def _compute_derived_variable(
 
 
 def compute_derived_quantities(
-    data: Dict[str, torch.Tensor],
+    data: TensorDict,
     vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
     timestep: datetime.timedelta,
-    forcing_data: Optional[Dict[str, torch.Tensor]] = None,
-) -> Dict[str, torch.Tensor]:
+    forcing_data: Optional[TensorDict] = None,
+) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _DERIVED_VARIABLE_REGISTRY:
         func = _DERIVED_VARIABLE_REGISTRY[label][0]
