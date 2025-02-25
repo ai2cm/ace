@@ -54,7 +54,7 @@ class _MockDepth:
     def get_idepth(self) -> torch.Tensor:
         return torch.tensor([0, 5, 15], device=DEVICE)
 
-    def integral(self, integrand: torch.Tensor) -> torch.Tensor:
+    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
         thickness = self.get_idepth().diff(dim=-1)
         return torch.nansum(_MASK * integrand * thickness, dim=-1)
 
