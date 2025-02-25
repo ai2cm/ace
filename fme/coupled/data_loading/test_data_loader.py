@@ -28,7 +28,7 @@ def _save_netcdf(
     realm: Literal["ocean", "atmosphere"],
     timestep_size=1,
     timestep_start=0,
-    nz=2,
+    nz=3,
 ):
     data_vars = {}
     dim_sizes_without_time = {k: v for k, v in dim_sizes.items() if k != "time"}
@@ -40,7 +40,7 @@ def _save_netcdf(
         if name == "constant_mask":
             data = np.ones(list(dim_sizes_to_use.values()))
         else:
-            data = np.random.randn(*list(dim_sizes_to_use.values()))
+            data = np.random.uniform(size=list(dim_sizes_to_use.values()))
         if len(dim_sizes) > 0:
             data = data.astype(np.float32)  # type: ignore
         data_vars[name] = xr.DataArray(
@@ -102,6 +102,8 @@ def create_coupled_data_on_disk(
     ocean_names: List[str],
     atmosphere_names: List[str],
     atmosphere_start_time_offset_from_ocean: bool,
+    n_levels_ocean: int = 2,
+    n_levels_atmosphere: int = 2,
 ) -> MockCoupledData:
     np.random.seed(0)
 
@@ -123,6 +125,7 @@ def create_coupled_data_on_disk(
         # _save_netcdf has a default timestep of 1 day which we interpret as the
         # atmosphere timestep, so the ocean data needs
         timestep_size=ocean_timestep_size,
+        nz=n_levels_ocean + 1,
     )
 
     atmos_dir = data_dir / "atmos"
@@ -145,6 +148,7 @@ def create_coupled_data_on_disk(
         realm="atmosphere",
         timestep_size=1,
         timestep_start=timestep_start_atmosphere,
+        nz=n_levels_atmosphere + 1,
     )
     # _save_netcdf creates integer times in units of "days since 1970-01-01"
     timedelta_atmos = "1D"
