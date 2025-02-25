@@ -19,7 +19,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
-class HasOceanIntegral(Protocol):
+class HasOceanDepthIntegral(Protocol):
     def __len__(self) -> int: ...
 
     def get_mask(self) -> torch.Tensor: ...
@@ -28,7 +28,7 @@ class HasOceanIntegral(Protocol):
 
     def get_idepth(self) -> torch.Tensor: ...
 
-    def integral(
+    def depth_integral(
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
@@ -42,7 +42,7 @@ class OceanData:
     def __init__(
         self,
         ocean_data: TensorMapping,
-        depth_coordinate: Optional[HasOceanIntegral] = None,
+        depth_coordinate: Optional[HasOceanDepthIntegral] = None,
         ocean_field_name_prefixes: Mapping[str, List[str]] = OCEAN_FIELD_NAME_PREFIXES,
     ):
         """
@@ -127,7 +127,7 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
-        return self._depth_coordinate.integral(
+        return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
             * SPECIFIC_HEAT_OF_WATER_CM4
             * DENSITY_OF_WATER_CM4
