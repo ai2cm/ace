@@ -1,4 +1,5 @@
 import dataclasses
+import datetime
 from typing import Dict, Tuple
 
 import numpy as np
@@ -79,6 +80,10 @@ class CoupledDatasetProperties:
         metadata.update(self.ocean.variable_metadata)
         metadata.update(self.atmosphere.variable_metadata)
         return metadata
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self.ocean.timestep
 
     @property
     def is_remote(self) -> bool:

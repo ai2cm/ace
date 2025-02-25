@@ -151,6 +151,14 @@ def _get_test_yaml_files(
     surface_temperature_name: {in_variable_names[0]}
     ocean_fraction_name: {mask_name}
 """
+    if nettype == "SphericalFourierNeuralOperatorNet":
+        new_stepper_config += """
+  corrector:
+    type: "atmosphere_corrector"
+    config:
+      conserve_dry_air: true
+
+"""
     existing_stepper_config = f"""
   checkpoint_file: {stepper_checkpoint_file}
 """
@@ -427,6 +435,7 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
     assert np.sum(np.isnan(ds_prediction["PRESsfc"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["specific_total_water_0"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["specific_total_water_1"].values)) == 0
+    assert np.sum(np.isnan(ds_prediction["total_water_path"].values)) == 0
     ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 

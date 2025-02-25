@@ -22,10 +22,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
         loader: DataLoader[CoupledBatchData],
-        variable_metadata: Dict[str, VariableMetadata],
-        vertical_coordinate: CoupledVerticalCoordinate,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: datetime.timedelta,
+        properties: CoupledDatasetProperties,
         sampler: Optional[torch.utils.data.Sampler] = None,
     ):
         """
@@ -34,21 +31,13 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
                 TensorMapping where keys indicate variable name.
                 Each tensor has shape
                 [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
-            variable_metadata: Metadata for each variable.
-            area_weights: Weights for each grid cell, used for computing area-weighted
-                averages. Has shape [n_x_coord, n_y_coord].
-            vertical_coordinate: Vertical coordinate for each grid cell, used for
-                computing pressure levels.
-            horizontal_coordinates: horizontal coordinates for the data.
-            timestep: Timestep of the model.
+            properties: Properties of the dataset, including variable metadata and
+                coordinates.
             sampler: Optional sampler for the data loader. Provided to allow support for
                 distributed training.
         """
         self._loader = loader
-        self._variable_metadata = variable_metadata
-        self._vertical_coordinate = vertical_coordinate
-        self._horizontal_coordinates = horizontal_coordinates
-        self._timestep = timestep
+        self._properties = properties.to_device()
         self._sampler = sampler
         self._batch_size: Optional[int] = None
 
@@ -61,19 +50,19 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
 
     @property
     def variable_metadata(self) -> Dict[str, VariableMetadata]:
-        return self._variable_metadata
+        return self._properties.variable_metadata
 
     @property
     def vertical_coordinate(self) -> CoupledVerticalCoordinate:
-        return self._vertical_coordinate
+        return self._properties.vertical_coordinate
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self._horizontal_coordinates
+        return self._properties.horizontal_coordinates
 
     @property
     def timestep(self) -> datetime.timedelta:
-        return self._timestep
+        return self._properties.timestep
 
     @property
     def coords(self) -> CoupledCoords:

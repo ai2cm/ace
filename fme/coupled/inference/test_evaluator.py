@@ -145,6 +145,8 @@ def test_evaluator_inference(
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
         atmosphere_start_time_offset_from_ocean=True,
+        n_levels_ocean=1,
+        n_levels_atmosphere=1,
     )
 
     checkpoint_path = save_coupled_stepper(
