@@ -789,7 +789,21 @@ def test_train_on_batch_loss():
 
 
 def test_train_on_batch_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "sst", "mask_0"]
+    ocean_in_names = [
+        "thetao_0",
+        "thetao_1",
+        "thetao_2",
+        "thetao_3",
+        "thetao_4",
+        "thetao_5",
+        "sst",
+        "mask_0",
+        "mask_1",
+        "mask_2",
+        "mask_3",
+        "mask_4",
+        "mask_5",
+    ]
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
