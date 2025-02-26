@@ -23,7 +23,7 @@ from fme.ace.inference.test_evaluator import (
 )
 from fme.ace.multi_call import MultiCallConfig
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
-from fme.ace.stepper import (
+from fme.ace.stepper.single_module import (
     CorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
