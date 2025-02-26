@@ -452,9 +452,10 @@ def _force_conserve_total_energy(
         )
     input = AtmosphereData(input_data, vertical_coordinate)
     gen = AtmosphereData(dict(gen_data) | dict(forcing_data), vertical_coordinate)
-    if torch.any(gen.surface_pressure <= 0):
+    if torch.any(input.surface_pressure <= 0) or torch.any(gen.surface_pressure <= 0):
         warnings.warn(
-            "Surface pressure has a non-positive value, skipping energy correction."
+            "Input or generated surface pressure has a non-positive value. Skipping "
+            "energy correction, since it would produce a NaN temperature correction."
         )
         return dict(gen_data)
 
