@@ -2,10 +2,11 @@
 
 set -e
 
-JOB_NAME="ace-coupled-cm4-pretrained-fixed-evaluator"  # recommnended but not required to change this
+JOB_NAME="pretrained-fixed-evaluator"  # recommnended but not required to change this
+JOB_GROUP="pretrained-fixed"
 
 EXISTING_RESULTS_ATMOS_DATASET="01JE8017VZVRBGCEK5S3DA5G08"  # this contains the atmosphere checkpoint to use for inference
-EXISTING_RESULTS_OCEAN_DATASET=""  # this contains the ocean checkpoint to use for inference
+EXISTING_RESULTS_OCEAN_DATASET="01JMRJKNS3XQGMXT4T0RR5JZTT"  # this contains the ocean checkpoint to use for inference
 
 CONFIG_FILENAME="coupled-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -24,18 +25,18 @@ cd $REPO_ROOT && gantry run \
     --description 'Run ACE coupled evaluator' \
     --beaker-image oliverwm/fme-deps-only-2025-01-16 \
     --workspace ai2/ace \
-    --priority normal \
-    --cluster ai2/saturn-cirrascale \
+    --priority high \
     --cluster ai2/jupiter-cirrascale-2 \
     --cluster ai2/ceres-cirrascale \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
     --env WANDB_NAME=$JOB_NAME \
     --env WANDB_JOB_TYPE=inference \
-    --env WANDB_RUN_GROUP= \
+    --env WANDB_RUN_GROUP=$JOB_GROUP \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-    --dataset $EXISTING_RESULTS_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
+    --dataset $EXISTING_RESULTS_ATMOS_DATASET:training_checkpoints/best_inference_ckpt.tar:/atmos_ckpt.tar \
+    --dataset $EXISTING_RESULTS_OCEAN_DATASET:training_checkpoints/best_inference_ckpt.tar:/ocean_ckpt.tar \
     --gpus 1 \
     --shared-memory 20GiB \
     --weka climate-default:/climate-default \
