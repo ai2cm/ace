@@ -12,11 +12,16 @@ from matplotlib import pyplot as plt
 
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from ...plotting import plot_mean_and_samples
 
 SAMPLE_DIM, TIME_DIM, LAT_DIM, LON_DIM = 0, 1, -2, -1
+
+SEA_SURFACE_TEMPERATURE_NAMES = [
+    "sst",
+    "surface_temperature",
+]
 
 
 class Region(abc.ABC):
@@ -57,44 +62,47 @@ class RegionalIndexAggregator:
         regional_weights: A tensor of weights for the region.
         regional_mean: A function that computes the regional mean of a variable,
             given weights.
-        variable_name: The name of the variable for which to compute the index.
         running_mean_n_months: The number of months to use for the running mean.
     """
 
     _sample_dim = SAMPLE_DIM
     _time_dim = TIME_DIM
+    sea_surface_temperature_names = SEA_SURFACE_TEMPERATURE_NAMES
 
     def __init__(
         self,
         regional_weights: torch.Tensor,
         regional_mean: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
-        variable_name: str,
         running_mean_n_months: int = 5,
     ):
         self._regional_weights = regional_weights
         self._regional_mean = regional_mean
-        self._variable_name: str = variable_name
         self._running_mean_n_months = running_mean_n_months
-        self._raw_index_values: Optional[torch.Tensor] = None
+        self._raw_indices: TensorDict = {}
         self._raw_index_times: Optional[xr.DataArray] = None
         self._calendar: Optional[str] = None
+        self._already_logged: List[str] = []
 
     def record_batch(self, data: TensorMapping, time: xr.DataArray) -> None:
-        if self._variable_name not in data:
-            logging.info(
-                f"Variable {self._variable_name} not found in data. "
-                "Skipping RegionalIndexAggregator.",
+        for sst_name in self.sea_surface_temperature_names:
+            if sst_name not in data:
+                if sst_name not in self._already_logged:
+                    logging.info(
+                        f"Variable {sst_name} not found in data. "
+                        "Skipping Nino3.4 index computation for this variable."
+                    )
+                    self._already_logged.append(sst_name)
+                continue
+            regional_average = self._regional_mean(
+                data[sst_name], self._regional_weights
             )
-            return None
-        regional_average = self._regional_mean(
-            data[self._variable_name], self._regional_weights
-        )
-        if self._raw_index_values is None:
-            self._raw_index_values = regional_average
-        else:
-            self._raw_index_values = torch.cat(
-                [self._raw_index_values, regional_average], dim=self._time_dim
-            )
+            if sst_name not in self._raw_indices:
+                self._raw_indices[sst_name] = regional_average
+            else:
+                self._raw_indices[sst_name] = torch.cat(
+                    [self._raw_indices[sst_name], regional_average],
+                    dim=self._time_dim,
+                )
         if self._raw_index_times is None:
             self._raw_index_times = time
         else:
@@ -102,20 +110,26 @@ class RegionalIndexAggregator:
         if self._calendar is None and time.dt.calendar is not None:
             self._calendar = time.dt.calendar
 
-    def _get_index(self) -> Optional[xr.DataArray]:
-        if self._raw_index_values is None:
-            return None
-        anomaly_index_values = anomalies_from_monthly_climo(
-            self._raw_index_values, self._raw_index_times
-        )
-        time_averaged_index, unique_months = running_monthly_mean(
-            anomaly_index_values,
-            self._raw_index_times,
-            n_months=self._running_mean_n_months,
-        )
-        return self._get_gathered_index(
-            time_averaged_index, unique_months.years, unique_months.months
-        )
+    def get_indices(self) -> xr.Dataset:
+        indices = {}
+        for sst_name in self.sea_surface_temperature_names:
+            if sst_name not in self._raw_indices:
+                continue
+            anomaly_index_values = anomalies_from_monthly_climo(
+                self._raw_indices[sst_name], self._raw_index_times
+            )
+            time_averaged_index, unique_months = running_monthly_mean(
+                anomaly_index_values,
+                self._raw_index_times,
+                n_months=self._running_mean_n_months,
+            )
+            gathered_index = self._get_gathered_index(
+                time_averaged_index, unique_months.years, unique_months.months
+            )
+            if gathered_index is None:
+                continue
+            indices[sst_name] = gathered_index
+        return xr.Dataset(indices)
 
     def _get_gathered_index(
         self, index: torch.Tensor, years: torch.Tensor, months: torch.Tensor
@@ -144,7 +158,7 @@ class RegionalIndexAggregator:
         indices: List[torch.Tensor],
         years: List[torch.Tensor],
         months: List[torch.Tensor],
-    ):
+    ) -> xr.DataArray:
         index_data_arrays = []
         for index, year, month in zip(indices, years, months):
             time_coord = [  # approximate the middle of the month
@@ -168,34 +182,32 @@ class RegionalIndexAggregator:
         return xr.concat(index_data_arrays, dim="sample")
 
     def get_logs(self, label: str) -> Dict[str, Any]:
-        index = self._get_index()
-        if index is None:  # not the root rank
-            return {}
-        else:
-            fig, ax = plt.subplots(1, 1)
-            if index.sizes["time"] > 1:
-                index_plottable = index.assign_coords(
-                    {"time": convert_cftime_to_datetime_coord(index.time)}
+        indices = self.get_indices()
+        plots = {}
+        for sst_name in self.sea_surface_temperature_names:
+            if sst_name in indices and indices[sst_name].sizes["time"] > 1:
+                fig, ax = plt.subplots(1, 1)
+                index_plottable = indices[sst_name].assign_coords(
+                    {"time": convert_cftime_to_datetime_coord(indices[sst_name].time)}
                 )
                 plot_mean_and_samples(
                     ax, index_plottable, "ensemble_mean", time_series_dim="time"
                 )
-            ax.set_title("Nino3.4 Index")
-            ax.set_ylabel("K")
-            ax.legend()
-            fig.tight_layout()
-
+                ax.set_title("Nino3.4 Index")
+                ax.set_ylabel("K")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index"] = fig
         if len(label) > 0:
             label = label + "/"
-
-        return {f"{label}nino34_index": fig}
+        return {f"{label}{k}": v for k, v in plots.items()}
 
     def get_dataset(self) -> xr.Dataset:
-        index = self._get_index()
-        if index is None:
+        indices = self.get_indices()
+        if indices is None:
             return xr.Dataset()
         else:
-            return xr.Dataset({"nino34_index": index})
+            return indices
 
 
 class PairedRegionalIndexAggregator:
@@ -219,53 +231,59 @@ class PairedRegionalIndexAggregator:
         self._prediction_aggregator.record_batch(gen_data, time)
 
     def get_logs(self, label: str) -> Dict[str, Any]:
-        target_index = self._target_aggregator._get_index()
-        prediction_index = self._prediction_aggregator._get_index()
-        if prediction_index is None or target_index is None:  # not the root rank
-            return {}
-        else:
-            target_index_plottable = target_index.assign_coords(
-                {"time": convert_cftime_to_datetime_coord(target_index.time)}
-            )
-            prediction_index_plottable = prediction_index.assign_coords(
-                {"time": convert_cftime_to_datetime_coord(prediction_index.time)}
-            )
-            fig, ax = plt.subplots(1, 1)
-            if prediction_index_plottable.sizes["time"] > 1:
+        target_indices = self._target_aggregator.get_indices()
+        prediction_indices = self._prediction_aggregator.get_indices()
+        plots = {}
+        for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            if (
+                sst_name in prediction_indices
+                and prediction_indices[sst_name].sizes["time"] > 1
+            ):
+                target_indices_plottable = target_indices.assign_coords(
+                    {"time": convert_cftime_to_datetime_coord(target_indices.time)}
+                )
+                prediction_indices_plottable = prediction_indices.assign_coords(
+                    {"time": convert_cftime_to_datetime_coord(prediction_indices.time)}
+                )
+                fig, ax = plt.subplots(1, 1)
                 plot_mean_and_samples(
                     ax,
-                    prediction_index_plottable,
+                    prediction_indices_plottable[sst_name],
                     "predicted ensemble mean",
                     time_series_dim="time",
                 )
                 plot_mean_and_samples(
                     ax,
-                    target_index_plottable,
+                    target_indices_plottable[sst_name],
                     "target",
                     time_series_dim="time",
                     color="orange",
                     plot_samples=False,
                 )
-            ax.set_title("Nino3.4 Index")
-            ax.set_ylabel("K")
-            ax.legend()
-            fig.tight_layout()
+                ax.set_title("Nino3.4 Index")
+                ax.set_ylabel("K")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index"] = fig
 
         if len(label) > 0:
             label = label + "/"
 
-        return {f"{label}nino34_index": fig}
+        return {f"{label}{k}": v for k, v in plots.items()}
 
     def get_dataset(self) -> xr.Dataset:
         prediction = self._prediction_aggregator.get_dataset()
         target = self._target_aggregator.get_dataset()
-        return xr.concat(
-            [
-                target.expand_dims({"source": ["target"]}),
-                prediction.expand_dims({"source": ["prediction"]}),
-            ],
-            dim="source",
-        )
+        if len(prediction) == 0 or len(target) == 0:
+            return xr.Dataset()
+        else:
+            return xr.concat(
+                [
+                    target.expand_dims({"source": ["target"]}),
+                    prediction.expand_dims({"source": ["prediction"]}),
+                ],
+                dim="source",
+            )
 
 
 def anomalies_from_monthly_climo(
