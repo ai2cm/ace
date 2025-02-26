@@ -10,9 +10,11 @@ checkpoint_path:
     path: /atmos_ckpt.tar
 data_writer:
   ocean:
-    save_prediction_files: true
+    save_prediction_files: false
+    save_monthly_files: false
   atmosphere:
-    save_prediction_files: true
+    save_prediction_files: false
+    save_monthly_files: false
 logging:
   log_to_screen: true
   log_to_wandb: true
