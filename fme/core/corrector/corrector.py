@@ -14,6 +14,7 @@ from fme.core.atmosphere_data import (
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -250,14 +251,6 @@ class Corrector(CorrectorABC):
                 unaccounted_heating=self._energy_unaccounted_heating,
             )
         return gen_data
-
-
-def force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
-    """Clamp all tensors defined by `names` to be greater than or equal to zero."""
-    out = {**data}
-    for name in names:
-        out[name] = torch.clamp(data[name], min=0.0)
-    return out
 
 
 class AreaWeightedMean(Protocol):
