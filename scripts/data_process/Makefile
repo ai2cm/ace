@@ -263,3 +263,8 @@ cm4_trial_run_ocean_dataset_and_stats:
 .PHONY: shield_som_c96_abrupt_4xCO2_ensemble_dataset
 shield_som_c96_abrupt4xCO2_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-abrupt4xCO2-ensemble-c96-1deg-$(LAYERS).yaml
+
+.PHONY: shield_som_c96_idealized_0p1_heating_ensemble_dataset
+shield_som_c96_idealized_0p1_heating_ensemble_dataset:
+	./compute_dataset.sh --config configs/shield-som-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
+

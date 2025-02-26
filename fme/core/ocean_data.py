@@ -1,10 +1,9 @@
 from types import MappingProxyType
-from typing import List, Mapping, Optional
+from typing import List, Mapping, Optional, Protocol
 
 import torch
 
 from fme.core.constants import DENSITY_OF_WATER_CM4, SPECIFIC_HEAT_OF_WATER_CM4
-from fme.core.coordinates import DepthCoordinate
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -20,6 +19,21 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
 )
 
 
+class HasOceanDepthIntegral(Protocol):
+    def __len__(self) -> int: ...
+
+    def get_mask(self) -> torch.Tensor: ...
+
+    def get_mask_level(self, level: int) -> torch.Tensor: ...
+
+    def get_idepth(self) -> torch.Tensor: ...
+
+    def depth_integral(
+        self,
+        integrand: torch.Tensor,
+    ) -> torch.Tensor: ...
+
+
 class OceanData:
     """Container for ocean data for accessing variables and providing
     torch.Tensor views on data with multiple depth levels.
@@ -28,7 +42,7 @@ class OceanData:
     def __init__(
         self,
         ocean_data: TensorMapping,
-        depth_coordinate: Optional[DepthCoordinate] = None,
+        depth_coordinate: Optional[HasOceanDepthIntegral] = None,
         ocean_field_name_prefixes: Mapping[str, List[str]] = OCEAN_FIELD_NAME_PREFIXES,
     ):
         """
@@ -113,7 +127,7 @@ class OceanData:
                 "Depth coordinate must be provided to compute column-integrated "
                 "ocean heat content."
             )
-        return self._depth_coordinate.integral(
+        return self._depth_coordinate.depth_integral(
             self.sea_water_potential_temperature
             * SPECIFIC_HEAT_OF_WATER_CM4
             * DENSITY_OF_WATER_CM4

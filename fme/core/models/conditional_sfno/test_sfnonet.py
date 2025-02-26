@@ -34,6 +34,8 @@ def test_can_call_sfnonet(
     device = get_device()
     model = SphericalFourierNeuralOperatorNet(
         params=None,
+        embed_dim=16,
+        num_layers=2,
         img_shape=img_shape,
         in_chans=input_channels,
         out_chans=output_channels,
@@ -55,7 +57,7 @@ def test_can_call_sfnonet(
     assert output.shape == (n_samples, output_channels, *img_shape)
 
 
-def test_sfnonet_default_output_is_unchanged():
+def test_sfnonet_output_is_unchanged():
     torch.manual_seed(0)
     input_channels = 2
     output_channels = 3
@@ -66,6 +68,8 @@ def test_sfnonet_default_output_is_unchanged():
     device = get_device()
     model = SphericalFourierNeuralOperatorNet(
         params=None,
+        embed_dim=16,
+        num_layers=2,
         img_shape=img_shape,
         in_chans=input_channels,
         out_chans=output_channels,
@@ -85,5 +89,5 @@ def test_sfnonet_default_output_is_unchanged():
         output = model(x, context)
     validate_tensor(
         output,
-        os.path.join(DIR, "testdata/test_sfnonet_default_output_is_unchanged.pt"),
+        os.path.join(DIR, "testdata/test_sfnonet_output_is_unchanged.pt"),
     )

@@ -16,6 +16,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
@@ -61,14 +62,25 @@ class AtmosphericDeriveFn(DeriveFnABC):
 class OceanDeriveFn(DeriveFnABC):
     def __init__(
         self,
-        vertical_coordinate: "DepthCoordinate",
+        depth_coordinate: "OptionalDepthCoordinate",
         timestep: timedelta,
     ):
-        pass
+        self.depth_coordinate = depth_coordinate.to(
+            "cpu"
+        )  # must be on cpu for multiprocessing fork context
+        self.timestep = timestep
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
-        # TODO: implement derived variables for ocean
-        return dict(data)
+        if isinstance(self.depth_coordinate, NullVerticalCoordinate):
+            depth_coord: Optional["DepthCoordinate"] = None
+        else:
+            depth_coord = self.depth_coordinate.to(get_device())
+        return compute_ocean_derived_quantities(
+            dict(data),
+            depth_coordinate=depth_coord,
+            timestep=self.timestep,
+            forcing_data=dict(forcing_data),
+        )
 
 
 class VerticalCoordinate(abc.ABC):
@@ -297,6 +309,15 @@ class DepthCoordinate(VerticalCoordinate):
         """The number of vertical layer interfaces."""
         return len(self.idepth)
 
+    def get_mask(self) -> torch.Tensor:
+        return self.mask
+
+    def get_mask_level(self, level: int) -> torch.Tensor:
+        return self.mask.select(dim=-1, index=level)
+
+    def get_idepth(self) -> torch.Tensor:
+        return self.idepth
+
     def build_corrector(
         self,
         config: Union[CorrectorConfig, CorrectorSelector],
@@ -320,6 +341,9 @@ class DepthCoordinate(VerticalCoordinate):
         )
         return OceanCorrector(
             config=config_instance,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=self,
+            timestep=timestep,
         )
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
@@ -352,8 +376,8 @@ class DepthCoordinate(VerticalCoordinate):
     def as_dict(self) -> TensorMapping:
         return {"idepth": self.idepth, "mask": self.mask}
 
-    def integral(self, integrand: torch.Tensor) -> torch.Tensor:
-        """Compute the vertical integral of the integrand.
+    def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
+        """Compute the depth integral of the integrand.
 
         ∫ x dz
         where
@@ -371,8 +395,10 @@ class DepthCoordinate(VerticalCoordinate):
         """
         if len(self.idepth) != integrand.shape[-1] + 1:
             raise ValueError(
-                "The last dimension of integrand must match the number of vertical "
-                "layers in the depth vertical coordinate."
+                f"The last dimension of integrand must match the number of vertical "
+                "layers in the depth vertical coordinate. "
+                f"Got integrand.shape: {integrand.shape} and idepth.shape: "
+                f"{self.idepth.shape}."
             )
         layer_thickness = self.idepth.diff(dim=-1)
         return (integrand * layer_thickness * self.mask).nansum(dim=-1)
@@ -423,6 +449,9 @@ class NullVerticalCoordinate(VerticalCoordinate):
             )
             return OceanCorrector(
                 config=config_instance,
+                gridded_operations=gridded_operations,
+                vertical_coordinate=None,
+                timestep=timestep,
             )
         else:
             raise ValueError(

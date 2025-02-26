@@ -148,7 +148,7 @@ def test_depth_coordinate_integral_raises():
     data = torch.tensor([1, 1, 4])
     coords = DepthCoordinate(idepth, mask)
     with pytest.raises(ValueError, match="dimension of integrand must match"):
-        coords.integral(data)
+        coords.depth_integral(data)
 
 
 @pytest.mark.parametrize(
@@ -168,7 +168,7 @@ def test_depth_coordinate_integral_raises():
 )
 def test_depth_integral_1d_data(idepth, mask, expected):
     data = torch.arange(1, len(idepth))
-    result = DepthCoordinate(idepth, mask).integral(data)
+    result = DepthCoordinate(idepth, mask).depth_integral(data)
     torch.testing.assert_close(result, expected)
 
 
@@ -183,5 +183,5 @@ def test_depth_integral_3d_data():
     depth_0 = idepth[1] - idepth[0]
     depth_1 = idepth[2] - idepth[1]
     expected = data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1
-    result = DepthCoordinate(idepth, mask).integral(data)
+    result = DepthCoordinate(idepth, mask).depth_integral(data)
     torch.testing.assert_close(result, expected)

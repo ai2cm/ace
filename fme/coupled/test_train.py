@@ -76,10 +76,11 @@ stepper:
     timedelta: 2D
     stepper:
       builder:
-        type: SphericalFourierNeuralOperatorNet
+        type: Samudra
         config:
-          num_layers: 2
-          embed_dim: 12
+            ch_width: [8, 16]
+            dilation: [2, 4]
+            n_layers: [1, 1]
       loss:
         type: MSE
       normalization:
@@ -88,6 +89,7 @@ stepper:
       corrector:
         type: "ocean_corrector"
         config: {{}}
+      next_step_forcing_names: {ocean_next_step_forcing_names}
       in_names: {ocean_in_names}
       out_names: {ocean_out_names}
   atmosphere:
@@ -108,6 +110,10 @@ stepper:
       ocean:
         surface_temperature_name: {atmos_sfc_temp_name}
         ocean_fraction_name: {ocean_frac_name}
+      corrector:
+        type: "atmosphere_corrector"
+        config:
+          conserve_dry_air: true
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """
@@ -164,6 +170,9 @@ def _write_test_yaml_files(
     coupled_steps_in_memory: int = 2,
 ):
     exper_dir = tmp_path / "output"
+    ocean_next_step_forcing_names = list(
+        set(atmos_out_names).intersection(ocean_in_names)
+    )
     train_config = _TRAIN_CONFIG_TEMPLATE.format(
         experiment_dir=exper_dir,
         max_epochs=max_epochs,
@@ -177,6 +186,7 @@ def _write_test_yaml_files(
         ocean_out_names=ocean_out_names,
         atmos_in_names=atmos_in_names,
         atmos_out_names=atmos_out_names,
+        ocean_next_step_forcing_names=ocean_next_step_forcing_names,
         ocean_sfc_temp_name=ocean_sfc_temp_name,
         ocean_sfc_mask_name=ocean_sfc_mask_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
@@ -224,10 +234,16 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
 
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
-    ocean_names = ["o_exog", "o_prog", "o_sfc", "o_mask"]
-    atmos_names = ["a_exog", "a_diag", "a_prog", "a_sfc", "constant_mask"]
 
-    outnames = ["o_prog", "o_sfc", "a_diag", "a_prog", "a_sfc"]
+    ocean_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
+    atmos_names = [
+        "DLWRFsfc",
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "surface_temperature",
+        "ocean_fraction",
+    ]
 
     n_forward_times_ocean = 8
     n_forward_times_atmos = 16
@@ -238,12 +254,33 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         ocean_names=ocean_names,
         atmosphere_names=atmos_names,
         atmosphere_start_time_offset_from_ocean=True,
+        n_levels_ocean=2,
+        n_levels_atmosphere=2,
     )
 
-    ocean_in_names = ["o_exog", "o_prog", "o_sfc", "o_mask"]
-    ocean_out_names = ["o_prog", "o_sfc"]
-    atmos_in_names = ["a_exog", "a_diag", "a_prog", "a_sfc", "constant_mask"]
-    atmos_out_names = ["a_diag", "a_prog", "a_sfc"]
+    ocean_in_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
+    ocean_out_names = ["thetao_0", "thetao_1", "sst"]
+    atmos_in_names = [
+        "DLWRFsfc",
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "surface_temperature",
+        "ocean_fraction",
+    ]
+    atmos_out_names = [
+        "DLWRFsfc",
+        "PRESsfc",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "surface_temperature",
+    ]
+    atmos_derived_names = [
+        "surface_pressure_due_to_dry_air",
+        "surface_pressure_due_to_dry_air_absolute_tendency",
+        "total_water_path",
+    ]
+    all_out_names = ocean_out_names + atmos_out_names + atmos_derived_names
 
     train_config_fname, inference_config_fname = _write_test_yaml_files(
         tmp_path,
@@ -252,10 +289,10 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         ocean_out_names,
         atmos_in_names,
         atmos_out_names,
-        ocean_sfc_temp_name="o_sfc",
-        ocean_sfc_mask_name="o_mask",
-        atmos_sfc_temp_name="a_sfc",
-        ocean_frac_name="constant_mask",
+        ocean_sfc_temp_name="sst",
+        ocean_sfc_mask_name="mask_0",
+        atmos_sfc_temp_name="surface_temperature",
+        ocean_frac_name="ocean_fraction",
         log_zonal_mean_images=log_zonal_mean_images,
         n_coupled_steps=1,
         max_epochs=1,
@@ -284,25 +321,28 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
+    ocean_weight = len(ocean_out_names) / len(all_out_names)
     assert np.isclose(
         epoch_logs["inference/time_mean_norm/rmse/channel_mean"],
         (
-            0.4 * epoch_logs["inference/time_mean_norm/rmse/ocean_channel_mean"]
-            + 0.6 * epoch_logs["inference/time_mean_norm/rmse/atmosphere_channel_mean"]
+            ocean_weight
+            * epoch_logs["inference/time_mean_norm/rmse/ocean_channel_mean"]
+            + (1 - ocean_weight)
+            * epoch_logs["inference/time_mean_norm/rmse/atmosphere_channel_mean"]
         ),
     )
-    for name in outnames:
+    for name in all_out_names:
         assert f"inference/time_mean/rmse/{name}" in epoch_logs
 
     # check that inference map captions includes expected units
     for map_name in ["val/mean_map/image-error", "inference/time_mean/bias_map"]:
-        for name in ["o_prog", "a_diag"]:
-            wandb_img = epoch_logs[f"{map_name}/{name}"]
-            captions = wandb_img.captions([wandb_img])
-            assert len(captions) > 0
-            assert name in captions[0]
-            assert "[unknown_units]" not in captions[0]
-            assert "[m]" in captions[0]  # set by _save_netcdf
+        name = "thetao_0"
+        wandb_img = epoch_logs[f"{map_name}/{name}"]
+        captions = wandb_img.captions([wandb_img])
+        assert len(captions) > 0
+        assert name in captions[0]
+        assert "[unknown_units]" not in captions[0]
+        assert "[m]" in captions[0]  # set by _save_netcdf
 
     best_checkpoint_path = (
         tmp_path / "output" / "training_checkpoints" / "best_ckpt.tar"
@@ -327,11 +367,11 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         assert "inference/mean/forecast_step" in log
         assert log["inference/mean/forecast_step"] == i
         if i % n_inner_steps == 0:
-            assert "inference/mean/weighted_bias/o_prog" in log
-            assert "inference/mean/weighted_bias/a_prog" in log
+            assert "inference/mean/weighted_bias/thetao_0" in log
+            assert "inference/mean/weighted_bias/PRESsfc" in log
         if i % n_inner_steps == 1:
-            assert "inference/mean/weighted_bias/o_prog" not in log
-            assert "inference/mean/weighted_bias/a_prog" in log
+            assert "inference/mean/weighted_bias/thetao_0" not in log
+            assert "inference/mean/weighted_bias/PRESsfc" in log
 
     assert "inference/time_mean_norm/rmse/channel_mean" in inference_logs[-1]
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in inference_logs[-1]
@@ -350,11 +390,11 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     assert (
         ds_ocean["sample"].size == 2
     )  # 2 initial conditions in _INFERENCE_CONFIG_TEMPLATE
-    assert np.sum(np.isnan(ds_ocean["o_sfc"].values)) == 0
-    assert np.sum(np.isnan(ds_ocean["o_prog"].values)) == 0
+    assert np.sum(np.isnan(ds_ocean["sst"].values)) == 0
+    assert np.sum(np.isnan(ds_ocean["thetao_0"].values)) == 0
     ds_atmos = xr.open_dataset(atmosphere_output_path)
     assert ds_atmos["time"].size == 6 * n_inner_steps
     assert ds_atmos["sample"].size == 2
-    assert np.sum(np.isnan(ds_atmos["a_sfc"].values)) == 0
-    assert np.sum(np.isnan(ds_atmos["a_prog"].values)) == 0
-    assert np.sum(np.isnan(ds_atmos["a_diag"].values)) == 0
+    assert np.sum(np.isnan(ds_atmos["surface_temperature"].values)) == 0
+    assert np.sum(np.isnan(ds_atmos["PRESsfc"].values)) == 0
+    assert np.sum(np.isnan(ds_atmos["DLWRFsfc"].values)) == 0
