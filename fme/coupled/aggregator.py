@@ -330,6 +330,7 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=atmosphere_normalize,
+                log_nino34_index=False,
             ),
         }
         self._num_channels_ocean: Optional[int] = None

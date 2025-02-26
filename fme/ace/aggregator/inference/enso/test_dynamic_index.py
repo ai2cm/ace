@@ -161,7 +161,6 @@ def test_regional__raw_index():
     agg = RegionalIndexAggregator(
         regional_weights=region.regional_weights,
         regional_mean=gridded_operations.regional_area_weighted_mean,
-        variable_name="surface_temperature",
     )
     first_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
     agg.record_batch(first_data, first_times)
@@ -176,10 +175,11 @@ def test_regional__raw_index():
     second_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
     agg.record_batch(second_data, second_times)
 
-    raw_index: torch.Tensor = agg._raw_index_values
-    assert raw_index.shape == (n_samples, n_times)
     expected_values = torch.arange(16.0, 16.0 + n_times, 1.0).to(device=get_device())
-    assert torch.allclose(raw_index, expected_values)
+    raw_indices: torch.Tensor = agg._raw_indices
+    for raw_index in raw_indices.values():
+        assert raw_index.shape == (n_samples, n_times)
+        assert torch.allclose(raw_index, expected_values)
     raw_times: xr.DataArray = agg._raw_index_times
     assert raw_times.sizes["sample"] == n_samples
     assert raw_times.sizes["time"] == n_times
@@ -292,7 +292,7 @@ def test_running_monthly_mean_window_averaging(n_months: int):
     "use_mock_distributed",
     [pytest.param(False, id="single_process"), pytest.param(True, id="distributed")],
 )
-def test_regional_index__get_gathered_index(use_mock_distributed):
+def test_regional_index__get_gathered_indices(use_mock_distributed):
     n_samples, n_times, n_lat, n_lon = 1, 1440, 11, 21
     start_date = (2000, 1, 1, 0, 0, 0)
     first_sample_data = _get_windowed_data(n_samples, n_times, n_lat, n_lon)
@@ -328,30 +328,36 @@ def test_regional_index__get_gathered_index(use_mock_distributed):
     agg = RegionalIndexAggregator(
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
-        variable_name="surface_temperature",
     )
     agg.record_batch(sample_data, sample_times)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):
-            index_dataset = agg.get_dataset()
-            assert index_dataset is not None
+            indices_dataset = agg.get_dataset()
+            assert indices_dataset is not None
     else:
         world_size = 1
-        index_dataset = agg.get_dataset()
-        assert index_dataset is not None
-    assert set(index_dataset.dims) == {"sample", "time"}
-    assert set(index_dataset.time.dt.year.values) == {2000, 2001}
-    assert index_dataset.sizes["sample"] == 2 * n_samples * world_size
-    assert index_dataset.sizes["time"] == 2 * 12  # 2 years of 12 months each
+        indices_dataset = agg.get_dataset()
+        assert indices_dataset is not None
+    assert set(indices_dataset.dims) == {"sample", "time"}
+    assert set(indices_dataset.time.dt.year.values) == {2000, 2001}
+    assert indices_dataset.sizes["sample"] == 2 * n_samples * world_size
+    assert indices_dataset.sizes["time"] == 2 * 12  # 2 years of 12 months each
 
 
-def test_regional_index_aggregator():
+@pytest.mark.parametrize(
+    "variable_name",
+    [
+        pytest.param("surface_temperature", id="surface_temperature"),
+        pytest.param("sst", id="sst"),
+    ],
+)
+def test_regional_index_aggregator(variable_name):
     n_lat = 10
     n_lon = 20
     n_sample = 2
     n_times = 365 * 4  # one year of data for monthly averaging
-    data = _get_windowed_data(n_sample, n_times, n_lat, n_lon)
+    data = _get_windowed_data(n_sample, n_times, n_lat, n_lon, sst_name=variable_name)
     time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times)
     lat_lon_coordinates = LatLonCoordinates(
         lat=data["lat"],
@@ -366,23 +372,32 @@ def test_regional_index_aggregator():
     agg = RegionalIndexAggregator(
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
-        variable_name="surface_temperature",
     )
     agg.record_batch(time=time, data=data)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
-    assert "test/nino34_index" in logs
-    assert isinstance(logs["test/nino34_index"], plt.Figure)
+    metric_name = f"test/{variable_name}_nino34_index"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
 
 
-def test_paired_regional_index_aggregator():
+@pytest.mark.parametrize(
+    "variable_name",
+    [
+        pytest.param("surface_temperature", id="surface_temperature"),
+        pytest.param("sst", id="sst"),
+    ],
+)
+def test_paired_regional_index_aggregator(variable_name):
     n_lat = 10
     n_lon = 20
     n_sample = 2
     n_times = 365 * 4  # one year of data for monthly averaging
-    target_data = _get_windowed_data(n_sample, n_times, n_lat, n_lon)
+    target_data = _get_windowed_data(
+        n_sample, n_times, n_lat, n_lon, sst_name=variable_name
+    )
     prediction_data = _get_windowed_data(
-        n_sample, n_times, n_lat, n_lon, time_varying=False
+        n_sample, n_times, n_lat, n_lon, time_varying=False, sst_name=variable_name
     )
     time = _get_windowed_times((2000, 1, 1, 0, 0, 0), n_sample, n_times)
     lat_lon_coordinates = LatLonCoordinates(
@@ -399,16 +414,15 @@ def test_paired_regional_index_aggregator():
         target_aggregator=RegionalIndexAggregator(
             regional_weights=region.regional_weights,
             regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
-            variable_name="surface_temperature",
         ),
         prediction_aggregator=RegionalIndexAggregator(
             regional_weights=region.regional_weights,
             regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
-            variable_name="surface_temperature",
         ),
     )
     agg.record_batch(time=time, target_data=target_data, gen_data=prediction_data)
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
-    assert "test/nino34_index" in logs
-    assert isinstance(logs["test/nino34_index"], plt.Figure)
+    metric_name = f"test/{variable_name}_nino34_index"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
