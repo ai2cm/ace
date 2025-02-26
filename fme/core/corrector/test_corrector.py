@@ -19,8 +19,8 @@ from .corrector import (
     _force_conserve_moisture,
     _force_conserve_total_energy,
     _force_zero_global_mean_moisture_advection,
-    force_positive,
 )
+from .utils import force_positive
 
 TIMESTEP = datetime.timedelta(hours=6)
 

@@ -229,6 +229,7 @@ class InferenceEvaluatorAggregator(
         log_histograms: bool = False,
         time_mean_reference_data: Optional[xr.Dataset] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
+        log_nino34_index: bool = True,
     ):
         """
         Args:
@@ -255,6 +256,7 @@ class InferenceEvaluatorAggregator(
             time_mean_reference_data: Reference time means for computing bias stats.
             channel_mean_names: Names over which to compute channel means. If not
                 provided, all available variables will be used.
+            log_nino34_index: Whether to log the Nino34 index.
         """
         self._channel_mean_names = channel_mean_names
         self._aggregators: Dict[str, _EvaluatorAggregator] = {}
@@ -330,8 +332,10 @@ class InferenceEvaluatorAggregator(
                     monthly_reference_data=monthly_reference_data,
                 )
             )
-            if isinstance(horizontal_coordinates, LatLonCoordinates) and isinstance(
-                ops, LatLonOperations
+            if (
+                isinstance(horizontal_coordinates, LatLonCoordinates)
+                and isinstance(ops, LatLonOperations)
+                and log_nino34_index
             ):
                 nino34_region = LatLonRegion(
                     lat_bounds=NINO34_LAT,
@@ -344,12 +348,10 @@ class InferenceEvaluatorAggregator(
                         target_aggregator=RegionalIndexAggregator(
                             regional_weights=nino34_region.regional_weights,
                             regional_mean=ops.regional_area_weighted_mean,
-                            variable_name="surface_temperature",
                         ),
                         prediction_aggregator=RegionalIndexAggregator(
                             regional_weights=nino34_region.regional_weights,
                             regional_mean=ops.regional_area_weighted_mean,
-                            variable_name="surface_temperature",
                         ),
                     )
                 )
@@ -646,7 +648,6 @@ class InferenceAggregator(
             aggregators["enso_index"] = RegionalIndexAggregator(
                 regional_weights=nino34_region.regional_weights,
                 regional_mean=gridded_operations.regional_area_weighted_mean,
-                variable_name="surface_temperature",
             )
         self._aggregators = aggregators
         self._summary_aggregators = {

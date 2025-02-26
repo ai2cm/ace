@@ -4,10 +4,13 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.corrector.ocean import (
+    OceanCorrector,
+    OceanCorrectorConfig,
+    SeaIceFractionConfig,
+)
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.masking import StaticMaskingConfig
-
-from .ocean import OceanCorrector, OceanCorrectorConfig
 
 
 def test_ocean_corrector_init_error():
@@ -88,3 +91,33 @@ def test_ocean_corrector_integration():
         x = corrected_gen[name].clone()
         x[_LAT, _LON] = 0.0
         assert torch.all(x >= 0.0)
+
+
+def test_ocean_corrector_has_no_negative_ocean_fraction():
+    config = OceanCorrectorConfig(
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
+    input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
+    gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
+    gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
+    gen_data["sea_ice_fraction"] = torch.randn(IMG_SHAPE, device=DEVICE) * 0.5
+    gen_data["sea_ice_fraction"][_LAT, _LON] = -0.5
+    forcing_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE) * 0.8}
+    corrector = OceanCorrector(config, ops, None, timestep)
+    violation = (forcing_data["land_fraction"] + gen_data["sea_ice_fraction"]) > 1.0
+    assert violation.any()
+    negative_sea_ice_fraction = gen_data["sea_ice_fraction"] < 0.0
+    assert negative_sea_ice_fraction.any()
+
+    gen_data_corrected = corrector(input_data, gen_data, forcing_data)
+    corrected_violation = (
+        forcing_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
+    ) > 1.0
+    assert not corrected_violation.any()
+    assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()

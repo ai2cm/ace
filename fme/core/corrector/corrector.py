@@ -14,6 +14,7 @@ from fme.core.atmosphere_data import (
 )
 from fme.core.constants import GRAVITY, SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.utils import force_positive
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -252,14 +253,6 @@ class Corrector(CorrectorABC):
         return gen_data
 
 
-def force_positive(data: TensorMapping, names: List[str]) -> TensorDict:
-    """Clamp all tensors defined by `names` to be greater than or equal to zero."""
-    out = {**data}
-    for name in names:
-        out[name] = torch.clamp(data[name], min=0.0)
-    return out
-
-
 class AreaWeightedMean(Protocol):
     def __call__(self, data: torch.Tensor, keepdim: bool) -> torch.Tensor: ...
 
@@ -459,9 +452,10 @@ def _force_conserve_total_energy(
         )
     input = AtmosphereData(input_data, vertical_coordinate)
     gen = AtmosphereData(dict(gen_data) | dict(forcing_data), vertical_coordinate)
-    if torch.any(gen.surface_pressure <= 0):
+    if torch.any(input.surface_pressure <= 0) or torch.any(gen.surface_pressure <= 0):
         warnings.warn(
-            "Surface pressure has a non-positive value, skipping energy correction."
+            "Input or generated surface pressure has a non-positive value. Skipping "
+            "energy correction, since it would produce a NaN temperature correction."
         )
         return dict(gen_data)
 
