@@ -23,11 +23,24 @@ git checkout --quiet "$COMMIT_SHA"
 
 pip install --no-deps -e .
 
-yq eval '.experiment_dir="/results" | .n_forward_steps=40 | .forward_steps_in_memory=10 | .checkpoint_path="/test-default/ckpt.tar" | .loader.dataset.data_path="/test-default/data"' docs/evaluator-config.yaml > /workspace/evaluator-config.yaml
+cp docs/evaluator-config.yaml /workspace/evaluator-config.yaml
 
 mkdir -p /results
 
-# Change direcotry to avoid reading from fme
-cd /results
+COMMIT_SHA_SHORT=$(git rev-parse --short HEAD)
+export WANDB_NAME="ci-evaluator-${COMMIT_SHA_SHORT}"
 
-exec "$@" 2>&1 | tee /results/out.log
+python -m fme.ace.evaluator /workspace/evaluator-config.yaml \
+    --override \
+    experiment_dir=/results \
+    n_forward_steps=2800 \
+    forward_steps_in_memory=30 \
+    checkpoint_path=/test-data/ckpt.tar \
+    loader.dataset.data_path=/test-data/data \
+    loader.dataset.n_repeats=24 \
+    logging.log_to_wandb=True \
+    logging.project=ace-ci-tests \
+    logging.entity=ai2cm \
+    aggregator.log_global_mean_norm_time_series=False \
+    aggregator.log_zonal_mean_images=False \
+    | tee /results/out.log
