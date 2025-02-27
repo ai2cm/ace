@@ -17,8 +17,8 @@ class SamudraBuilder(ModuleConfig):
     )
     n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
     dilation: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
-    pred_residuals: bool = False
     pad: str = "circular"
+    norm: str = "instance"
 
     def build(
         self,
@@ -32,6 +32,6 @@ class SamudraBuilder(ModuleConfig):
             ch_width=self.ch_width,
             dilation=self.dilation,
             n_layers=self.n_layers,
-            pred_residuals=self.pred_residuals,
             pad=self.pad,
+            norm=self.norm,
         )
