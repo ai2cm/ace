@@ -1,5 +1,5 @@
 import dataclasses
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import torch
@@ -25,11 +25,13 @@ class Samudra(torch.nn.Module):
         Dilation rates for each ConvNeXt block
     n_layers : List[int]
         Number of ConvNeXt layers at each level
-    pred_residuals : bool, optional
-        Whether to predict residuals instead of absolute values, by default False
     pad : str, optional
         Type of padding to use in convolutions, for example,
         ('circular', 'constant'), by default "circular"
+    norm: str, optional
+        Normalization to use in the network, by default "instance"
+        Options are "batch", "layer", "instance", or None
+        "layer" normalization normalizes over only the channel dimensions
 
     Example:
     --------
@@ -55,8 +57,8 @@ class Samudra(torch.nn.Module):
         ),
         dilation: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8]),
         n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1]),
-        pred_residuals: bool = False,
         pad: str = "circular",
+        norm: Optional[str] = "instance",
     ):
         super().__init__()
 
@@ -66,9 +68,8 @@ class Samudra(torch.nn.Module):
         self.ch_width = ch_width
         self.dilation = dilation
         self.n_layers = n_layers
-        self.pred_residuals = pred_residuals
         self.pad = pad
-
+        self.norm = norm
         self.last_kernel_size = 3
         self.N_pad = int((self.last_kernel_size - 1) / 2)
 
@@ -84,6 +85,7 @@ class Samudra(torch.nn.Module):
                     dilation=self.dilation[i],
                     n_layers=self.n_layers[i],
                     pad=self.pad,
+                    norm=self.norm,
                 )
             )
             layers.append(AvgPool())
@@ -94,6 +96,7 @@ class Samudra(torch.nn.Module):
                 dilation=self.dilation[i],
                 n_layers=self.n_layers[i],
                 pad=self.pad,
+                norm=self.norm,
             )
         )
         layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -108,6 +111,7 @@ class Samudra(torch.nn.Module):
                     dilation=dilation_reversed[i],
                     n_layers=n_layers_reversed[i],
                     pad=self.pad,
+                    norm=self.norm,
                 )
             )
             layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -118,6 +122,7 @@ class Samudra(torch.nn.Module):
                 dilation=dilation_reversed[i],
                 n_layers=n_layers_reversed[i],
                 pad=self.pad,
+                norm=self.norm,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
@@ -125,7 +130,7 @@ class Samudra(torch.nn.Module):
         self.layers = nn.ModuleList(layers)
         self.num_steps = int(len(ch_width_with_input) - 1)
 
-    def forward_once(self, fts):
+    def forward(self, fts):
         temp: list[torch.Tensor] = []
         count = 0
         for layer in self.layers:
@@ -159,13 +164,3 @@ class Samudra(torch.nn.Module):
                     fts += temp[int(2 * self.num_steps - count - 1)]
                     count += 1
         return fts
-
-    def forward(self, input_tensor):
-        decodings = self.forward_once(input_tensor)
-        if self.pred_residuals:
-            reshaped = (
-                input_tensor[: self.output_channels] + decodings
-            )  # Residual prediction
-        else:
-            reshaped = decodings  # Absolute prediction
-        return reshaped
