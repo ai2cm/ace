@@ -17,7 +17,7 @@ class OptimizationABC(abc.ABC):
     def learning_rate(self) -> float: ...
 
     @abc.abstractmethod
-    def set_mode(self, module: nn.Module):
+    def set_mode(self, modules: nn.ModuleList):
         """
         Sets the mode of the module to train.
         """
