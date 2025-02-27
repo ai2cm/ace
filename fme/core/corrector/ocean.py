@@ -86,7 +86,7 @@ class OceanCorrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorMapping:
+    ) -> TensorDict:
         if self._masking is not None:
             gen_data = self._masking(gen_data)
         if len(self._config.force_positive_names) > 0:
