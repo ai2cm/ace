@@ -1,6 +1,8 @@
 import dataclasses
 from typing import Callable, List, Sequence, TypeVar
 
+import numpy as np
+
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.data_typing import CoupledDatasetItem
@@ -111,25 +113,38 @@ class CoupledBatchData:
             ),
         )
 
-    def remove_initial_condition(self: SelfType, n_ic_timesteps: int) -> SelfType:
+    def prepend(self: SelfType, initial_condition: CoupledPrognosticState) -> SelfType:
         return self.__class__(
-            ocean_data=self.ocean_data.remove_initial_condition(n_ic_timesteps),
+            ocean_data=self.ocean_data.prepend(initial_condition.ocean_data),
+            atmosphere_data=self.atmosphere_data.prepend(
+                initial_condition.atmosphere_data
+            ),
+        )
+
+    def remove_initial_condition(
+        self: SelfType,
+        n_ic_timesteps_ocean: int,
+        n_ic_timesteps_atmosphere: int,
+    ) -> SelfType:
+        return self.__class__(
+            ocean_data=self.ocean_data.remove_initial_condition(n_ic_timesteps_ocean),
             atmosphere_data=self.atmosphere_data.remove_initial_condition(
-                n_ic_timesteps
+                n_ic_timesteps_atmosphere
             ),
         )
 
     def compute_derived_variables(
         self: SelfType,
-        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        ocean_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        atmosphere_derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         forcing_data: SelfType,
     ) -> SelfType:
         return self.__class__(
             ocean_data=self.ocean_data.compute_derived_variables(
-                derive_func, forcing_data.ocean_data
+                ocean_derive_func, forcing_data.ocean_data
             ),
             atmosphere_data=self.atmosphere_data.compute_derived_variables(
-                derive_func, forcing_data.atmosphere_data
+                atmosphere_derive_func, forcing_data.atmosphere_data
             ),
         )
 
@@ -143,3 +158,35 @@ class CoupledPairedData:
 
     ocean_data: PairedData
     atmosphere_data: PairedData
+
+    @classmethod
+    def from_coupled_batch_data(
+        cls,
+        prediction: CoupledBatchData,
+        reference: CoupledBatchData,
+    ) -> "CoupledPairedData":
+        if not np.all(
+            prediction.ocean_data.time.values == reference.ocean_data.time.values
+        ):
+            raise ValueError(
+                "Prediction and target ocean time coordinate must be the same."
+            )
+        if not np.all(
+            prediction.atmosphere_data.time.values
+            == reference.atmosphere_data.time.values
+        ):
+            raise ValueError(
+                "Prediction and target atmosphere time coordinate must be the same."
+            )
+        return CoupledPairedData(
+            ocean_data=PairedData(
+                prediction=prediction.ocean_data.data,
+                reference=reference.ocean_data.data,
+                time=prediction.ocean_data.time,
+            ),
+            atmosphere_data=PairedData(
+                prediction=prediction.atmosphere_data.data,
+                reference=reference.atmosphere_data.data,
+                time=prediction.atmosphere_data.time,
+            ),
+        )

@@ -260,6 +260,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
 
     ocean_in_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
     ocean_out_names = ["thetao_0", "thetao_1", "sst"]
+    ocean_derived_names = ["ocean_heat_content"]
     atmos_in_names = [
         "DLWRFsfc",
         "PRESsfc",
@@ -280,7 +281,9 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         "surface_pressure_due_to_dry_air_absolute_tendency",
         "total_water_path",
     ]
-    all_out_names = ocean_out_names + atmos_out_names + atmos_derived_names
+    all_out_names = (
+        ocean_out_names + ocean_derived_names + atmos_out_names + atmos_derived_names
+    )
 
     train_config_fname, inference_config_fname = _write_test_yaml_files(
         tmp_path,
@@ -321,7 +324,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
-    ocean_weight = len(ocean_out_names) / len(all_out_names)
+    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
     assert np.isclose(
         epoch_logs["inference/time_mean_norm/rmse/channel_mean"],
         (

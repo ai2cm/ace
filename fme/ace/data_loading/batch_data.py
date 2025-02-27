@@ -75,6 +75,10 @@ class BatchData:
     def dims(self) -> List[str]:
         return ["sample", "time"] + self.horizontal_dims
 
+    @property
+    def n_timesteps(self) -> int:
+        return self.time["time"].values.size
+
     def to_device(self) -> "BatchData":
         return self.__class__(
             data={k: v.to(get_device()) for k, v in self.data.items()},
