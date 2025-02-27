@@ -49,7 +49,7 @@ def test_optimization_reload(
         kwargs={},
     )
     # train the model
-    optimization.set_mode(model)
+    optimization.set_mode(nn.ModuleList([model]))
     model_intermediate_state = None
     for i in range(max_epochs):
         if i == checkpoint_epoch:
@@ -79,7 +79,7 @@ def test_optimization_reload(
     )
     optimization.load_state(yaml.load(intermediate_state, Loader=yaml.CLoader))
     # train the model again
-    optimization.set_mode(model)
+    optimization.set_mode(nn.ModuleList([model]))
     for i in range(max_epochs - checkpoint_epoch):
         loss = model(x).sum()
         optimization.accumulate_loss(loss)

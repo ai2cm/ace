@@ -927,7 +927,7 @@ class SingleModuleStepper(
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)
 
-        optimization.set_mode(self.module)
+        optimization.set_mode(self.modules)
         with optimization.autocast():
             # output from self.predict_paired does not include initial condition
             n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
