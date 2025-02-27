@@ -174,7 +174,7 @@ class CheckpointModelConfig:
     checkpoint: str
 
     def __post_init__(self) -> None:
-        checkpoint_dict = torch.load(self.checkpoint)
+        checkpoint_dict = torch.load(self.checkpoint, weights_only=False)
         checkpoint_dict = clean_checkpoint_dict(checkpoint_dict)
         self.checkpoint_dict: Mapping[str, Any] = checkpoint_dict
 

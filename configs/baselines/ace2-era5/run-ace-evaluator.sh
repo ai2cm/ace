@@ -18,7 +18,7 @@ python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --description 'Run ACE evaluator' \
-    --beaker-image oliverwm/fme-deps-only-01cfbdf1 \
+    --beaker-image oliverwm/fme-deps-only-5493f777 \
     --workspace ai2/ace \
     --priority normal \
     --cluster ai2/saturn-cirrascale \
