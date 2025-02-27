@@ -24,7 +24,7 @@ RUN cd $FME_DIR && pip install --no-deps -e .
 # copy after install so editing scripts does not trigger reinstall
 COPY scripts ${FME_DIR}/scripts
 
-FROM base AS ci-test
+FROM base AS deps-only
 
 # install github cli and yq
 RUN apt-get update && apt-get install -y \
