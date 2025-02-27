@@ -21,7 +21,6 @@ import math
 import tensorly as tl
 import torch
 import torch.nn as nn
-from torch.cuda import amp
 
 tl.set_backend("pytorch")
 
@@ -138,7 +137,7 @@ class SpectralConv(nn.Module):
         x = x.float()
         B, C, H, W = x.shape
 
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = self.forward_transform(x).contiguous()
             if self.scale_residual:
                 residual = self.inverse_transform(x)
@@ -151,7 +150,7 @@ class SpectralConv(nn.Module):
         )
         x = xp.contiguous()
 
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):
@@ -270,7 +269,7 @@ class FactorizedSpectralConv(nn.Module):
         residual = x
         x = x.float()
 
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = self.forward_transform(x).contiguous()
             if self.scale_residual:
                 residual = self.inverse_transform(x)
@@ -287,7 +286,7 @@ class FactorizedSpectralConv(nn.Module):
             )
         x = xp.contiguous()
 
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = self.inverse_transform(x)
 
         if hasattr(self, "bias"):

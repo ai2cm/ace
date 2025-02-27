@@ -5,7 +5,6 @@ from typing import Any, Iterable, Literal, Mapping, Optional
 
 import numpy as np
 import torch
-import torch.cuda.amp as amp
 from torch import nn
 
 from fme.core.device import get_device
@@ -34,7 +33,7 @@ class Optimization(OptimizationABC):
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
         if enable_automatic_mixed_precision:
-            self.gscaler: Optional[amp.GradScaler] = amp.GradScaler()
+            self.gscaler: Optional[torch.amp.GradScaler] = torch.amp.GradScaler("cuda")
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
@@ -45,7 +44,7 @@ class Optimization(OptimizationABC):
     def autocast(self):
         enabled = self.gscaler is not None
         dtype = torch.bfloat16 if enabled else None
-        with amp.autocast(enabled=enabled, dtype=dtype):
+        with torch.amp.autocast("cuda", enabled=enabled, dtype=dtype):
             yield
 
     @property

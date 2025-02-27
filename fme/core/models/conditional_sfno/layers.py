@@ -22,7 +22,6 @@ import torch
 import torch.fft
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.cuda import amp
 from torch.utils.checkpoint import checkpoint
 
 from .activations import ComplexReLU
@@ -433,7 +432,7 @@ class SpectralAttention2d(nn.Module):
         # x = x.to(torch.float32)
 
         # FWD transform
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = x.to(torch.float32)
             x = x.contiguous()
             x = self.forward_transform(x)
@@ -443,7 +442,7 @@ class SpectralAttention2d(nn.Module):
         x = self.forward_mlp(x)
 
         # BWD transform
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = torch.view_as_complex(x)
             x = x.contiguous()
             x = self.inverse_transform(x)
@@ -544,7 +543,7 @@ class SpectralAttentionS2(nn.Module):
         # x = x.to(torch.float32)
 
         # FWD transform
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = x.to(torch.float32)
             x = x.contiguous()
             x = self.forward_transform(x)
@@ -554,7 +553,7 @@ class SpectralAttentionS2(nn.Module):
         x = self.forward_mlp(x)
 
         # BWD transform
-        with amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             x = torch.view_as_complex(x)
             x = x.contiguous()
             x = self.inverse_transform(x)
