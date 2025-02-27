@@ -52,11 +52,12 @@ class Optimization(OptimizationABC):
     def learning_rate(self) -> float:
         return self.optimizer.param_groups[0]["lr"]
 
-    def set_mode(self, module: nn.Module):
+    def set_mode(self, modules: nn.ModuleList):
         """
         Sets the mode of the module to train.
         """
-        module.train()
+        for m in modules:
+            m.train()
 
     def step_scheduler(self, valid_loss: float):
         """
@@ -223,11 +224,12 @@ class NullOptimization(OptimizationABC):
     def load_state(self, state):
         return
 
-    def set_mode(self, module: nn.Module):
+    def set_mode(self, modules: nn.ModuleList):
         """
         Sets the mode of the module to eval.
         """
-        module.eval()
+        for m in modules:
+            m.eval()
 
 
 @dataclasses.dataclass
