@@ -57,7 +57,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     if trainer.epoch_checkpoint_path is None:
         raise ValueError("Cannot restore checkpoint without a checkpoint path")
 
-    checkpoint = torch.load(trainer.epoch_checkpoint_path, map_location=get_device())
+    checkpoint = torch.load(
+        trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
+    )
     trainer.model = trainer.model.from_state(
         checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )
@@ -67,7 +69,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
-    ema_checkpoint = torch.load(trainer.ema_checkpoint_path, map_location=get_device())
+    ema_checkpoint = torch.load(
+        trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
+    )
     ema_model = trainer.model.from_state(
         ema_checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )

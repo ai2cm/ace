@@ -18,7 +18,9 @@ def _get_parser():
 
 if __name__ == "__main__":
     args = _get_parser().parse_args()
-    checkpoint = torch.load(args.input_path, map_location=torch.device("cpu"))
+    checkpoint = torch.load(
+        args.input_path, map_location=torch.device("cpu"), weights_only=False
+    )
     if args.strip_optimization:
         del checkpoint["optimization"]
     if args.cast_coords_to_float32:

@@ -43,7 +43,7 @@ class InlineInferenceConfig:
     loader: InferenceDataLoaderConfig
     n_coupled_steps: int = 2
     coupled_steps_in_memory: int = 2
-    epochs: Slice = Slice(start=0, stop=None, step=1)
+    epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
             log_global_mean_time_series=False, log_global_mean_norm_time_series=False

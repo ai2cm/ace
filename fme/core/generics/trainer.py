@@ -515,7 +515,9 @@ class Trainer:
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     # separated into a function only to make it easier to mock
-    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     # restore checkpoint is used for finetuning as well as resuming.
     # If finetuning (i.e., not resuming), restore checkpoint
     # does not load optimizer state, instead uses config specified lr.
@@ -525,7 +527,9 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._start_epoch = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
+    ema_checkpoint = torch.load(
+        ema_checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     ema_stepper: TrainStepperABC = type(trainer.stepper).from_state(
         ema_checkpoint["stepper"]
     )

@@ -36,7 +36,9 @@ class DataLoaderConfig:
     num_data_workers: int = 0
     prefetch_factor: Optional[int] = None
     strict_ensemble: bool = True
-    augmentation: AugmentationConfig = AugmentationConfig()
+    augmentation: AugmentationConfig = dataclasses.field(
+        default_factory=lambda: AugmentationConfig()
+    )
 
     def __post_init__(self):
         dist = Distributed.get_instance()

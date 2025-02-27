@@ -532,7 +532,9 @@ def test_saves_correct_ema_checkpoints(
         best_weight,
         atol=1e-7,
     )
-    best_inference_checkpoint = torch.load(paths.best_inference_checkpoint_path)
+    best_inference_checkpoint = torch.load(
+        paths.best_inference_checkpoint_path, weights_only=False
+    )
     assert best_inference_checkpoint["best_validation_loss"] == valid_loss
     assert best_inference_checkpoint["best_inference_error"] == inference_error
     np.testing.assert_allclose(
@@ -605,7 +607,7 @@ def test_saves_correct_non_ema_epoch_checkpoints(
                 min((i + 1) * segment_epochs_value, config.max_epochs),
             )
         ]
-        latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+        latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
         assert latest_checkpoint["epoch"] == min(
             max_epochs, (i + 1) * segment_epochs_value
         )
@@ -618,7 +620,7 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
     assert os.path.exists(paths.ema_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path)
+    best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0
     assert best_checkpoint["best_inference_error"] == np.min(
@@ -628,13 +630,15 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         best_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         module_values[best_val_epoch - 1],
     )
-    best_inference_checkpoint = torch.load(paths.best_inference_checkpoint_path)
+    best_inference_checkpoint = torch.load(
+        paths.best_inference_checkpoint_path, weights_only=False
+    )
     assert best_inference_checkpoint["epoch"] == best_inference_epoch
     assert best_inference_checkpoint["best_validation_loss"] == np.min(
         val_losses[:best_inference_epoch]
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.0
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+    latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
     assert latest_checkpoint["epoch"] == max_epochs
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),

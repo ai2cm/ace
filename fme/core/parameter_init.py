@@ -173,7 +173,9 @@ class ParameterInitializationConfig:
         initialization.
         """
         if self.weights_path is not None:
-            checkpoint = torch.load(self.weights_path, map_location=get_device())
+            checkpoint = torch.load(
+                self.weights_path, map_location=get_device(), weights_only=False
+            )
             return strip_leading_module(checkpoint["stepper"]["module"])
         else:
             return None
