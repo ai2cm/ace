@@ -20,7 +20,7 @@ gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
     --description 'Run ACE training for CM4 atmosphere data' \
-    --beaker-image oliverwm/fme-deps-only-01cfbdf1 \
+    --beaker-image oliverwm/fme-deps-only-5493f777 \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \

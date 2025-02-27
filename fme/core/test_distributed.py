@@ -50,6 +50,7 @@ def run_gather_test(rank, worldsize):
     os.environ["WORLD_SIZE"] = str(worldsize)
     os.environ["RANK"] = str(rank)
     os.environ["LOCAL_RANK"] = str(rank)
+    os.environ["NCCL_SHM_DISABLE"] = "1"
 
     dist = Distributed()
     assert dist.is_distributed()

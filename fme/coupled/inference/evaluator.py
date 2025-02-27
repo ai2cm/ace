@@ -111,7 +111,9 @@ def load_stepper_config(
         return checkpoint_path.load_stepper_config()
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     config = CoupledStepperConfig.from_state(checkpoint["stepper"]["config"])
 
     return config
@@ -141,7 +143,9 @@ def load_stepper(
         return checkpoint_path.load_stepper()
 
     logging.info(f"Loading trained coupled model checkpoint from {checkpoint_path}")
-    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     stepper = CoupledStepper.from_state(checkpoint["stepper"])
 
     return stepper
@@ -206,7 +210,7 @@ class InferenceEvaluatorConfig:
                 )
             except ValueError as err:
                 raise ValueError(
-                    "Ocean time_coarsen config invalid with error: " f"{str(err)}"
+                    f"Ocean time_coarsen config invalid with error: {str(err)}"
                 )
         if self.data_writer.atmosphere.time_coarsen is not None:
             try:
@@ -217,7 +221,7 @@ class InferenceEvaluatorConfig:
                 )
             except ValueError as err:
                 raise ValueError(
-                    "Atmosphere time_coarsen config invalid with error: " f"{str(err)}"
+                    f"Atmosphere time_coarsen config invalid with error: {str(err)}"
                 )
 
         variable_metadata = get_derived_variable_metadata() | data.variable_metadata
