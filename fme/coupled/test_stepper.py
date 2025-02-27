@@ -32,7 +32,7 @@ from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
 DEVICE = fme.get_device()
-NZ = 7  # number of vertical interface levels in mock data from get_data
+NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
 
@@ -463,7 +463,7 @@ def get_stepper_config(
     return config
 
 
-def _get_stepper_and_batch(
+def get_stepper_and_batch(
     ocean_in_names: List[str],
     ocean_out_names: List[str],
     atmosphere_in_names: List[str],
@@ -546,7 +546,7 @@ def test_predict_paired():
             a_diag = a_prog + x[:, -1:]
             return torch.concat([a_prog, a_sfc_temp, a_diag], dim=1) + 2
 
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -678,7 +678,7 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_diag"]
     atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -710,7 +710,11 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
 
 
 def test_predict_paired_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "sst", "mask_0"]
+    ocean_in_names = (
+        [f"thetao_{i}" for i in range(NZ - 1)]
+        + ["sst"]
+        + [f"mask_{i}" for i in range(NZ - 1)]
+    )
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -718,7 +722,7 @@ def test_predict_paired_with_derived_variables():
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
 
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -756,7 +760,7 @@ def test_train_on_batch_loss():
     ocean_out_names = ["o_sfc", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc", "ocean_frac"]
     atmos_out_names = ["a_prog", "a_sfc", "a_diag"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -789,28 +793,18 @@ def test_train_on_batch_loss():
 
 
 def test_train_on_batch_with_derived_variables():
-    ocean_in_names = [
-        "thetao_0",
-        "thetao_1",
-        "thetao_2",
-        "thetao_3",
-        "thetao_4",
-        "thetao_5",
-        "sst",
-        "mask_0",
-        "mask_1",
-        "mask_2",
-        "mask_3",
-        "mask_4",
-        "mask_5",
-    ]
+    ocean_in_names = (
+        [f"thetao_{i}" for i in range(NZ - 1)]
+        + ["sst"]
+        + [f"mask_{i}" for i in range(NZ - 1)]
+    )
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
         "surface_temperature",
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
