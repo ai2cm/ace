@@ -96,7 +96,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
     env:
       BEAKER_TOKEN: ${{ secrets.BEAKER_TOKEN }}
-      BEAKER_IMAGE: oliverwm/fme-deps-only-2025-02-10
+      BEAKER_IMAGE: oliverwm/fme-deps-only-2025-02-27
       BEAKER_WORKSPACE: ai2/ace-ci-tests
     steps:
       - name: Determine current commit SHA (pull request)
@@ -136,7 +136,7 @@ jobs:
                     - ai2/jupiter-cirrascale-2
                     - ai2/augusta-google-1
                 datasets:
-                  - mountPath: /test-default
+                  - mountPath: /test-data
                     source:
                       beaker: elynn/ci-inference
                 envVars:
@@ -144,10 +144,11 @@ jobs:
                     value: ${{ env.COMMIT_SHA }}
                   - name: TMP_GITHUB_TOKEN
                     value: ${{ secrets.GITHUB_TOKEN }}
-                command: ["/entrypoint.sh", "python", "-m", "fme.ace.evaluator", "/workspace/evaluator-config.yaml"]
+                  - name: WANDB_API_KEY
+                    secret: wandb-api-key-ai2cm-sa
+                command: ["/entrypoint.sh"]
                 result:
                   path: /results
           token: ${{ env.BEAKER_TOKEN }}
           workspace: ${{ env.BEAKER_WORKSPACE }}
           name: ci-ace-evaluator-${{ env.COMMIT_SHA_SHORT }}
-
