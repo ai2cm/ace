@@ -320,7 +320,9 @@ class ExistingStepperConfig:
         )
 
     def _load_checkpoint(self) -> Mapping[str, Any]:
-        return torch.load(self.checkpoint_path, map_location=get_device())
+        return torch.load(
+            self.checkpoint_path, map_location=get_device(), weights_only=False
+        )
 
     def get_evaluation_window_data_requirements(
         self, n_forward_steps: int
@@ -1140,7 +1142,9 @@ def load_stepper_config(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(checkpoint_path, map_location=get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=get_device(), weights_only=False
+    )
     config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
 
     if override_config.ocean != "keep":
@@ -1174,7 +1178,9 @@ def load_stepper(
     if override_config is None:
         override_config = StepperOverrideConfig()
 
-    checkpoint = torch.load(checkpoint_path, map_location=get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=get_device(), weights_only=False
+    )
     stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":
