@@ -187,7 +187,7 @@ class Corrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorMapping:
+    ) -> TensorDict:
         """Apply corrections to the generated data.
 
         Args:
@@ -198,6 +198,7 @@ class Corrector(CorrectorABC):
         Returns:
             The corrected data.
         """
+        gen_data = dict(gen_data)
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
