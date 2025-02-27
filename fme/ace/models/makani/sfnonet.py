@@ -25,7 +25,6 @@ import torch.nn as nn
 
 # get spectral transforms from torch_harmonics
 import torch_harmonics as th
-from torch.cuda import amp
 from torch.utils.checkpoint import checkpoint
 
 from .layers import MLP, DropPath, EncoderDecoder, InverseRealFFT2, RealFFT2
@@ -541,7 +540,7 @@ class SphericalFourierNeuralOperatorNet(nn.Module):
                 xtype = x.dtype
                 # only take the predicted channels as residual
                 residual = x.to(torch.float32)
-                with amp.autocast(enabled=False):
+                with torch.amp.autocast("cuda", enabled=False):
                     residual = self.trans_down(residual)
                     residual = residual.contiguous()
                     residual = self.itrans_up(residual)
@@ -564,7 +563,7 @@ class SphericalFourierNeuralOperatorNet(nn.Module):
                     ],
                     dim=-1,
                 )
-                with amp.autocast(enabled=False):
+                with torch.amp.autocast("cuda", enabled=False):
                     pos_embed = self.itrans_up(torch.view_as_complex(pos_embed))
             else:
                 pos_embed = self.pos_embed
