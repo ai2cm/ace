@@ -667,7 +667,7 @@ class DiffusionStepper(
         metrics: Dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
 
-        optimization.set_mode(self.module)
+        optimization.set_mode(self.modules)
         with optimization.autocast():
             # output from self.predict does not include initial condition
             output, _ = self.predict_paired(
