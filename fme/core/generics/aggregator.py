@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, Generic, List, TypeVar
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state
 T = TypeVar("T", contravariant=True)
@@ -12,6 +12,10 @@ class AggregatorABC(abc.ABC, Generic[T]):
 
     @abc.abstractmethod
     def get_logs(self, label: str) -> Dict[str, float]:
+        pass
+
+    @abc.abstractmethod
+    def flush_diagnostics(self, epoch: Optional[int]) -> None:
         pass
 
 
@@ -50,4 +54,8 @@ class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
 
     @abc.abstractmethod
     def get_summary_logs(self) -> InferenceLog:
+        pass
+
+    @abc.abstractmethod
+    def flush_diagnostics(self, epoch: Optional[int]) -> None:
         pass

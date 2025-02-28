@@ -102,6 +102,9 @@ class TrainConfigProtocol(Protocol):
     def experiment_dir(self) -> str: ...
 
     @property
+    def output_dir(self) -> str: ...
+
+    @property
     def checkpoint_dir(self) -> str: ...
 
     @property
@@ -373,7 +376,7 @@ class Trainer:
                 wandb.log(metrics, step=self.num_batches_seen)
                 n_samples_seen_since_logging = 0
         self._model_epoch += 1
-
+        aggregator.flush_diagnostics(epoch=self._model_epoch)
         return aggregator.get_logs(label="train")
 
     @contextlib.contextmanager
@@ -414,6 +417,7 @@ class Trainer:
                 aggregator.record_batch(
                     batch=stepped,
                 )
+        aggregator.flush_diagnostics(epoch=self._model_epoch)
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):

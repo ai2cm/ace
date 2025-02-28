@@ -109,3 +109,36 @@ def test_logs_labels_exist_with_reference_time_means():
     assert len(summary_logs) == len(expected_summary_keys), set(
         summary_logs
     ).difference(expected_summary_keys)
+
+
+def test_flush_diagnostics(tmpdir):
+    nx, ny, n_sample, n_time = 2, 2, 10, 21
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
+    agg = InferenceAggregator(
+        horizontal_coordinates.to(device=get_device()),
+        n_time,
+        TIMESTEP,
+        output_dir=tmpdir,
+    )
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
+    agg.record_batch(
+        data=PairedData(
+            prediction=gen_data,
+            reference=target_data,
+            time=time,
+        ),
+    )
+    agg.flush_diagnostics()
+    expected_files = [  # note: time-dependent aggregators not tested here
+        "mean",
+        "time_mean",
+    ]
+    for file in expected_files:
+        assert (tmpdir / f"{file}_diagnostics.nc").exists()
