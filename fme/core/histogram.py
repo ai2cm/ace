@@ -208,8 +208,13 @@ class ComparedDynamicHistograms:
         target = {k: v for k, v in target.items() if k in self._variables}
         prediction = {k: v for k, v in prediction.items() if k in self._variables}
         if self._nan_masks is None:
+            # assume the final two dimensions are the spatial dimensions and the
+            # spatial pattern of NaNs is the same for all samples & time, but
+            # can vary by variable
+            ndim = next(iter(target.values())).ndim
+            index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
             self._nan_masks = {
-                k: v.flatten().unsqueeze(0).isnan() if torch.any(v.isnan()) else None
+                k: v[index].isnan() if torch.any(v[index].isnan()) else None
                 for k, v in target.items()
                 if k in self._variables
             }
@@ -229,10 +234,10 @@ class ComparedDynamicHistograms:
                 )
         for k in target:
             # no matter what data shape is given, combine it all into one histogram
-            value = self._remove_nans(k, target[k].flatten().unsqueeze(0))
+            value = self._remove_nans(k, target[k])
             self.target_histograms[k].add(value)
         for k in prediction:
-            value = self._remove_nans(k, prediction[k].flatten().unsqueeze(0))
+            value = self._remove_nans(k, prediction[k])
             self.prediction_histograms[k].add(value)
 
     def _remove_nans(self, key: str, value: torch.Tensor):
@@ -242,9 +247,11 @@ class ComparedDynamicHistograms:
             )
         nan_mask = self._nan_masks[key]
         if nan_mask is not None:
-            mask = ~nan_mask.to(value.device)
-            value = torch.masked_select(value, mask).unsqueeze(0)
-        return value
+            mask = ~nan_mask.to(value.device).expand(*value.shape)
+            value = torch.masked_select(value, mask)
+        else:
+            value = value.flatten()
+        return value.unsqueeze(0)
 
     def _get_histograms(
         self,
