@@ -2,11 +2,11 @@
 
 set -e
 
-JOB_NAME="ace-cm4-atmosphere-train"
+JOB_NAME="ace2-cm4-atmosphere-train"
 JOB_GROUP="ace2-cm4-atmosphere"
 CONFIG_FILENAME="ace-train-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
-CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
+CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 REPO_ROOT=$(git rev-parse --show-toplevel)
