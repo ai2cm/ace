@@ -1,13 +1,11 @@
 import dataclasses
 import datetime
 import os
-from typing import Iterable, Mapping, Optional
+from typing import Mapping
 
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
-from fme.ace.inference.loop import write_reduced_metrics as write_reduced_metrics_
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
-from fme.coupled.aggregator import InferenceEvaluatorAggregator
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
@@ -16,43 +14,6 @@ from fme.coupled.data_loading.data_typing import CoupledCoords
 
 OCEAN_OUTPUT_DIR_NAME = "ocean"
 ATMOSPHERE_OUTPUT_DIR_NAME = "atmosphere"
-
-
-def write_reduced_metrics(
-    aggregator: InferenceEvaluatorAggregator,
-    data_coords: CoupledCoords,
-    experiment_dir: str,
-    excluded: Optional[Iterable[str]] = None,
-):
-    """
-    Write the reduced metrics to disk. Each component aggregator will write
-    netCDFs to their corresponding sub-directories.
-
-    Args:
-        aggregator: The aggregator to write metrics from.
-        data_coords: Coordinates to assign to the datasets.
-        experiment_dir: Base path to write the metrics to.
-        excluded: Names of metrics to exclude from writing.
-
-    """
-    ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
-    atmosphere_dir = os.path.join(experiment_dir, ATMOSPHERE_OUTPUT_DIR_NAME)
-    if not os.path.exists(ocean_dir):
-        os.makedirs(ocean_dir)
-    if not os.path.exists(atmosphere_dir):
-        os.makedirs(atmosphere_dir)
-    write_reduced_metrics_(
-        aggregator.ocean,
-        data_coords.ocean,
-        ocean_dir,
-        excluded=excluded,
-    )
-    write_reduced_metrics_(
-        aggregator.atmosphere,
-        data_coords.atmosphere,
-        atmosphere_dir,
-        excluded=excluded,
-    )
 
 
 @dataclasses.dataclass

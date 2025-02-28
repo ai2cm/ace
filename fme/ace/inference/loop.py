@@ -1,14 +1,7 @@
 import abc
 import logging
-from pathlib import Path
-from typing import Callable, Iterable, Mapping, Optional, Union
+from typing import Callable, Optional, Union
 
-import numpy as np
-
-from fme.ace.aggregator.inference.main import (
-    InferenceAggregator,
-    InferenceEvaluatorAggregator,
-)
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.inference.data_writer import PairedDataWriter
 from fme.core.generics.aggregator import InferenceAggregatorABC, InferenceLogs
@@ -31,29 +24,6 @@ class DeriverABC(abc.ABC):
     @property
     @abc.abstractmethod
     def n_ic_timesteps(self) -> int: ...
-
-
-def write_reduced_metrics(
-    aggregator: Union[InferenceEvaluatorAggregator, InferenceAggregator],
-    data_coords: Mapping[str, np.ndarray],
-    path: str,
-    excluded: Optional[Iterable[str]] = None,
-):
-    """
-    Write the reduced metrics to disk. Each sub-aggregator will write a netCDF file
-    if its `get_dataset` method returns a non-empty dataset.
-
-    Args:
-        aggregator: The aggregator to write metrics from.
-        data_coords: Coordinates to assign to the datasets.
-        path: Path to write the metrics to.
-        excluded: Names of metrics to exclude from writing.
-    """
-    for name, ds in aggregator.get_datasets(excluded_aggregators=excluded).items():
-        if len(ds) > 0:
-            coords = {k: v for k, v in data_coords.items() if k in ds.dims}
-            ds = ds.assign_coords(coords)
-            ds.to_netcdf(Path(path) / f"{name}_diagnostics.nc")
 
 
 def run_dataset_comparison(

@@ -25,7 +25,6 @@ from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.inference.data_writer import (
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
-    write_reduced_metrics,
 )
 from fme.coupled.stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
@@ -314,6 +313,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
         variable_metadata=variable_metadata,
+        output_dir=config.experiment_dir,
     )
 
     writer = config.get_data_writer(data)
@@ -333,14 +333,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    write_reduced_metrics(
-        aggregator,
-        data.coords,
-        config.experiment_dir,
-        excluded=[
-            "video",
-        ],
-    )
+    aggregator.flush_diagnostics()
     timer.stop()
 
     timer.stop_outer("inference")

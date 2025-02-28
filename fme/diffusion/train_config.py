@@ -92,6 +92,13 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
+    @property
+    def output_dir(self) -> str:
+        """
+        The directory where output files are saved.
+        """
+        return os.path.join(self.experiment_dir, "output")
+
     def get_inference_epochs(self) -> List[int]:
         return list(range(0, self.max_epochs))[self.inference.epochs.slice]
 

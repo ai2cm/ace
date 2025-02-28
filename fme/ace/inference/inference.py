@@ -21,7 +21,6 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
-from fme.ace.inference.loop import write_reduced_metrics
 from fme.ace.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
@@ -269,6 +268,7 @@ def run_inference_from_config(config: InferenceConfig):
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
         timestep=data.timestep,
         variable_metadata=variable_metadata,
+        output_dir=config.experiment_dir,
     )
 
     writer = config.get_data_writer(data)
@@ -288,7 +288,7 @@ def run_inference_from_config(config: InferenceConfig):
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    write_reduced_metrics(aggregator, data.coords, config.experiment_dir)
+    aggregator.flush_diagnostics()
     timer.stop()
 
     timer.stop_outer("inference")
