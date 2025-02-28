@@ -120,6 +120,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,
+        output_dir=config.output_dir,
     )
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
@@ -149,6 +150,7 @@ class AggregatorBuilder(
         initial_inference_time: xr.DataArray,
         record_step_20: bool,
         n_timesteps: int,
+        output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
@@ -161,6 +163,7 @@ class AggregatorBuilder(
         self.initial_inference_time = initial_inference_time
         self.record_step_20 = record_step_20
         self.n_timesteps = n_timesteps
+        self.output_dir = output_dir
         self.variable_metadata = variable_metadata
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
@@ -171,9 +174,10 @@ class AggregatorBuilder(
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            gridded_operations=self.gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,
+            output_dir=os.path.join(self.output_dir, "val"),
         )
 
     def get_inference_aggregator(

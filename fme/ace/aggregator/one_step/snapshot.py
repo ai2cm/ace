@@ -1,6 +1,7 @@
 from typing import Dict, Mapping, Optional
 
 import torch
+import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
@@ -99,3 +100,6 @@ class SnapshotAggregator:
             caption_name, units = name, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
         return caption
+
+    def get_dataset(self) -> xr.Dataset:
+        return xr.Dataset()

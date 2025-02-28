@@ -173,6 +173,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
 class Config:
     experiment_dir: str = "test_experiment_dir"
     checkpoint_dir: str = "test_checkpoint_dir"
+    output_dir: str = "test_output_dir"
     max_epochs: int = 2
     save_checkpoint: bool = True
     validate_using_ema: bool = True
@@ -201,6 +202,9 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.train_loss}
 
+    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+        pass
+
 
 class ValidationAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, validation_loss: float):
@@ -211,6 +215,9 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
 
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.validation_loss}
+
+    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+        pass
 
 
 class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
@@ -225,6 +232,9 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
 
     def get_summary_logs(self) -> InferenceLog:
         return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
+
+    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+        pass
 
 
 class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):

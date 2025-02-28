@@ -12,7 +12,7 @@ import fme
 from fme.ace.aggregator import OneStepAggregator
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
@@ -410,10 +410,11 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     in_names, out_names, all_names = ["a"], ["a"], ["a"]
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
     stepper = _get_stepper(in_names, out_names, ocean_config=None, module_name="AddOne")
-
-    aggregator = OneStepAggregator(
-        gridded_operations=LatLonOperations(torch.ones((5, 5))),
-    )
+    nx, ny = 5, 5
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    aggregator = OneStepAggregator(lat_lon_coordinates)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
