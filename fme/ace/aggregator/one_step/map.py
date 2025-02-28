@@ -1,6 +1,7 @@
 from typing import Dict, Mapping, Optional
 
 import torch
+import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.distributed import Distributed
@@ -21,7 +22,7 @@ class MapAggregator:
             "(top) generated and (bottom) target [{units}]"
         ),
         "error": (
-            "{name} one step mean full field error (generated - target) " "[{units}]"
+            "{name} one step mean full field error (generated - target) [{units}]"
         ),
     }
 
@@ -112,3 +113,6 @@ class MapAggregator:
             caption_name, units = name, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
         return caption
+
+    def get_dataset(self) -> xr.Dataset:
+        return xr.Dataset()

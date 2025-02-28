@@ -35,7 +35,11 @@ from fme.ace.stepper.single_module import (
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
@@ -504,11 +508,12 @@ def test_train_on_batch(
 def test_train_on_batch_one_step_aggregator(n_forward_steps):
     in_names, out_names, all_names = ["a"], ["a"], ["a"]
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
+    nx, ny = 5, 5
     stepper = _get_stepper(in_names, out_names, ocean_config=None, module_name="AddOne")
-
-    aggregator = OneStepAggregator(
-        gridded_operations=LatLonOperations(torch.ones((5, 5))),
-    )
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    aggregator = OneStepAggregator(lat_lon_coordinates)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1

@@ -135,6 +135,10 @@ class TrainConfig:
         return os.path.join(self.experiment_dir, "training_checkpoints")
 
     @property
+    def output_dir(self) -> str:
+        return os.path.join(self.experiment_dir, "output")
+
+    @property
     def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig:
         return self.inference.aggregator
 
