@@ -2,11 +2,13 @@ from typing import Dict, Mapping, Optional, Protocol
 
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.ace.stepper import TrainOutput
+from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorMapping
 
 from .map import MapAggregator
@@ -26,6 +28,8 @@ class _Aggregator(Protocol):
         gen_data_norm: TensorMapping,
     ) -> None: ...
 
+    def get_dataset(self) -> xr.Dataset: ...
+
 
 class OneStepAggregator(AggregatorABC[TrainOutput]):
     """
@@ -37,19 +41,23 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
 
     def __init__(
         self,
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: HorizontalCoordinates,
+        output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
     ):
         """
         Args:
-            gridded_operations: Operations for computing metrics on gridded data.
+            horizontal_coordinates: Horizontal coordinates of the data.
+            output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
         """
+        self._output_dir = output_dir
+        self._coords = horizontal_coordinates.coords
         aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(gridded_operations)
+            "mean": MeanAggregator(horizontal_coordinates.gridded_operations)
         }
         aggregators["snapshot"] = SnapshotAggregator(variable_metadata)
         aggregators["mean_map"] = MapAggregator(variable_metadata)
@@ -116,3 +124,18 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             for k, v in scaled_squared_errors.items()
         }
         return fractional_contribs
+
+    @torch.no_grad()
+    def flush_diagnostics(self, epoch: Optional[int] = None):
+        reduced_diagnostics = get_reduced_diagnostics(
+            sub_aggregators=self._aggregators,
+            coords=self._coords,
+        )
+        if self._output_dir is not None:
+            write_reduced_diagnostics(
+                reduced_diagnostics,
+                self._output_dir,
+                epoch=epoch,
+            )
+        else:
+            raise ValueError("Output directory is not set.")

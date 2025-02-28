@@ -72,6 +72,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
         atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
         variable_metadata=train_data.variable_metadata,
+        output_dir=config.output_dir,
     )
     return Trainer(
         train_data=train_data,
@@ -99,6 +100,7 @@ class CoupledAggregatorBuilder(
         initial_inference_times: xr.DataArray,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
+        output_dir: str,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: Optional[TensorMapping] = None,
@@ -113,6 +115,7 @@ class CoupledAggregatorBuilder(
         self.initial_inference_times = initial_inference_times
         self.n_timesteps_ocean = n_timesteps_ocean
         self.n_timesteps_atmosphere = n_timesteps_atmosphere
+        self.output_dir = output_dir
         self.variable_metadata = variable_metadata
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
@@ -124,10 +127,11 @@ class CoupledAggregatorBuilder(
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            gridded_operations=self.gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             ocean_loss_scaling=self.ocean_loss_scaling,
             atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            output_dir=os.path.join(self.output_dir, "val"),
         )
 
     def get_inference_aggregator(self):

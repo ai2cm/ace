@@ -158,6 +158,7 @@ def test_inference_logs_labels_exist(tmpdir):
     )
     monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
 
+    output_dir = pathlib.Path(tmpdir) / "output"
     agg = InferenceEvaluatorAggregator(
         horizontal_coordinates=horizontal_coordinates,
         ocean_timestep=TIMESTEP,
@@ -171,6 +172,7 @@ def test_inference_logs_labels_exist(tmpdir):
         log_zonal_mean_images=True,
         time_mean_reference_data=reference_time_means,
         monthly_reference_data=monthly_ds,
+        output_dir=str(output_dir),
     )
 
     time = xr.DataArray(
@@ -268,25 +270,29 @@ def test_inference_logs_labels_exist(tmpdir):
         expected_keys
     ), f"unexpected keys: {set(summary_logs).difference(expected_keys)}"
 
-    datasets = agg.get_datasets(excluded_aggregators=["video"])
-    assert len(datasets) == 2
-    assert "ocean" in datasets
-    assert "atmosphere" in datasets
-    expected_keys = [
+    agg.flush_diagnostics()
+    ocean_directory = output_dir / "ocean"
+    atmosphere_directory = output_dir / "atmosphere"
+    expected_file_types = [
         "mean",
         "mean_norm",
         "mean_step_20",
         "zonal_mean",
-        "spherical_power_spectrum",
+        "video",
         "time_mean",
         "time_mean_norm",
         "annual",
     ]
-    for key in expected_keys:
-        assert key in datasets["ocean"]
-        assert key in datasets["atmosphere"]
-
-    assert "weighted_bias-ocean_var" in datasets["ocean"]["mean"].data_vars
-    assert datasets["ocean"]["mean"]["weighted_bias-ocean_var"].size == n_time
-    assert "weighted_bias-atmos_var" in datasets["atmosphere"]["mean"].data_vars
-    assert datasets["atmosphere"]["mean"]["weighted_bias-atmos_var"].size == n_time
+    for file_type in expected_file_types:
+        ocean_file = ocean_directory / f"{file_type}_diagnostics.nc"
+        assert ocean_file.exists()
+        atmosphere_file = atmosphere_directory / f"{file_type}_diagnostics.nc"
+        assert atmosphere_file.exists()
+    ocean_mean_dataset = xr.open_dataset(ocean_directory / "mean_diagnostics.nc")
+    assert "weighted_bias-ocean_var" in ocean_mean_dataset.data_vars
+    assert ocean_mean_dataset["weighted_bias-ocean_var"].size == n_time
+    atmosphere_mean_dataset = xr.open_dataset(
+        atmosphere_directory / "mean_diagnostics.nc"
+    )
+    assert "weighted_bias-atmos_var" in atmosphere_mean_dataset.data_vars
+    assert atmosphere_mean_dataset["weighted_bias-atmos_var"].size == n_time

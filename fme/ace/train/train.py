@@ -115,6 +115,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         gridded_operations=train_data.gridded_operations,
         horizontal_coordinates=train_data.horizontal_coordinates,
         timestep=train_data.timestep,
+        output_dir=config.output_dir,
         initial_inference_time=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
         n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
@@ -151,6 +152,7 @@ class AggregatorBuilder(
         initial_inference_time: xr.DataArray,
         record_step_20: bool,
         n_timesteps: int,
+        output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
@@ -167,15 +169,17 @@ class AggregatorBuilder(
         self.loss_scaling = loss_scaling
         self.channel_mean_names = channel_mean_names
         self.normalize = normalize
+        self.output_dir = output_dir
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            gridded_operations=self.gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,
+            output_dir=os.path.join(self.output_dir, "val"),
         )
 
     def get_inference_aggregator(
