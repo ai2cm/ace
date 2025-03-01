@@ -146,7 +146,10 @@ class InferenceEvaluatorAggregatorConfig:
         record_step_20: bool = False,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
+        save_diagnostics: bool = True,
     ) -> "InferenceEvaluatorAggregator":
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics.")
         if self.monthly_reference_data is None:
             monthly_reference_data = None
         else:
@@ -187,6 +190,7 @@ class InferenceEvaluatorAggregatorConfig:
             variable_metadata=variable_metadata,
             channel_mean_names=channel_mean_names,
             normalize=normalize,
+            save_diagnostics=save_diagnostics,
         )
 
 
@@ -224,6 +228,7 @@ class InferenceEvaluatorAggregator(
         time_mean_reference_data: Optional[xr.Dataset] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
         log_nino34_index: bool = True,
+        save_diagnostics: bool = True,
     ):
         """
         Args:
@@ -252,12 +257,16 @@ class InferenceEvaluatorAggregator(
             channel_mean_names: Names over which to compute channel means. If not
                 provided, all available variables will be used.
             log_nino34_index: Whether to log the Nino34 index.
+            save_diagnostics: Whether to save reduced diagnostics to disk.
         """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: Dict[str, _EvaluatorAggregator] = {}
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
+        self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
         self._coords = horizontal_coordinates.coords
         ops = horizontal_coordinates.gridded_operations
@@ -483,19 +492,20 @@ class InferenceEvaluatorAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int] = None):
-        reduced_diagnostics = get_reduced_diagnostics(
-            sub_aggregators=(self._aggregators | self._time_dependent_aggregators),
-            coords=self._coords,
-        )
-        if self._output_dir is not None:
-            write_reduced_diagnostics(
-                reduced_diagnostics=reduced_diagnostics,
-                output_dir=self._output_dir,
-                epoch=epoch,
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        if self._save_diagnostics:
+            reduced_diagnostics = get_reduced_diagnostics(
+                sub_aggregators=(self._aggregators | self._time_dependent_aggregators),
+                coords=self._coords,
             )
-        else:
-            raise ValueError("Output directory not set.")
+            if self._output_dir is not None:
+                write_reduced_diagnostics(
+                    reduced_diagnostics=reduced_diagnostics,
+                    output_dir=self._output_dir,
+                    subdir=subdir,
+                )
+            else:
+                raise ValueError("Output directory not set.")
 
 
 def to_inference_logs(
@@ -587,6 +597,7 @@ class InferenceAggregator(
         horizontal_coordinates: HorizontalCoordinates,
         n_timesteps: int,
         timestep: datetime.timedelta,
+        save_diagnostics: bool = True,
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
@@ -597,14 +608,18 @@ class InferenceAggregator(
             horizontal_coordinates: Data horizontal coordinates.
             n_timesteps: Number of timesteps in the model.
             timestep: Timestep of the model.
+            save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to save diagnostic output.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
             log_global_mean_time_series: Whether to log global mean time series metrics.
         """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics")
         self._log_time_series = log_global_mean_time_series
         self._coords = horizontal_coordinates.coords
+        self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
         aggregators: Dict[str, _Aggregator] = {}
         gridded_operations = horizontal_coordinates.gridded_operations
@@ -741,16 +756,17 @@ class InferenceAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int] = None):
-        reduced_diagnostics = get_reduced_diagnostics(
-            sub_aggregators=self._aggregators,
-            coords=self._coords,
-        )
-        if self._output_dir is not None:
-            write_reduced_diagnostics(
-                reduced_diagnostics=reduced_diagnostics,
-                output_dir=self._output_dir,
-                epoch=epoch,
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        if self._save_diagnostics:
+            reduced_diagnostics = get_reduced_diagnostics(
+                sub_aggregators=self._aggregators,
+                coords=self._coords,
             )
-        else:
-            raise ValueError("Output directory is not set.")
+            if self._output_dir is not None:
+                write_reduced_diagnostics(
+                    reduced_diagnostics=reduced_diagnostics,
+                    output_dir=self._output_dir,
+                    subdir=subdir,
+                )
+            else:
+                raise ValueError("Output directory is not set.")

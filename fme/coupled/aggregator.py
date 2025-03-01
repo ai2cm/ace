@@ -48,7 +48,7 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int]):
+    def flush_diagnostics(self, subdir: Optional[str]):
         pass
 
 
@@ -63,6 +63,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
     def __init__(
         self,
         horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         ocean_loss_scaling: Optional[TensorMapping] = None,
@@ -71,6 +72,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         """
         Args:
             horizontal_coordinates: Horizontal coordinates for the data.
+            save_diagnostics: Whether to save diagnostics to disk.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
             ocean_loss_scaling: Dictionary of variables and their scaling factors
@@ -87,6 +89,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 horizontal_coordinates,
                 variable_metadata=variable_metadata,
                 loss_scaling=ocean_loss_scaling,
+                save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "ocean")
                     if output_dir is not None
@@ -97,6 +100,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 horizontal_coordinates,
                 variable_metadata=variable_metadata,
                 loss_scaling=atmosphere_loss_scaling,
+                save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "atmosphere")
                     if output_dir is not None
@@ -142,13 +146,13 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int] = None):
+    def flush_diagnostics(self, subdir: Optional[str] = None):
         """
         Flushes diagnostics to netCDF files, in separate directories for ocean and
         atmosphere.
         """
         for aggregator in self._aggregators.values():
-            aggregator.flush_diagnostics(epoch)
+            aggregator.flush_diagnostics(subdir)
 
 
 @dataclasses.dataclass
@@ -193,6 +197,7 @@ class InferenceEvaluatorAggregatorConfig:
         initial_time: xr.DataArray,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        save_diagnostics: bool = True,
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceEvaluatorAggregator":
@@ -225,6 +230,7 @@ class InferenceEvaluatorAggregatorConfig:
             n_timesteps_ocean=n_timesteps_ocean,
             n_timesteps_atmosphere=n_timesteps_atmosphere,
             initial_time=initial_time,
+            save_diagnostics=save_diagnostics,
             output_dir=output_dir,
             log_histograms=self.log_histograms,
             log_video=self.log_video,
@@ -311,6 +317,7 @@ class InferenceEvaluatorAggregator(
         initial_time: xr.DataArray,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        save_diagnostics: bool = True,
         output_dir: Optional[str] = None,
         log_video: bool = False,
         enable_extended_videos: bool = False,
@@ -344,6 +351,7 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=ocean_normalize,
+                save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "ocean")
                     if output_dir is not None
@@ -368,6 +376,7 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=atmosphere_normalize,
+                save_diagnostics=save_diagnostics,
                 output_dir=(
                     os.path.join(output_dir, "atmosphere")
                     if output_dir is not None
@@ -450,10 +459,10 @@ class InferenceEvaluatorAggregator(
         }
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int] = None):
+    def flush_diagnostics(self, subdir: Optional[str] = None):
         """
         Flushes diagnostics to netCDF files, in separate directories for ocean and
         atmosphere.
         """
         for aggregator in self._aggregators.values():
-            aggregator.flush_diagnostics(epoch)
+            aggregator.flush_diagnostics(subdir)

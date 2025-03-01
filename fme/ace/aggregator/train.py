@@ -40,5 +40,5 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int]):
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
