@@ -376,7 +376,7 @@ class Trainer:
                 wandb.log(metrics, step=self.num_batches_seen)
                 n_samples_seen_since_logging = 0
         self._model_epoch += 1
-        aggregator.flush_diagnostics(epoch=self._model_epoch)
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         return aggregator.get_logs(label="train")
 
     @contextlib.contextmanager
@@ -417,7 +417,7 @@ class Trainer:
                 aggregator.record_batch(
                     batch=stepped,
                 )
-        aggregator.flush_diagnostics(epoch=self._model_epoch)
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
@@ -428,6 +428,7 @@ class Trainer:
                 data=self._inference_data,
                 aggregator=aggregator,
             )
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
 

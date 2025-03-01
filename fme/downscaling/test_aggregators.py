@@ -102,7 +102,7 @@ def test_snapshot_runs():
         "x": VariableMetadata("foo/sec", "bary bar bar"),
         "y": VariableMetadata("bar/m", "fooey foo"),
     }
-    snapshot = SnapshotAggregator(variable_metadata)
+    snapshot = SnapshotAggregator(["height", "width"], variable_metadata)
     batch_size, height, width = 2, 4, 8
 
     target = {
@@ -176,6 +176,7 @@ def test_performance_metrics(
 
     with mock_wandb():
         aggregator = Aggregator(
+            ["lat", "lon"],
             area_weights,
             latitudes,
             downscale_factor,

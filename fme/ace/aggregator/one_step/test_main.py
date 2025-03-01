@@ -17,7 +17,9 @@ def test_labels_exist():
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    agg = OneStepAggregator(lat_lon_coordinates.to(device=get_device()))
+    agg = OneStepAggregator(
+        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
+    )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     agg.record_batch(
@@ -48,7 +50,9 @@ def test_aggregator_raises_on_no_data():
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    agg = OneStepAggregator(lat_lon_coordinates.to(device=get_device()))
+    agg = OneStepAggregator(
+        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
+    )
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             batch=TrainOutput(
@@ -75,6 +79,7 @@ def test__get_loss_scaled_mse_components():
     agg = OneStepAggregator(
         lat_lon_coordinates.to(device=get_device()),
         loss_scaling=loss_scaling,
+        save_diagnostics=False,
     )
 
     logs = {
@@ -116,13 +121,23 @@ def test_flush_diagnostics(tmpdir, epoch):
         ),
     )
     if epoch is not None:
-        agg.flush_diagnostics(epoch=epoch)
+        agg.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
         output_dir = tmpdir / "val" / f"epoch_{epoch:04d}"
     else:
         agg.flush_diagnostics()
         output_dir = tmpdir / "val"
     expected_files = [
         "mean",
+        "snapshot",
+        "mean_map",
     ]
     for file in expected_files:
         assert (output_dir / f"{file}_diagnostics.nc").exists()
+
+
+def test_agg_raises_without_output_dir():
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    with pytest.raises(
+        ValueError, match="Output directory must be set to save diagnostics"
+    ):
+        OneStepAggregator(lat_lon_coordinates, save_diagnostics=True, output_dir=None)
