@@ -48,6 +48,7 @@ class Evaluator:
                 "Only lat-lon coordinates are supported for evaluation"
             )
         aggregator = Aggregator(
+            self.data.horizontal_coordinates.fine.dims,
             self.data.area_weights.fine,
             self.data.horizontal_coordinates.fine.lat.cpu(),
             self.model.downscale_factor,

@@ -37,7 +37,7 @@ def get_reduced_diagnostics(
 def write_reduced_diagnostics(
     reduced_diagnostics: Mapping[str, xr.Dataset],
     output_dir: str,
-    epoch: Optional[int] = None,
+    subdir: Optional[str] = None,
 ):
     """Write the reduced metrics to disk. Each sub-aggregator will write a netCDF file
     if its `get_dataset` method returns a non-empty dataset.
@@ -45,10 +45,10 @@ def write_reduced_diagnostics(
     Args:
         reduced_diagnostics: Dictionary of reduced diagnostics datasets.
         output_dir: Output directory.
-        epoch: Epoch number to be used in making sub-directories within the output_dir.
+        subdir: Sub-directory within the output_dir.
     """
-    if epoch is not None:
-        output_dir = os.path.join(output_dir, f"epoch_{epoch:04d}")
+    if subdir is not None:
+        output_dir = os.path.join(output_dir, subdir)
     dist = Distributed.get_instance()
     if dist.is_root():
         os.makedirs(output_dir, exist_ok=True)

@@ -186,9 +186,11 @@ class ZonalPowerSpectrum:
 
 class SnapshotAggregator:
     def __init__(
-        self, variable_metadata: Optional[Mapping[str, VariableMetadata]]
+        self,
+        dims: List[str],
+        variable_metadata: Optional[Mapping[str, VariableMetadata]],
     ) -> None:
-        self._snapshot_aggregator = CoreSnapshotAggregator(variable_metadata)
+        self._snapshot_aggregator = CoreSnapshotAggregator(dims, variable_metadata)
 
     def _tile_time_dim(self, x: torch.Tensor) -> torch.Tensor:
         time_dim = -3
@@ -472,6 +474,7 @@ class Aggregator:
     Class for aggregating evaluation metrics and intrinsic statistics.
 
     Args:
+        dims: Dimensions of the data.
         area_weights: Tensor of area weights.
         latitudes: Tensor of latitudes.
         downscale_factor: Downscaling factor.
@@ -483,6 +486,7 @@ class Aggregator:
 
     def __init__(
         self,
+        dims: List[str],
         area_weights: Optional[torch.Tensor],
         latitudes: torch.Tensor,
         downscale_factor: int,
@@ -506,7 +510,7 @@ class Aggregator:
 
         self._comparisons: Mapping[str, _ComparisonAggregator] = {
             "rmse": MeanComparison(metrics.root_mean_squared_error),
-            "snapshot": SnapshotAggregator(variable_metadata),
+            "snapshot": SnapshotAggregator(dims, variable_metadata),
             "histogram": ComparedDynamicHistograms(
                 n_bins=n_histogram_bins, percentiles=percentiles
             ),

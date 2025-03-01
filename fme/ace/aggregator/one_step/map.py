@@ -1,4 +1,4 @@
-from typing import Dict, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
 import xarray as xr
@@ -26,12 +26,16 @@ class MapAggregator:
         ),
     }
 
-    def __init__(self, metadata: Optional[Mapping[str, VariableMetadata]] = None):
+    def __init__(
+        self, dims: List[str], metadata: Optional[Mapping[str, VariableMetadata]] = None
+    ):
         """
         Args:
+            dims: Dimensions of the data.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
+        self._dims = dims
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -62,6 +66,37 @@ class MapAggregator:
                 self._gen_data[name] = gen_data[name].mean(dim=0)
         self._n_batches += 1
 
+    def _get_data(self) -> Tuple[TensorMapping, TensorMapping]:
+        dist = Distributed.get_instance()
+        time_dim = 0
+        # note that we are only using the first timestep
+        # see https://github.com/ai2cm/full-model/issues/1005
+        target_time = 1
+        gen, target = {}, {}
+        for name in sorted(list(self._gen_data.keys())):
+            gen[name] = (
+                (
+                    dist.reduce_mean(
+                        self._gen_data[name].select(dim=time_dim, index=target_time)
+                    )
+                    / self._n_batches
+                )
+                .cpu()
+                .numpy()
+            )
+        for name in sorted(list(self._target_data.keys())):
+            target[name] = (
+                (
+                    dist.reduce_mean(
+                        self._target_data[name].select(dim=time_dim, index=target_time)
+                    )
+                    / self._n_batches
+                )
+                .cpu()
+                .numpy()
+            )
+        return gen, target
+
     @torch.no_grad()
     def get_logs(self, label: str) -> Dict[str, Image]:
         """
@@ -70,34 +105,18 @@ class MapAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        dist = Distributed.get_instance()
-        time_dim = 0
-        target_time = 1
+        gen, target = self._get_data()
         image_logs = {}
-        sorted_names = sorted(list(self._gen_data.keys()))
-        for name in sorted_names:
-            # use first sample in batch
-            gen = (
-                dist.reduce_mean(
-                    self._gen_data[name].select(dim=time_dim, index=target_time)
-                )
-                / self._n_batches
-            )
-            target = (
-                dist.reduce_mean(
-                    self._target_data[name].select(dim=time_dim, index=target_time)
-                )
-                / self._n_batches
-            )
+        for name in gen.keys():
             image_logs[f"image-error/{name}"] = plot_paneled_data(
-                [[(gen - target).cpu().numpy()]],
+                [[(gen[name] - target[name])]],
                 diverging=True,
                 caption=self._get_caption("error", name),
             )
             image_logs[f"image-full-field/{name}"] = plot_paneled_data(
                 [
-                    [gen.cpu().numpy()],
-                    [target.cpu().numpy()],
+                    [gen[name]],
+                    [target[name]],
                 ],
                 diverging=False,
                 caption=self._get_caption("full-field", name),
@@ -115,4 +134,22 @@ class MapAggregator:
         return caption
 
     def get_dataset(self) -> xr.Dataset:
-        return xr.Dataset()
+        gen, target = self._get_data()
+        ds = xr.Dataset()
+        for name in gen:
+            if name in self._metadata:
+                long_name = self._metadata[name].long_name
+                units = self._metadata[name].units
+            else:
+                long_name = name
+                units = "unknown_units"
+            metadata_attrs = {"long_name": long_name, "units": units}
+            ds[f"gen_map-{name}"] = xr.DataArray(
+                data=gen[name], dims=self._dims, attrs=metadata_attrs
+            )
+            ds[f"bias_map-{name}"] = xr.DataArray(
+                data=gen[name] - target[name],
+                dims=self._dims,
+                attrs=metadata_attrs,
+            )
+        return ds

@@ -1,6 +1,7 @@
 import datetime
 
 import numpy as np
+import pytest
 import torch
 import xarray as xr
 
@@ -26,6 +27,7 @@ def test_logs_labels_exist():
         LatLonCoordinates(lat, lon).to(device=get_device()),
         n_time,
         datetime.timedelta(seconds=1),
+        save_diagnostics=False,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -73,6 +75,7 @@ def test_logs_labels_exist_with_reference_time_means():
         n_time,
         datetime.timedelta(seconds=1),
         time_mean_reference_data=reference_time_means,
+        save_diagnostics=False,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
@@ -142,3 +145,17 @@ def test_flush_diagnostics(tmpdir):
     ]
     for file in expected_files:
         assert (tmpdir / f"{file}_diagnostics.nc").exists()
+
+
+def test_agg_raises_without_output_dir():
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    with pytest.raises(
+        ValueError, match="Output directory must be set to save diagnostics"
+    ):
+        InferenceAggregator(
+            lat_lon_coordinates,
+            n_timesteps=1,
+            timestep=TIMESTEP,
+            save_diagnostics=True,
+            output_dir=None,
+        )

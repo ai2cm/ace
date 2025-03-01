@@ -15,7 +15,7 @@ class AggregatorABC(abc.ABC, Generic[T]):
         pass
 
     @abc.abstractmethod
-    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
 
 
@@ -57,5 +57,5 @@ class InferenceAggregatorABC(abc.ABC, Generic[PS, T]):
         pass
 
     @abc.abstractmethod
-    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
