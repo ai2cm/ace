@@ -241,6 +241,19 @@ compute_cm4_trial_run_atmosphere_dataset:
 compute_cm4_trial_run_atmosphere_stats:
 	python -u get_stats.py configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml 0
 
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr
+cm4_picontrol_atmosphere_1deg_8layer_200yr:
+	./compute_dataset.sh --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr.yaml
+
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
+cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url $(NC_INPUT) \
+	--n-ic 1 \
+	--output-dir $(NC_OUTPUT) \
+	--start-date "0151-01-01T06:00:00" \
+	--end-date "0351-01-01T00:00:00"
+
 .PHONY: build_docker_image
 build_docker_image:
 	docker build -f beakerpy.Dockerfile -t us.gcr.io/vcm-ml/beaker-py .
