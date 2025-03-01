@@ -103,6 +103,8 @@ class TrainConfig:
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
+        save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
+            training, validation and inline inference aggregators.
     """
 
     train_loader: DataLoaderConfig
@@ -124,6 +126,7 @@ class TrainConfig:
     ema_checkpoint_save_epochs: Optional[Slice] = None
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
+    save_per_epoch_diagnostics: bool = False
 
     @property
     def inference_n_forward_steps(self) -> int:

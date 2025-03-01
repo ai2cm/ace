@@ -42,6 +42,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
     def __init__(
         self,
         horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
@@ -49,18 +50,26 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         """
         Args:
             horizontal_coordinates: Horizontal coordinates of the data.
+            save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
         """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics.")
         self._output_dir = output_dir
+        self._save_diagnostics = save_diagnostics
         self._coords = horizontal_coordinates.coords
         aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(horizontal_coordinates.gridded_operations)
         }
-        aggregators["snapshot"] = SnapshotAggregator(variable_metadata)
-        aggregators["mean_map"] = MapAggregator(variable_metadata)
+        aggregators["snapshot"] = SnapshotAggregator(
+            horizontal_coordinates.dims, variable_metadata
+        )
+        aggregators["mean_map"] = MapAggregator(
+            horizontal_coordinates.dims, variable_metadata
+        )
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 
@@ -126,16 +135,17 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         return fractional_contribs
 
     @torch.no_grad()
-    def flush_diagnostics(self, epoch: Optional[int] = None):
-        reduced_diagnostics = get_reduced_diagnostics(
-            sub_aggregators=self._aggregators,
-            coords=self._coords,
-        )
-        if self._output_dir is not None:
-            write_reduced_diagnostics(
-                reduced_diagnostics,
-                self._output_dir,
-                epoch=epoch,
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        if self._save_diagnostics:
+            reduced_diagnostics = get_reduced_diagnostics(
+                sub_aggregators=self._aggregators,
+                coords=self._coords,
             )
-        else:
-            raise ValueError("Output directory is not set.")
+            if self._output_dir is not None:
+                write_reduced_diagnostics(
+                    reduced_diagnostics,
+                    self._output_dir,
+                    subdir=subdir,
+                )
+            else:
+                raise ValueError("Output directory is not set.")

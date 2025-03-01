@@ -123,6 +123,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.out_names,
         normalize=stepper.normalizer.normalize,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
     )
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
@@ -157,6 +158,7 @@ class AggregatorBuilder(
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
+        save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
@@ -170,6 +172,7 @@ class AggregatorBuilder(
         self.channel_mean_names = channel_mean_names
         self.normalize = normalize
         self.output_dir = output_dir
+        self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
@@ -179,6 +182,7 @@ class AggregatorBuilder(
             horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,
+            save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
         )
 
@@ -194,6 +198,8 @@ class AggregatorBuilder(
             variable_metadata=self.variable_metadata,
             channel_mean_names=self.channel_mean_names,
             normalize=self.normalize,
+            save_diagnostics=self.save_per_epoch_diagnostics,
+            output_dir=os.path.join(self.output_dir, "inference"),
         )
 
 

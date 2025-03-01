@@ -72,6 +72,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
         atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
         variable_metadata=train_data.variable_metadata,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
         output_dir=config.output_dir,
     )
     return Trainer(
@@ -106,6 +107,7 @@ class CoupledAggregatorBuilder(
         ocean_loss_scaling: Optional[TensorMapping] = None,
         atmosphere_loss_scaling: Optional[TensorMapping] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
@@ -121,6 +123,7 @@ class CoupledAggregatorBuilder(
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
         self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
@@ -131,6 +134,7 @@ class CoupledAggregatorBuilder(
             variable_metadata=self.variable_metadata,
             ocean_loss_scaling=self.ocean_loss_scaling,
             atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            save_diagnostics=self.save_per_epoch_diagnostics,
             output_dir=os.path.join(self.output_dir, "val"),
         )
 
@@ -145,6 +149,8 @@ class CoupledAggregatorBuilder(
             ocean_normalize=self.ocean_normalize,
             atmosphere_normalize=self.atmosphere_normalize,
             variable_metadata=self.variable_metadata,
+            save_diagnostics=self.save_per_epoch_diagnostics,
+            output_dir=os.path.join(self.output_dir, "inference"),
         )
 
 

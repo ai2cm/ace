@@ -202,7 +202,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.train_loss}
 
-    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
 
 
@@ -216,7 +216,7 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.validation_loss}
 
-    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
 
 
@@ -233,7 +233,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
     def get_summary_logs(self) -> InferenceLog:
         return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
 
-    def flush_diagnostics(self, epoch: Optional[int]) -> None:
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
         pass
 
 
