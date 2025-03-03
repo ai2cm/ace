@@ -75,6 +75,7 @@ class SingleModuleStepperConfig:
             loss. The same loss configuration as specified in 'loss' is used.
         activation_checkpointing: Configuration for activation checkpointing to trade
             increased computation for lowered memory during training.
+        crps_training: Whether to use CRPS training for stochastic models.
     """
 
     builder: ModuleSelector
@@ -99,6 +100,7 @@ class SingleModuleStepperConfig:
     activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
         default_factory=lambda: ActivationCheckpointingConfig()
     )
+    crps_training: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -456,6 +458,79 @@ class TrainOutput(TrainOutputABC):
         return self.metrics
 
 
+def crps_loss(
+    gen_norm_step: TensorDict,
+    target_norm_step: TensorDict,
+    names: List[str],
+) -> torch.Tensor:
+    """
+    Compute the CRPS loss for a single timestep.
+
+    Args:
+        gen_norm_step: The generated normalized step with each variable having
+            shape [n_batch, 2, ...] where the 2 represents the two samples.
+        target_norm_step: The target normalized step with each variable having
+            shape [n_batch, ...].
+        names: The names of the variables to compute the loss for.
+
+    Returns:
+        The CRPS loss for the given variables.
+    """
+    total = torch.tensor(0.0, device=get_device())
+    for name in names:
+        total += _crps_loss_single(
+            gen_norm_step[name],
+            target_norm_step[name],
+        )
+    return total / len(names)
+
+
+def _crps_loss_single(
+    gen_norm_step: torch.Tensor,
+    target_norm_step: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Compute the CRPS loss for a single variable at a single timestep.
+
+    Args:
+        gen_norm_step: The generated normalized step, of shape
+            [n_batch, 2, ...] where the 2 represents the two samples.
+        target_norm_step: The target normalized step, of shape
+            [n_batch, ...].
+
+    Returns:
+        The CRPS loss.
+    """
+    if gen_norm_step.shape[1] != 2:
+        raise NotImplementedError(
+            "CRPS loss is written here specifically for 2 samples, "
+            f"got {gen_norm_step.shape[1]} samples"
+        )
+    # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
+    # below we compute the first term as the average of two samples
+    # meaning the 0.5 factor can be pulled out
+    # we are using "almost fair" CRPS from https://arxiv.org/html/2412.15832v1
+    # with a value of alpha = 0.95 as used in the paper
+    alpha = 0.95
+    epsilon = (1 - alpha) / 2
+    target_term = torch.abs(gen_norm_step - target_norm_step[:, None, ...]).mean(axis=1)
+    internal_term = -0.5 * torch.abs(
+        gen_norm_step[:, 0, ...] - gen_norm_step[:, 1, ...]
+    )
+    return (target_term + (1 - epsilon) * internal_term).mean()
+
+
+def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict:
+    return {k: v.repeat_interleave(repeats, dim=0) for k, v in data.items()}
+
+
+def reshape_with_sample_dim(data: TensorMapping, repeats: int) -> TensorDict:
+    return {
+        k: v.reshape(v.shape[0] // repeats, repeats, *v.shape[1:])
+        for k, v in data.items()
+    }
+
+
 def stack_list_of_tensor_dicts(
     dict_list: List[TensorDict],
     time_dim: int,
@@ -761,6 +836,17 @@ class SingleModuleStepper(
         """
         ic_dict = initial_condition.as_batch_data().data
         forcing_dict = forcing_data.data
+        return self._predict_generator(
+            ic_dict, forcing_dict, n_forward_steps, optimizer
+        )
+
+    def _predict_generator(
+        self,
+        ic_dict: TensorMapping,
+        forcing_dict: TensorMapping,
+        n_forward_steps: int,
+        optimizer: OptimizationABC,
+    ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         ml_forcing_names = self._config.forcing_names
         for step in range(n_forward_steps):
@@ -932,41 +1018,19 @@ class SingleModuleStepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        time_dim = self.TIME_DIM
         metrics: Dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)
 
         optimization.set_mode(self.modules)
-        with optimization.autocast():
-            # output from self.predict_paired does not include initial condition
-            n_forward_steps = data.n_timesteps - self.n_ic_timesteps
-            output_generator = self.get_prediction_generator(
-                input_data,
-                data,
-                n_forward_steps,
-                optimization,
-            )
-            output_list = []
-            for step, gen_step in enumerate(output_generator):
-                output_list.append(gen_step)
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
-                target_step = {
-                    k: v.select(time_dim, step) for k, v in target_data.data.items()
-                }
-                gen_norm_step = self.loss_normalizer.normalize(gen_step)
-                target_norm_step = self.loss_normalizer.normalize(target_step)
-
-                step_loss: torch.Tensor = self.loss_obj(gen_norm_step, target_norm_step)
-                metrics[f"loss_step_{step}"] = step_loss.detach()
-
-                if self._multi_call is not None:
-                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
-                    step_loss = step_loss + mc_loss
-                    metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
-
-                optimization.accumulate_loss(step_loss)
+        output_list = self._accumulate_loss(
+            input_data,
+            data,
+            target_data,
+            optimization,
+            metrics,
+            use_crps=self._config.crps_training,
+        )
 
         regularizer_loss = self._l2_sp_tuning_regularizer()
         if torch.any(regularizer_loss > 0):
@@ -995,6 +1059,73 @@ class SingleModuleStepper(
         if compute_derived_variables:
             stepped = stepped.compute_derived_variables()
         return stepped
+
+    def _accumulate_loss(
+        self,
+        input_data: PrognosticState,
+        data: BatchData,
+        target_data: BatchData,
+        optimization: OptimizationABC,
+        metrics: Dict[str, float],
+        use_crps: bool = False,
+    ):
+        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        # output from self.predict_paired does not include initial condition
+        n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
+        if use_crps:
+            n_samples = 2  # must be 2 for CRPS loss calculation
+            input_sample_data: TensorMapping = repeat_interleave_batch_dim(
+                input_data.as_batch_data().data, repeats=n_samples
+            )
+            forcing_sample_data: TensorMapping = repeat_interleave_batch_dim(
+                data.data, repeats=n_samples
+            )
+        else:
+            input_sample_data = input_data.as_batch_data().data
+            forcing_sample_data = data.data
+        output_generator = self._predict_generator(
+            input_sample_data,
+            forcing_sample_data,
+            n_forward_steps,
+            optimization,
+        )
+        output_list = []
+        for step, gen_step in enumerate(output_generator):
+            if use_crps:
+                gen_step = reshape_with_sample_dim(gen_step, repeats=n_samples)
+                output_list.append(
+                    {k: v.select(1, index=0) for k, v in gen_step.items()}
+                )
+            else:
+                output_list.append(gen_step)
+            # Note: here we examine the loss for a single timestep,
+            # not a single model call (which may contain multiple timesteps).
+            target_step = {
+                k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()
+            }
+            gen_norm_step = self.loss_normalizer.normalize(gen_step)
+            target_norm_step = self.loss_normalizer.normalize(target_step)
+
+            if use_crps:
+                step_loss: torch.Tensor = crps_loss(
+                    gen_norm_step, target_norm_step, names=self.out_names
+                )
+            else:
+                step_loss = self.loss_obj(gen_norm_step, target_norm_step)
+            metrics[f"loss_step_{step}"] = step_loss.detach()
+
+            if self._multi_call is not None:
+                if use_crps:
+                    mc_loss = crps_loss(
+                        gen_norm_step, target_norm_step, names=self._multi_call.names
+                    )
+                else:
+                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
+                step_loss = step_loss + mc_loss
+                metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
+
+            optimization.accumulate_loss(step_loss)
+        return output_list
 
     def get_state(self):
         """
