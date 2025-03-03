@@ -32,6 +32,8 @@ from fme.ace.stepper.single_module import (
     _combine_normalizers,
     load_stepper,
     load_stepper_config,
+    repeat_interleave_batch_dim,
+    reshape_with_sample_dim,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
@@ -280,6 +282,39 @@ def test_train_on_batch_addition_series():
         stepped.normalize(stepped.target_data)["b"],
         data_with_ic.data["b"],
     )
+
+
+def test_train_on_batch_crps_loss():
+    torch.manual_seed(0)
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    area = torch.ones((5, 5), device=DEVICE)
+    gridded_operations = LatLonOperations(area)
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 1.0),
+        ),
+        loss=WeightedMappingLossConfig(type="MSE"),
+        crps_training=True,
+    )
+    stepper = config.get_stepper(
+        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    # output of train_on_batch does not include the initial condition
+    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
 
 
 def test_train_on_batch_with_prescribed_ocean():
@@ -1047,6 +1082,26 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
+
+
+@pytest.mark.parametrize("repeats", [1, 3])
+def test_sample_dim_operations_give_correct_data_order(repeats: int):
+    n_samples = 3
+    data = {
+        "a": torch.arange(n_samples)
+        .reshape(n_samples, 1, 1)
+        .broadcast_to(n_samples, 5, 5),
+        "b": torch.arange(n_samples)
+        .reshape(n_samples, 1, 1)
+        .broadcast_to(n_samples, 5, 5),
+    }
+    intermediate = repeat_interleave_batch_dim(data, repeats)
+    for k in data:
+        assert intermediate[k].shape == (n_samples * repeats, 5, 5)
+    result = reshape_with_sample_dim(intermediate, repeats)
+    for k in data:
+        assert result[k].shape == (n_samples, repeats, 5, 5)
+        assert torch.allclose(result[k], data[k][:, None, :, :])
 
 
 @pytest.mark.parametrize(
