@@ -1,5 +1,5 @@
 import re
-from typing import List, Mapping, Union
+from typing import Iterable, List, Mapping, Optional, Union
 
 import torch
 
@@ -56,7 +56,7 @@ class Stacker:
 
     def __init__(
         self,
-        prefix_map: Mapping[str, List[str]],
+        prefix_map: Optional[Mapping[str, List[str]]] = None,
     ):
         """
         Args:
@@ -65,7 +65,32 @@ class Stacker:
                 and lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"]
                 or ["air_temperature_", "T_"]) found in the data.
         """
+        self._prefix_map: Optional[Mapping[str, List[str]]] = prefix_map
+
+    def infer_prefix_map(self, names: Iterable[str]):
+        """
+        Infer the prefix map from data names.
+
+        Args:
+             names: Variable names, such as the keys from a tensor mapping.
+        """
+        if self.has_prefix_map:
+            raise RuntimeError("Prefix map has already been built.")
+        prefix_map = {}
+        for name in names:
+            match = self.LEVEL_PATTERN.search(name)
+            if match is None:
+                # 2D variable
+                prefix_map[name] = [name]
+            else:
+                # 3D variable, +1 to include "_" in the prefix
+                prefix_name = name[: match.start() + 1]
+                prefix_map[prefix_name] = [prefix_name]
         self._prefix_map = prefix_map
+
+    @property
+    def has_prefix_map(self) -> bool:
+        return self._prefix_map is not None
 
     @property
     def prefix_map(self) -> Mapping[str, List[str]]:
@@ -74,11 +99,16 @@ class Stacker:
         lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"] or
         ["air_temperature_", "T_"]) found in the data.
         """
+        if self._prefix_map is None:
+            raise RuntimeError(
+                "Stacker's prefix map hasn't yet been built. Build it at runtime by "
+                "first calling stacker.infer_prefix_map(data) with the data."
+            )
         return self._prefix_map
 
     @property
     def standard_names(self) -> List[str]:
-        return list(self._prefix_map.keys())
+        return list(self.prefix_map.keys())
 
     def get_all_level_names(self, standard_name: str, data: TensorMapping) -> List[str]:
         """Get the names of all variables in the data that match one of the
@@ -88,7 +118,7 @@ class Stacker:
         """
         if standard_name not in self.standard_names:
             raise ValueError(f"{standard_name} is not a standard name.")
-        for prefix_or_name in self._prefix_map[standard_name]:
+        for prefix_or_name in self.prefix_map[standard_name]:
             if prefix_or_name in data:
                 return [prefix_or_name]
             try:
@@ -96,7 +126,7 @@ class Stacker:
             except KeyError:
                 pass
         raise KeyError(
-            f"No prefix associated with {standard_name} was found in data keys."
+            f"No prefix associated with '{standard_name}' was found in data keys."
         )
 
     def __call__(self, standard_name: str, data: TensorMapping) -> torch.Tensor:
@@ -114,7 +144,7 @@ class Stacker:
     def _stack_levels_try(
         self, standard_name: str, data: TensorMapping
     ) -> torch.Tensor:
-        prefixes_or_names = self._prefix_map[standard_name]
+        prefixes_or_names = self.prefix_map[standard_name]
         for prefix_or_name in prefixes_or_names:
             if prefix_or_name in data:
                 # 2D variable, return as 1-level 3D tensor
