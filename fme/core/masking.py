@@ -42,9 +42,9 @@ class StaticMaskingConfig:
         fill_value: The constant fill value to use outside of masked regions.
     """
 
-    variable_names_and_prefixes: List[str]
     mask_value: int
     fill_value: float = 0.0
+    variable_names_and_prefixes: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
@@ -66,22 +66,22 @@ class StaticMaskingConfig:
 
         """
         return StaticMasking(
-            variable_names_and_prefixes=self.variable_names_and_prefixes,
             mask_value=self.mask_value,
             fill_value=self.fill_value,
             mask_2d=mask_2d,
             mask_3d=mask_3d,
+            variable_names_and_prefixes=self.variable_names_and_prefixes,
         )
 
 
 class StaticMasking:
     def __init__(
         self,
-        variable_names_and_prefixes: List[str],
         mask_value: int,
         fill_value: float,
         mask_2d: Optional[torch.Tensor] = None,
         mask_3d: Optional[torch.Tensor] = None,
+        variable_names_and_prefixes: Optional[List[str]] = None,
     ):
         if mask_2d is None and mask_3d is None:
             raise ValueError("Either mask_2d or mask_3d must be provided to Masking.")
@@ -98,7 +98,12 @@ class StaticMasking:
         # add convenience 3rd dimension to
         self._mask_2d = None if mask_2d is None else mask_2d.unsqueeze(-1)
         self._mask_3d = mask_3d
-        self._stacker = Stacker({name: [name] for name in variable_names_and_prefixes})
+        if variable_names_and_prefixes is None:
+            self._stacker = Stacker()
+        else:
+            self._stacker = Stacker(
+                {name: [name] for name in variable_names_and_prefixes}
+            )
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """
@@ -108,6 +113,8 @@ class StaticMasking:
             data: The data to mask.
 
         """
+        if not self._stacker.has_prefix_map:
+            self._stacker.infer_prefix_map(data.keys())
         data_: TensorDict = {**data}
         for name in self._stacker.standard_names:
             stacked = self._stacker(name, data)

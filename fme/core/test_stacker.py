@@ -56,32 +56,28 @@ def test_natural_sort(names, sorted_names):
     assert natural_sort(names) == sorted_names
 
 
-_PREFIX_MAPS = [{"a": ["aa_", "ab_"], "b": ["b_", "bb_"], "c": ["ca", "cb"]}]
-
-_DATA_NAMES = [
-    ["aa_0", "aa_1", "b_00", "b_01", "b", "ca"],
-    ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
-    ["ab_0", "b_", "cc"],
-]
+_PREFIX_MAP = {"a": ["aa_", "ab_"], "b": ["b_", "bb_"], "c": ["ca", "cb"]}
 
 
+@pytest.mark.parametrize("prefix_map", [_PREFIX_MAP])
 @pytest.mark.parametrize(
-    "prefix_map, data_names, expected_level_names",
+    "data_names, expected_level_names",
     [
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[0],
+            ["aa_0", "aa_1", "b_00", "b_01", "b", "ca"],
             {"a": ["aa_0", "aa_1"], "b": ["b_00", "b_01"], "c": ["ca"]},
         ),
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[1],
-            {"a": ["ab_0", "ab_1"], "b": ValueError, "c": ["cb"]},
+            ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
+            {"a": ["ab_0", "ab_1"], "b": (ValueError, "Missing level 0"), "c": ["cb"]},
         ),
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[2],
-            {"a": ["ab_0"], "b": ["b_"], "c": KeyError},
+            ["ab_0", "b_", "cc"],
+            {
+                "a": ["ab_0"],
+                "b": ["b_"],
+                "c": (KeyError, "No prefix associated with 'c'"),
+            },
         ),
     ],
 )
@@ -89,8 +85,10 @@ def test_get_all_level_names(prefix_map, data_names, expected_level_names):
     data = {name: torch.zeros(2, 2) for name in data_names}
     stacker = Stacker(prefix_map)
     for standard_name in expected_level_names.keys():
-        if isinstance(expected_level_names[standard_name], type):
-            with pytest.raises(expected_level_names[standard_name]):
+        expected_names = expected_level_names[standard_name]
+        if isinstance(expected_names, tuple):
+            expected_error, message = expected_names
+            with pytest.raises(expected_error, match=message):
                 stacker.get_all_level_names(standard_name, data)
         else:
             assert (
@@ -99,22 +97,20 @@ def test_get_all_level_names(prefix_map, data_names, expected_level_names):
             )
 
 
+@pytest.mark.parametrize("prefix_map", [_PREFIX_MAP])
 @pytest.mark.parametrize(
-    "prefix_map, data_names, expected_level_names",
+    "data_names, expected_level_names",
     [
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[0],
+            ["aa_0", "aa_1", "b_00", "b_01", "b", "ca"],
             {"a": ["aa_0", "aa_1"], "b": ["b_00", "b_01"], "c": ["ca"]},
         ),
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[1],
+            ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
             {"a": ["ab_0", "ab_1"], "c": ["cb"]},
         ),
         (
-            _PREFIX_MAPS[0],
-            _DATA_NAMES[2],
+            ["ab_0", "b_", "cc"],
             {"a": ["ab_0"], "b": ["b_"]},
         ),
     ],
@@ -137,3 +133,51 @@ def test_stack_unstack(prefix_map, data_names, expected_level_names):
         for name in level_names:
             assert name in unstacked
             assert torch.allclose(unstacked[name], data[name])
+
+
+@pytest.mark.parametrize(
+    "data_names, expected_prefix_map, expected_level_names",
+    [
+        (
+            ["aa_0", "aa_1", "b_00", "b_01", "b", "ca"],
+            {"aa_": ["aa_"], "b_": ["b_"], "b": ["b"], "ca": ["ca"]},
+            {"aa_": ["aa_0", "aa_1"], "b_": ["b_00", "b_01"], "b": ["b"], "ca": ["ca"]},
+        ),
+        (
+            ["ab_0", "ab_1", "bb_1", "bb_2", "cb"],
+            {"ab_": ["ab_"], "bb_": ["bb_"], "cb": ["cb"]},
+            {
+                "ab_": ["ab_0", "ab_1"],
+                "bb_": (ValueError, "Missing level 0"),
+                "cb": ["cb"],
+            },
+        ),
+        (
+            ["ab_0", "b_", "cc"],
+            {"ab_": ["ab_"], "b_": ["b_"], "cc": ["cc"]},
+            {"ab_": ["ab_0"], "b_": ["b_"], "cc": ["cc"]},
+        ),
+    ],
+)
+def test_inferred_stacker(data_names, expected_prefix_map, expected_level_names):
+    data = {name: torch.rand(2, 2) for name in data_names}
+    stacker = Stacker()
+    with pytest.raises(RuntimeError, match="hasn't yet been built"):
+        stacker("a", data)
+    stacker.infer_prefix_map(data.keys())
+    with pytest.raises(RuntimeError, match="has already been built"):
+        stacker.infer_prefix_map(data.keys())
+    assert stacker.prefix_map == expected_prefix_map
+    standard_names = stacker.standard_names
+    assert standard_names == list(expected_prefix_map.keys())
+    for standard_name in stacker.standard_names:
+        expected_levels = expected_level_names[standard_name]
+        if isinstance(expected_levels, tuple):
+            expected_error, message = expected_levels
+            with pytest.raises(expected_error, match=message):
+                _ = stacker(standard_name, data)
+        else:
+            stacked = stacker(standard_name, data)
+            tensors = [data[name] for name in expected_levels]
+            expected_stacked = torch.stack(tensors, dim=-1)
+            assert torch.allclose(stacked, expected_stacked)
