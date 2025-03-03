@@ -54,8 +54,6 @@ class Context:
     embedding_2d: torch.Tensor
 
     def __post_init__(self):
-        if self.embedding_scalar.ndim != 2:
-            raise ValueError("embedding_scalar must have 2 dimensions")
         if self.embedding_2d.ndim != self.embedding_scalar.ndim + 2:
             raise ValueError(
                 "embedding_2d must have 2 more dimensions than embedding_scalar"

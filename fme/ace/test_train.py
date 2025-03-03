@@ -66,6 +66,7 @@ def _get_test_yaml_files(
     segment_epochs=1,
     inference_forward_steps=2,
     use_healpix=False,
+    crps_training=False,
     save_per_epoch_diagnostics=False,
 ):
     input_time_size = 1
@@ -135,6 +136,7 @@ def _get_test_yaml_files(
         spatial_dimensions_str = "latlon"
 
     new_stepper_config = f"""
+  crps_training: {"true" if crps_training else "false"}
   in_names: {in_variable_names}
   out_names: {out_variable_names}
   normalization:
@@ -283,6 +285,7 @@ def _setup(
     inference_forward_steps=2,
     use_healpix=False,
     save_per_epoch_diagnostics=False,
+    crps_training=False,
 ):
     if not path.exists():
         path.mkdir()
@@ -366,21 +369,23 @@ def _setup(
         segment_epochs=segment_epochs,
         inference_forward_steps=inference_forward_steps,
         use_healpix=use_healpix,
+        crps_training=crps_training,
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype",
+    "nettype, crps_training",
     [
-        "SphericalFourierNeuralOperatorNet",
-        "HEALPixRecUNet",
-        "Samudra",
-        "NoiseConditionedSFNO",
+        ("SphericalFourierNeuralOperatorNet", False),
+        ("NoiseConditionedSFNO", True),
+        ("HEALPixRecUNet", False),
+        ("Samudra", False),
+        ("NoiseConditionedSFNO", False),
     ],
 )
-def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
+def test_train_and_inference(tmp_path, nettype, crps_training, very_fast_only: bool):
     """Ensure that ACE training and subsequent standalone inference run without errors.
 
     Args:
@@ -399,6 +404,7 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
         use_healpix=(nettype == "HEALPixRecUNet"),
+        crps_training=crps_training,
         save_per_epoch_diagnostics=True,
     )
     # using pdb requires calling main functions directly
