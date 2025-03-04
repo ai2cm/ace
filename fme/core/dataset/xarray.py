@@ -656,7 +656,10 @@ class XarrayDataset(Dataset):
         # load static derived variables
         for name in self._static_derived_names:
             tensor = self._static_derived_data[name]
-            tensors[name] = tensor.repeat((total_steps, 1, 1))
+            horizontal_dims = [1] * tensor.ndim
+            tensors[name] = tensor.repeat((total_steps, *horizontal_dims)).to(
+                get_device()
+            )
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}

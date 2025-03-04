@@ -1,6 +1,8 @@
+import numpy as np
 import pytest
 import torch
 
+from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.core.coordinates import (
     DepthCoordinate,
     HEALPixCoordinates,
@@ -185,3 +187,66 @@ def test_depth_integral_3d_data():
     expected = data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1
     result = DepthCoordinate(idepth, mask).depth_integral(data)
     torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize("pad", [True, False])
+def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests and healpix (earth2grid) tests")
+
+    face = torch.arange(12)
+    height = torch.arange(16)
+    width = torch.arange(16)
+    healpix_coords = HEALPixCoordinates(face=face, height=height, width=width)
+
+    x, y, z = healpix_coords.xyz
+
+    # Calculate original distances between points along x and y axes
+    distances_x = np.sqrt(
+        (np.diff(x, axis=-1) ** 2)
+        + (np.diff(y, axis=-1) ** 2)
+        + (np.diff(z, axis=-1) ** 2)
+    )
+    distances_y = np.sqrt(
+        (np.diff(x, axis=-2) ** 2)
+        + (np.diff(y, axis=-2) ** 2)
+        + (np.diff(z, axis=-2) ** 2)
+    )
+
+    # Apply HEALPix padding
+    if pad:
+        padding = 2
+        healpix_padding = HEALPixPadding(padding=padding, enable_nhwc=False)
+        padded_x = healpix_padding(torch.Tensor(x).unsqueeze(1)).squeeze(1)
+        padded_y = healpix_padding(torch.Tensor(y).unsqueeze(1)).squeeze(1)
+        padded_z = healpix_padding(torch.Tensor(z).unsqueeze(1)).squeeze(1)
+
+        # Calculate distances between padding points along x and y axes
+        distances_padded_x = np.sqrt(
+            (np.diff(padded_x.numpy(), axis=-1) ** 2)
+            + (np.diff(padded_y.numpy(), axis=-1) ** 2)
+            + (np.diff(padded_z.numpy(), axis=-1) ** 2)
+        )
+        distances_padded_y = np.sqrt(
+            (np.diff(padded_x.numpy(), axis=-2) ** 2)
+            + (np.diff(padded_y.numpy(), axis=-2) ** 2)
+            + (np.diff(padded_z.numpy(), axis=-2) ** 2)
+        )
+
+        max_distance_x = np.max(distances_x)
+        max_distance_y = np.max(distances_y)
+
+        # Assert distances are not too far from the expected diff (min = 0, max = 2dx)
+        assert np.all(
+            distances_padded_x <= 2 * max_distance_x
+        ), "Some distances along x-axis exceed 2 * max_distance_x"
+        assert np.all(
+            distances_padded_y <= 2 * max_distance_y
+        ), "Some distances along y-axis exceed 2 * max_distance_y"
+
+    else:
+        mean_distances_x = distances_x.mean()
+        mean_distances_y = distances_y.mean()
+
+        assert np.allclose(distances_x, mean_distances_x, atol=0.03)
+        assert np.allclose(distances_y, mean_distances_y, atol=0.03)
