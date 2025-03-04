@@ -203,6 +203,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     )
 
     stepper = config.load_stepper()
+    stepper.set_eval()
     if stepper.timestep != data.timestep:
         raise ValueError(
             f"Timestep of the loaded stepper, {stepper.timestep}, does not "

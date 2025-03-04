@@ -1304,3 +1304,12 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
     for k, v in data.target_data.items():
         return_dict[f"target_data.{k}"] = v
     return return_dict
+
+
+def test_set_train_eval():
+    stepper = _get_stepper(["a"], ["a"])
+    assert stepper.module.training
+    stepper.set_eval()
+    assert not stepper.module.training
+    stepper.set_train()
+    assert stepper.module.training
