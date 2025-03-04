@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import math
 from datetime import timedelta
 from typing import (
     Callable,
@@ -16,7 +17,11 @@ from typing import (
 import dacite
 import numpy as np
 import torch
-from astropy_healpix import HEALPix
+
+try:
+    from earth2grid import healpix as e2ghpx
+except ImportError:
+    e2ghpx = None
 
 from fme.core import metrics
 from fme.core.constants import GRAVITY
@@ -758,10 +763,14 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     @property
     def xyz(self) -> Tuple[float, float, float]:
-        hp = HEALPix(nside=len(self.height), order="ring")
-        return hp.healpix_to_xyz(
-            [self.coords["face"], self.coords["height"], self.coords["width"]]
-        )
+        level = int(math.log2(len(self.width)))
+        hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
+        lats = hpx.lat
+        lats = lats.reshape(len(self.face), len(self.width), len(self.height))
+        lons = hpx.lon
+        lons = lons.reshape(len(self.face), len(self.width), len(self.height))
+        x, y, z = lon_lat_to_xyz(lat=lats, lon=lons)
+        return x, y, z
 
     @property
     def dims(self) -> List[str]:
@@ -809,6 +818,12 @@ class HEALPixCoordinates(HorizontalCoordinates):
 
     @property
     def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        raise NotImplementedError(
-            "meshgrid is not implemented yet for HEALPixCoordinates."
-        )
+        # We'll return a 3D (face, width, height) tensor representing the lat-lon
+        # coordinates of this grid.
+        level = int(math.log2(len(self.width)))
+        hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
+        lats = hpx.lat
+        lats = lats.reshape(len(self.face), len(self.width), len(self.height))
+        lons = hpx.lon
+        lons = lons.reshape(len(self.face), len(self.width), len(self.height))
+        return lats, lons
