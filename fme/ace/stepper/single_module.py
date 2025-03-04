@@ -617,6 +617,7 @@ class SingleModuleStepper(
         )
         self.module = module.to(get_device())
         self.derive_func = derive_func
+        self._post_process_func = vertical_coordinate.build_post_process_function()
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -935,7 +936,13 @@ class SingleModuleStepper(
                     )
                     .remove_initial_condition(self.n_ic_timesteps)
                 )
-        return data, data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
+        data = BatchData.new_on_device(
+            data=self._post_process_func(data.data),
+            time=data.time,
+            horizontal_dims=data.horizontal_dims,
+        )
+        return data, prognostic_state
 
     def predict_paired(
         self,
@@ -965,11 +972,16 @@ class SingleModuleStepper(
         prediction, new_initial_condition = self.predict(
             initial_condition, forcing, compute_derived_variables
         )
+        forward_data = self.get_forward_data(
+            forcing, compute_derived_variables=compute_derived_variables
+        )
         return (
             PairedData.from_batch_data(
                 prediction=prediction,
-                reference=self.get_forward_data(
-                    forcing, compute_derived_variables=compute_derived_variables
+                reference=BatchData.new_on_device(
+                    data=self._post_process_func(forward_data.data),
+                    time=forward_data.time,
+                    horizontal_dims=forward_data.horizontal_dims,
                 ),
             ),
             new_initial_condition,
@@ -1046,8 +1058,8 @@ class SingleModuleStepper(
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=dict(gen_data),
-            target_data=dict(target_data.data),
+            gen_data=self._post_process_func(gen_data),
+            target_data=self._post_process_func(target_data.data),
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
