@@ -1,7 +1,17 @@
 import abc
 import dataclasses
 from datetime import timedelta
-from typing import Dict, List, Literal, Mapping, Optional, Tuple, TypeVar, Union
+from typing import (
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import dacite
 import numpy as np
@@ -16,6 +26,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
+from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -83,6 +94,14 @@ class OceanDeriveFn(DeriveFnABC):
         )
 
 
+PostProcessFnType = Callable[[TensorMapping], TensorDict]
+
+
+class NullPostProcessFn:
+    def __call__(self, data: TensorMapping) -> TensorDict:
+        return dict(data)
+
+
 class VerticalCoordinate(abc.ABC):
     """
     A vertical coordinate system for use in the stepper.
@@ -105,6 +124,10 @@ class VerticalCoordinate(abc.ABC):
 
     @abc.abstractmethod
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
+        pass
+
+    @abc.abstractmethod
+    def build_post_process_function(self) -> PostProcessFnType:
         pass
 
     @property
@@ -193,6 +216,9 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
+
+    def build_post_process_function(self) -> PostProcessFnType:
+        return NullPostProcessFn()
 
     def get_ak(self) -> torch.Tensor:
         return self.ak
@@ -349,6 +375,19 @@ class DepthCoordinate(VerticalCoordinate):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep)
 
+    def build_post_process_function(self) -> PostProcessFnType:
+        """
+        Return a function that fills in NaNs outside of the mask valid
+        points, i.e. where the mask value is 0.
+
+        """
+        return StaticMasking(
+            mask_value=0,
+            fill_value=float("nan"),
+            mask_2d=self.get_mask_level(0),
+            mask_3d=self.mask,
+        )
+
     @property
     def dtype(self) -> torch.dtype:
         return self.idepth.dtype
@@ -461,6 +500,9 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return NullDeriveFn()
+
+    def build_post_process_function(self) -> PostProcessFnType:
+        return NullPostProcessFn()
 
     def to(self, device: str) -> "NullVerticalCoordinate":
         return self

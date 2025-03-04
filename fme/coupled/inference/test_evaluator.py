@@ -59,10 +59,11 @@ def save_coupled_stepper(
         ocean_timedelta=ocean_timedelta,
         atmosphere_timedelta=atmosphere_timedelta,
     )
-    area = torch.ones(data_shape[-2:], device=get_device())
+    img_shape = (data_shape[-2], data_shape[-1])
+    area = torch.ones(*img_shape, device=get_device())
     ocean_vertical_coordinate = DepthCoordinate(
         idepth=torch.arange(nz_interface, device=get_device()),
-        mask=torch.ones(nz_interface - 1),
+        mask=torch.ones(*img_shape, nz_interface - 1),
     )
     atmos_vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(nz_interface, device=get_device()),
@@ -70,13 +71,13 @@ def save_coupled_stepper(
     )
     if save_standalone_component_checkpoints:
         ocean_stepper = config.ocean.stepper.get_stepper(
-            img_shape=(data_shape[-2], data_shape[-1]),
+            img_shape=img_shape,
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=ocean_vertical_coordinate,
             timestep=config.ocean_timestep,
         )
         atmos_stepper = config.atmosphere.stepper.get_stepper(
-            img_shape=(data_shape[-2], data_shape[-1]),
+            img_shape=img_shape,
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=atmos_vertical_coordinate,
             timestep=config.atmosphere_timestep,
@@ -87,7 +88,7 @@ def save_coupled_stepper(
         torch.save({"stepper": atmos_stepper.get_state()}, atmos_path)
 
     coupled_stepper = config.get_stepper(
-        img_shape=(data_shape[-2], data_shape[-1]),
+        img_shape=img_shape,
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=CoupledVerticalCoordinate(
             ocean=ocean_vertical_coordinate,
