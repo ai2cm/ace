@@ -343,7 +343,9 @@ def get_data(
         ak, bk = torch.arange(NZ), torch.arange(NZ)
         vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     elif realm == "ocean":
-        vertical_coord = DepthCoordinate(torch.arange(NZ), torch.ones(NZ - 1))
+        vertical_coord = DepthCoordinate(
+            torch.arange(NZ), torch.ones(N_LAT, N_LON, NZ - 1)
+        )
     data = BatchData.new_on_device(
         data=data_dict,
         time=xr.DataArray(
@@ -866,7 +868,7 @@ def test_reloaded_stepper_gives_same_prediction():
     )
     area = torch.ones((N_LAT, N_LON), device=DEVICE)
     vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(2), torch.ones(1)),
+        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)),
         atmosphere=HybridSigmaPressureCoordinate(
             ak=torch.arange(7), bk=torch.arange(7)
         ),
