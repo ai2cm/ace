@@ -938,3 +938,23 @@ def test_reloaded_stepper_gives_same_prediction():
         first_result.atmosphere_data.target_data["a_sfc"],
         second_result.atmosphere_data.target_data["a_sfc"],
     )
+
+
+def test_set_train_eval():
+    stepper, _ = get_stepper_and_batch(
+        ["sst", "mask_0"],
+        ["sst"],
+        ["surface_temperature", "ocean_fraction"],
+        ["surface_temperature"],
+        1,
+        1,
+        1,
+    )
+    assert stepper.atmosphere.module.training
+    assert stepper.ocean.module.training
+    stepper.set_eval()
+    assert not stepper.atmosphere.module.training
+    assert not stepper.ocean.module.training
+    stepper.set_train()
+    assert stepper.atmosphere.module.training
+    assert stepper.ocean.module.training

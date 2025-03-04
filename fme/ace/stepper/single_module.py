@@ -767,6 +767,12 @@ class SingleModuleStepper(
         """
         return nn.ModuleList([self.module])
 
+    def set_train(self):
+        self.module.train()
+
+    def set_eval(self):
+        self.module.eval()
+
     def step(
         self,
         input: TensorMapping,
