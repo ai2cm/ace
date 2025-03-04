@@ -124,13 +124,13 @@ def lon_lat_to_xyz(lon, lat):
     Convert (lon, lat) to (x, y, z).
 
     Args:
-        lon: 2d array of longitudes, in degrees
-        lat: 2d array of latitudes, in degrees
+        lon: n-dimensional array of longitudes, in degrees
+        lat: n-dimensional array of latitudes, in degrees
 
     Returns:
-        x: 2d array of x values
-        y: 2d array of y values
-        z: 2d array of z values
+        x: n-dimensional array of x values
+        y: n-dimensional array of y values
+        z: n-dimensional array of z values
     """
     lat = np.deg2rad(lat)
     lon = np.deg2rad(lon)
@@ -146,13 +146,13 @@ def xyz_to_lon_lat(x, y, z):
     Convert (x, y, z) to (lon, lat).
 
     Args:
-        x: 2d array of x values
-        y: 2d array of y values
-        z: 2d array of z values
+        x: n-dimensional array of x values
+        y: n-dimensional array of y values
+        z: n-dimensional array of z values
 
     Returns:
-        lon: 2d array of longitudes, in degrees
-        lat: 2d array of latitudes, in degrees
+        lon: n-dimensional array of longitudes, in degrees
+        lat: n-dimensional array of latitudes, in degrees
     """
     x, y, z = normalize_vector(x, y, z)
     # double transpose to index last dimension, regardless of number of dimensions

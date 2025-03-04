@@ -14,6 +14,7 @@ from fme.ace.models.healpix.healpix_activations import (
 from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
 from fme.ace.models.healpix.healpix_decoder import UNetDecoder
 from fme.ace.models.healpix.healpix_encoder import UNetEncoder
+from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import SingleModuleStepperConfig
@@ -828,3 +829,151 @@ def compare_output(
         )
         return False
     return True
+
+
+@pytest.fixture
+def mock_data():
+    """
+    Create a mock tensor with known values for 12 HEALPix faces.
+    Shape: [B=1, F=12, C=1, H=4, W=4] - a single batch with 12 faces, one channel,
+        4x4 grid
+    """
+    return th.arange(1, 12 * 4 * 4 + 1, dtype=th.float32).reshape((12, 1, 4, 4))
+
+
+@pytest.fixture
+def healpix_padding():
+    padding = 2
+
+    """Instantiate HEALPixPadding with the specified padding."""
+    return HEALPixPadding(padding=padding, enable_nhwc=False)
+
+
+def test_healpix_padding_pn(healpix_padding):
+    """
+    Test north hemisphere padding.
+    This test checks if each northern face is padded correctly with its neighbors.
+    """
+    padding = 2
+
+    # Mock the neighbor faces, assuming they are 4x4 for simplicity.
+    face = th.ones((1, 1, 4, 4))
+    top = face
+    top_left = face * 2
+    left = face * 3
+    bottom_left = face * 4
+    bottom = face * 5
+    bottom_right = face * 6
+    right = face * 7
+    top_right = face * 8
+
+    # Run the pn function directly for controlled testing
+    padded = healpix_padding.pn(
+        face, top, top_left, left, bottom_left, bottom, bottom_right, right, top_right
+    )
+
+    # Check if padding applied matches expected size: 4 + 2*padding in each dimension
+    assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
+    # North padding (top two rows) should match `top`
+    assert th.all(padded[..., :padding, padding:-padding] == top[..., -padding:, :])
+    # Northwest corner padding should match `top_left`
+    assert th.all(
+        padded[..., :padding, :padding] == top_left[..., -padding:, -padding:]
+    )
+    # Northeast corner padding should match `top_right`
+    assert th.all(
+        padded[..., :padding, -padding:] == top_right[..., -padding:, :padding]
+    )
+
+
+def test_healpix_padding_pe(healpix_padding):
+    """
+    Test equatorial face padding to ensure proper padding alignment with
+    equatorial neighbors.
+    """
+    padding = 2
+
+    # Mock the neighbor faces, assuming they are 4x4 for simplicity.
+    face = th.ones((1, 1, 4, 4))
+    top = face
+    top_left = face * 2
+    left = face * 3
+    bottom_left = face * 4
+    bottom = face * 5
+    bottom_right = face * 6
+    right = face * 7
+    top_right = face * 8
+
+    # Run the pe function directly for controlled testing
+    padded = healpix_padding.pe(
+        face, top, top_left, left, bottom_left, bottom, bottom_right, right, top_right
+    )
+
+    # Check if padding applied matches expected size: 4 + 2*padding in each dimension
+    assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
+    # Left padding (left two columns) should match `left`
+    assert th.all(padded[..., padding:-padding, :padding] == left[..., :, -padding:])
+    # Right padding (right two columns) should match `right`
+    assert th.all(padded[..., padding:-padding, -padding:] == right[..., :, :padding])
+
+
+def test_healpix_padding_ps(healpix_padding):
+    """
+    Test south hemisphere padding.
+    This test checks if each southern face is padded correctly with its neighbors.
+    """
+    padding = 2
+
+    # Mock the neighbor faces, assuming they are 4x4 for simplicity.
+    face = th.ones((1, 1, 4, 4))
+    top = face
+    top_left = face * 2
+    left = face * 3
+    bottom_left = face * 4
+    bottom = face * 5
+    bottom_right = face * 6
+    right = face * 7
+    top_right = face * 8
+
+    # Run the ps function directly for controlled testing
+    padded = healpix_padding.ps(
+        face, top, top_left, left, bottom_left, bottom, bottom_right, right, top_right
+    )
+
+    # Check if padding applied matches expected size: 4 + 2*padding in each dimension
+    assert padded.shape[-2:] == (4 + 2 * padding, 4 + 2 * padding)
+    # South padding (bottom two rows) should match `bottom`
+    assert th.all(padded[..., -padding:, padding:-padding] == bottom[..., :padding, :])
+    # Southwest corner padding should match `bottom_left`
+    assert th.all(
+        padded[..., -padding:, :padding] == bottom_left[..., :padding, -padding:]
+    )
+    # Southeast corner padding should match `bottom_right`
+    assert th.all(
+        padded[..., -padding:, -padding:] == bottom_right[..., :padding, :padding]
+    )
+
+
+def test_healpix_padding_forward(healpix_padding, mock_data):
+    """
+    Full integration test for HEALPixPadding's forward method.
+    Checks that all faces receive the correct padding.
+    """
+    padding = 2
+
+    padded_data = healpix_padding(mock_data)
+
+    expected_height = mock_data.shape[-2] + 2 * padding
+    expected_width = mock_data.shape[-1] + 2 * padding
+    assert padded_data.shape[-2:] == (expected_height, expected_width)
+
+    # TODO: check each face to confirm padding values in each region
+    for face_idx in range(mock_data.shape[0]):
+        face_data = padded_data[face_idx, 0]
+
+        # the region where original data should reside
+        data_region = face_data[padding : padding + 4, padding : padding + 4]
+        original_data = mock_data[face_idx, 0]  # Original face data
+        assert (
+            data_region == original_data
+        ).all(), f"Data region on face {face_idx} has been altered."
