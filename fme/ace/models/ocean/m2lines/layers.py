@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 import torch
 import torch.nn as nn
@@ -44,6 +44,7 @@ class ConvNeXtBlock(torch.nn.Module):
         activation: torch.nn.Module = CappedGELU,
         pad: str = "circular",
         norm: Optional[str] = "instance",
+        norm_kwargs: Optional[Mapping[str, Any]] = None,
         upscale_factor: int = 4,
     ):
         super().__init__()
@@ -53,6 +54,9 @@ class ConvNeXtBlock(torch.nn.Module):
         self.N_pad = int((kernel_size + (kernel_size - 1) * (dilation - 1) - 1) / 2)
         self.pad = pad
         self.norm = norm
+        self.norm_kwargs = norm_kwargs
+        if self.norm_kwargs is None:
+            self.norm_kwargs = {}
 
         assert n_layers == 1, "Can only use a single layer here!"  # Needs fixing
 
@@ -79,13 +83,21 @@ class ConvNeXtBlock(torch.nn.Module):
         )
         # Batch Norm
         if norm == "batch":
-            convblock.append(torch.nn.BatchNorm2d(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.BatchNorm2d(in_channels * upscale_factor, **self.norm_kwargs)
+            )
         # Instance Norm
         elif norm == "instance":
-            convblock.append(torch.nn.InstanceNorm2d(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.InstanceNorm2d(
+                    in_channels * upscale_factor, **self.norm_kwargs
+                )
+            )
         # Layer Norm
         elif norm == "layer":
-            convblock.append(torch.nn.LayerNorm(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.LayerNorm(in_channels * upscale_factor, **self.norm_kwargs)
+            )
         # No Norm
         elif norm is None:
             pass
@@ -104,13 +116,21 @@ class ConvNeXtBlock(torch.nn.Module):
         )
         # Batch Norm
         if norm == "batch":
-            convblock.append(torch.nn.BatchNorm2d(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.BatchNorm2d(in_channels * upscale_factor, **self.norm_kwargs)
+            )
         # Instance Norm
         elif norm == "instance":
-            convblock.append(torch.nn.InstanceNorm2d(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.InstanceNorm2d(
+                    in_channels * upscale_factor, **self.norm_kwargs
+                )
+            )
         # Layer Norm
         elif norm == "layer":
-            convblock.append(torch.nn.LayerNorm(in_channels * upscale_factor))
+            convblock.append(
+                torch.nn.LayerNorm(in_channels * upscale_factor, **self.norm_kwargs)
+            )
         # No Norm
         elif norm is None:
             pass

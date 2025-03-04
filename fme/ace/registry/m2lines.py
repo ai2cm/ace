@@ -1,5 +1,5 @@
 import dataclasses
-from typing import List, Tuple
+from typing import Any, List, Mapping, Tuple
 
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
@@ -19,6 +19,13 @@ class SamudraBuilder(ModuleConfig):
     dilation: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
     pad: str = "circular"
     norm: str = "instance"
+    norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if "num_features" in self.norm_kwargs:
+            raise ValueError("norm_kwargs should not have num_features")
+        if "normalized_shape" in self.norm_kwargs:
+            raise ValueError("norm_kwargs should not have normalized_shape")
 
     def build(
         self,
@@ -34,4 +41,5 @@ class SamudraBuilder(ModuleConfig):
             n_layers=self.n_layers,
             pad=self.pad,
             norm=self.norm,
+            norm_kwargs=self.norm_kwargs,
         )

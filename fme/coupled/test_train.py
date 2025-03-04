@@ -82,6 +82,9 @@ stepper:
             ch_width: [8, 16]
             dilation: [2, 4]
             n_layers: [1, 1]
+            norm: batch
+            norm_kwargs:
+                track_running_stats: false
       loss:
         type: MSE
       normalization:

@@ -1,5 +1,5 @@
 import dataclasses
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 
 import numpy as np
 import torch
@@ -59,6 +59,7 @@ class Samudra(torch.nn.Module):
         n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1]),
         pad: str = "circular",
         norm: Optional[str] = "instance",
+        norm_kwargs: Optional[Mapping[str, Any]] = None,
     ):
         super().__init__()
 
@@ -70,6 +71,7 @@ class Samudra(torch.nn.Module):
         self.n_layers = n_layers
         self.pad = pad
         self.norm = norm
+        self.norm_kwargs = norm_kwargs
         self.last_kernel_size = 3
         self.N_pad = int((self.last_kernel_size - 1) / 2)
 
@@ -86,6 +88,7 @@ class Samudra(torch.nn.Module):
                     n_layers=self.n_layers[i],
                     pad=self.pad,
                     norm=self.norm,
+                    norm_kwargs=self.norm_kwargs,
                 )
             )
             layers.append(AvgPool())
@@ -97,6 +100,7 @@ class Samudra(torch.nn.Module):
                 n_layers=self.n_layers[i],
                 pad=self.pad,
                 norm=self.norm,
+                norm_kwargs=self.norm_kwargs,
             )
         )
         layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -112,6 +116,7 @@ class Samudra(torch.nn.Module):
                     n_layers=n_layers_reversed[i],
                     pad=self.pad,
                     norm=self.norm,
+                    norm_kwargs=self.norm_kwargs,
                 )
             )
             layers.append(BilinearUpsample(in_channels=b, out_channels=b))
@@ -123,6 +128,7 @@ class Samudra(torch.nn.Module):
                 n_layers=n_layers_reversed[i],
                 pad=self.pad,
                 norm=self.norm,
+                norm_kwargs=self.norm_kwargs,
             )
         )
         layers.append(torch.nn.Conv2d(b, self.output_channels, self.last_kernel_size))
