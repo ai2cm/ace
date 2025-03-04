@@ -323,6 +323,8 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
+                    "best_val_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
                 },
             }
             if inference_end is not None:
@@ -435,24 +437,23 @@ class Trainer:
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
 
-    def save_checkpoint(self, checkpoint_path):
+    def save_checkpoint(self, checkpoint_path, include_optimization=False):
         # save to a temporary file in case we get pre-empted during save
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
         try:
-            torch.save(
-                {
-                    "num_batches_seen": self.num_batches_seen,
-                    "epoch": self._model_epoch,
-                    "best_validation_loss": self._best_validation_loss,
-                    "best_inference_error": self._best_inference_error,
-                    "stepper": self.stepper.get_state(),
-                    "optimization": self.optimization.get_state(),
-                    "ema": self._ema.get_state(),
-                },
-                temporary_location,
-            )
+            data = {
+                "num_batches_seen": self.num_batches_seen,
+                "epoch": self._model_epoch,
+                "best_validation_loss": self._best_validation_loss,
+                "best_inference_error": self._best_inference_error,
+                "stepper": self.stepper.get_state(),
+                "ema": self._ema.get_state(),
+            }
+            if include_optimization:
+                data["optimization"] = self.optimization.get_state()
+            torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
         finally:
             if os.path.exists(temporary_location):
@@ -502,7 +503,9 @@ class Trainer:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
         logging.info(f"Saving latest checkpoint to {self.paths.latest_checkpoint_path}")
-        self.save_checkpoint(self.paths.latest_checkpoint_path)
+        self.save_checkpoint(
+            self.paths.latest_checkpoint_path, include_optimization=True
+        )
         with self._ema_context():
             logging.info(
                 f"Saving latest EMA checkpoint to {self.paths.ema_checkpoint_path}"
