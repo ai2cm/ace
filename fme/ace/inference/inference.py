@@ -247,6 +247,7 @@ def run_inference_from_config(config: InferenceConfig):
         config.initial_condition.get_dataset(), stepper_config.prognostic_names
     )
     stepper = config.load_stepper()
+    stepper.set_eval()
     logging.info("Initializing forcing data loaded")
     data = get_forcing_data(
         config=config.forcing_loader,
