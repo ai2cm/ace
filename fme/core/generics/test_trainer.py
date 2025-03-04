@@ -168,6 +168,12 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization.step_weights()
         return TrainOutput()
 
+    def set_train(self) -> None:
+        pass
+
+    def set_eval(self) -> None:
+        pass
+
 
 @dataclasses.dataclass
 class Config:
