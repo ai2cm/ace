@@ -59,6 +59,21 @@ def test_samudra_normalization(norm):
     assert not torch.isinf(output).any(), "Output contains infinite values"
 
 
+def test_samudra_norm_kwargs():
+    model = Samudra(
+        input_channels=4,
+        output_channels=3,
+        ch_width=[32, 64],
+        dilation=[1, 2],
+        n_layers=[1, 1],
+        norm="batch",
+        norm_kwargs={"track_running_stats": False},
+    )
+    for module in model.modules():
+        if isinstance(module, torch.nn.BatchNorm2d):
+            assert not module.track_running_stats
+
+
 def test_samudra_output_is_unchanged():
     torch.manual_seed(0)
     input_channels = 2
