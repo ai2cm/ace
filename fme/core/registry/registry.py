@@ -50,6 +50,13 @@ class Registry(Generic[T]):
 
         return register_func
 
+    def get(self, type_name: str, config: Dict[str, Any]) -> Type[T]:
+        return dacite.from_dict(
+            data_class=self._types[type_name],
+            data=config,
+            config=dacite.Config(strict=True),
+        )
+
     def from_dict(self, config: Mapping[str, Any]) -> T:
         """
         Creates a registered type from the given config dict.
