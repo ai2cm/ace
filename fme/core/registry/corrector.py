@@ -32,7 +32,6 @@ class CorrectorSelector:
     Parameters:
         type: the type of the CorrectorConfigProtocol
         config: data for a CorrectorConfigProtocol instance of the indicated type
-
     """
 
     type: str
