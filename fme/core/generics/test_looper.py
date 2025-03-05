@@ -199,7 +199,7 @@ def test_looper_paired_with_derived_variables():
         side_effect=_mock_compute_derived_quantities
     )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
-    stepper.derive_func = mock_derive_func
+    stepper._derive_func = mock_derive_func
     forcing_names = set(in_names) - set(out_names)
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(
@@ -248,7 +248,7 @@ def test_looper_paired_with_target_data_and_derived_variables():
         side_effect=_mock_compute_derived_quantities
     )
     stepper, spherical_data, time, in_names, out_names = _get_stepper()
-    stepper.derive_func = mock_derive_func
+    stepper._derive_func = mock_derive_func
     all_names = list(set(in_names + out_names))
     shape = spherical_data.data[in_names[0]].shape
     initial_condition = BatchData.new_on_device(

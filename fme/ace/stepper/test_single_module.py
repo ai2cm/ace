@@ -958,10 +958,12 @@ def test_next_step_forcing_names():
     input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=["b", "c"])
     stepper.predict(input_data, forcing_data)
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 1, :], forcing_data.data["b"][:, 0]
+        stepper.module.module.last_input[:, 1, :],
+        forcing_data.data["b"][:, 0],
     )
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 2, :], forcing_data.data["c"][:, 1]
+        stepper.module.module.last_input[:, 2, :],
+        forcing_data.data["c"][:, 1],
     )
 
 

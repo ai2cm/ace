@@ -198,13 +198,19 @@ class SingleModuleStepperConfig:
             gridded_operations=gridded_operations,
             timestep=timestep,
         )
-        return SingleModuleStepper(
+        normalizer = self.normalization.build(self.normalize_names)
+        step = SingleModuleStep(
             config=self,
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             corrector=corrector,
+            normalizer=normalizer,
             timestep=timestep,
+        )
+        return SingleModuleStepper(
+            config=self,
+            step=step,
             derive_func=derive_func,
         )
 
@@ -556,17 +562,9 @@ def process_prediction_generator_list(
     )
 
 
-class SingleModuleStepper(
-    TrainStepperABC[
-        PrognosticState,
-        BatchData,
-        BatchData,
-        PairedData,
-        TrainOutput,
-    ],
-):
+class SingleModuleStep:
     """
-    Stepper class for a single pytorch module.
+    Step class for a single pytorch module.
     """
 
     TIME_DIM = 1
@@ -579,7 +577,7 @@ class SingleModuleStepper(
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         corrector: CorrectorABC,
-        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
         init_weights: bool = True,
     ):
@@ -590,7 +588,7 @@ class SingleModuleStepper(
             gridded_operations: The gridded operations, e.g. for area weighting.
             vertical_coordinate: The vertical coordinate.
             corrector: The corrector to use at the end of each step.
-            derive_func: Function to compute derived variables.
+            normalizer: The normalizer to use.
             timestep: Timestep of the model.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
@@ -600,7 +598,7 @@ class SingleModuleStepper(
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        self.normalizer = config.normalization.build(config.normalize_names)
+        self.normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Optional[Ocean] = config.ocean.build(
                 config.in_names, config.out_names, timestep
@@ -616,8 +614,6 @@ class SingleModuleStepper(
             self.module, init_weights=init_weights
         )
         self.module = module.to(get_device())
-        self.derive_func = derive_func
-        self._post_process_func = vertical_coordinate.build_post_process_function()
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -628,60 +624,19 @@ class SingleModuleStepper(
         self._vertical_coordinate = vertical_coordinate.to(get_device())
         self._timestep = timestep
 
-        self.loss_obj = config.loss.build(
-            gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
-        )
-
         self._corrector = corrector
-        if config.loss_normalization is not None:
-            self.loss_normalizer = config.loss_normalization.build(
-                names=config.normalize_names
-            )
-        elif config.residual_normalization is not None:
-            # Use residual norm for prognostic variables and input/output
-            # normalizer for diagnostic variables in loss
-            self.loss_normalizer = _combine_normalizers(
-                residual_normalizer=config.residual_normalization.build(
-                    config.prognostic_names
-                ),
-                model_normalizer=self.normalizer,
-            )
-        else:
-            self.loss_normalizer = self.normalizer
         self.in_names = config.in_names
         self.out_names = config.out_names
 
-        if config.multi_call is not None:
-            self._multi_call = config.multi_call.build(self.step)
-            if config.include_multi_call_in_loss:
-                self._multi_call_loss = config.loss.build(
-                    gridded_operations.area_weighted_mean,
-                    self._multi_call.names,
-                    self.CHANNEL_DIM,
-                )
-            else:
-                zero_loss = torch.tensor(0.0, device=get_device())
-                self._multi_call_loss = lambda x, y: zero_loss
-        else:
-            self._multi_call = None
-
         self._activation_checkpointing = config.activation_checkpointing
-
-        _1: PredictFunction[  # for type checking
-            PrognosticState,
-            BatchData,
-            BatchData,
-        ] = self.predict
-
-        _2: PredictFunction[  # for type checking
-            PrognosticState,
-            BatchData,
-            PairedData,
-        ] = self.predict_paired
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:
         return self._vertical_coordinate
+
+    @property
+    def gridded_operations(self) -> GriddedOperations:
+        return self._gridded_operations
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -699,20 +654,6 @@ class SingleModuleStepper(
             return self._config.ocean.ocean_fraction_name
         return None
 
-    @property
-    def effective_loss_scaling(self) -> TensorDict:
-        """
-        Effective loss scalings used to normalize outputs before computing loss.
-        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
-        where loss_scaling_i = loss_normalizer_std_i / weight_i.
-        """
-        custom_weights = self._config.loss.weights
-        loss_normalizer_stds = self.loss_normalizer.stds
-        return {
-            k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
-            for k in self._config.out_names
-        }
-
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         """
         Replace the ocean model with a new one.
@@ -726,26 +667,12 @@ class SingleModuleStepper(
         else:
             self.ocean = ocean.build(self.in_names, self.out_names, self.timestep)
 
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
-        """
-        Replace the MultiCall object with a new one. Note this is only
-        meant to be used at inference time and does not affect the loss
-        function.
-
-        Args:
-            multi_call: The new multi_call configuration or None.
-        """
-        self._config.multi_call = multi_call
-        if multi_call is None:
-            self._multi_call = None
-        else:
-            multi_call.validate(self.in_names, self.out_names)
-            self._multi_call = multi_call.build(self.step)
-
     @property
     def forcing_names(self) -> List[str]:
         """Names of variables which are inputs only."""
-        return self._config.forcing_names
+        if self.ocean is None:
+            return self._config.forcing_names
+        return list(set(self._config.forcing_names).union(self.ocean.forcing_names))
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -766,12 +693,6 @@ class SingleModuleStepper(
             A list of modules being trained.
         """
         return nn.ModuleList([self.module])
-
-    def set_train(self):
-        self.module.train()
-
-    def set_eval(self):
-        self.module.eval()
 
     def step(
         self,
@@ -815,6 +736,321 @@ class SingleModuleStepper(
         if self.ocean is not None:
             output = self.ocean(input, output, next_step_forcing_data)
         return output
+
+    def get_regularizer_loss(self):
+        return self._l2_sp_tuning_regularizer()
+
+    def get_state(self):
+        """
+        Returns:
+            The state of the stepper.
+        """
+        return {
+            "module": self.module.state_dict(),
+            "normalizer": self.normalizer.get_state(),
+            "img_shape": self._img_shape,
+            "config": self._config.get_state(),
+            "gridded_operations": self._gridded_operations.to_state(),
+            "vertical_coordinate": self._vertical_coordinate.as_dict(),
+            "encoded_timestep": encode_timestep(self.timestep),
+        }
+
+    def load_state(self, state: Dict[str, Any]) -> None:
+        """
+        Load the state of the stepper.
+
+        Args:
+            state: The state to load.
+        """
+        if "module" in state:
+            module = state["module"]
+            if "module.device_buffer" in module:
+                # for backwards compatibility with old checkpoints
+                del module["module.device_buffer"]
+            self.module.load_state_dict(module)
+
+    @classmethod
+    def from_state(cls, state) -> "SingleModuleStep":
+        """
+        Load the state of the stepper.
+
+        Args:
+            state: The state to load.
+
+        Returns:
+            The stepper.
+        """
+        config_data = {**state["config"]}  # make a copy to avoid mutating input
+        config_data["normalization"] = state["normalizer"]
+
+        if "area" in state:
+            # backwards-compatibility, these older checkpoints are always lat-lon
+            gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+        else:
+            gridded_operations = GriddedOperations.from_state(
+                state["gridded_operations"]
+            )
+
+        if "sigma_coordinates" in state:
+            # for backwards compatibility with old checkpoints
+            state["vertical_coordinate"] = state["sigma_coordinates"]
+
+        vertical_coordinate = dacite.from_dict(
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["vertical_coordinate"]},
+            config=dacite.Config(strict=True),
+        ).vertical_coordinate
+
+        # for backwards compatibility with original ACE checkpoint which
+        # serialized vertical coordinates as float64
+        if isinstance(vertical_coordinate, HybridSigmaPressureCoordinate):
+            if vertical_coordinate.ak.dtype == torch.float64:
+                vertical_coordinate.ak = vertical_coordinate.ak.to(dtype=torch.float32)
+            if vertical_coordinate.bk.dtype == torch.float64:
+                vertical_coordinate.bk = vertical_coordinate.bk.to(dtype=torch.float32)
+        encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
+        timestep = decode_timestep(encoded_timestep)
+        if "img_shape" in state:
+            img_shape = state["img_shape"]
+        else:
+            # this is for backwards compatibility with old checkpoints
+            for v in state["data_shapes"].values():
+                img_shape = v[-2:]
+                break
+        config = SingleModuleStepperConfig.from_state(config_data)
+        corrector = vertical_coordinate.build_corrector(
+            config=config.corrector,
+            gridded_operations=gridded_operations,
+            timestep=timestep,
+        )
+        step = cls(
+            config=config,
+            img_shape=img_shape,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            corrector=corrector,
+            timestep=timestep,
+            normalizer=config.normalization.build(config.normalize_names),
+            # don't need to initialize weights, we're about to load_state
+            init_weights=False,
+        )
+        step.load_state(state)
+        return step
+
+
+class SingleModuleStepper(
+    TrainStepperABC[
+        PrognosticState,
+        BatchData,
+        BatchData,
+        PairedData,
+        TrainOutput,
+    ],
+):
+    """
+    Stepper class for a single pytorch module.
+    """
+
+    TIME_DIM = 1
+    CHANNEL_DIM = -3
+
+    def __init__(
+        self,
+        config: SingleModuleStepperConfig,
+        step: SingleModuleStep,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+    ):
+        """
+        Args:
+            config: The configuration.
+            step: The step object.
+            derive_func: Function to compute derived variables.
+        """
+        self._step_obj = step
+        self._derive_func = derive_func
+        self._post_process_func = (
+            self._step_obj.vertical_coordinate.build_post_process_function()
+        )
+        self._config = config
+        self._no_optimization = NullOptimization()
+
+        self.loss_obj = config.loss.build(
+            step.gridded_operations.area_weighted_mean,
+            config.out_names,
+            self.CHANNEL_DIM,
+        )
+
+        if config.loss_normalization is not None:
+            self.loss_normalizer = config.loss_normalization.build(
+                names=config.normalize_names
+            )
+        elif config.residual_normalization is not None:
+            # Use residual norm for prognostic variables and input/output
+            # normalizer for diagnostic variables in loss
+            self.loss_normalizer = _combine_normalizers(
+                residual_normalizer=config.residual_normalization.build(
+                    config.prognostic_names
+                ),
+                model_normalizer=config.normalization.build(config.normalize_names),
+            )
+        else:
+            self.loss_normalizer = config.normalization.build(config.normalize_names)
+
+        if config.multi_call is not None:
+            self._multi_call = config.multi_call.build(self.step)
+            if config.include_multi_call_in_loss:
+                self._multi_call_loss = config.loss.build(
+                    step.gridded_operations.area_weighted_mean,
+                    self._multi_call.names,
+                    self.CHANNEL_DIM,
+                )
+            else:
+                zero_loss = torch.tensor(0.0, device=get_device())
+                self._multi_call_loss = lambda x, y: zero_loss
+        else:
+            self._multi_call = None
+
+        self._activation_checkpointing = config.activation_checkpointing
+
+        _1: PredictFunction[  # for type checking
+            PrognosticState,
+            BatchData,
+            BatchData,
+        ] = self.predict
+
+        _2: PredictFunction[  # for type checking
+            PrognosticState,
+            BatchData,
+            PairedData,
+        ] = self.predict_paired
+
+    @property
+    def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
+        return self._derive_func
+
+    @property
+    def vertical_coordinate(self) -> VerticalCoordinate:
+        return self._step_obj.vertical_coordinate
+
+    @property
+    def surface_temperature_name(self) -> Optional[str]:
+        return self._step_obj.surface_temperature_name
+
+    @property
+    def ocean_fraction_name(self) -> Optional[str]:
+        return self._step_obj.ocean_fraction_name
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return self._step_obj.timestep
+
+    @property
+    def effective_loss_scaling(self) -> TensorDict:
+        """
+        Effective loss scalings used to normalize outputs before computing loss.
+        y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
+        where loss_scaling_i = loss_normalizer_std_i / weight_i.
+        """
+        custom_weights = self._config.loss.weights
+        loss_normalizer_stds = self.loss_normalizer.stds
+        return {
+            k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
+            for k in self._config.out_names
+        }
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        """
+        Replace the ocean model with a new one.
+
+        Args:
+            ocean: The new ocean model configuration or None.
+        """
+        self._step_obj.replace_ocean(ocean)
+
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        """
+        Replace the MultiCall object with a new one. Note this is only
+        meant to be used at inference time and does not affect the loss
+        function.
+
+        Args:
+            multi_call: The new multi_call configuration or None.
+        """
+        self._config.multi_call = multi_call
+        if multi_call is None:
+            self._multi_call = None
+        else:
+            multi_call.validate(self.in_names, self.out_names)
+            self._multi_call = multi_call.build(self.step)
+
+    @property
+    def forcing_names(self) -> List[str]:
+        """Names of variables which are inputs only."""
+        return self._step_obj.forcing_names
+
+    @property
+    def prognostic_names(self) -> List[str]:
+        return self._step_obj.prognostic_names
+
+    @property
+    def diagnostic_names(self) -> List[str]:
+        return self._step_obj.diagnostic_names
+
+    @property
+    def in_names(self) -> List[str]:
+        return self._step_obj.in_names
+
+    @property
+    def out_names(self) -> List[str]:
+        return self._step_obj.out_names
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._step_obj.n_ic_timesteps
+
+    @property
+    def module(self) -> nn.Module:
+        return self._step_obj.module
+
+    @property
+    def modules(self) -> nn.ModuleList:
+        """
+        Returns:
+            A list of modules being trained.
+        """
+        return self._step_obj.modules
+
+    @property
+    def normalizer(self) -> StandardNormalizer:
+        return self._step_obj.normalizer
+
+    def step(
+        self,
+        input: TensorMapping,
+        next_step_forcing_data: TensorMapping,
+        use_activation_checkpointing: bool = False,
+    ) -> TensorDict:
+        """
+        Step the model forward one timestep given input data.
+
+        Args:
+            input: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
+                and is assumed to contain all input variables and be denormalized.
+            next_step_forcing_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
+                data at the output timestep for the ocean model and corrector.
+            use_activation_checkpointing: If True, wrap the module call with
+                torch.utils.checkpoint.checkpoint, reducing memory consumption
+                in exchange for increased computation. This is only relevant during
+                training and otherwise has no effect.
+
+        Returns:
+            The denormalized output data at the next time step.
+        """
+        return self._step_obj.step(
+            input, next_step_forcing_data, use_activation_checkpointing
+        )
 
     def get_prediction_generator(
         self,
@@ -1006,9 +1242,7 @@ class SingleModuleStepper(
         return data.remove_initial_condition(self.n_ic_timesteps)
 
     def _forcing_names(self) -> List[str]:
-        if self.ocean is None:
-            return self._config.forcing_names
-        return list(set(self._config.forcing_names).union(self.ocean.forcing_names))
+        return self._step_obj.forcing_names
 
     def train_on_batch(
         self,
@@ -1040,7 +1274,7 @@ class SingleModuleStepper(
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)
 
-        optimization.set_mode(self.modules)
+        optimization.set_mode(self._step_obj.modules)
         output_list = self._accumulate_loss(
             input_data,
             data,
@@ -1050,7 +1284,7 @@ class SingleModuleStepper(
             use_crps=self._config.crps_training,
         )
 
-        regularizer_loss = self._l2_sp_tuning_regularizer()
+        regularizer_loss = self._step_obj.get_regularizer_loss()
         if torch.any(regularizer_loss > 0):
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
@@ -1150,15 +1384,13 @@ class SingleModuleStepper(
         Returns:
             The state of the stepper.
         """
+        step_config = self._step_obj.get_state()
+        step_config.pop("config")
+        assert "loss_normalizer" not in step_config
         return {
-            "module": self.module.state_dict(),
-            "normalizer": self.normalizer.get_state(),
-            "img_shape": self._img_shape,
             "config": self._config.get_state(),
-            "gridded_operations": self._gridded_operations.to_state(),
-            "vertical_coordinate": self._vertical_coordinate.as_dict(),
-            "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
+            **step_config,
         }
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -1168,12 +1400,7 @@ class SingleModuleStepper(
         Args:
             state: The state to load.
         """
-        if "module" in state:
-            module = state["module"]
-            if "module.device_buffer" in module:
-                # for backwards compatibility with old checkpoints
-                del module["module.device_buffer"]
-            self.module.load_state_dict(module)
+        self._step_obj.load_state(state)
 
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepper":
@@ -1186,69 +1413,32 @@ class SingleModuleStepper(
         Returns:
             The stepper.
         """
+        step = SingleModuleStep.from_state(state)
         config_data = {**state["config"]}  # make a copy to avoid mutating input
-        config_data["normalization"] = state["normalizer"]
 
         # for backwards compatibility with previous steppers created w/o
         # loss_normalization or residual_normalization
-        loss_normalizer_state = state.get("loss_normalizer", state["normalizer"])
+        loss_normalizer_state = state.get(
+            "loss_normalizer", state.get("normalizer", None)
+        )
+        if loss_normalizer_state is None:
+            raise ValueError(
+                f"No loss normalizer state found, keys include {state.keys()}"
+            )
         config_data["loss_normalization"] = loss_normalizer_state
 
         # Overwrite the residual_normalization key if it exists, since the combined
         # loss scalings are saved in initial training as the loss_normalization
         config_data["residual_normalization"] = None
+        config = SingleModuleStepperConfig.from_state(config_data)
 
-        if "area" in state:
-            # backwards-compatibility, these older checkpoints are always lat-lon
-            gridded_operations: GriddedOperations = LatLonOperations(state["area"])
-        else:
-            gridded_operations = GriddedOperations.from_state(
-                state["gridded_operations"]
-            )
-
-        if "sigma_coordinates" in state:
-            # for backwards compatibility with old checkpoints
-            state["vertical_coordinate"] = state["sigma_coordinates"]
-
-        vertical_coordinate = dacite.from_dict(
-            data_class=SerializableVerticalCoordinate,
-            data={"vertical_coordinate": state["vertical_coordinate"]},
-            config=dacite.Config(strict=True),
-        ).vertical_coordinate
-
-        # for backwards compatibility with original ACE checkpoint which
-        # serialized vertical coordinates as float64
-        if isinstance(vertical_coordinate, HybridSigmaPressureCoordinate):
-            if vertical_coordinate.ak.dtype == torch.float64:
-                vertical_coordinate.ak = vertical_coordinate.ak.to(dtype=torch.float32)
-            if vertical_coordinate.bk.dtype == torch.float64:
-                vertical_coordinate.bk = vertical_coordinate.bk.to(dtype=torch.float32)
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
-        if "img_shape" in state:
-            img_shape = state["img_shape"]
-        else:
-            # this is for backwards compatibility with old checkpoints
-            for v in state["data_shapes"].values():
-                img_shape = v[-2:]
-                break
-        derive_func = vertical_coordinate.build_derive_function(timestep)
-        config = SingleModuleStepperConfig.from_state(config_data)
-        corrector = vertical_coordinate.build_corrector(
-            config=config.corrector,
-            gridded_operations=gridded_operations,
-            timestep=timestep,
-        )
+        derive_func = step.vertical_coordinate.build_derive_function(timestep)
         stepper = cls(
             config=config,
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            corrector=corrector,
-            timestep=timestep,
+            step=step,
             derive_func=derive_func,
-            # don't need to initialize weights, we're about to load_state
-            init_weights=False,
         )
         stepper.load_state(state)
         return stepper

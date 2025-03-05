@@ -144,8 +144,8 @@ class StandardNormalizer:
         return cls(
             means=means,
             stds=stds,
-            fill_nans_on_normalize=state["fill_nans_on_normalize"],
-            fill_nans_on_denormalize=state["fill_nans_on_denormalize"],
+            fill_nans_on_normalize=state.get("fill_nans_on_normalize", False),
+            fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
         )
 
 
