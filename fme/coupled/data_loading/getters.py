@@ -30,6 +30,17 @@ from fme.coupled.requirements import (
 )
 
 
+class CollateFn:
+    def __init__(self, horizontal_dims: List[str]):
+        self.horizontal_dims = horizontal_dims
+
+    def __call__(self, samples: List[CoupledDatasetItem]) -> CoupledBatchData:
+        return CoupledBatchData.collate_fn(
+            samples,
+            horizontal_dims=self.horizontal_dims,
+        )
+
+
 def get_dataset(
     config: CoupledDatasetConfig, requirements: CoupledDataRequirements
 ) -> Tuple[CoupledDataset, CoupledDatasetProperties]:
@@ -109,12 +120,6 @@ def get_data_loader(
         mp_context = None
         persistent_workers = False
 
-    def collate_fn(samples: List[CoupledDatasetItem]) -> CoupledBatchData:
-        return CoupledBatchData.collate_fn(
-            samples,
-            horizontal_dims=list(properties.atmosphere.horizontal_coordinates.dims),
-        )
-
     batch_size = dist.local_batch_size(int(config.batch_size))
 
     if config.prefetch_factor is None:
@@ -130,7 +135,7 @@ def get_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=collate_fn,
+        collate_fn=CollateFn(list(properties.atmosphere.horizontal_coordinates.dims)),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,

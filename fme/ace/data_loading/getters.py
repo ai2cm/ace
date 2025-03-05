@@ -1,5 +1,5 @@
 import logging
-from typing import Mapping, Optional, Sequence, Union
+from typing import List, Mapping, Optional, Sequence, Union
 
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
@@ -23,6 +23,17 @@ from .inference import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class CollateFn:
+    def __init__(self, horizontal_dims: List[str]):
+        self.horizontal_dims = horizontal_dims
+
+    def __call__(self, samples):
+        return BatchData.from_sample_tuples(
+            samples,
+            horizontal_dims=self.horizontal_dims,
+        )
 
 
 def get_data_loader(
@@ -67,12 +78,6 @@ def get_data_loader(
         mp_context = None
         persistent_workers = False
 
-    def collate_fn(samples):
-        return BatchData.from_sample_tuples(
-            samples,
-            horizontal_dims=list(properties.horizontal_coordinates.dims),
-        )
-
     batch_size = dist.local_batch_size(int(config.batch_size))
 
     if config.prefetch_factor is None:
@@ -88,7 +93,7 @@ def get_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=collate_fn,
+        collate_fn=CollateFn(list(properties.horizontal_coordinates.dims)),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,
