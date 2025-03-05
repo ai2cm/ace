@@ -91,19 +91,19 @@ def save_plus_one_stepper(
 def validate_stepper_ocean(
     stepper: SingleModuleStepper, expected_ocean_config: Optional[OceanConfig]
 ):
-    assert stepper._config.ocean == expected_ocean_config
+    assert stepper._step_obj._config.ocean == expected_ocean_config
     if expected_ocean_config is not None:
-        assert isinstance(stepper.ocean, Ocean)
+        assert isinstance(stepper._step_obj.ocean, Ocean)
         assert (
-            stepper.ocean.surface_temperature_name
+            stepper._step_obj.ocean.surface_temperature_name
             == expected_ocean_config.surface_temperature_name
         )
         assert (
-            stepper.ocean.ocean_fraction_name
+            stepper._step_obj.ocean.ocean_fraction_name
             == expected_ocean_config.ocean_fraction_name
         )
     else:
-        assert stepper.ocean is None
+        assert stepper._step_obj.ocean is None
 
 
 def validate_stepper_multi_call(
