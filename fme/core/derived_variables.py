@@ -104,7 +104,7 @@ def net_energy_flux_sfc_into_atmosphere(
 ):
     # property is defined as positive into surface, but want to compare to
     # MSE tendency defined as positive into atmosphere
-    return -data.net_surface_energy_flux_without_frozen_precip
+    return -data.net_surface_energy_flux
 
 
 @register(
