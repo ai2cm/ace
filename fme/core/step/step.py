@@ -1,9 +1,11 @@
 import abc
+import dataclasses
 import datetime
-from typing import Any, Dict, List, Tuple, Type, TypeVar
+from typing import Any, Callable, ClassVar, Dict, List, Set, Tuple, Type, TypeVar, cast
 
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.registry.registry import Registry
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -20,6 +22,41 @@ class StepConfigABC(abc.ABC):
         Returns:
             The state of the stepper.
         """
+
+
+T = TypeVar("T", bound=StepConfigABC)
+
+
+@dataclasses.dataclass
+class StepSelector:
+    type: str
+    config: Dict[str, Any]
+    registry: ClassVar[Registry] = Registry()
+
+    def __post_init__(self):
+        self._step_config_instance: StepConfigABC = cast(
+            StepConfigABC, self.registry.get(self.type, self.config)
+        )
+
+    @classmethod
+    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
+        return cls.registry.register(name)
+
+    def get_step(
+        self,
+        img_shape: Tuple[int, int],
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: VerticalCoordinate,
+        timestep: datetime.timedelta,
+    ) -> "StepABC":
+        return self._step_config_instance.get_step(
+            img_shape, gridded_operations, vertical_coordinate, timestep
+        )
+
+    @classmethod
+    def get_available_types(cls) -> Set[str]:
+        """This class method is used to expose all available types of Steps."""
+        return set(cls(type="", config={}).registry._types.keys())
 
 
 class StepABC(abc.ABC):

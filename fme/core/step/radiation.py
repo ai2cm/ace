@@ -21,13 +21,14 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.step import StepABC, StepConfigABC
+from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
+@StepSelector.register("separate_radiation")
 @dataclasses.dataclass
 class SeparateRadiationStepConfig(StepConfigABC):
     """
