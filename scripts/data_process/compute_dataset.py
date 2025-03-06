@@ -46,6 +46,7 @@ SPECIFIC_TOTAL_WATER = "specific_total_water"
 # lat-lon 3D variables. This is the water path we want to use for training. It is not
 # necessarily exactly equal to the precipitable water path computed online by FV3GFS.
 TOTAL_WATER_PATH = "total_water_path"
+SURFACE_FROZEN_PRECIPITATION_NAME = "total_frozen_precipitation_rate"
 
 
 @dataclasses.dataclass
@@ -62,6 +63,10 @@ class StandardNameMapping(StandardDimMapping):
     surface_pressure: str = "PRESsfc"
     latent_heat_flux: str = "LHTFLsfc"
     precip_rate: str = "PRATEsfc"
+    surface_snow_rate: str = "SNOWsfc"
+    surface_ice_rate: str = "ICEsfc"
+    surface_graupel_rate: str = "GRAUPELsfc"
+    total_frozen_precip_rate: str = "total_frozen_precipitation_rate"
     precipitable_water_path: str = "precipitable_water_path"
     pressure_thickness: str = "pressure_thickness_of_atmospheric_layer"
     air_temperature: str = "air_temperature"
@@ -84,6 +89,7 @@ class StandardNameMapping(StandardDimMapping):
 
         self.specific_total_water = SPECIFIC_TOTAL_WATER
         self.total_water_path = TOTAL_WATER_PATH
+        self.total_frozen_precip_rate_output_name = SURFACE_FROZEN_PRECIPITATION_NAME
         self.pwat_tendency = f"tendency_of_{self.total_water_path}"
         self.time_derivative_names = [self.total_water_path]
 
@@ -100,8 +106,14 @@ class StandardNameMapping(StandardDimMapping):
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim]
         )
-        if self.precipitable_water_path.lower() != "none":
-            self.dropped_variables.append(self.precipitable_water_path)
+        for name in [
+            self.precipitable_water_path,
+            self.surface_graupel_rate,
+            self.surface_ice_rate,
+            self.surface_snow_rate,
+        ]:
+            if name.lower() != "none":
+                self.dropped_variables.append(name)
 
     @property
     def water_species(self) -> List[str]:
@@ -117,6 +129,23 @@ class StandardNameMapping(StandardDimMapping):
             ]
             if item.lower() != "none"
         ]
+
+    @property
+    def frozen_precipitation_species(self) -> List[str]:
+        if self.total_frozen_precip_rate.lower() != "none":
+            # if total frozen precip rate is available, just use that
+            return [self.total_frozen_precip_rate]
+        else:
+            # return all frozen precip species
+            return [
+                item
+                for item in [
+                    self.surface_graupel_rate,
+                    self.surface_ice_rate,
+                    self.surface_snow_rate,
+                ]
+                if item.lower() != "none"
+            ]
 
 
 @dataclasses.dataclass
@@ -357,6 +386,16 @@ def compute_specific_total_water(
     return ds.assign({output_name: specific_total_water})
 
 
+def compute_frozen_precipitation_rate(
+    ds: xr.Dataset, frozen_precip_names: Sequence[str], output_name: str
+) -> xr.Dataset:
+    """Compute the total surface frozen precipitation rate."""
+    frozen_precip: xr.DataArray = sum([ds[name] for name in frozen_precip_names])
+    frozen_precip.attrs["units"] = ds[frozen_precip_names[0]].units
+    frozen_precip.attrs["long_name"] = "Total surface frozen precipitation rate"
+    return ds.assign({output_name: frozen_precip})
+
+
 def compute_pressure_thickness(
     ds: xr.Dataset,
     vertical_coordinate_file: str,
@@ -565,6 +604,11 @@ def construct_lazy_dataset(
         ds,
         water_condensate_names=standard_names.water_species,
         output_name=standard_names.specific_total_water,
+    )
+    ds = compute_frozen_precipitation_rate(
+        ds,
+        frozen_precip_names=standard_names.frozen_precipitation_species,
+        output_name=standard_names.total_frozen_precip_rate_output_name,
     )
     ds = compute_pressure_thickness(
         ds,
