@@ -149,6 +149,8 @@ class WandB:
                     )
             else:
                 wandb.init(**kwargs)
+                if wandb.run is None:
+                    raise RuntimeError("wandb.init did not return a run")
                 logging.info(f"New non-resuming wandb run with id: {wandb.run.id}.")
 
     def watch(self, modules):
@@ -157,7 +159,7 @@ class WandB:
 
     def log(self, data: Mapping[str, Any], step=None, sleep=None):
         if self._enabled:
-            wandb.log(data, step=step)
+            wandb.log(dict(data), step=step)
             if sleep is not None:
                 time.sleep(sleep)
 
@@ -235,6 +237,8 @@ def init_wandb_with_resumption(
     if wandb_id is None:
 
         def wandb_id():
+            if wandb.run is None:
+                raise RuntimeError("wandb does not have an active run")
             return wandb.run.id
 
     if not os.path.exists(os.path.join(experiment_dir, wandb_run_id_file)):
