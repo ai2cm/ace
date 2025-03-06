@@ -105,6 +105,8 @@ def test_plot_paneled_data(shape, img_shape):
         [panel, panel],
     ]
     fig = plot_paneled_data(data, diverging=False)
+    assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)
     fig = plot_paneled_data(data, diverging=True)
+    assert fig.image is not None
     assert np.array_equal(fig.image.size, img_shape)

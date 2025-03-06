@@ -413,7 +413,7 @@ class VideoAggregator:
                     gen=data.min_err[name],
                     units=get_units(name),
                     long_name=(
-                        f"min error of {get_long_name(name)} " "across ensemble members"
+                        f"min error of {get_long_name(name)} across ensemble members"
                     ),
                 )
             for name in data.max_err:
@@ -422,7 +422,7 @@ class VideoAggregator:
                     gen=data.max_err[name],
                     units=get_units(name),
                     long_name=(
-                        f"max error of {get_long_name(name)} " "across ensemble members"
+                        f"max error of {get_long_name(name)} across ensemble members"
                     ),
                 )
         if self._variance_data is not None:
