@@ -44,8 +44,11 @@ def test_stepper_gradient_accumulation_integration():
         ),
     )
 
-    atmos_module = coupler.atmosphere.module.module
-    ocean_module = coupler.ocean.module.module
+    assert len(coupler.atmosphere.modules) == 1
+    assert len(coupler.ocean.modules) == 1
+
+    atmos_module = coupler.atmosphere.modules[0].module
+    ocean_module = coupler.ocean.modules[0].module
     atmos_module.mock_caller = Mock()
     ocean_module.mock_caller = Mock()
 
