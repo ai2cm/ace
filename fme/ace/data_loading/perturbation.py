@@ -52,15 +52,7 @@ class PerturbationSelector:
         return cls.registry.register(type_name)
 
     def build(self) -> PerturbationConfig:
-        return self.registry.from_dict(self.get_state())
-
-    def get_state(self) -> Mapping[str, Any]:
-        """
-        Get a dictionary containing all the information needed to build a
-        PerturbationConfig.
-
-        """
-        return {"type": self.type, "config": self.config}
+        return self.registry.get(self.type, self.config)
 
     @classmethod
     def get_available_types(cls):

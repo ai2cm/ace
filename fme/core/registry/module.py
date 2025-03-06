@@ -1,6 +1,6 @@
 import abc
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Tuple, Type, Union
+from typing import Any, Callable, ClassVar, Mapping, Tuple, Type
 
 import dacite
 from torch import nn
@@ -103,27 +103,11 @@ class ModuleSelector:
         Returns:
             a nn.Module
         """
-        instance = self.registry.from_dict(self.get_state())
+        instance = self.registry.get(self.type, self.config)
         return instance.build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             img_shape=img_shape,
-        )
-
-    def get_state(self) -> Union[Mapping[str, Any], dict]:
-        """
-        Get a dictionary containing all the information needed to build a ModuleConfig.
-        """
-        return {"type": self.type, "config": self.config}
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "ModuleSelector":
-        """
-        Create a ModuleSelector from a dictionary containing all the information
-        needed to build a ModuleConfig.
-        """
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
     @classmethod
