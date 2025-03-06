@@ -75,9 +75,10 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
+    assert len(with_builder_stepper.modules) == 1
     assert_same_state(
-        with_builder_stepper.module.state_dict(),
-        stepper.module.state_dict(),
+        with_builder_stepper.modules[0].state_dict(),
+        stepper.modules[0].state_dict(),
         allow_larger=False,
     )
 
@@ -166,17 +167,18 @@ def test_builder_with_weights_sfno_init(
             vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         )
+        assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
             with pytest.raises(AssertionError):
                 assert_same_state(
-                    with_builder_stepper.module.state_dict(),
-                    stepper.module.state_dict(),
+                    with_builder_stepper.modules[0].state_dict(),
+                    stepper.modules[0].state_dict(),
                     allow_larger=True,
                     same_keys=True,  # This should fail if there are more parameters
                 )
         assert_same_state(
-            with_builder_stepper.module.state_dict(),
-            stepper.module.state_dict(),
+            with_builder_stepper.modules[0].state_dict(),
+            stepper.modules[0].state_dict(),
             allow_larger=True,
             same_keys=(not extra_built_layer),
         )

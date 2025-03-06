@@ -1006,10 +1006,6 @@ class SingleModuleStepper(
         return self._step_obj.n_ic_timesteps
 
     @property
-    def module(self) -> nn.Module:
-        return self._step_obj.module
-
-    @property
     def modules(self) -> nn.ModuleList:
         """
         Returns:

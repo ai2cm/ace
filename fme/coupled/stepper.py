@@ -403,7 +403,7 @@ class CoupledStepper(
 
     @property
     def modules(self) -> nn.ModuleList:
-        return nn.ModuleList([self.atmosphere.module, self.ocean.module])
+        return nn.ModuleList([*self.atmosphere.modules, *self.ocean.modules])
 
     def set_train(self):
         self.atmosphere.set_train()
