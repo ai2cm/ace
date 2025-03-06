@@ -52,4 +52,5 @@ def test_sfno_init(shape):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    assert len(stepper.module.module.blocks) == num_layers
+    assert len(stepper.modules) == 1
+    assert len(stepper.modules[0].module.blocks) == num_layers

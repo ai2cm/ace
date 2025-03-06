@@ -207,7 +207,8 @@ def test_hpx_init(shape):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    assert type(stepper.module.module) is HEALPixRecUNet
+    assert len(stepper.modules) == 1
+    assert type(stepper.modules[0].module) is HEALPixRecUNet
 
 
 @pytest.mark.parametrize(

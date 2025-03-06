@@ -950,11 +950,11 @@ def test_set_train_eval():
         1,
         1,
     )
-    assert stepper.atmosphere.module.training
-    assert stepper.ocean.module.training
+    for module in stepper.modules:
+        assert module.training
     stepper.set_eval()
-    assert not stepper.atmosphere.module.training
-    assert not stepper.ocean.module.training
+    for module in stepper.modules:
+        assert not module.training
     stepper.set_train()
-    assert stepper.atmosphere.module.training
-    assert stepper.ocean.module.training
+    for module in stepper.modules:
+        assert module.training
