@@ -57,3 +57,4 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
+known-third-party = ["wandb"]
