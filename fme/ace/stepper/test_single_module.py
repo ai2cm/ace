@@ -957,12 +957,13 @@ def test_next_step_forcing_names():
     )
     input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=["b", "c"])
     stepper.predict(input_data, forcing_data)
+    assert len(stepper.modules) == 1
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 1, :],
+        stepper.modules[0].module.last_input[:, 1, :],
         forcing_data.data["b"][:, 0],
     )
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 2, :],
+        stepper.modules[0].module.last_input[:, 2, :],
         forcing_data.data["c"][:, 1],
     )
 
@@ -1310,8 +1311,11 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
 
 def test_set_train_eval():
     stepper = _get_stepper(["a"], ["a"])
-    assert stepper.module.training
+    for module in stepper.modules:
+        assert module.training
     stepper.set_eval()
-    assert not stepper.module.training
+    for module in stepper.modules:
+        assert not module.training
     stepper.set_train()
-    assert stepper.module.training
+    for module in stepper.modules:
+        assert module.training
