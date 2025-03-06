@@ -87,3 +87,5 @@ dataset_computation:
       - air_temperature_at_two_meters
       - northward_wind_at_ten_meters
       - eastward_wind_at_ten_meters
+  standard_names:
+    total_frozen_precip_rate: None
