@@ -668,11 +668,12 @@ class SingleModuleStep:
             self.ocean = ocean.build(self.in_names, self.out_names, self.timestep)
 
     @property
-    def forcing_names(self) -> List[str]:
-        """Names of variables which are inputs only."""
+    def next_step_input_names(self) -> List[str]:
+        """Names of variables provided in next_step_input_data."""
+        forcing_names = set(self._config.in_names).difference(self._config.out_names)
         if self.ocean is None:
-            return self._config.forcing_names
-        return list(set(self._config.forcing_names).union(self.ocean.forcing_names))
+            return list(forcing_names)
+        return list(forcing_names.union(self.ocean.forcing_names))
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -697,7 +698,7 @@ class SingleModuleStep:
     def step(
         self,
         input: TensorMapping,
-        next_step_forcing_data: TensorMapping,
+        next_step_input_data: TensorMapping,
         use_activation_checkpointing: bool = False,
     ) -> TensorDict:
         """
@@ -705,11 +706,12 @@ class SingleModuleStep:
 
         Args:
             input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
-                and is assumed to contain all input variables and be denormalized.
-            next_step_forcing_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
-                data at the output timestep for the ocean model and corrector.
+                [n_batch, n_lat, n_lon] containing denormalized data from the
+                initial timestep. In practice this contains the ML inputs.
+            next_step_input_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon] containing denormalized data from
+                the output timestep. In practice this contains the necessary data
+                at the output timestep for the ocean model and corrector.
             use_activation_checkpointing: If True, wrap the module call with
                 torch.utils.checkpoint.checkpoint, reducing memory consumption
                 in exchange for increased computation. This is only relevant during
@@ -732,9 +734,9 @@ class SingleModuleStep:
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize(output_norm)
         if self._corrector is not None:
-            output = self._corrector(input, output, next_step_forcing_data)
+            output = self._corrector(input, output, next_step_input_data)
         if self.ocean is not None:
-            output = self.ocean(input, output, next_step_forcing_data)
+            output = self.ocean(input, output, next_step_input_data)
         return output
 
     def get_regularizer_loss(self):
@@ -984,11 +986,6 @@ class SingleModuleStepper(
             self._multi_call = multi_call.build(self.step)
 
     @property
-    def forcing_names(self) -> List[str]:
-        """Names of variables which are inputs only."""
-        return self._step_obj.forcing_names
-
-    @property
     def prognostic_names(self) -> List[str]:
         return self._step_obj.prognostic_names
 
@@ -1027,7 +1024,7 @@ class SingleModuleStepper(
     def step(
         self,
         input: TensorMapping,
-        next_step_forcing_data: TensorMapping,
+        next_step_input_data: TensorMapping,
         use_activation_checkpointing: bool = False,
     ) -> TensorDict:
         """
@@ -1035,11 +1032,11 @@ class SingleModuleStepper(
 
         Args:
             input: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This data is used as input for `self.module`
-                and is assumed to contain all input variables and be denormalized.
-            next_step_forcing_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
-                data at the output timestep for the ocean model and corrector.
+                [n_batch, n_lat, n_lon] containing denormalized data from the
+                initial timestep.
+            next_step_input_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon] containing denormalized data from
+                the output timestep.
             use_activation_checkpointing: If True, wrap the module call with
                 torch.utils.checkpoint.checkpoint, reducing memory consumption
                 in exchange for increased computation. This is only relevant during
@@ -1049,7 +1046,7 @@ class SingleModuleStepper(
             The denormalized output data at the next time step.
         """
         return self._step_obj.step(
-            input, next_step_forcing_data, use_activation_checkpointing
+            input, next_step_input_data, use_activation_checkpointing
         )
 
     def get_prediction_generator(
@@ -1101,8 +1098,9 @@ class SingleModuleStepper(
                 )
                 for k in ml_forcing_names
             }
-            next_step_forcing_dict = {
-                k: forcing_dict[k][:, step + 1] for k in self._forcing_names()
+            next_step_input_dict = {
+                k: forcing_dict[k][:, step + 1]
+                for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **ml_input_forcing}
             use_activation_checkpointing = (
@@ -1110,12 +1108,12 @@ class SingleModuleStepper(
             )
             state = self.step(
                 input_data,
-                next_step_forcing_dict,
+                next_step_input_dict,
                 use_activation_checkpointing,
             )
             if self._multi_call is not None:
                 multi_called_outputs = self._multi_call.step(
-                    input_data, next_step_forcing_dict, use_activation_checkpointing
+                    input_data, next_step_input_dict, use_activation_checkpointing
                 )
                 state = {**multi_called_outputs, **state}
             yield state
@@ -1147,7 +1145,9 @@ class SingleModuleStepper(
         """
         timer = GlobalTimer.get_instance()
         with timer.context("forward_prediction"):
-            forcing_data = forcing.subset_names(self._forcing_names())
+            forcing_data = forcing.subset_names(
+                self._config.forcing_names + self._step_obj.next_step_input_names
+            )
             if initial_condition.as_batch_data().n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
@@ -1240,9 +1240,6 @@ class SingleModuleStepper(
                     forcing_data=data,
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
-
-    def _forcing_names(self) -> List[str]:
-        return self._step_obj.forcing_names
 
     def train_on_batch(
         self,
