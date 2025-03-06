@@ -138,3 +138,5 @@ dataset_computation:
       - prescribed_qflux
     scalar.zarr:
       - global_mean_co2
+  standard_names:
+    total_frozen_precip_rate: None
