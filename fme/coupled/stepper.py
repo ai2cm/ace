@@ -388,12 +388,6 @@ class CoupledStepper(
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
-        self._atmos_vertical_coord = atmosphere.vertical_coordinate
-        self._ocean_vertical_coord = ocean.vertical_coordinate
-        assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
-        )
-        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -431,16 +425,6 @@ class CoupledStepper(
     @property
     def n_ic_timesteps(self) -> int:
         return 1
-
-    @property
-    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
-        assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
-        )
-        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
-        return CoupledVerticalCoordinate(
-            self._ocean_vertical_coord, self._atmos_vertical_coord
-        )
 
     @property
     def timestep(self) -> datetime.timedelta:
