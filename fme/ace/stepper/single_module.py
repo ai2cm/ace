@@ -208,9 +208,12 @@ class SingleModuleStepperConfig:
             normalizer=normalizer,
             timestep=timestep,
         )
+        post_process_func = vertical_coordinate.build_post_process_function()
         return SingleModuleStepper(
             config=self,
             step=step,
+            post_process_func=post_process_func,
+            area_weighted_mean=gridded_operations.area_weighted_mean,
             derive_func=derive_func,
         )
 
@@ -631,14 +634,6 @@ class SingleModuleStep:
         self._activation_checkpointing = config.activation_checkpointing
 
     @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._vertical_coordinate
-
-    @property
-    def gridded_operations(self) -> GriddedOperations:
-        return self._gridded_operations
-
-    @property
     def timestep(self) -> datetime.timedelta:
         return self._timestep
 
@@ -868,24 +863,27 @@ class SingleModuleStepper(
         self,
         config: SingleModuleStepperConfig,
         step: SingleModuleStep,
+        post_process_func: Callable[[TensorMapping], TensorDict],
+        area_weighted_mean: Callable[[TensorMapping], TensorDict],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
     ):
         """
         Args:
             config: The configuration.
             step: The step object.
+            post_process_func: Function to post-process the output.
+            area_weighted_mean: Function to compute the area-weighted mean.
             derive_func: Function to compute derived variables.
         """
         self._step_obj = step
         self._derive_func = derive_func
-        self._post_process_func = (
-            self._step_obj.vertical_coordinate.build_post_process_function()
-        )
+        self._post_process_func = post_process_func
+        self._area_weighted_mean = area_weighted_mean
         self._config = config
         self._no_optimization = NullOptimization()
 
         self.loss_obj = config.loss.build(
-            step.gridded_operations.area_weighted_mean,
+            area_weighted_mean,
             config.out_names,
             self.CHANNEL_DIM,
         )
@@ -910,7 +908,7 @@ class SingleModuleStepper(
             self._multi_call = config.multi_call.build(self.step)
             if config.include_multi_call_in_loss:
                 self._multi_call_loss = config.loss.build(
-                    step.gridded_operations.area_weighted_mean,
+                    area_weighted_mean,
                     self._multi_call.names,
                     self.CHANNEL_DIM,
                 )
@@ -937,10 +935,6 @@ class SingleModuleStepper(
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
         return self._derive_func
-
-    @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._step_obj.vertical_coordinate
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -1435,10 +1429,28 @@ class SingleModuleStepper(
 
         encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
         timestep = decode_timestep(encoded_timestep)
-        derive_func = step.vertical_coordinate.build_derive_function(timestep)
+        vertical_coordinate = dacite.from_dict(
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["vertical_coordinate"]},
+            config=dacite.Config(strict=True),
+        ).vertical_coordinate
+        derive_func = vertical_coordinate.build_derive_function(timestep)
+        post_process_func = vertical_coordinate.build_post_process_function()
+
+        if "area" in state:
+            # backwards-compatibility, these older checkpoints are always lat-lon
+            gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+        else:
+            gridded_operations = GriddedOperations.from_state(
+                state["gridded_operations"]
+            )
+
+        area_weighted_mean = gridded_operations.area_weighted_mean
         stepper = cls(
             config=config,
             step=step,
+            post_process_func=post_process_func,
+            area_weighted_mean=area_weighted_mean,
             derive_func=derive_func,
         )
         stepper.load_state(state)
