@@ -1,6 +1,8 @@
+import dataclasses
 import datetime
 from typing import List, Tuple
 
+import dacite
 import pytest
 import torch
 
@@ -18,18 +20,49 @@ CONFIG_CASES = [
     pytest.param(
         SeparateRadiationStepConfig(
             builder=ModuleSelector(
-                type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+                type="SphericalFourierNeuralOperatorNet",
+                config={
+                    "scale_factor": 1,
+                    "embed_dim": 4,
+                    "num_layers": 2,
+                },
             ),
             radiation_builder=ModuleSelector(
-                type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+                type="SphericalFourierNeuralOperatorNet",
+                config={
+                    "scale_factor": 1,
+                    "embed_dim": 4,
+                    "num_layers": 2,
+                },
             ),
-            in_names=["a", "b", "e"],
-            out_names=["b", "c"],
-            radiation_in_names=["d", "e"],
-            radiation_out_names=["e", "f"],
+            main_prognostic_names=["prog_a", "prog_b"],
+            shared_forcing_names=["forcing_shared"],
+            radiation_only_forcing_names=["forcing_rad"],
+            radiation_diagnostic_names=["diagnostic_rad"],
+            main_diagnostic_names=["diagnostic_main"],
             normalization=NormalizationConfig(
-                means={"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0, "e": 0.0, "f": 0.0},
-                stds={"a": 1.0, "b": 1.0, "c": 1.0, "d": 1.0, "e": 1.0, "f": 1.0},
+                means={
+                    name: 0.0
+                    for name in [
+                        "prog_a",
+                        "prog_b",
+                        "forcing_shared",
+                        "forcing_rad",
+                        "diagnostic_rad",
+                        "diagnostic_main",
+                    ]
+                },
+                stds={
+                    name: 1.0
+                    for name in [
+                        "prog_a",
+                        "prog_b",
+                        "forcing_shared",
+                        "forcing_rad",
+                        "diagnostic_rad",
+                        "diagnostic_main",
+                    ]
+                },
             ),
         ),
         id="separate_radiation",
@@ -52,31 +85,69 @@ def get_tensor_dict(
     return data_dict
 
 
-@pytest.mark.parametrize("config", CONFIG_CASES)
-def test_reloaded_step_gives_same_prediction(config: StepConfigABC):
+def get_step(config: StepConfigABC, img_shape: Tuple[int, int]):
     device = fme.get_device()
-    torch.manual_seed(0)
-
-    img_shape = (5, 5)
-    n_samples = 5
     area = torch.ones(img_shape, device=device)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    step = config.get_step(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+    return config.get_step(
+        img_shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
+
+
+@pytest.mark.parametrize("config", CONFIG_CASES)
+def test_reloaded_step_gives_same_prediction(config: StepConfigABC):
+    torch.manual_seed(0)
+    img_shape = (5, 5)
+    n_samples = 5
+    step = get_step(config, img_shape)
     new_step = step.__class__.from_state(step.get_state())
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_step_forcing_data = get_tensor_dict(
-        step.next_step_forcing_names, img_shape, n_samples
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
     )
-    first_result = step.step(input_data, next_step_forcing_data)
-    second_result = new_step.step(input_data, next_step_forcing_data)
+    first_result = step.step(input_data, next_step_input_data)
+    second_result = new_step.step(input_data, next_step_input_data)
     assert set(first_result.keys()) == set(step.output_names)
     assert set(second_result.keys()) == set(step.output_names)
     for k in first_result:
         torch.testing.assert_close(first_result[k], second_result[k])
+
+
+@pytest.mark.parametrize("config", CONFIG_CASES)
+def test_next_step_forcing_names_is_forcing(config: StepConfigABC):
+    data = dataclasses.asdict(config)
+    img_shape = (5, 5)
+    step = get_step(config, img_shape)
+    forcing_names = set(step.input_names).difference(step.output_names)
+    data["next_step_forcing_names"] = [list(forcing_names)[0]]
+    dacite.from_dict(config.__class__, data, config=dacite.Config(strict=True))
+
+
+@pytest.mark.parametrize("config", CONFIG_CASES)
+def test_next_step_forcing_names_is_prognostic(config: StepConfigABC):
+    data = dataclasses.asdict(config)
+    img_shape = (5, 5)
+    step = get_step(config, img_shape)
+    prognostic_names = set(step.output_names).intersection(step.input_names)
+    name = list(prognostic_names)[0]
+    data["next_step_forcing_names"] = [name]
+    with pytest.raises(ValueError) as err:
+        dacite.from_dict(config.__class__, data, config=dacite.Config(strict=True))
+    assert "next_step_forcing_name" in str(err.value)
+    assert name in str(err.value)
+
+
+@pytest.mark.parametrize("config", CONFIG_CASES)
+def test_next_step_forcing_names_is_diagnostic(config: StepConfigABC):
+    data = dataclasses.asdict(config)
+    img_shape = (5, 5)
+    step = get_step(config, img_shape)
+    diagnostic_names = set(step.output_names).difference(step.input_names)
+    name = list(diagnostic_names)[0]
+    data["next_step_forcing_names"] = [name]
+    with pytest.raises(ValueError) as err:
+        dacite.from_dict(config.__class__, data, config=dacite.Config(strict=True))
+    assert "next_step_forcing_name" in str(err.value)
+    assert name in str(err.value)
