@@ -1,13 +1,14 @@
 import dataclasses
 import datetime
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 
 from fme.core.coordinates import HybridSigmaPressureCoordinate, VerticalCoordinate
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.ocean import OceanConfig
 
-from .step import StepABC, StepConfigABC, StepSelector
+from .step import InferenceDataProtocol, StepABC, StepConfigABC, StepSelector
 
 
 class MockStep(StepABC):
@@ -24,21 +25,61 @@ class MockStep(StepABC):
         self.timestep = timestep
 
     @property
-    def input_names(self):
+    def prognostic_names(self):
         raise NotImplementedError()
 
     @property
-    def output_names(self):
+    def diagnostic_names(self):
+        raise NotImplementedError()
+
+    @property
+    def forcing_names(self):
+        raise NotImplementedError()
+
+    @property
+    def next_step_input_names(self):
         raise NotImplementedError()
 
     @property
     def next_step_forcing_names(self):
         raise NotImplementedError()
 
-    def step(self, input, next_step_forcing_data, use_activation_checkpointing=False):
+    @property
+    def n_ic_timesteps(self):
+        raise NotImplementedError()
+
+    @property
+    def modules(self):
+        raise NotImplementedError()
+
+    @property
+    def normalizer(self):
+        raise NotImplementedError()
+
+    @property
+    def surface_temperature_name(self):
+        return None
+
+    @property
+    def ocean_fraction_name(self):
+        return None
+
+    def get_regularizer_loss(self) -> torch.Tensor:
+        return torch.tensor(0.0)
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        raise NotImplementedError()
+
+    def validate_inference_data(self, data: InferenceDataProtocol):
+        raise NotImplementedError()
+
+    def step(self, input, next_step_input_data, use_activation_checkpointing=False):
         raise NotImplementedError()
 
     def get_state(self):
+        raise NotImplementedError()
+
+    def load_state(self, state):
         raise NotImplementedError()
 
     @classmethod
