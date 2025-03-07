@@ -452,7 +452,12 @@ def _force_conserve_total_energy(
             f"Method {method} not implemented for total energy conservation"
         )
     input = AtmosphereData(input_data, vertical_coordinate)
-    gen = AtmosphereData(dict(gen_data) | dict(forcing_data), vertical_coordinate)
+    forcing = AtmosphereData(forcing_data)
+    required_forcing = {
+        "DSWRFtoa": forcing.toa_down_sw_radiative_flux,
+        "HGTsfc": forcing.surface_height,
+    }
+    gen = AtmosphereData(dict(gen_data) | required_forcing, vertical_coordinate)
     if torch.any(input.surface_pressure <= 0) or torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Input or generated surface pressure has a non-positive value. Skipping "
