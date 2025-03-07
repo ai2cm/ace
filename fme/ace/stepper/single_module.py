@@ -668,6 +668,14 @@ class SingleModuleStep:
             self.ocean = ocean.build(self.in_names, self.out_names, self.timestep)
 
     @property
+    def forcing_names(self) -> List[str]:
+        return list(set(self._config.in_names).difference(self._config.out_names))
+
+    @property
+    def next_step_forcing_names(self) -> List[str]:
+        return self._config.next_step_forcing_names
+
+    @property
     def next_step_input_names(self) -> List[str]:
         """Names of variables provided in next_step_input_data."""
         forcing_names = set(self._config.in_names).difference(self._config.out_names)
@@ -1084,15 +1092,14 @@ class SingleModuleStepper(
         optimizer: OptimizationABC,
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
-        ml_forcing_names = self._config.forcing_names
         for step in range(n_forward_steps):
             ml_input_forcing = {
                 k: (
                     forcing_dict[k][:, step]
-                    if k not in self._config.next_step_forcing_names
+                    if k not in self._step_obj.next_step_forcing_names
                     else forcing_dict[k][:, step + 1]
                 )
-                for k in ml_forcing_names
+                for k in self._step_obj.forcing_names
             }
             next_step_input_dict = {
                 k: forcing_dict[k][:, step + 1]
@@ -1140,10 +1147,11 @@ class SingleModuleStepper(
             which can be used as a new initial condition.
         """
         timer = GlobalTimer.get_instance()
+        forcing_names = set(self._step_obj.forcing_names).union(
+            self._step_obj.next_step_input_names
+        )
         with timer.context("forward_prediction"):
-            forcing_data = forcing.subset_names(
-                self._config.forcing_names + self._step_obj.next_step_input_names
-            )
+            forcing_data = forcing.subset_names(forcing_names)
             if initial_condition.as_batch_data().n_timesteps != self.n_ic_timesteps:
                 raise ValueError(
                     f"Initial condition must have {self.n_ic_timesteps} timesteps, got "
