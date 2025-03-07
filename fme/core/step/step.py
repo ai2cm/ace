@@ -1,14 +1,34 @@
 import abc
 import dataclasses
 import datetime
-from typing import Any, Callable, ClassVar, Dict, List, Set, Tuple, Type, TypeVar, cast
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    List,
+    Optional,
+    Protocol,
+    Set,
+    Tuple,
+    Type,
+    TypeVar,
+    cast,
+)
+
+import torch
 
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.normalizer import StandardNormalizer
+from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+# Children still need to decorate with @dataclass, otherwise
+# they will be a dataclass with no dataclass fields.
+@dataclasses.dataclass
 class StepConfigABC(abc.ABC):
     @abc.abstractmethod
     def get_step(
@@ -59,29 +79,106 @@ class StepSelector:
         return set(cls(type="", config={}).registry._types.keys())
 
 
+class InferenceDataProtocol(Protocol):
+    @property
+    def timestep(self) -> datetime.timedelta:
+        pass
+
+
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> List[str]:
+    def modules(self) -> torch.nn.ModuleList:
         pass
 
     @property
     @abc.abstractmethod
+    def prognostic_names(self) -> List[str]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def forcing_names(self) -> List[str]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def diagnostic_names(self) -> List[str]:
+        pass
+
+    @property
+    def input_names(self) -> List[str]:
+        return list(set(self.prognostic_names).union(self.forcing_names))
+
+    @property
     def output_names(self) -> List[str]:
+        return list(set(self.prognostic_names).union(self.diagnostic_names))
+
+    @property
+    @abc.abstractmethod
+    def normalizer(self) -> StandardNormalizer:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def next_step_input_names(self) -> List[str]:
+        """
+        Names of variables required in next_step_input_data for .step.
+        """
         pass
 
     @property
     @abc.abstractmethod
     def next_step_forcing_names(self) -> List[str]:
+        """Names of input variables which come from the output timestep."""
+        pass
+
+    @property
+    @abc.abstractmethod
+    def surface_temperature_name(self) -> Optional[str]:
+        """
+        Name of the surface temperature variable, if one is available.
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def ocean_fraction_name(self) -> Optional[str]:
+        """
+        Name of the ocean fraction variable, if one is available.
+        """
+        pass
+
+    @abc.abstractmethod
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        pass
+
+    @abc.abstractmethod
+    def validate_inference_data(self, data: InferenceDataProtocol):
+        """
+        Validate the inference data.
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def n_ic_timesteps(self) -> int:
+        pass
+
+    @abc.abstractmethod
+    def get_regularizer_loss(self) -> torch.Tensor:
+        """
+        Get the regularizer loss.
+        """
         pass
 
     @abc.abstractmethod
     def step(
         self,
         input: TensorMapping,
-        next_step_forcing_data: TensorMapping,
+        next_step_input_data: TensorMapping,
         use_activation_checkpointing: bool = False,
     ) -> TensorDict:
         """
@@ -92,8 +189,8 @@ class StepABC(abc.ABC):
                 [n_batch, n_lat, n_lon]. This data is used as input for pytorch
                 module(s) and is assumed to contain all input variables
                 and be denormalized.
-            next_step_forcing_data: Mapping from variable name to tensor of shape
-                [n_batch, n_lat, n_lon]. This must contain the necessary forcing
+            next_step_input_data: Mapping from variable name to tensor of shape
+                [n_batch, n_lat, n_lon]. This must contain the necessary input
                 data at the output timestep, such as might be needed to prescribe
                 sea surface temperature or use a corrector.
             use_activation_checkpointing: If True, wrap module calls with
@@ -125,5 +222,12 @@ class StepABC(abc.ABC):
 
         Returns:
             The stepper.
+        """
+        pass
+
+    @abc.abstractmethod
+    def load_state(self, state: Dict[str, Any]):
+        """
+        Load the state of the stepper.
         """
         pass
