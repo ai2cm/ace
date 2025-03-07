@@ -370,6 +370,28 @@ def test__force_conserve_total_energy():
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
 
 
+def test__force_conserve_energy_doesnt_clobber():
+    tensor_shape = (5, 5)
+
+    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    # add a prognostic variable to the forcing data
+    forcing_data["PRESsfc"] = 10.0 + torch.rand(size=tensor_shape)
+
+    corrected_gen_data = _force_conserve_total_energy(
+        input_data=input_data,
+        gen_data=gen_data,
+        forcing_data=forcing_data,
+        area_weighted_mean=ops.area_weighted_mean,
+        vertical_coordinate=vertical_coord,
+        timestep=timestep,
+    )
+    torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
+
+
 def test_corrector_integration():
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
