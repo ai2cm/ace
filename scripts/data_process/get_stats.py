@@ -10,6 +10,7 @@ from typing import Dict, List, Literal, Optional
 
 import click
 import dacite
+import dask
 import fsspec
 import xarray as xr
 import yaml
@@ -108,7 +109,13 @@ def main(config_yaml: str, run: int, debug: bool):
         config.data_output_directory + "/" + list(config.runs.keys())[run] + ".zarr"
     )
     print(f"Reading data from {input_zarr}")
-    ds = xr.open_zarr(input_zarr)
+
+    # Open data with roughly 128 MiB chunks via dask's automatic chunking. This
+    # is useful when opening sharded zarr stores with an inner chunk size of 1,
+    # which is otherwise inefficient for the type of computation done here.
+    with dask.config.set({"array.chunk-size": "128MiB"}):
+        ds = xr.open_zarr(input_zarr, chunks={"time": "auto"})
+
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
     ds = ds.sel(time=slice(config.stats.start_date, config.stats.end_date))
 
