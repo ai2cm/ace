@@ -91,7 +91,7 @@ spec:
           - name: output_directory
           - name: run
       container:
-        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.03.0
         resources:
           limits:
             cpu: "8000m"
@@ -169,7 +169,7 @@ spec:
           - name: config
           - name: run
       container:
-        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.03.0
         resources:
           limits:
             cpu: "8000m"
@@ -209,7 +209,7 @@ spec:
           - name: python_script
           - name: config
       container:
-        image: us.gcr.io/vcm-ml/fv3net:3d1589321e40cddc06bb88c22b44f597646473b2
+        image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.03.0
         resources:
           limits:
             cpu: "8000m"
