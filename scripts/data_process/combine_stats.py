@@ -44,8 +44,8 @@ def add_history_attrs(ds, config_filename: str, stats_output_dir: str):
 def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
     datasets = []
     for root in roots:
-        file = fsspec.open(root + filename, "rb").open()
-        ds = xr.open_dataset(file, engine="h5netcdf")
+        with fsspec.open(root + filename) as file:
+            ds = xr.open_dataset(file).load()
         datasets.append(ds)
     return datasets
 

@@ -169,7 +169,7 @@ class DLWPNameMapping(StandardNameMapping):
 
 @dataclasses.dataclass
 class _ChunkingConfig(abc.ABC):
-    time_dim: int = 160
+    time_dim: int = 1
 
     @abc.abstractmethod
     def get_chunks(self, standard_names: StandardDimMapping) -> Dict[str, int]: ...
@@ -228,7 +228,12 @@ class DatasetComputationConfig:
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
         chunking: (optional) mapping of standard dimension names to desired
-            output chunk sizes
+            output inner chunk sizes. Defaults to a chunk size of 1 along
+            the time dimension.
+        sharding: (optional) mapping of standard dimension names to desired
+            output shard sizes. Defaults to a shard size of 360 along the time
+            dimension. If None, then an unsharded zarr store will be written
+            with chunks as specified in ``chunking``.
         time_invariant_dir: (optional) path to directory containing time-invariant data
             This option is used for E3SMv2 dataset.
     """
@@ -243,7 +248,10 @@ class DatasetComputationConfig:
         default_factory=StandardNameMapping
     )
     chunking: Union[ChunkingConfig, DLWPChunkingConfig] = dataclasses.field(
-        default_factory=ChunkingConfig
+        default_factory=lambda: ChunkingConfig(time_dim=1)
+    )
+    sharding: Optional[Union[ChunkingConfig, DLWPChunkingConfig]] = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=360)
     )
     time_invariant_dir: Optional[str] = None
 
@@ -292,7 +300,7 @@ def open_datasets(
     datasets = []
     for store, names in config.variable_sources.items():
         url = urls[store]
-        ds = xr.open_zarr(url)[names]
+        ds = xr.open_zarr(url, decode_timedelta=True)[names]
         datasets.append(ds)
     return xr.merge(datasets, compat="equals")
 
@@ -333,7 +341,7 @@ def get_coarse_ak_bk(
         data[f"ak_{i}"].attrs["units"] = "Pa"
         data[f"bk_{i}"].attrs["units"] = ""  # unitless quantity
         for name in ["ak", "bk"]:
-            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop([z_dim, time_dim])
+            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop_vars([z_dim, time_dim])
     return xr.Dataset(data)
 
 
@@ -371,7 +379,7 @@ def compute_latent_heat_flux(
     latent_heat_flux = ds[evaporation_name] * LATENT_HEAT_OF_VAPORIZATION
     latent_heat_flux.attrs["units"] = "W/m^2"
     latent_heat_flux.attrs["long_name"] = "Latent heat flux"
-    return ds.assign({output_name: latent_heat_flux}).drop(evaporation_name)
+    return ds.assign({output_name: latent_heat_flux}).drop_vars(evaporation_name)
 
 
 def compute_specific_total_water(
@@ -648,8 +656,14 @@ def construct_lazy_dataset(
         config.vertical_coarsening_indices,
     )
     ds = xr.merge([ds, ak_bk_ds])
-    chunks = config.chunking.get_chunks(standard_names)
-    ds = ds.chunk(chunks)
+
+    if config.sharding is None:
+        outer_chunks = config.chunking.get_chunks(standard_names)
+    else:
+        outer_chunks = config.sharding.get_chunks(standard_names)
+
+    ds = ds.chunk(outer_chunks)
+
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/data_process"
         "/compute_dataset_fv3gfs.py"
@@ -662,6 +676,26 @@ def construct_lazy_dataset(
         "volume layer, counting down from the top of atmosphere."
     )
     ds = ds.rename(config.renaming)
+    return ds
+
+
+def clear_compressors_encoding(ds: xr.Dataset) -> xr.Dataset:
+    """Clear "compressors" encoding of the Dataset.
+
+    This ensures that we use zarr's default zstd encoding when writing out the
+    Dataset. It also helps avoid errors resulting from lingering zarr v2
+    compression encoding parameters that are not compatible with zarr v3.
+
+    Args:
+        ds: input xr.Dataset to remove "compressors" encoding from.
+
+    Returns:
+        xr.Dataset with the "compressors" key in the encoding dictionary of
+        each variable removed, if it exists.
+    """
+    ds = ds.copy(deep=False)
+    for variable in {**ds.coords, **ds.data_vars}.values():
+        variable.encoding.pop("compressors", None)
     return ds
 
 
@@ -712,13 +746,21 @@ def main(
             precip_rate_name=standard_names.precip_rate,
             time_dim=standard_names.time_dim,
         )
-    ds = ds.drop(standard_names.dropped_variables)
+    ds = ds.drop_vars(standard_names.dropped_variables)
+
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking.get_chunks(standard_names)
+
+    ds = clear_compressors_encoding(ds)
+
     print(f"Output dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
             print(ds)
     else:
-        ds.partition.initialize_store(output_store)
+        ds.partition.initialize_store(output_store, inner_chunks=inner_chunks)
         for i in range(config.n_split):
             print(f"Writing segment {i + 1} / {config.n_split}")
             with ProgressBar():
