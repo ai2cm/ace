@@ -26,6 +26,8 @@ NAME_CLIMSST_1DEG = fv3gfs-ensemble
 NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
+ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.0
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -281,3 +283,10 @@ shield_som_c96_abrupt4xCO2_ensemble_dataset:
 shield_som_c96_idealized_0p1_heating_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
 
+.PHONY: build_atmosphere_processing_image
+build_atmosphere_processing_image:
+	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
+
+.PHONY: push_atmosphere_processing_image
+push_atmosphere_processing_image:
+	docker push $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION)
