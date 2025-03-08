@@ -83,6 +83,9 @@ class StandardNameMapping(StandardDimMapping):
     ocean_fraction: str = "ocean_fraction"
     sea_ice_fraction: str = "sea_ice_fraction"
     hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
+    additional_vertically_resolved_names: List[str] = dataclasses.field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         self.horizontal_dims: List[str] = [self.longitude_dim, self.latitude_dim]
@@ -98,7 +101,7 @@ class StandardNameMapping(StandardDimMapping):
             self.air_temperature,
             self.northward_wind,
             self.eastward_wind,
-        ]
+        ] + self.additional_vertically_resolved_names
 
         # variables to drop after all derived variables are computed
         self.dropped_variables: List[str] = (
