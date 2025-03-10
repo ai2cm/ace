@@ -208,6 +208,12 @@ class GlobalMeanAnnualAggregator:
         min_samples = _get_min_samples(self.timestep)
         data = data.where(data["counts"] > min_samples, drop=True)
         data = data / data["counts"]
+        # ensure the 'year' coordinate has no jumps, filling in with NaNs as needed
+        if data.sizes["year"] > 0:
+            min_year = data["year"].min()
+            max_year = data["year"].max()
+            years = np.arange(min_year, max_year + 1, dtype=data.year.dtype)
+            data = data.reindex(year=years)
         return data
 
     @torch.no_grad()
