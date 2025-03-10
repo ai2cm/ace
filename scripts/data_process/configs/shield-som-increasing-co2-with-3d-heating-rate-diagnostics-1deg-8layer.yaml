@@ -8,6 +8,7 @@ stats:
   end_date: null
   data_type: FV3GFS
 dataset_computation:
+  n_split: 300
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
   vertical_coarsening_indices:
     - [0, 11]

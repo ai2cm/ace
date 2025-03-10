@@ -283,7 +283,7 @@ shield_som_c96_abrupt4xCO2_ensemble_dataset:
 shield_som_c96_idealized_0p1_heating_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
 
-.PHONY: shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset:
+.PHONY: shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset
 shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset:
 	./compute_dataset.sh --config configs/shield-som-increasing-co2-with-3d-heating-rate-diagnostics-1deg-$(LAYERS).yaml
 
