@@ -35,6 +35,7 @@ ATMOSPHERE_FIELD_NAME_PREFIXES = MappingProxyType(
         "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux"],
         "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
         "air_temperature": ["air_temperature_", "T_"],
+        "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
     }
 )
 
@@ -195,11 +196,16 @@ class AtmosphereData:
     def frozen_precipitation_rate(self) -> torch.Tensor:
         # Return zero if any necessary fields are missing
         try:
-            return (
-                self._data["ICEsfc"] + self._data["GRAUPELsfc"] + self._data["SNOWsfc"]
-            )
+            return self._get("frozen_precipitation_rate")
         except KeyError:
-            return torch.zeros_like(self.surface_pressure)
+            try:
+                return (
+                    self._data["ICEsfc"]
+                    + self._data["GRAUPELsfc"]
+                    + self._data["SNOWsfc"]
+                )
+            except KeyError:
+                return torch.zeros_like(self.surface_pressure)
 
     @property
     def net_surface_energy_flux_without_frozen_precip(self) -> torch.Tensor:
