@@ -186,3 +186,33 @@ def test_net_energy_flux_into_atmosphere():
 
     result = atmosphere_data.net_energy_flux_into_atmosphere
     torch.testing.assert_close(result, expected)
+
+
+@pytest.mark.parametrize(
+    ("fields", "expected_sum"),
+    [
+        (("GRAUPELsfc", "ICEsfc", "SNOWsfc"), 3),
+        (("GRAUPELsfc", "ICEsfc"), 0),
+        (("total_frozen_precipitation_rate",), 1),
+        ((), 0),
+    ],
+    ids=lambda x: f"{x!r}",
+)
+def test_frozen_precipitation_rate(fields, expected_sum):
+    n_samples, n_time_steps, nlat, nlon = 2, 3, 4, 8
+    shape = (n_samples, n_time_steps, nlat, nlon)
+
+    def _get_data(shape: Tuple[int, ...]) -> AtmosphereData:
+        ones = torch.ones(shape)
+        surface_pressure = {"PRESsfc": ones}
+        frozen_precipitation = {}
+        for field in fields:
+            frozen_precipitation[field] = ones
+        data = surface_pressure | frozen_precipitation
+        return AtmosphereData(data)
+
+    atmosphere_data = _get_data(shape)
+    expected = torch.full(shape, expected_sum)
+
+    result = atmosphere_data.frozen_precipitation_rate
+    torch.testing.assert_close(result, expected, check_dtype=False)
