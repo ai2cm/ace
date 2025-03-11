@@ -45,6 +45,7 @@ from fme.core.optimization import ActivationCheckpointingConfig, NullOptimizatio
 from fme.core.packer import Packer
 from fme.core.parameter_init import ParameterInitializationConfig
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -634,8 +635,12 @@ class SingleModuleStep:
         self._activation_checkpointing = config.activation_checkpointing
 
     @property
-    def timestep(self) -> datetime.timedelta:
-        return self._timestep
+    def vertical_coordinate(self) -> VerticalCoordinate:
+        return self._vertical_coordinate
+
+    @property
+    def gridded_operations(self) -> GriddedOperations:
+        return self._gridded_operations
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -660,7 +665,7 @@ class SingleModuleStep:
         if ocean is None:
             self.ocean = ocean
         else:
-            self.ocean = ocean.build(self.in_names, self.out_names, self.timestep)
+            self.ocean = ocean.build(self.in_names, self.out_names, self._timestep)
 
     @property
     def forcing_names(self) -> List[str]:
@@ -742,6 +747,13 @@ class SingleModuleStep:
             output = self.ocean(input, output, next_step_input_data)
         return output
 
+    def validate_inference_data(self, data: InferenceDataProtocol):
+        if self._timestep != data.timestep:
+            raise ValueError(
+                f"Timestep of step object, {self._timestep}, does not "
+                f"match that of the inference data, {data.timestep}."
+            )
+
     def get_regularizer_loss(self):
         return self._l2_sp_tuning_regularizer()
 
@@ -757,7 +769,7 @@ class SingleModuleStep:
             "config": self._config.get_state(),
             "gridded_operations": self._gridded_operations.to_state(),
             "vertical_coordinate": self._vertical_coordinate.as_dict(),
-            "encoded_timestep": encode_timestep(self.timestep),
+            "encoded_timestep": encode_timestep(self._timestep),
         }
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -944,9 +956,8 @@ class SingleModuleStepper(
     def ocean_fraction_name(self) -> Optional[str]:
         return self._step_obj.ocean_fraction_name
 
-    @property
-    def timestep(self) -> datetime.timedelta:
-        return self._step_obj.timestep
+    def validate_inference_data(self, data: InferenceDataProtocol):
+        self._step_obj.validate_inference_data(data)
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
