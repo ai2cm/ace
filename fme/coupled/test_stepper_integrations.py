@@ -35,7 +35,6 @@ def test_stepper_gradient_accumulation_integration():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
         ocean_builder=ModuleSelector(type="prebuilt", config={"module": AddBias()}),

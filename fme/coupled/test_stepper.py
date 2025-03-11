@@ -397,7 +397,6 @@ def get_stepper_config(
     atmosphere_in_names: List[str],
     atmosphere_out_names: List[str],
     sst_name_in_ocean_data: str = "sst",
-    sst_mask_name_in_ocean_data: str = "mask_0",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
@@ -412,7 +411,6 @@ def get_stepper_config(
     assert sst_name_in_ocean_data in ocean_out_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
-    assert sst_mask_name_in_ocean_data in ocean_in_names
     assert ocean_fraction_name in atmosphere_in_names
 
     ocean_norm_names = set(ocean_in_names + ocean_out_names)
@@ -460,7 +458,6 @@ def get_stepper_config(
             ),
         ),
         sst_name=sst_name_in_ocean_data,
-        sst_mask_name=sst_mask_name_in_ocean_data,
     )
     return config
 
@@ -474,7 +471,6 @@ def get_stepper_and_batch(
     n_forward_times_atmosphere: int,
     n_samples: int,
     sst_name_in_ocean_data: str = "sst",
-    sst_mask_name_in_ocean_data: str = "mask_0",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
@@ -503,7 +499,6 @@ def get_stepper_and_batch(
         atmosphere_in_names=atmosphere_in_names,
         atmosphere_out_names=atmosphere_out_names,
         sst_name_in_ocean_data=sst_name_in_ocean_data,
-        sst_mask_name_in_ocean_data=sst_mask_name_in_ocean_data,
         sfc_temp_name_in_atmosphere_data=sfc_temp_name_in_atmosphere_data,
         ocean_fraction_name=ocean_fraction_name,
         ocean_builder=ocean_builder,
@@ -557,7 +552,6 @@ def test_predict_paired():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
         ocean_builder=ModuleSelector(type="prebuilt", config={"module": Ocean()}),
@@ -689,7 +683,6 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
     )
@@ -771,7 +764,6 @@ def test_train_on_batch_loss():
         n_forward_times_atmosphere=2,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc",
         ocean_fraction_name="ocean_frac",
     )
@@ -864,7 +856,6 @@ def test_reloaded_stepper_gives_same_prediction():
             ),
         ),
         sst_name="o_sfc",
-        sst_mask_name="o_mask",
     )
     area = torch.ones((N_LAT, N_LON), device=DEVICE)
     vertical_coordinate = CoupledVerticalCoordinate(
