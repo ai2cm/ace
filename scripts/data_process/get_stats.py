@@ -10,11 +10,9 @@ from typing import Dict, List, Literal, Optional
 
 import click
 import dacite
-import dask
 import fsspec
 import xarray as xr
 import yaml
-from dask.diagnostics import ProgressBar
 
 # these are auxiliary variables that exist in dataset for convenience, e.g. to do
 # masking or to more easily compute vertical integrals. But they are not inputs
@@ -96,6 +94,10 @@ def main(config_yaml: str, run: int, debug: bool):
     config_yaml -- Path to the configuration file for the data processing pipeline.
     run -- Run index for the data processing pipeline.
     """
+    # Import dask-related things here to enable testing in environments without dask.
+    import dask
+    from dask.diagnostics import ProgressBar
+
     with open(config_yaml, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
     config = dacite.from_dict(data_class=Config, data=config_data)
