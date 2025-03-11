@@ -9,7 +9,7 @@ from torch import nn
 
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
-from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
@@ -76,8 +76,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    corrector: Union[CorrectorConfig, CorrectorSelector] = dataclasses.field(
-        default_factory=lambda: CorrectorConfig()
+    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+        default_factory=lambda: AtmosphereCorrectorConfig()
     )
     residual_normalization: Optional[NormalizationConfig] = None
     activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
