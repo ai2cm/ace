@@ -72,7 +72,6 @@ optimization:
   optimizer_type: Adam
 stepper:
   sst_name: {ocean_sfc_temp_name}
-  sst_mask_name: {ocean_sfc_mask_name}
   ocean:
     timedelta: 2D
     stepper:
