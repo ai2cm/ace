@@ -199,6 +199,14 @@ class TrainBuilders:
     def get_optimization(self, parameters) -> Optimization:
         return self.config.optimization.build(parameters, self.config.max_epochs)
 
+    @property
+    def atmosphere_timestep(self) -> datetime.timedelta:
+        return self.config.stepper.atmosphere_timestep
+
+    @property
+    def ocean_timestep(self) -> datetime.timedelta:
+        return self.config.stepper.ocean_timestep
+
     def get_stepper(
         self,
         img_shape: Tuple[int, int],

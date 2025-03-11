@@ -257,11 +257,7 @@ def run_inference_from_config(config: InferenceConfig):
         surface_temperature_name=stepper.surface_temperature_name,
         ocean_fraction_name=stepper.ocean_fraction_name,
     )
-    if stepper.timestep != data.timestep:
-        raise ValueError(
-            f"Timestep of the loaded stepper, {stepper.timestep}, does not "
-            f"match that of the forcing data, {data.timestep}."
-        )
+    stepper.validate_inference_data(data)
 
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     aggregator = config.aggregator.build(

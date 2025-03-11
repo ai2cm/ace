@@ -283,17 +283,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    if stepper.ocean_timestep != data.ocean_timestep:
-        raise ValueError(
-            f"Timestep of the loaded ocean stepper, {stepper.ocean_timestep}, does "
-            f"not match that of the forcing data, {data.ocean_timestep}."
-        )
-    if stepper.atmosphere_timestep != data.atmosphere_timestep:
-        raise ValueError(
-            "Timestep of the loaded atmosphere stepper, "
-            f"{stepper.atmosphere_timestep}, does not match that of the forcing data, "
-            f"{data.atmosphere_timestep}."
-        )
+    stepper.validate_inference_data(data)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
