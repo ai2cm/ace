@@ -27,7 +27,7 @@ NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
 ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
-ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.0
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -255,14 +255,6 @@ cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
 	--output-dir $(NC_OUTPUT) \
 	--start-date "0151-01-01T06:00:00" \
 	--end-date "0351-01-01T00:00:00"
-
-.PHONY: build_docker_image
-build_docker_image:
-	docker build -f beakerpy.Dockerfile -t us.gcr.io/vcm-ml/beaker-py .
-
-.PHONY: push_docker_image
-push_docker_image: build_docker_image
-	docker push us.gcr.io/vcm-ml/beaker-py
 
 create_ocean_data_proc_env:
 	conda create -y -n ocean_data_proc python=3.10 pip yq
