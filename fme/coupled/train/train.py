@@ -5,7 +5,6 @@ from datetime import timedelta
 from typing import Callable, Mapping, Optional, Sequence
 
 import dacite
-import dask
 import torch
 import xarray as xr
 
@@ -30,9 +29,6 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
-
-# dask used on individual workers to load batches
-dask.config.set(scheduler="synchronous")
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:

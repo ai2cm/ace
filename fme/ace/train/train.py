@@ -55,7 +55,6 @@ from datetime import timedelta
 from typing import Callable, Dict, Mapping, Optional, Sequence
 
 import dacite
-import dask
 import torch
 import xarray as xr
 
@@ -78,9 +77,6 @@ from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
-
-# dask used on individual workers to load batches
-dask.config.set(scheduler="synchronous")
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
