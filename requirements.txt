@@ -15,6 +15,5 @@ gcsfs
 s3fs
 plotly
 matplotlib
-dask
 pandas
 omegaconf>=2.1.0

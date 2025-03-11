@@ -224,17 +224,26 @@ def mock_monthly_netcdfs_with_nans(tmp_path_factory) -> MockData:
     return get_mock_monthly_netcdfs(tmp_path_factory, "month_with_nans", with_nans=True)
 
 
+def load_files_without_dask(files, engine="netcdf4") -> xr.Dataset:
+    """Load a sequence of files without dask, concatenating along the time dimension.
+
+    We load the data from the files into memory to ensure Datasets are properly closed,
+    since xarray cannot concatenate Datasets lazily without dask anyway. This should be
+    acceptable for the small datasets we construct for test purposes.
+    """
+    datasets = []
+    for file in sorted(files):
+        with xr.open_dataset(file, use_cftime=True, engine=engine) as ds:
+            datasets.append(ds.load())
+    return xr.concat(datasets, dim="time", data_vars="minimal", coords="minimal")
+
+
 @pytest.fixture(scope="session")
 def mock_monthly_zarr(tmp_path_factory, mock_monthly_netcdfs) -> MockData:
     zarr_parent = tmp_path_factory.mktemp("zarr")
     filename = "data.zarr"
-    data = xr.open_mfdataset(
-        mock_monthly_netcdfs.tmpdir.glob("*.nc"),
-        use_cftime=True,
-        data_vars="minimal",
-        coords="minimal",
-    )
-    data.chunk({"time": 240}).to_zarr(zarr_parent / filename)
+    data = load_files_without_dask(mock_monthly_netcdfs.tmpdir.glob("*.nc"))
+    data.to_zarr(zarr_parent / filename)
     return MockData(
         zarr_parent,
         mock_monthly_netcdfs.obs_times,
@@ -306,33 +315,27 @@ def _test_monthly_values(
 
     assert len(dataset) == expected_n_samples
     arrays, time = dataset[global_idx]
-    with xr.open_mfdataset(
-        mock_data.tmpdir.glob(file_pattern),
-        engine=engine,
-        use_cftime=True,
-        data_vars="minimal",
-        coords="minimal",
-    ) as ds:
-        target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
-        xr.testing.assert_equal(time, target_times)
-        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
-        dims = ("time", str(lat_dim), str(lon_dim))
-        shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
-        time_slice = slice(global_idx, global_idx + 2)
-        for var_name in var_names.spatial_resolved_names:
-            data = arrays[var_name]
-            assert data.shape[0] == 2
-            da = ds[var_name]
-            if var_name in var_names.time_dependent_names:
-                da = da.isel(time=time_slice)
-            target_data = as_broadcasted_tensor(da.variable, dims, shape)
-            assert torch.equal(data, target_data)
+    ds = load_files_without_dask(mock_data.tmpdir.glob(file_pattern), engine=engine)
+    target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
+    xr.testing.assert_equal(time, target_times)
+    lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+    dims = ("time", str(lat_dim), str(lon_dim))
+    shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
+    time_slice = slice(global_idx, global_idx + 2)
+    for var_name in var_names.spatial_resolved_names:
+        data = arrays[var_name]
+        assert data.shape[0] == 2
+        da = ds[var_name]
+        if var_name in var_names.time_dependent_names:
+            da = da.isel(time=time_slice)
+        target_data = as_broadcasted_tensor(da.variable, dims, shape)
+        assert torch.equal(data, target_data)
 
-        for var_name in mock_data.var_names.initial_condition_names:
-            data = arrays[var_name].detach().numpy()
-            assert data.shape[0] == 1
-            target_data = ds[var_name][global_idx : global_idx + 1, :, :].values
-            assert np.all(data == target_data)
+    for var_name in mock_data.var_names.initial_condition_names:
+        data = arrays[var_name].detach().numpy()
+        assert data.shape[0] == 1
+        target_data = ds[var_name][global_idx : global_idx + 1, :, :].values
+        assert np.all(data == target_data)
 
 
 @pytest.mark.parametrize(
@@ -411,32 +414,27 @@ def test_yearly_file_local_index(
 def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     mock_data: MockData = mock_yearly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir)
-    with xr.open_mfdataset(
-        mock_data.tmpdir.glob("*.nc"),
-        use_cftime=True,
-        data_vars="minimal",
-        coords="minimal",
-    ) as ds:
-        for n_steps in [3, 50]:
-            dataset = XarrayDataset(config, mock_data.var_names.all_names, n_steps)
-            assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
-            lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
-            dims = ("time", lat_dim, lon_dim)
-            shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
-            time_slice = slice(global_idx, global_idx + n_steps)
-            for var_name in mock_data.var_names.spatial_resolved_names:
-                da = ds[var_name]
-                if var_name in mock_data.var_names.time_dependent_names:
-                    da = da.isel(time=time_slice)
-                target_data = as_broadcasted_tensor(da.variable, dims, shape)
-                target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
-                    "time"
-                )
-                data, time = dataset[global_idx]
-                data_tensor = data[var_name]
-                assert data_tensor.shape[0] == n_steps
-                assert torch.equal(data_tensor, target_data)
-                xr.testing.assert_equal(time, target_times)
+    ds = load_files_without_dask(mock_data.tmpdir.glob("*.nc"))
+    for n_steps in [3, 50]:
+        dataset = XarrayDataset(config, mock_data.var_names.all_names, n_steps)
+        assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
+        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+        dims = ("time", lat_dim, lon_dim)
+        shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
+        time_slice = slice(global_idx, global_idx + n_steps)
+        for var_name in mock_data.var_names.spatial_resolved_names:
+            da = ds[var_name]
+            if var_name in mock_data.var_names.time_dependent_names:
+                da = da.isel(time=time_slice)
+            target_data = as_broadcasted_tensor(da.variable, dims, shape)
+            target_times = ds["time"][global_idx : global_idx + n_steps].drop_vars(
+                "time"
+            )
+            data, time = dataset[global_idx]
+            data_tensor = data[var_name]
+            assert data_tensor.shape[0] == n_steps
+            assert torch.equal(data_tensor, target_data)
+            xr.testing.assert_equal(time, target_times)
 
 
 def test_dataset_dtype_casting(mock_monthly_netcdfs):
