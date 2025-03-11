@@ -5,8 +5,9 @@ import torch
 import torch.linalg
 
 from fme.core.device import get_device
+from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import TensorMapping
 
 
 class NaNLoss(torch.nn.Module):
@@ -17,21 +18,64 @@ class NaNLoss(torch.nn.Module):
         return torch.tensor(torch.nan)
 
 
-class MappingLoss:
-    def __init__(self, loss: torch.nn.Module, packer: Packer, channel_dim: int = -3):
-        self.loss = loss
-        self.packer = packer
+class WeightedMappingLoss:
+    def __init__(
+        self,
+        loss: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        weights: Dict[str, float],
+        out_names: List[str],
+        normalizer: StandardNormalizer,
+        channel_dim: int = -3,
+    ):
+        """
+        Args:
+            loss: The loss function to apply.
+            weights: A dictionary of variable names with individual
+                weights to apply to their normalized losses
+            out_names: The names of the output variables.
+            normalizer: The normalizer to use.
+            channel_dim: The channel dimension of the input tensors.
+        """
+        self._weight_tensor = _construct_weight_tensor(
+            weights, out_names, channel_dim=channel_dim
+        )
+        self.loss = VariableWeightingLoss(
+            weights=self._weight_tensor,
+            loss=loss,
+        )
+        if self._weight_tensor.flatten().shape[0] != len(out_names):
+            raise RuntimeError(
+                "The number of weights must match the number of output names, "
+                "behavior of _construct_weight_tensor has changed."
+            )
+        self.packer = Packer(out_names)
         self.channel_dim = channel_dim
+        self.normalizer = normalizer
 
     def __call__(
         self,
-        predict_dict: TensorDict,
-        target_dict: TensorDict,
+        predict_dict: TensorMapping,
+        target_dict: TensorMapping,
     ):
-        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim)
-        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
+        predict_tensors = self.packer.pack(
+            self.normalizer.normalize(predict_dict), axis=self.channel_dim
+        )
+        target_tensors = self.packer.pack(
+            self.normalizer.normalize(target_dict), axis=self.channel_dim
+        )
 
         return self.loss(predict_tensors, target_tensors)
+
+    def get_normalizer_state(self) -> Dict[str, float]:
+        return self.normalizer.get_state()
+
+    @property
+    def effective_loss_scaling(self) -> Dict[str, float]:
+        custom_weights = dict(zip(self.packer.names, self._weight_tensor.flatten()))
+        loss_normalizer_stds = self.normalizer.stds
+        return {
+            k: loss_normalizer_stds[k] / custom_weights[k] for k in self.packer.names
+        }
 
 
 def _construct_weight_tensor(
@@ -298,14 +342,14 @@ class WeightedMappingLossConfig:
         self,
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         out_names: List[str],
+        normalizer: StandardNormalizer,
         channel_dim: int = -3,
-    ) -> Any:
+    ) -> WeightedMappingLoss:
         loss = self.loss_config.build(area_weighted_mean, reduction="mean")
-        weighted_loss = VariableWeightingLoss(
-            weights=_construct_weight_tensor(
-                self.weights, out_names, channel_dim=channel_dim
-            ),
+        return WeightedMappingLoss(
             loss=loss,
+            weights=self.weights,
+            out_names=out_names,
+            channel_dim=channel_dim,
+            normalizer=normalizer,
         )
-        packer = Packer(out_names)
-        return MappingLoss(loss=weighted_loss, packer=packer, channel_dim=channel_dim)
