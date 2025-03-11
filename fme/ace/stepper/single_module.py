@@ -808,11 +808,9 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             state["vertical_coordinate"] = state["sigma_coordinates"]
 
-        vertical_coordinate = dacite.from_dict(
-            data_class=SerializableVerticalCoordinate,
-            data={"vertical_coordinate": state["vertical_coordinate"]},
-            config=dacite.Config(strict=True),
-        ).vertical_coordinate
+        vertical_coordinate = SerializableVerticalCoordinate.from_state(
+            state["vertical_coordinate"]
+        )
 
         # for backwards compatibility with original ACE checkpoint which
         # serialized vertical coordinates as float64
