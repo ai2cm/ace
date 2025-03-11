@@ -309,11 +309,6 @@ class SeparateRadiationStep(StepABC):
             get_device()
         )
         self._timestep = timestep
-
-        self.loss_obj = config.loss.build(
-            gridded_operations.area_weighted_mean, config.output_names, self.CHANNEL_DIM
-        )
-
         self._corrector = corrector
         self._activation_checkpointing = config.activation_checkpointing
 

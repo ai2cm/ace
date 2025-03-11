@@ -889,35 +889,39 @@ class SingleModuleStepper(
         self._config = config
         self._no_optimization = NullOptimization()
 
-        self.loss_obj = config.loss.build(
-            area_weighted_mean,
-            config.out_names,
-            self.CHANNEL_DIM,
-        )
-
         if config.loss_normalization is not None:
-            self.loss_normalizer = config.loss_normalization.build(
+            loss_normalizer = config.loss_normalization.build(
                 names=config.normalize_names
             )
         elif config.residual_normalization is not None:
             # Use residual norm for prognostic variables and input/output
             # normalizer for diagnostic variables in loss
-            self.loss_normalizer = _combine_normalizers(
+            loss_normalizer = _combine_normalizers(
                 residual_normalizer=config.residual_normalization.build(
                     config.prognostic_names
                 ),
                 model_normalizer=config.normalization.build(config.normalize_names),
             )
         else:
-            self.loss_normalizer = config.normalization.build(config.normalize_names)
+            loss_normalizer = config.normalization.build(config.normalize_names)
+
+        self.loss_obj = config.loss.build(
+            area_weighted_mean,
+            out_names=config.out_names,
+            channel_dim=self.CHANNEL_DIM,
+            normalizer=loss_normalizer,
+        )
 
         if config.multi_call is not None:
             self._multi_call = config.multi_call.build(self.step)
             if config.include_multi_call_in_loss:
-                self._multi_call_loss = config.loss.build(
+                self._multi_call_loss: Callable[
+                    [TensorMapping, TensorMapping], torch.Tensor
+                ] = config.loss.build(
                     area_weighted_mean,
-                    self._multi_call.names,
-                    self.CHANNEL_DIM,
+                    out_names=self._multi_call.names,
+                    channel_dim=self.CHANNEL_DIM,
+                    normalizer=loss_normalizer,
                 )
             else:
                 zero_loss = torch.tensor(0.0, device=get_device())
@@ -961,12 +965,7 @@ class SingleModuleStepper(
         y_loss_normalized_i = (y_i - y_mean_i) / loss_scaling_i
         where loss_scaling_i = loss_normalizer_std_i / weight_i.
         """
-        custom_weights = self._config.loss.weights
-        loss_normalizer_stds = self.loss_normalizer.stds
-        return {
-            k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
-            for k in self._config.out_names
-        }
+        return self.loss_obj.effective_loss_scaling
 
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         """
@@ -1348,24 +1347,22 @@ class SingleModuleStepper(
             target_step = {
                 k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()
             }
-            gen_norm_step = self.loss_normalizer.normalize(gen_step)
-            target_norm_step = self.loss_normalizer.normalize(target_step)
 
             if use_crps:
                 step_loss: torch.Tensor = crps_loss(
-                    gen_norm_step, target_norm_step, names=self.out_names
+                    gen_step, target_step, names=self.out_names
                 )
             else:
-                step_loss = self.loss_obj(gen_norm_step, target_norm_step)
+                step_loss = self.loss_obj(gen_step, target_step)
             metrics[f"loss_step_{step}"] = step_loss.detach()
 
             if self._multi_call is not None:
                 if use_crps:
                     mc_loss = crps_loss(
-                        gen_norm_step, target_norm_step, names=self._multi_call.names
+                        gen_step, target_step, names=self._multi_call.names
                     )
                 else:
-                    mc_loss = self._multi_call_loss(gen_norm_step, target_norm_step)
+                    mc_loss = self._multi_call_loss(gen_step, target_step)
                 step_loss = step_loss + mc_loss
                 metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
 
@@ -1382,7 +1379,7 @@ class SingleModuleStepper(
         assert "loss_normalizer" not in step_config
         return {
             "config": self._config.get_state(),
-            "loss_normalizer": self.loss_normalizer.get_state(),
+            "loss_normalizer": self.loss_obj.get_normalizer_state(),
             **step_config,
         }
 

@@ -295,16 +295,6 @@ class CoupledStepperConfig:
         )
 
 
-def _get_step_loss(
-    gen_step: TensorMapping,
-    target_step: TensorMapping,
-    stepper: SingleModuleStepper,
-):
-    gen_norm_step = stepper.loss_normalizer.normalize(gen_step)
-    target_norm_step = stepper.loss_normalizer.normalize(target_step)
-    return stepper.loss_obj(gen_norm_step, target_norm_step)
-
-
 @dataclasses.dataclass
 class CoupledTrainOutput(TrainOutputABC):
     metrics: TensorDict
@@ -796,10 +786,9 @@ class CoupledStepper(
                         k: v.select(self.ocean.TIME_DIM, gen_step.step)
                         for k, v in ocean_forward_data.data.items()
                     }
-                    step_loss = _get_step_loss(
+                    step_loss = self.ocean.loss_obj(
                         gen_step.data,
                         target_step,
-                        self.ocean,
                     )
                     ocean_metrics[f"loss/ocean_step_{gen_step.step}"] = (
                         step_loss.detach()

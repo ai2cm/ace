@@ -1075,11 +1075,11 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_normalizer.means == {
+        assert stepper.loss_obj.normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_normalizer.stds == {
+        assert stepper.loss_obj.normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }
