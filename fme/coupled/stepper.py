@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, Generator, List, Literal, Tuple
+from typing import Any, Dict, Generator, List, Literal, Optional, Tuple
 
 import dacite
 import numpy as np
@@ -19,9 +19,12 @@ from fme.ace.stepper import (
     stack_list_of_tensor_dicts,
 )
 from fme.core.coordinates import (
+    DepthCoordinate,
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
+    SerializableVerticalCoordinate,
 )
+from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -69,16 +72,11 @@ class CoupledStepperConfig:
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
         sst_name: Name of the liquid sea surface temperature field in the ocean data.
-        sst_mask_name: Name of the static sea surface mask field in the ocean data.
-            Should be non-zero in every grid cell where the target ocean surface data
-            is non-NaN.
     """
 
     ocean: ComponentConfig
     atmosphere: ComponentConfig
-
     sst_name: str = "sst"
-    sst_mask_name: str = "mask_0"
 
     def __post_init__(self):
         if self.atmosphere.stepper.ocean is None:
@@ -271,6 +269,9 @@ class CoupledStepperConfig:
         vertical_coordinate: CoupledVerticalCoordinate,
     ):
         logging.info("Initializing coupler")
+        sst_mask = None
+        if isinstance(vertical_coordinate.ocean, DepthCoordinate):
+            sst_mask = vertical_coordinate.ocean.get_mask_level(0)
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
@@ -283,6 +284,7 @@ class CoupledStepperConfig:
                 gridded_operations=gridded_operations,
                 vertical_coordinate=vertical_coordinate.atmosphere,
             ),
+            sst_mask=sst_mask,
         )
 
     def get_state(self):
@@ -290,9 +292,17 @@ class CoupledStepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "CoupledStepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+        state_copy = state.copy()
+        if "sst_mask_name" in state_copy:
+            del state_copy["sst_mask_name"]
+        return state_copy
 
 
 @dataclasses.dataclass
@@ -372,13 +382,29 @@ class CoupledStepper(
         config: CoupledStepperConfig,
         ocean: SingleModuleStepper,
         atmosphere: SingleModuleStepper,
+        sst_mask: Optional[torch.Tensor] = None,
     ):
+        """
+        Args:
+            config: The configuration.
+            ocean: The ocean stepper.
+            atmosphere: The atmosphere stepper.
+            sst_mask: (Optional) The ocean surface mask tensor, with value 1 at
+                valid ocean points and 0 elsewhere. If provided, ensures that
+                the ocean fraction variable used by the atmosphere to determine
+                where to prescribe the ocean's SST is 0 everywhere that the mask
+                is 0.
+
+        """
         if ocean.n_ic_timesteps != 1 or atmosphere.n_ic_timesteps != 1:
             raise ValueError("Only n_ic_timesteps = 1 is currently supported.")
 
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
+        self._sst_mask = sst_mask
+        if self._sst_mask is not None:
+            self._sst_mask = self._sst_mask.to(get_device())
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -491,15 +517,15 @@ class CoupledStepper(
         )
         # get the SST mask (0 if land, 1 if sea surface)
         assert next(iter(ocean_forcings.values())).shape[self.ocean.TIME_DIM] == 1
-        sst_mask = ocean_forcings[self._config.sst_mask_name].expand(*sizes)
-        # enforce agreement between the atmosphere ocean frac and the SST mask
-        # so that ocean frac is 0 everywhere the ocean target data is NaN
-        forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
-            torch.minimum(
-                forcing_data[self._config.atmosphere_ocean_fraction_name],
-                sst_mask,
+        if self._sst_mask is not None:
+            # enforce agreement between the atmosphere ocean frac and the SST mask
+            # so that ocean frac is 0 everywhere the ocean target data is NaN
+            forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
+                torch.minimum(
+                    forcing_data[self._config.atmosphere_ocean_fraction_name],
+                    self._sst_mask,
+                )
             )
-        )
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return forcing_data
@@ -851,4 +877,10 @@ class CoupledStepper(
         config = CoupledStepperConfig.from_state(state["config"])
         ocean = SingleModuleStepper.from_state(state["ocean_state"])
         atmosphere = SingleModuleStepper.from_state(state["atmosphere_state"])
-        return cls(config, ocean, atmosphere)
+        sst_mask = None
+        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
+            state["ocean_state"]["vertical_coordinate"]
+        ).to(get_device())
+        if isinstance(ocean_vertical_coord, DepthCoordinate):
+            sst_mask = ocean_vertical_coord.get_mask_level(0)
+        return cls(config, ocean, atmosphere, sst_mask)

@@ -13,6 +13,7 @@ from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.coordinates import DepthCoordinate, SerializableVerticalCoordinate
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -53,16 +54,12 @@ class StandaloneComponentCheckpointsConfig:
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
         sst_name: Name of the sea surface temperature field in the ocean data.
-        sst_mask_name: Name of the static sea surface mask field in the ocean data.
-            Should be non-zero in every grid cell where the target ocean surface data
-            is non-NaN.
 
     """
 
     ocean: StandaloneComponentConfig
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
-    sst_mask_name: str = "mask_0"
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -75,14 +72,22 @@ class StandaloneComponentCheckpointsConfig:
                 stepper=load_single_stepper_config(self.atmosphere.path),
             ),
             sst_name=self.sst_name,
-            sst_mask_name=self.sst_mask_name,
         )
+
+    def _load_sst_mask(self) -> Optional[torch.Tensor]:
+        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
+            torch.load(self.ocean.path, weights_only=False)["vertical_coordinate"]
+        ).to(fme.get_device())
+        if isinstance(ocean_vertical_coord, DepthCoordinate):
+            return ocean_vertical_coord.get_mask_level(0)
+        return None
 
     def load_stepper(self) -> CoupledStepper:
         return CoupledStepper(
             config=self.load_stepper_config(),
             ocean=load_single_stepper(self.ocean.path),
             atmosphere=load_single_stepper(self.atmosphere.path),
+            sst_mask=self._load_sst_mask(),
         )
 
 
