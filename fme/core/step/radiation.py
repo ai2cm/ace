@@ -87,7 +87,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def __post_init__(self):
         seen_names: Dict[str, str] = {}
         for name_list, label in (
-            (self.main_prognostic_names, "shared_prognostic_names"),
+            (self.main_prognostic_names, "main_prognostic_names"),
             (self.shared_forcing_names, "shared_forcing_names"),
             (self.radiation_only_forcing_names, "radiation_only_forcing_names"),
             (self.main_diagnostic_names, "main_diagnostic_names"),

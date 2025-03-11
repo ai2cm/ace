@@ -45,6 +45,7 @@ from fme.core.optimization import ActivationCheckpointingConfig, NullOptimizatio
 from fme.core.packer import Packer
 from fme.core.parameter_init import ParameterInitializationConfig
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step import StepABC
 from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -566,7 +567,7 @@ def process_prediction_generator_list(
     )
 
 
-class SingleModuleStep:
+class SingleModuleStep(StepABC):
     """
     Step class for a single pytorch module.
     """
@@ -602,7 +603,7 @@ class SingleModuleStep:
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
-        self.normalizer = normalizer
+        self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Optional[Ocean] = config.ocean.build(
                 config.in_names, config.out_names, timestep
@@ -635,12 +636,8 @@ class SingleModuleStep:
         self._activation_checkpointing = config.activation_checkpointing
 
     @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._vertical_coordinate
-
-    @property
-    def gridded_operations(self) -> GriddedOperations:
-        return self._gridded_operations
+    def normalizer(self) -> StandardNormalizer:
+        return self._normalizer
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -669,7 +666,7 @@ class SingleModuleStep:
 
     @property
     def forcing_names(self) -> List[str]:
-        return list(set(self._config.in_names).difference(self._config.out_names))
+        return self._config.forcing_names
 
     @property
     def next_step_forcing_names(self) -> List[str]:
@@ -678,10 +675,9 @@ class SingleModuleStep:
     @property
     def next_step_input_names(self) -> List[str]:
         """Names of variables provided in next_step_input_data."""
-        forcing_names = set(self._config.in_names).difference(self._config.out_names)
         if self.ocean is None:
-            return list(forcing_names)
-        return list(forcing_names.union(self.ocean.forcing_names))
+            return list(self.forcing_names)
+        return list(set(self.forcing_names).union(self.ocean.forcing_names))
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -874,23 +870,22 @@ class SingleModuleStepper(
     def __init__(
         self,
         config: SingleModuleStepperConfig,
-        step: SingleModuleStep,
+        step: StepABC,
         post_process_func: Callable[[TensorMapping], TensorDict],
-        area_weighted_mean: Callable[[TensorMapping], TensorDict],
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
     ):
         """
         Args:
             config: The configuration.
             step: The step object.
-            post_process_func: Function to post-process the output.
-            area_weighted_mean: Function to compute the area-weighted mean.
+            post_process_func: Function to post-process the output of the step function.
+            area_weighted_mean: Function to compute the area weighted mean of a tensor.
             derive_func: Function to compute derived variables.
         """
         self._step_obj = step
         self._derive_func = derive_func
         self._post_process_func = post_process_func
-        self._area_weighted_mean = area_weighted_mean
         self._config = config
         self._no_optimization = NullOptimization()
 
@@ -995,7 +990,7 @@ class SingleModuleStepper(
         if multi_call is None:
             self._multi_call = None
         else:
-            multi_call.validate(self.in_names, self.out_names)
+            multi_call.validate(self._step_obj.input_names, self._step_obj.output_names)
             self._multi_call = multi_call.build(self.step)
 
     @property
@@ -1003,16 +998,8 @@ class SingleModuleStepper(
         return self._step_obj.prognostic_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
-        return self._step_obj.diagnostic_names
-
-    @property
-    def in_names(self) -> List[str]:
-        return self._step_obj.in_names
-
-    @property
     def out_names(self) -> List[str]:
-        return self._step_obj.out_names
+        return self._step_obj.output_names
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -1460,8 +1447,8 @@ class SingleModuleStepper(
         stepper = cls(
             config=config,
             step=step,
-            post_process_func=post_process_func,
             area_weighted_mean=area_weighted_mean,
+            post_process_func=post_process_func,
             derive_func=derive_func,
         )
         stepper.load_state(state)
