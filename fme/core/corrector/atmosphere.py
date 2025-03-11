@@ -40,7 +40,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class CorrectorConfig:
+class AtmosphereCorrectorConfig:
     r"""
     Configuration for the post-step state corrector.
 
@@ -134,16 +134,16 @@ class CorrectorConfig:
     ] = None
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "CorrectorConfig":
+    def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
 
-class Corrector(CorrectorABC):
+class AtmosphereCorrector(CorrectorABC):
     def __init__(
         self,
-        config: CorrectorConfig,
+        config: AtmosphereCorrectorConfig,
         gridded_operations: GriddedOperations,
         vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
         timestep: datetime.timedelta,

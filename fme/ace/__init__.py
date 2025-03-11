@@ -39,7 +39,7 @@ from fme.ace.registry.hpx import (
 )
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper import StepperOverrideConfig
-from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.config import (
     OverwriteConfig,
