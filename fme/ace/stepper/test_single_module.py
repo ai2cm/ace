@@ -24,7 +24,7 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.multi_call import MultiCallConfig
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
-    CorrectorConfig,
+    AtmosphereCorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
     StepperOverrideConfig,
@@ -637,7 +637,7 @@ def test_stepper_corrector(
     else:
         force_positive_names = []
 
-    corrector_config = CorrectorConfig(
+    corrector_config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction=terms_to_modify,

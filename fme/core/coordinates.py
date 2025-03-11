@@ -25,7 +25,7 @@ except ImportError:
 
 from fme.core import metrics
 from fme.core.constants import GRAVITY
-from fme.core.corrector.corrector import Corrector, CorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrector, AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrector, OceanCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
@@ -121,7 +121,7 @@ class VerticalCoordinate(abc.ABC):
     @abc.abstractmethod
     def build_corrector(
         self,
-        config: Union[CorrectorConfig, CorrectorSelector],
+        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
@@ -192,10 +192,10 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[CorrectorConfig, CorrectorSelector],
+        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
         gridded_operations: GriddedOperations,
         timestep: timedelta,
-    ) -> Corrector:
+    ) -> AtmosphereCorrector:
         if (
             isinstance(config, CorrectorSelector)
             and config.type != "atmosphere_corrector"
@@ -206,13 +206,13 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
             )
         if isinstance(config, CorrectorSelector):
             config_instance = dacite.from_dict(
-                data_class=CorrectorConfig,
+                data_class=AtmosphereCorrectorConfig,
                 data=config.config,
                 config=dacite.Config(strict=True),
             )
         else:
             config_instance = config
-        return Corrector(
+        return AtmosphereCorrector(
             config=config_instance,
             gridded_operations=gridded_operations,
             vertical_coordinate=self,
@@ -351,14 +351,14 @@ class DepthCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[CorrectorConfig, CorrectorSelector],
+        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> OceanCorrector:
-        if isinstance(config, CorrectorConfig):
+        if isinstance(config, AtmosphereCorrectorConfig):
             raise ValueError(
                 "Cannot build corrector for depth coordinate with an "
-                "atmosphere CorrectorConfig."
+                "AtmosphereCorrectorConfig."
             )
         elif config.type != "ocean_corrector":
             raise ValueError(
@@ -462,12 +462,12 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[CorrectorConfig, CorrectorSelector],
+        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
-        if isinstance(config, CorrectorConfig):
-            return Corrector(
+        if isinstance(config, AtmosphereCorrectorConfig):
+            return AtmosphereCorrector(
                 config=config,
                 gridded_operations=gridded_operations,
                 vertical_coordinate=None,
@@ -475,11 +475,11 @@ class NullVerticalCoordinate(VerticalCoordinate):
             )
         if config.type == "atmosphere_corrector":
             config_instance = dacite.from_dict(
-                data_class=CorrectorConfig,
+                data_class=AtmosphereCorrectorConfig,
                 data=config.config,
                 config=dacite.Config(strict=True),
             )
-            return Corrector(
+            return AtmosphereCorrector(
                 config=config_instance,
                 gridded_operations=gridded_operations,
                 vertical_coordinate=None,

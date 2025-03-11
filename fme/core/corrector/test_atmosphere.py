@@ -11,9 +11,9 @@ from fme.core.derived_variables import total_water_path_budget_residual
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
 
-from .corrector import (
-    Corrector,
-    CorrectorConfig,
+from .atmosphere import (
+    AtmosphereCorrector,
+    AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _force_conserve_dry_air,
     _force_conserve_moisture,
@@ -395,7 +395,7 @@ def test__force_conserve_energy_doesnt_clobber():
 def test_corrector_integration():
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
-    config = CorrectorConfig(
+    config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
@@ -407,5 +407,5 @@ def test_corrector_integration():
     input_data, gen_data, forcing_data, vertical_coord = test_input
     ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = Corrector(config, ops, vertical_coord, timestep)
+    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data)
