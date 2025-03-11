@@ -535,6 +535,14 @@ class SerializableVerticalCoordinate:
         HybridSigmaPressureCoordinate | DepthCoordinate | NullVerticalCoordinate
     )
 
+    @classmethod
+    def from_state(cls, state) -> VerticalCoordinate:
+        return dacite.from_dict(
+            data_class=cls,
+            data={"vertical_coordinate": state},
+            config=dacite.Config(strict=True),
+        ).vertical_coordinate
+
 
 @dataclasses.dataclass
 class DimSize:
