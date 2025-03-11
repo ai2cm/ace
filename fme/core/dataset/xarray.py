@@ -267,7 +267,7 @@ def _open_xr_dataset(path: str, *args, **kwargs):
         use_cftime=True,
         mask_and_scale=False,
         cache=False,
-        chunks={},
+        chunks=None,
         **kwargs,
     )
 
@@ -359,7 +359,9 @@ def infer_available_variables(config: XarrayDataConfig):
     Infer the available variables from a XarrayDataset.
     """
     paths = _get_raw_paths(config.data_path, config.file_pattern)
-    dataset = xr.open_dataset(paths[0], decode_times=False, engine=config.engine)
+    dataset = xr.open_dataset(
+        paths[0], decode_times=False, engine=config.engine, chunks=None
+    )
     return dataset.data_vars
 
 
@@ -392,9 +394,7 @@ class XarrayDataset(Dataset):
         self.n_steps = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
-            self.full_paths[0],
-            decode_times=False,
-            engine=self.engine,
+            self.full_paths[0], decode_times=False, engine=self.engine, chunks=None
         )
         (
             self._horizontal_coordinates,
