@@ -204,11 +204,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    if stepper.timestep != data.timestep:
-        raise ValueError(
-            f"Timestep of the loaded stepper, {stepper.timestep}, does not "
-            f"match that of the forcing data, {data.timestep}."
-        )
+    stepper.validate_inference_data(data)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:

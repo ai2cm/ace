@@ -26,6 +26,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.step.step import InferenceDataProtocol
 
 T = TypeVar("T", covariant=True)
 
@@ -213,6 +214,8 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
+
+        _: InferenceDataProtocol = self
 
     @property
     def loader(self) -> DataLoader[BatchData]:

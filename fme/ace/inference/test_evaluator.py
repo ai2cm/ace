@@ -895,7 +895,7 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     )
     use_prediction_data = False
     n_forward_steps = 2
-    with pytest.raises(ValueError, match="Timestep of the loaded stepper"):
+    with pytest.raises(ValueError, match="Timestep of step object"):
         inference_helper(
             tmp_path,
             in_names,
