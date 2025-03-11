@@ -1,3 +1,4 @@
+beaker-py
 cftime
 click
 dacite
