@@ -60,7 +60,7 @@ class OceanCorrector(CorrectorABC):
             self._masking = None
 
     def _correct_sea_ice_fraction(
-        self, gen_data: TensorMapping, forcing_data: TensorMapping
+        self, gen_data: TensorMapping, input_data: TensorMapping
     ) -> TensorDict:
         """Correct predicted sea ice fraction to ensure \
             sea ice fraction is always 0-1, and \
@@ -75,7 +75,7 @@ class OceanCorrector(CorrectorABC):
             negative_ocean_fraction = (
                 1
                 - out[sea_ice_config.sea_ice_fraction_name]
-                - forcing_data[sea_ice_config.land_fraction_name]
+                - input_data[sea_ice_config.land_fraction_name]
             )
             negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
             out[sea_ice_config.sea_ice_fraction_name] += negative_ocean_fraction
@@ -91,5 +91,5 @@ class OceanCorrector(CorrectorABC):
             gen_data = self._masking(gen_data)
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
-        gen_data = self._correct_sea_ice_fraction(gen_data, forcing_data)
+        gen_data = self._correct_sea_ice_fraction(gen_data, input_data)
         return gen_data

@@ -1,0 +1,495 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 10
+n_coupled_steps: 4
+inference:
+  n_coupled_steps: 1460
+  coupled_steps_in_memory: 8
+  loader:
+    dataset:
+      ocean:
+        data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
+        subset:
+          start_time: '0151-01-06'
+        fill_nans:
+          method: "constant"
+          value: 0.0
+      atmosphere:
+        data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+        subset:
+          # NOTE: this is required to align the atmosphere and ocean start times
+          start_time: '0151-01-06'
+    start_indices:
+      times:
+        - '0151-01-06T00:00:00'
+        - '0171-01-06T00:00:00'
+        - '0191-01-06T00:00:00'
+        - '0211-01-06T00:00:00'
+        - '0231-01-06T00:00:00'
+        - '0251-01-06T00:00:00'
+        - '0271-01-06T00:00:00'
+        - '0291-01-06T00:00:00'
+  aggregator:
+    log_zonal_mean_images: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    - ocean:
+        data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
+        subset:
+          start_time: '0151-01-06'
+          stop_time: '0306-01-01'
+        fill_nans:
+          method: "constant"
+          value: 0.0
+      atmosphere:
+        data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+        subset:
+          start_time: '0151-01-06'
+          stop_time: '0306-01-01'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    - ocean:
+        data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
+        subset:
+          start_time: '0306-01-01'
+          stop_time: '0311-01-01'
+        fill_nans:
+          method: "constant"
+          value: 0.0
+      atmosphere:
+        data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+        subset:
+          start_time: '0306-01-01'
+          stop_time: '0311-01-01'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  kwargs:
+    weight_decay: 0.01
+  use_gradient_accumulation: true
+stepper:
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: sea_ice_fraction
+    land_fraction_name: land_fraction
+  sst_name: sst
+  ocean:
+    timedelta: 5D
+    stepper:
+      parameter_init:
+        weights_path: /ocean_ckpt.tar
+      builder:
+        type: Samudra
+        config:
+          ch_width:
+            - 200
+            - 250
+            - 300
+            - 400
+          dilation:
+            - 1
+            - 2
+            - 4
+            - 8
+          n_layers:
+            - 1
+            - 1
+            - 1
+            - 1
+      loss:
+        type: MSE
+      normalization:
+        global_means_path: /statsdata/centering.nc
+        global_stds_path: /statsdata/scaling-full-field.nc
+      corrector:
+        type: ocean_corrector
+        config:
+          masking:
+            mask_value: 0
+            fill_value: 0.0
+          force_positive_names:
+          - so_0
+          - so_1
+          - so_2
+          - so_3
+          - so_4
+          - so_5
+          - so_6
+          - so_7
+          - so_8
+          - so_9
+          - so_10
+          - so_11
+          - so_12
+          - so_13
+          - so_14
+          - so_15
+          - so_16
+          - so_17
+          - so_18
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: sea_ice_fraction
+            land_fraction_name: land_fraction
+      next_step_forcing_names:
+      - DLWRFsfc
+      - DSWRFsfc
+      - ULWRFsfc
+      - USWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      in_names:
+      - DLWRFsfc
+      - DSWRFsfc
+      - ULWRFsfc
+      - USWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - land_fraction
+      - sea_surface_fraction
+      - sst
+      - zos
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - thetao_0
+      - thetao_1
+      - thetao_2
+      - thetao_3
+      - thetao_4
+      - thetao_5
+      - thetao_6
+      - thetao_7
+      - thetao_8
+      - thetao_9
+      - thetao_10
+      - thetao_11
+      - thetao_12
+      - thetao_13
+      - thetao_14
+      - thetao_15
+      - thetao_16
+      - thetao_17
+      - thetao_18
+      - uo_0
+      - uo_1
+      - uo_2
+      - uo_3
+      - uo_4
+      - uo_5
+      - uo_6
+      - uo_7
+      - uo_8
+      - uo_9
+      - uo_10
+      - uo_11
+      - uo_12
+      - uo_13
+      - uo_14
+      - uo_15
+      - uo_16
+      - uo_17
+      - uo_18
+      - vo_0
+      - vo_1
+      - vo_2
+      - vo_3
+      - vo_4
+      - vo_5
+      - vo_6
+      - vo_7
+      - vo_8
+      - vo_9
+      - vo_10
+      - vo_11
+      - vo_12
+      - vo_13
+      - vo_14
+      - vo_15
+      - vo_16
+      - vo_17
+      - vo_18
+      - sea_ice_fraction
+      out_names:
+      - sst
+      - zos
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - thetao_0
+      - thetao_1
+      - thetao_2
+      - thetao_3
+      - thetao_4
+      - thetao_5
+      - thetao_6
+      - thetao_7
+      - thetao_8
+      - thetao_9
+      - thetao_10
+      - thetao_11
+      - thetao_12
+      - thetao_13
+      - thetao_14
+      - thetao_15
+      - thetao_16
+      - thetao_17
+      - thetao_18
+      - uo_0
+      - uo_1
+      - uo_2
+      - uo_3
+      - uo_4
+      - uo_5
+      - uo_6
+      - uo_7
+      - uo_8
+      - uo_9
+      - uo_10
+      - uo_11
+      - uo_12
+      - uo_13
+      - uo_14
+      - uo_15
+      - uo_16
+      - uo_17
+      - uo_18
+      - vo_0
+      - vo_1
+      - vo_2
+      - vo_3
+      - vo_4
+      - vo_5
+      - vo_6
+      - vo_7
+      - vo_8
+      - vo_9
+      - vo_10
+      - vo_11
+      - vo_12
+      - vo_13
+      - vo_14
+      - vo_15
+      - vo_16
+      - vo_17
+      - vo_18
+      - sea_ice_fraction
+  atmosphere:
+    timedelta: 6h
+    stepper:
+      parameter_init:
+        weights_path: /atmos_ckpt.tar
+      builder:
+        type: SphericalFourierNeuralOperatorNet
+        config:
+          embed_dim: 384
+          filter_type: linear
+          hard_thresholding_fraction: 1.0
+          use_mlp: true
+          normalization_layer: instance_norm
+          num_layers: 8
+          operator_type: dhconv
+          scale_factor: 1
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      loss:
+        type: MSE
+        weights:
+          air_temperature_0: 0.5
+          air_temperature_1: 0.5
+          eastward_wind_0: 0.5
+          northward_wind_0: 0.5
+          specific_total_water_0: 0.5
+          specific_total_water_1: 0.25
+          specific_total_water_2: 0.5
+          PRATEsfc: 0.5
+          h500: 10
+          TMP850: 5
+          Q2m: 0.5
+          DLWRFsfc: 2
+          ULWRFsfc: 5
+          USWRFsfc: 2
+          DSWRFsfc: 2
+          USWRFtoa: 2
+          tendency_of_total_water_path_due_to_advection: 0.5
+      normalization:
+        global_means_path: /statsdata/centering.nc
+        global_stds_path: /statsdata/scaling-full-field.nc
+      residual_normalization:
+        global_means_path: /statsdata/centering.nc
+        global_stds_path: /statsdata/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+        interpolate: true
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - Q2m
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+      next_step_forcing_names:
+      - DSWRFtoa
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - DSWRFtoa
+      - HGTsfc
+      - PRESsfc
+      - surface_temperature
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      out_names:
+      - PRESsfc
+      - surface_temperature
+      - TMP2m
+      - Q2m
+      - UGRD10m
+      - VGRD10m
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
+      - TMP850
+      - h500
+      # ocean coupling variables (diagnostic for now)
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress

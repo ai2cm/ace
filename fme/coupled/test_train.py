@@ -32,6 +32,9 @@ train_loader:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
+        fill_nans:
+            method: constant
+            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -44,6 +47,9 @@ validation_loader:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
+        fill_nans:
+            method: constant
+            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -55,6 +61,9 @@ inference:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
+        fill_nans:
+            method: constant
+            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -72,6 +81,9 @@ optimization:
   optimizer_type: Adam
 stepper:
   sst_name: {ocean_sfc_temp_name}
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: {sea_ice_frac_name}
+    land_fraction_name: {land_frac_name}
   ocean:
     timedelta: 2D
     stepper:
@@ -91,7 +103,10 @@ stepper:
         global_stds_path: {global_stds_path}
       corrector:
         type: "ocean_corrector"
-        config: {{}}
+        config:
+          sea_ice_fraction_correction:
+            sea_ice_fraction_name: {sea_ice_frac_name}
+            land_fraction_name: {land_frac_name}
       next_step_forcing_names: {ocean_next_step_forcing_names}
       in_names: {ocean_in_names}
       out_names: {ocean_out_names}
@@ -143,6 +158,9 @@ loader:
       data_path: {ocean_data_path}
       subset:
           start_time: '1970-01-01'
+      fill_nans:
+          method: constant
+          value: 0
     atmosphere:
       data_path: {atmosphere_data_path}
       subset:
@@ -163,6 +181,8 @@ def _write_test_yaml_files(
     atmos_out_names: List[str],
     ocean_sfc_temp_name: str,
     ocean_sfc_mask_name: str,
+    sea_ice_frac_name: str,
+    land_frac_name: str,
     atmos_sfc_temp_name: str,
     ocean_frac_name: str,
     n_coupled_steps: int = 1,
@@ -193,6 +213,8 @@ def _write_test_yaml_files(
         ocean_next_step_forcing_names=ocean_next_step_forcing_names,
         ocean_sfc_temp_name=ocean_sfc_temp_name,
         ocean_sfc_mask_name=ocean_sfc_mask_name,
+        sea_ice_frac_name=sea_ice_frac_name,
+        land_frac_name=land_frac_name,
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
         log_zonal_mean_images=str(log_zonal_mean_images).lower(),
@@ -240,7 +262,16 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     data_dir = tmp_path / "coupled_data"
     data_dir.mkdir()
 
-    ocean_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
+    # variable names for the ocean data on disk
+    ocean_names = [
+        "thetao_0",
+        "thetao_1",
+        "sst",
+        "mask_0",
+        "mask_1",
+        "sea_ice_fraction",
+    ]
+    # variable names for the atmos data on disk
     atmos_names = [
         "DLWRFsfc",
         "PRESsfc",
@@ -248,6 +279,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         "specific_total_water_1",
         "surface_temperature",
         "ocean_fraction",
+        "land_fraction",
     ]
 
     n_forward_times_ocean = 8
@@ -263,8 +295,16 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         n_levels_atmosphere=2,
     )
 
-    ocean_in_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
-    ocean_out_names = ["thetao_0", "thetao_1", "sst"]
+    ocean_in_names = [
+        "thetao_0",
+        "thetao_1",
+        "sst",
+        "mask_0",
+        "mask_1",
+        "land_fraction",
+        "sea_ice_fraction",
+    ]
+    ocean_out_names = ["thetao_0", "thetao_1", "sst", "sea_ice_fraction"]
     ocean_derived_names = ["ocean_heat_content"]
     atmos_in_names = [
         "DLWRFsfc",
@@ -273,6 +313,8 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         "specific_total_water_1",
         "surface_temperature",
         "ocean_fraction",
+        "land_fraction",
+        "sea_ice_fraction",
     ]
     atmos_out_names = [
         "DLWRFsfc",
@@ -299,6 +341,8 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         atmos_out_names,
         ocean_sfc_temp_name="sst",
         ocean_sfc_mask_name="mask_0",
+        sea_ice_frac_name="sea_ice_fraction",
+        land_frac_name="land_fraction",
         atmos_sfc_temp_name="surface_temperature",
         ocean_frac_name="ocean_fraction",
         log_zonal_mean_images=log_zonal_mean_images,
