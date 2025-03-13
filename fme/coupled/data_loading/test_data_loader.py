@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
+import re
 from typing import List, Literal
 
 import cftime
@@ -19,6 +20,9 @@ from fme.coupled.requirements import CoupledDataRequirements
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
 from .getters import get_data_loader
 
+N_LAT = 16
+N_LON = 32
+
 
 def _save_netcdf(
     filename,
@@ -33,16 +37,13 @@ def _save_netcdf(
     data_vars = {}
     dim_sizes_without_time = {k: v for k, v in dim_sizes.items() if k != "time"}
     for name in variable_names:
-        if name.startswith("mask_"):
+        if name == "constant_mask" or name.startswith("mask_"):
             dim_sizes_to_use = dim_sizes_without_time
+            rng = np.random.default_rng()
+            data = rng.integers(low=0, high=2, size=list(dim_sizes_to_use.values()))
         else:
             dim_sizes_to_use = dim_sizes
-        if name == "constant_mask":
-            data = np.ones(list(dim_sizes_to_use.values()))
-        else:
             data = np.random.uniform(size=list(dim_sizes_to_use.values()))
-        if len(dim_sizes) > 0:
-            data = data.astype(np.float32)  # type: ignore
         data_vars[name] = xr.DataArray(
             data, dims=list(dim_sizes_to_use), attrs={"units": "m", "long_name": name}
         )
@@ -52,7 +53,23 @@ def _save_netcdf(
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
     elif realm == "ocean":
+        if "mask_0" in data_vars:
+            mask = data_vars["mask_0"]
+            # add nans to 2D vars
+            names = [name for name in data_vars if re.search(r"_\d+$", name) is None]
+            for name in names:
+                data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
         for i in range(nz):
+            if f"mask_{i}" in data_vars:
+                # add nans to 3D vars
+                mask = data_vars[f"mask_{i}"]
+                names = [
+                    name
+                    for name in data_vars
+                    if name != f"mask_{i}" and name.endswith(f"_{i}")
+                ]
+                for name in names:
+                    data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
             data_vars[f"idepth_{i}"] = float(i)
     ds = xr.Dataset(data_vars=data_vars, coords=coords)
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
@@ -109,7 +126,7 @@ def create_coupled_data_on_disk(
 
     ocean_dir = data_dir / "ocean"
     ocean_dir.mkdir()
-    ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": 16, "lon": 32}
+    ocean_dim_sizes = {"time": n_forward_times_ocean + 1, "lat": N_LAT, "lon": N_LON}
     ocean_timestep_size = n_forward_times_atmosphere / n_forward_times_ocean
     if ocean_timestep_size != int(ocean_timestep_size):
         raise ValueError(
@@ -137,8 +154,8 @@ def create_coupled_data_on_disk(
         timestep_start_atmosphere = -1
     atmos_dim_sizes = {
         "time": n_times_atmos,
-        "lat": 16,
-        "lon": 32,
+        "lat": N_LAT,
+        "lon": N_LON,
     }
     atmos_ds = _save_netcdf(
         filename=atmos_dir / "data.nc",
