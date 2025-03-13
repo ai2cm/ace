@@ -11,6 +11,7 @@ from fme.core.corrector.ocean import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.masking import StaticMaskingConfig
+from fme.core.typing_ import TensorMapping
 
 
 def test_ocean_corrector_init_error():
@@ -104,20 +105,21 @@ def test_ocean_corrector_has_no_negative_ocean_fraction():
     timestep = datetime.timedelta(seconds=3600)
     input_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     input_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
+    input_data["land_fraction"] = torch.ones(IMG_SHAPE, device=DEVICE) * 0.8
     gen_data = {f"so_{i}": torch.randn(IMG_SHAPE, device=DEVICE) for i in range(NZ)}
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     gen_data["sea_ice_fraction"] = torch.randn(IMG_SHAPE, device=DEVICE) * 0.5
     gen_data["sea_ice_fraction"][_LAT, _LON] = -0.5
-    forcing_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE) * 0.8}
     corrector = OceanCorrector(config, ops, None, timestep)
-    violation = (forcing_data["land_fraction"] + gen_data["sea_ice_fraction"]) > 1.0
+    violation = (input_data["land_fraction"] + gen_data["sea_ice_fraction"]) > 1.0
     assert violation.any()
     negative_sea_ice_fraction = gen_data["sea_ice_fraction"] < 0.0
     assert negative_sea_ice_fraction.any()
 
-    gen_data_corrected = corrector(input_data, gen_data, forcing_data)
+    next_step_input_data: TensorMapping = {}
+    gen_data_corrected = corrector(input_data, gen_data, next_step_input_data)
     corrected_violation = (
-        forcing_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
+        input_data["land_fraction"] + gen_data_corrected["sea_ice_fraction"]
     ) > 1.0
     assert not corrected_violation.any()
     assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()
