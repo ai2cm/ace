@@ -2,11 +2,11 @@
 
 set -e
 
-JOB_NAME="pretrained-fixed-evaluator"  # recommnended but not required to change this
-JOB_GROUP="pretrained-fixed"
+JOB_NAME="ptd_fixed-zero_fill-inst_norm--ace-samudra-cm4/9fb4l2ax--evaluator"  # recommnended but not required to change this
+JOB_GROUP="ptd_fixed-zero_fill-inst_norm--ace-samudra-cm4/9fb4l2ax"
 
 EXISTING_RESULTS_ATMOS_DATASET="01JE8017VZVRBGCEK5S3DA5G08"  # this contains the atmosphere checkpoint to use for inference
-EXISTING_RESULTS_OCEAN_DATASET="01JMRJKNS3XQGMXT4T0RR5JZTT"  # this contains the ocean checkpoint to use for inference
+EXISTING_RESULTS_OCEAN_DATASET="01JNJVMWQ6KQ42BQDV9SCK7BQE"  # this contains the ocean checkpoint to use for inference
 
 CONFIG_FILENAME="coupled-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -23,7 +23,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --description 'Run ACE coupled evaluator' \
-    --beaker-image oliverwm/fme-deps-only-2025-01-16 \
+    --beaker-image oliverwm/fme-deps-only-5493f777 \
     --workspace ai2/ace \
     --priority high \
     --cluster ai2/jupiter-cirrascale-2 \
