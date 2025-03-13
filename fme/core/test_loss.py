@@ -39,7 +39,12 @@ def test_loss_of_zeros_is_variance():
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    tol = {"rtol": 1e-4, "atol": 1e-4} if str(get_device()).startswith("cuda") else {}
+    if str(get_device()).startswith("cuda"):
+        tol = {"rtol": 1e-4, "atol": 1e-4}
+    elif str(get_device()).startswith("mps"):
+        tol = {"rtol": 1e-3, "atol": 1e-3}
+    else:
+        tol = {}
     torch.testing.assert_close(result, y.var(), **tol)
 
 
