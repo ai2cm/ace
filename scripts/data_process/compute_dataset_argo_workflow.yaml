@@ -80,7 +80,7 @@ spec:
       tolerations:
         - effect: NoSchedule
           key: dedicated
-          value: med-sim-pool
+          value: highmem-sim-pool
       inputs:
         parameters:
           - name: python_script
@@ -94,11 +94,11 @@ spec:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.03.1
         resources:
           limits:
-            cpu: "8000m"
-            memory: "48Gi"
+            cpu: "30000m"
+            memory: "200Gi"
           requests:
-            cpu: "7500m"
-            memory: "48Gi"
+            cpu: "30000m"
+            memory: "200Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |
@@ -162,7 +162,7 @@ spec:
       tolerations:
         - effect: NoSchedule
           key: dedicated
-          value: med-sim-pool
+          value: highmem-sim-pool
       inputs:
         parameters:
           - name: python_script
@@ -172,11 +172,11 @@ spec:
         image: us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing:v2025.03.1
         resources:
           limits:
-            cpu: "8000m"
-            memory: "27Gi"
+            cpu: "30000m"
+            memory: "200Gi"
           requests:
-            cpu: "7500m"
-            memory: "27Gi"
+            cpu: "30000m"
+            memory: "200Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |
