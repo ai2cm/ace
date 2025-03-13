@@ -8,10 +8,9 @@ import torch
 from torch import nn
 
 from fme.ace.requirements import DataRequirements
-from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
+from fme.core.coordinates import VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
-from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.gridded_ops import GriddedOperations
@@ -28,9 +27,6 @@ from fme.core.step.step import (
     StepSelector,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
-
-DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
-DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
 @StepSelector.register("separate_radiation")
@@ -274,7 +270,6 @@ class SeparateRadiationStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
         """
-        self._gridded_operations = gridded_operations  # stored for serializing
         self.in_packer = Packer(config.main_in_names)
         self.out_packer = Packer(config.main_out_names)
         self.radiation_in_packer = Packer(config.radiation_in_names)
@@ -305,20 +300,9 @@ class SeparateRadiationStep(StepABC):
         dist = Distributed.get_instance()
         self.module = dist.wrap_module(self.module)
         self.radiation_module = dist.wrap_module(self.radiation_module)
-        self._vertical_coordinate: VerticalCoordinate = vertical_coordinate.to(
-            get_device()
-        )
         self._timestep = timestep
         self._corrector = corrector
         self._activation_checkpointing = config.activation_checkpointing
-
-    @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._vertical_coordinate
-
-    @property
-    def timestep(self) -> datetime.timedelta:
-        return self._timestep
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -458,73 +442,19 @@ class SeparateRadiationStep(StepABC):
     def get_state(self):
         """
         Returns:
-            The state of the stepper.
+            The state of the ML modules.
         """
         return {
             "module": self.module.state_dict(),
             "radiation_module": self.radiation_module.state_dict(),
-            "normalizer": self.normalizer.get_state(),
-            "img_shape": self._img_shape,
-            "config": self._config.get_state(),
-            "gridded_operations": self._gridded_operations.to_state(),
-            "vertical_coordinate": self._vertical_coordinate.as_dict(),
-            "encoded_timestep": encode_timestep(self._timestep),
         }
 
     def load_state(self, state: Dict[str, Any]) -> None:
         """
-        Load the state of the stepper.
+        Load the state of the ML modules.
 
         Args:
             state: The state to load.
         """
-        if "module" in state:
-            module = state["module"]
-            if "module.device_buffer" in module:
-                # for backwards compatibility with old checkpoints
-                del module["module.device_buffer"]
-            self.module.load_state_dict(module)
+        self.module.load_state_dict(state["module"])
         self.radiation_module.load_state_dict(state["radiation_module"])
-
-    @classmethod
-    def from_state(cls, state) -> "SeparateRadiationStep":
-        """
-        Load the state of the stepper.
-
-        Args:
-            state: The state to load.
-
-        Returns:
-            The stepper.
-        """
-        config_data = {**state["config"]}  # make a copy to avoid mutating input
-        config_data["normalization"] = state["normalizer"]
-
-        gridded_operations = GriddedOperations.from_state(state["gridded_operations"])
-
-        vertical_coordinate: VerticalCoordinate = dacite.from_dict(
-            data_class=SerializableVerticalCoordinate,
-            data={"vertical_coordinate": state["vertical_coordinate"]},
-            config=dacite.Config(strict=True),
-        ).vertical_coordinate
-
-        encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
-        timestep = decode_timestep(encoded_timestep)
-        img_shape = state["img_shape"]
-        config = SeparateRadiationStepConfig.from_state(config_data)
-        corrector = vertical_coordinate.build_corrector(
-            config=config.corrector,
-            gridded_operations=gridded_operations,
-            timestep=timestep,
-        )
-        step = cls(
-            config=config,
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            corrector=corrector,
-            timestep=timestep,
-            normalizer=config.normalization.build(config.normalize_names),
-        )
-        step.load_state(state)
-        return step
