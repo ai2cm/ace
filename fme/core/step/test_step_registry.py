@@ -77,14 +77,10 @@ class MockStep(StepABC):
         raise NotImplementedError()
 
     def get_state(self):
-        raise NotImplementedError()
+        return {}
 
     def load_state(self, state):
-        raise NotImplementedError()
-
-    @classmethod
-    def from_state(cls, state):
-        raise NotImplementedError()
+        pass
 
 
 @StepSelector.register("mock")

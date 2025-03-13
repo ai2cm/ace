@@ -73,6 +73,16 @@ class StepSelector:
             img_shape, gridded_operations, vertical_coordinate, timestep
         )
 
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "type": self.type,
+            "config": self.config,
+        }
+
+    @classmethod
+    def from_state(cls, state: Dict[str, Any]) -> "StepSelector":
+        return cls(type=state["type"], config=state["config"])
+
     @classmethod
     def get_available_types(cls) -> Set[str]:
         """This class method is used to expose all available types of Steps."""
@@ -207,27 +217,14 @@ class StepABC(abc.ABC):
     def get_state(self) -> Dict[str, Any]:
         """
         Returns:
-            The state of the stepper.
-        """
-        pass
-
-    @classmethod
-    @abc.abstractmethod
-    def from_state(cls: Type[SelfType], state: Dict[str, Any]) -> SelfType:
-        """
-        Load the state of the stepper.
-
-        Args:
-            state: The state to load.
-
-        Returns:
-            The stepper.
+            The state of the step object as expected by load_state,
+                may or may not include initialization parameters.
         """
         pass
 
     @abc.abstractmethod
     def load_state(self, state: Dict[str, Any]):
         """
-        Load the state of the stepper.
+        Load the state of the step object.
         """
         pass
