@@ -8,6 +8,11 @@ from fme.core.device import get_device
 
 
 class GriddedOperations(abc.ABC):
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, GriddedOperations):
+            return False
+        return self.to_state() == other.to_state()
+
     @abc.abstractmethod
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
