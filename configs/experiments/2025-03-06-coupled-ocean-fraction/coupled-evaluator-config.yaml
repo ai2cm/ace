@@ -1,0 +1,31 @@
+experiment_dir: /output
+n_coupled_steps: 2920
+coupled_steps_in_memory: 8
+checkpoint_path: /ckpt.tar
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: true
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+      - '0311-01-01T00:00:00'
+  dataset:
+    ocean:
+      data_path: /climate-default/2025-02-12-cm4-piControl-ocean-200yr-dataset/monthly-netcdfs
+      fill_nans:
+        method: constant
+        value: 0.0
+    atmosphere:
+      data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+      subset:
+          start_time: '0151-01-06' # NOTE: aligns atmosphere start time to ocean start time
