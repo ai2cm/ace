@@ -11,7 +11,7 @@ from .test_step_registry import MockStep
 
 
 def test_serializable_step_round_trip():
-    serializable = SerializableStep.build(
+    serializable = SerializableStep(
         selector=StepSelector(type="mock", config={}),
         img_shape=(16, 32),
         gridded_operations=LatLonOperations(area_weights=torch.ones(16, 32)),

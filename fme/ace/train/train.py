@@ -117,7 +117,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
         variable_metadata=variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
-        channel_mean_names=stepper.out_names,
+        channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
     )

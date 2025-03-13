@@ -14,8 +14,8 @@ from fme.core.optimization import NullOptimization
 from fme.core.registry.module import ModuleSelector
 from fme.core.timing import GlobalTimer
 
+from ..ace.stepper import SingleModuleStepperConfig
 from .multi_call import MultiCallConfig
-from .stepper import SingleModuleStepperConfig
 
 TEST_CONFIG = MultiCallConfig(
     forcing_name="CO2",
