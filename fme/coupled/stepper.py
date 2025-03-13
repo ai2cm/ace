@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, Generator, List, Literal, Optional, Tuple
+from typing import Any, Dict, Generator, Iterable, List, Literal, Optional, Tuple
 
 import dacite
 import numpy as np
@@ -63,52 +63,94 @@ class ComponentConfig:
 
 
 @dataclasses.dataclass
-class CoupledStepperConfig:
+class CoupledOceanFractionConfig:
     """
-    Configuration for a coupled stepper.
+    Configuration for computing ocean fraction from the ocean-predicted sea ice
+    fraction.
 
     Parameters:
-        ocean: The ocean component configuration.
+        sea_ice_fraction_name: Name of the sea ice fraction field in the ocean
+            data. Must be an ocean prognostic variable. If the atmosphere uses
+            the same name as an ML forcing then the generated sea ice fraction
+            is also passed as an input to the atmosphere.
+        land_fraction_name: Name of the land fraction field in the atmosphere
+            data. If needed, will be passed to the ocean stepper as a forcing.
+
+    """
+
+    sea_ice_fraction_name: str
+    land_fraction_name: str
+
+    def validate_ocean_prognostic_names(self, prognostic_names: Iterable[str]):
+        if self.sea_ice_fraction_name not in prognostic_names:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {self.sea_ice_fraction_name} "
+                "to be a prognostic variable of the ocean model, but it is not."
+            )
+
+    def validate_atmosphere_forcing_names(self, forcing_names: Iterable[str]):
+        if self.land_fraction_name not in forcing_names:
+            raise ValueError(
+                f"CoupledOceanFractionConfig expected {self.land_fraction_name} "
+                "to be an ML forcing of the atmosphere model, but it is not."
+            )
+
+
+@dataclasses.dataclass
+class CoupledStepperConfig:
+    """Configuration for a coupled atmosphere-ocean stepper. From a common
+    initial condition time the atmosphere steps first and takes as many steps as
+    fit in a single ocean step, while being forced by the ocean's initial
+    condition SST. The ocean then steps forward once, receiving required
+    forcings from the atmosphere-generated output as averages over its step
+    window. This completes a single "coupled step". For subsequent coupled
+    steps, the generated SST from the ocean forces the atmosphere's steps.
+
+    For example, with an atmosphere:ocean step size ratio of 2:1, the following
+    sequence results in 2 coupled steps (4 atmosphere steps and 2 ocean steps):
+
+    1. IC -> atmos_step_1 -> atmos_step_2
+    2. (IC, atmos_step_1_and_2_avg) -> ocean_step_1
+    3. (atmos_step_2, ocean_step_1) -> atmos_step_3 -> atmos_step_4
+    4. (ocean_step_1, atmos_step_3_and_4_avg) -> ocean_step_2
+
+    Parameters:
+        ocean: The ocean component configuration. Output variable names must be distinct
+            from the atmosphere's output names. Outputs that are input names in the
+            atmosphere must be prognostic variables in the ocean.
         atmosphere: The atmosphere component configuration. The stepper
-            configuration must include 'ocean'.
+            configuration must include OceanConfig so that ocean-generated SSTs
+            can be written on the atmosphere's surface temperature field. Output
+            variable names must be distinct from the ocean's output names.
         sst_name: Name of the liquid sea surface temperature field in the ocean data.
+            Must be present in the ocean's output names.
+        ocean_fraction_prediction: (Optional) Configuration for ocean-generated
+            ocean fraction to replace the ocean fraction variable specified in the
+            atmosphere's OceanConfig. If the atmosphere uses the ocean fraction as
+            an ML forcing, the generated ocean fraction is also passed as an input.
+
     """
 
     ocean: ComponentConfig
     atmosphere: ComponentConfig
     sst_name: str = "sst"
+    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None
 
     def __post_init__(self):
-        if self.atmosphere.stepper.ocean is None:
-            raise ValueError(
-                "The atmosphere stepper 'ocean' config is missing but must be set for "
-                "coupled emulation."
-            )
-        self.atmosphere_surface_temperature_name = (
-            self.atmosphere.stepper.ocean.surface_temperature_name
-        )
-        self.atmosphere_ocean_fraction_name = (
-            self.atmosphere.stepper.ocean.ocean_fraction_name
-        )
+        self._validate_component_configs()
+
+        # this was already checked in _validate_component_configs, so an
+        # assertion will do fine here to appease mypy
+        assert self.atmosphere.stepper.ocean is not None
+        self._atmosphere_ocean_config = self.atmosphere.stepper.ocean
+
+        # set timesteps
         self._ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
         self._atmosphere_timestep = pd.Timedelta(
             self.atmosphere.timedelta
         ).to_pytimedelta()
-        if self.atmosphere_timestep > self.ocean_timestep:
-            raise ValueError("Atmosphere timedelta must not be larger than ocean's.")
-        n_inner_steps = self.ocean_timestep / self.atmosphere_timestep
-        if n_inner_steps != int(n_inner_steps):
-            raise ValueError("Ocean timedelta must be a multiple of the atmosphere's.")
-        self.n_inner_steps = int(n_inner_steps)
-        # check for overlapping names
-        duplicate_outputs = set(self.ocean.stepper.out_names).intersection(
-            self.atmosphere.stepper.out_names
-        )
-        if len(duplicate_outputs) > 0:
-            raise ValueError(
-                "Output variable names of CoupledStepper components cannot "
-                f"overlap. Found the following duplicated names: {duplicate_outputs}"
-            )
+
+        # calculate forcing sets
         self._ocean_forcing_exogenous_names = list(
             set(self.ocean.stepper.forcing_names).difference(
                 self.atmosphere.stepper.out_names
@@ -119,44 +161,38 @@ class CoupledStepperConfig:
                 self.ocean.stepper.out_names
             )
         )
+        self._shared_forcing_exogenous_names = list(
+            set(self._ocean_forcing_exogenous_names).intersection(
+                self._atmosphere_forcing_exogenous_names
+            )
+        )
         self._atmosphere_to_ocean_forcing_names = list(
             set(self.ocean.stepper.forcing_names).intersection(
                 self.atmosphere.stepper.out_names
             )
         )
-        missing_next_step_forcings = list(
-            set(self._atmosphere_to_ocean_forcing_names).difference(
-                self.ocean.stepper.next_step_forcing_names
-            )
-        )
-        if len(missing_next_step_forcings) > 0:
-            raise ValueError(
-                "The following variables which are atmosphere component outputs "
-                "and ocean component inputs were not found among the ocean's "
-                f"next_step_forcing_names: {missing_next_step_forcings}."
+        extra_forcings_names = [self.sst_name]
+        if self.ocean_fraction_prediction is not None:
+            # NOTE: this is only necessary for the special case where the
+            # atmosphere doesn't use the sea ice fraction as an ML forcing
+            extra_forcings_names.append(
+                self.ocean_fraction_prediction.sea_ice_fraction_name
             )
 
-        # include the ocean surface temperature variable as forcing for the atmosphere
-        if self.sst_name not in self.ocean.stepper.out_names:
-            raise ValueError(
-                f"The variable {self.sst_name} is not in the ocean's output "
-                "names but is required for coupling with the atmosphere."
-            )
         self._ocean_to_atmosphere_forcing_names = list(
             set(self.atmosphere.stepper.forcing_names)
             .intersection(self.ocean.stepper.out_names)
-            .union([self.sst_name])
+            .union(extra_forcings_names)
         )
+
         # calculate names for each component's data requirements
-        self._all_ocean_names = list(
-            set(self.ocean.stepper.all_names)
-            .difference(self.atmosphere.stepper.out_names)
-            .union([self.sst_name])
-        )
         self._all_atmosphere_names = list(
-            set(self.atmosphere.stepper.all_names)
-            .difference(self.ocean.stepper.out_names)
-            .union([self.atmosphere.stepper.ocean.surface_temperature_name])
+            set(self.atmosphere.stepper.all_names).difference(
+                self.ocean.stepper.out_names
+            )
+        )
+        self._all_ocean_names = list(
+            set(self.ocean.stepper.all_names).difference(self._all_atmosphere_names)
         )
 
     @property
@@ -173,6 +209,25 @@ class CoupledStepperConfig:
         return self._atmosphere_timestep
 
     @property
+    def n_inner_steps(self) -> int:
+        return self.ocean_timestep // self.atmosphere_timestep
+
+    @property
+    def ocean_fraction_name(self) -> str:
+        """Name of the ocean fraction field in the atmosphere data."""
+        return self._atmosphere_ocean_config.ocean_fraction_name
+
+    @property
+    def surface_temperature_name(self) -> str:
+        """Name of the surface temperature field in the atmosphere data."""
+        return self._atmosphere_ocean_config.surface_temperature_name
+
+    @property
+    def ocean_next_step_forcing_names(self) -> List[str]:
+        """Ocean next-step forcings."""
+        return self.ocean.stepper.next_step_forcing_names
+
+    @property
     def ocean_forcing_exogenous_names(self) -> List[str]:
         """Ocean forcing variables that are not outputs of the atmosphere."""
         return self._ocean_forcing_exogenous_names
@@ -183,6 +238,15 @@ class CoupledStepperConfig:
         return self._atmosphere_forcing_exogenous_names
 
     @property
+    def shared_forcing_exogenous_names(self) -> List[str]:
+        """Exogenous forcing variables shared by both components. Must be
+        present in the atmosphere data on disk. If time-varying, the ocean
+        receives the atmosphere data forcings averaged over its step window.
+
+        """
+        return self._shared_forcing_exogenous_names
+
+    @property
     def atmosphere_to_ocean_forcing_names(self) -> List[str]:
         """Ocean forcing variables that are outputs of the atmosphere."""
         return self._atmosphere_to_ocean_forcing_names
@@ -191,6 +255,86 @@ class CoupledStepperConfig:
     def ocean_to_atmosphere_forcing_names(self) -> List[str]:
         """Atmosphere forcing variables that are outputs of the ocean."""
         return self._ocean_to_atmosphere_forcing_names
+
+    def _validate_component_configs(self):
+        # validate atmosphere's OceanConfig
+        if self.atmosphere.stepper.ocean is None:
+            raise ValueError(
+                "The atmosphere stepper 'ocean' config is missing but must be set for "
+                "coupled emulation."
+            )
+        if self.atmosphere.stepper.ocean.slab is not None:
+            raise ValueError(
+                "The atmosphere stepper 'ocean' config cannot use 'slab' for "
+                "coupled emulation."
+            )
+
+        # validate compatibility of ocean and atmosphere timestep sizes
+        ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
+        atmosphere_timestep = pd.Timedelta(self.atmosphere.timedelta).to_pytimedelta()
+        if atmosphere_timestep > ocean_timestep:
+            raise ValueError("Atmosphere timedelta must not be larger than ocean's.")
+        n_inner_steps = ocean_timestep / atmosphere_timestep
+        if n_inner_steps != int(n_inner_steps):
+            raise ValueError("Ocean timedelta must be a multiple of the atmosphere's.")
+
+        # check for overlapping output names
+        duplicate_outputs = set(self.ocean.stepper.out_names).intersection(
+            self.atmosphere.stepper.out_names
+        )
+        if len(duplicate_outputs) > 0:
+            raise ValueError(
+                "Output variable names of CoupledStepper components cannot "
+                f"overlap. Found the following duplicated names: {duplicate_outputs}"
+            )
+
+        # ocean diagnostics cannot be used as atmosphere inputs
+        ocean_diags_as_atmos_forcings = list(
+            set(self.atmosphere.stepper.forcing_names)
+            .intersection(self.ocean.stepper.out_names)
+            .difference(self.ocean.stepper.in_names)
+        )
+        if len(ocean_diags_as_atmos_forcings) > 0:
+            raise ValueError(
+                "CoupledStepper only supports ocean prognostic variables as atmosphere "
+                "forcings, but the following ocean diagnostic variables are inputs to "
+                f"the atmosphere: {ocean_diags_as_atmos_forcings}."
+            )
+
+        # all ocean inputs that are atmosphere outputs must be "next step"
+        # forcings according to the ocean stepper config
+        atmosphere_to_ocean_forcing_names = list(
+            set(self.ocean.stepper.forcing_names).intersection(
+                self.atmosphere.stepper.out_names
+            )
+        )
+        missing_next_step_forcings = list(
+            set(atmosphere_to_ocean_forcing_names).difference(
+                self.ocean.stepper.next_step_forcing_names
+            )
+        )
+        if len(missing_next_step_forcings) > 0:
+            raise ValueError(
+                "The following variables which are atmosphere component outputs "
+                "and ocean component inputs were not found among the ocean's "
+                f"next_step_forcing_names: {missing_next_step_forcings}."
+            )
+
+        # sst_name must be present in the ocean's output names
+        if self.sst_name not in self.ocean.stepper.out_names:
+            raise ValueError(
+                f"The variable {self.sst_name} is not in the ocean's output "
+                "names but is required for coupling with the atmosphere."
+            )
+
+        # validate ocean_fraction_prediction
+        if self.ocean_fraction_prediction is not None:
+            self.ocean_fraction_prediction.validate_ocean_prognostic_names(
+                self.ocean.stepper.prognostic_names,
+            )
+            self.ocean_fraction_prediction.validate_atmosphere_forcing_names(
+                self.atmosphere.stepper.forcing_names
+            )
 
     def _get_ocean_data_requirements(self, n_forward_steps: int) -> DataRequirements:
         return DataRequirements(
@@ -454,38 +598,70 @@ class CoupledStepper(
 
     @property
     def _ocean_forcing_exogenous_names(self) -> List[str]:
-        """Ocean forcing variables that are not outputs of the atmosphere."""
         return self._config.ocean_forcing_exogenous_names
 
     @property
     def _atmosphere_forcing_exogenous_names(self) -> List[str]:
-        """Atmosphere forcing variables that are not outputs of the ocean."""
         return self._config.atmosphere_forcing_exogenous_names
 
     @property
+    def _shared_forcing_exogenous_names(self) -> List[str]:
+        return self._config.shared_forcing_exogenous_names
+
+    @property
     def _atmosphere_to_ocean_forcing_names(self) -> List[str]:
-        """Ocean forcing variables that are outputs of the atmosphere."""
         return self._config.atmosphere_to_ocean_forcing_names
 
     @property
     def _ocean_to_atmosphere_forcing_names(self) -> List[str]:
-        """Atmosphere forcing variables that are outputs of the ocean."""
         return self._config.ocean_to_atmosphere_forcing_names
 
-    def _select_step(
-        self, data: TensorMapping, names: List[str], dim: int, idx: int = 0
-    ):
-        """Select and return the tensors in dict data with the specified names,
-        slicing along the given dimension at the given index.
+    def _forcings_from_ocean_with_ocean_fraction(
+        self,
+        forcings_from_ocean: TensorMapping,
+        atmos_forcing_data: TensorMapping,
+    ) -> TensorDict:
+        """Get the ocean fraction field and return it with the other fields in
+        forcings_from_ocean.
+
+        Returns:
+            forcings_from_ocean: A copy of the forcings_from_ocean input,
+            including the ocean fraction.
 
         """
-        return {k: data[k].select(dim, idx) for k in names}
+        ocean_frac_name = self._config.ocean_fraction_name
+        forcings_from_ocean = dict(forcings_from_ocean)
+        if self._config.ocean_fraction_prediction is None:
+            # for convenience, move the atmos's ocean fraction to the
+            # forcings_from_ocean dict
+            forcings_from_ocean[ocean_frac_name] = atmos_forcing_data[ocean_frac_name]
+        else:
+            # compute ocean frac from land frac and ocean-predicted sea ice frac
+            land_frac_name = self._config.ocean_fraction_prediction.land_fraction_name
+            sea_ice_frac = forcings_from_ocean[
+                self._config.ocean_fraction_prediction.sea_ice_fraction_name
+            ]
+            ocean_frac = 1 - atmos_forcing_data[land_frac_name] - sea_ice_frac
+            # remove negative values just in case the ocean doesn't constrain
+            # the sea ice
+            forcings_from_ocean[ocean_frac_name] = torch.clip(ocean_frac, min=0)
+        if self._sst_mask is not None:
+            # enforce agreement between the ocean frac and the SST mask so that
+            # ocean frac is 0 everywhere the ocean target data is NaN (i.e., where
+            # the mask indicates there is no ocean)
+            ocean_frac = forcings_from_ocean[ocean_frac_name]
+            img_shape = list(ocean_frac.shape[-2:])
+            expanded_shape = [1] * (ocean_frac.ndim - len(img_shape)) + img_shape
+            forcings_from_ocean[ocean_frac_name] = torch.minimum(
+                ocean_frac,
+                self._sst_mask.expand(*expanded_shape),
+            )
+        return forcings_from_ocean
 
     def _get_atmosphere_forcings(
         self,
         atmos_data: TensorMapping,
         ocean_ic: TensorMapping,
-        ocean_forcings: TensorMapping,
     ) -> TensorDict:
         """
         Get the forcings for the atmosphere component.
@@ -496,13 +672,13 @@ class CoupledStepper(
             ocean_ic: Ocean initial condition state, including SST.
             ocean_forcings: Ocean forcing data, including the SST mask.
         """
-        data = atmos_data
         time_dim = self.atmosphere.TIME_DIM
-        sizes = [-1] * len(next(iter(data.values())).shape)
-        # treat ocean-to-atmosphere forcings as "next step" forcings
+        sizes = [-1] * len(next(iter(atmos_data.values())).shape)
         sizes[time_dim] = self.n_inner_steps + 1
         # exogenous forcings are used as is
-        forcing_data = {k: data[k] for k in self._atmosphere_forcing_exogenous_names}
+        forcing_data = {
+            k: atmos_data[k] for k in self._atmosphere_forcing_exogenous_names
+        }
         # forcings from ocean are constant during the fast atmosphere steps
         # NOTE: only n_ic_timesteps = 1 is currently supported
         assert next(iter(ocean_ic.values())).shape[self.ocean.TIME_DIM] == 1
@@ -512,20 +688,13 @@ class CoupledStepper(
         }
         # rename the ocean surface temperature variable using the corresponding
         # name in the atmosphere
-        forcings_from_ocean[self._config.atmosphere_surface_temperature_name] = (
+        forcings_from_ocean[self._config.surface_temperature_name] = (
             forcings_from_ocean.pop(self._config.sst_name)
         )
         # get the SST mask (0 if land, 1 if sea surface)
-        assert next(iter(ocean_forcings.values())).shape[self.ocean.TIME_DIM] == 1
-        if self._sst_mask is not None:
-            # enforce agreement between the atmosphere ocean frac and the SST mask
-            # so that ocean frac is 0 everywhere the ocean target data is NaN
-            forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
-                torch.minimum(
-                    forcing_data[self._config.atmosphere_ocean_fraction_name],
-                    self._sst_mask,
-                )
-            )
+        forcings_from_ocean = self._forcings_from_ocean_with_ocean_fraction(
+            forcings_from_ocean, forcing_data
+        )
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
         return forcing_data
@@ -533,31 +702,49 @@ class CoupledStepper(
     def _get_ocean_forcings(
         self,
         ocean_data: TensorMapping,
-        atmos_data: TensorMapping,
+        atmos_gen: TensorMapping,
+        atmos_forcings: TensorMapping,
     ) -> TensorDict:
         """
         Get the forcings for the ocean component.
 
         Args:
-            ocean_data: Ocean batch data, including initial condition and forward
+            ocean_data: Ocean data, including initial condition and forward
                 steps.
-            atmos_data: Atmosphere batch data, assumed to be.
+            atmos_gen: Generated atmosphere data covering the ocean forward steps.
+            atmos_forcings: Atmosphere forcing data covering the ocean forward steps.
         """
-        data = ocean_data
         time_dim = self.ocean.TIME_DIM
         # NOTE: only n_ic_timesteps = 1 is currently supported
-        assert next(iter(data.values())).shape[time_dim] == self.n_ic_timesteps + 1
-        # get n_ic_timesteps of ocean exognous forcings
-        forcing_data = {k: data[k] for k in self._ocean_forcing_exogenous_names}
+        assert (
+            next(iter(ocean_data.values())).shape[time_dim] == self.n_ic_timesteps + 1
+        )
+        # get n_ic_timesteps of ocean exogenous forcings
+        forcing_data = {
+            k: ocean_data[k]
+            for k in set(self._ocean_forcing_exogenous_names).difference(
+                self._shared_forcing_exogenous_names
+            )
+        }
         # get time-averaged forcings from atmosphere
         forcings_from_atmosphere = {
-            k: atmos_data[k].mean(time_dim, keepdim=True)
-            for k in self._atmosphere_to_ocean_forcing_names
+            **{
+                k: atmos_gen[k].mean(time_dim, keepdim=True)
+                for k in self._atmosphere_to_ocean_forcing_names
+            },
+            **{
+                k: atmos_forcings[k].mean(time_dim, keepdim=True)
+                for k in self._shared_forcing_exogenous_names
+            },
         }
-        # all forcings from the atmosphere are next_step_forcings in the ocean
-        # stepper, so prepend nans in the initial condition position
+        # append or prepend nans depending on whether or not the forcing is a
+        # "next step" forcing
         forcings_from_atmosphere = {
-            k: torch.cat([torch.full_like(v, fill_value=np.nan), v], dim=time_dim)
+            k: (
+                torch.cat([torch.full_like(v, fill_value=np.nan), v], dim=time_dim)
+                if k in self._config.ocean_next_step_forcing_names
+                else torch.cat([v, torch.full_like(v, fill_value=np.nan)], dim=time_dim)
+            )
             for k, v in forcings_from_atmosphere.items()
         }
         forcing_data.update(forcings_from_atmosphere)
@@ -601,18 +788,13 @@ class CoupledStepper(
                     (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
                 )
             )
-            ocean_data_forcings = forcing_data.ocean_data.select_time_slice(
-                slice(i_outer, i_outer + 1)
-            )
             atmos_forcings = BatchData(
                 data=self._get_atmosphere_forcings(
                     atmos_window.data,
                     ocean_ic_state.as_batch_data().data,
-                    ocean_data_forcings.data,
                 ),
                 time=atmos_window.time,
             )
-
             atmos_generator = self.atmosphere.get_prediction_generator(
                 atmos_ic_state,
                 atmos_forcings,
@@ -634,11 +816,20 @@ class CoupledStepper(
             ocean_window = forcing_data.ocean_data.select_time_slice(
                 slice(i_outer, i_outer + self.n_ic_timesteps + 1)
             )
-            atmos_data = stack_list_of_tensor_dicts(
+            atmos_gen = stack_list_of_tensor_dicts(
                 atmos_steps, self.atmosphere.TIME_DIM
             )
+
+            atmos_data_forcings = atmos_window.select_time_slice(
+                time_slice=slice(
+                    self.atmosphere.n_ic_timesteps,
+                    self.n_inner_steps + self.atmosphere.n_ic_timesteps,
+                )
+            )
             ocean_forcings = BatchData(
-                data=self._get_ocean_forcings(ocean_window.data, atmos_data),
+                data=self._get_ocean_forcings(
+                    ocean_window.data, atmos_gen, atmos_data_forcings.data
+                ),
                 time=ocean_window.time,
             )
             # predict and yield a single ocean step
