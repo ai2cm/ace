@@ -10,7 +10,6 @@ from typing import (
     Optional,
     Protocol,
     Set,
-    Tuple,
     Type,
     TypeVar,
     cast,
@@ -18,8 +17,7 @@ from typing import (
 
 import torch
 
-from fme.core.coordinates import VerticalCoordinate
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.registry.registry import Registry
@@ -33,10 +31,7 @@ class StepConfigABC(abc.ABC):
     @abc.abstractmethod
     def get_step(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "StepABC":
         """
         Returns:
@@ -64,14 +59,9 @@ class StepSelector:
 
     def get_step(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "StepABC":
-        return self._step_config_instance.get_step(
-            img_shape, gridded_operations, vertical_coordinate, timestep
-        )
+        return self._step_config_instance.get_step(dataset_info)
 
     def get_state(self) -> Dict[str, Any]:
         return {

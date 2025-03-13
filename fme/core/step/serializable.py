@@ -1,11 +1,8 @@
-import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 
-from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
-from fme.core.dataset.utils import decode_timestep, encode_timestep
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step.step import InferenceDataProtocol, StepSelector
@@ -16,19 +13,11 @@ class SerializableStep:
     def __init__(
         self,
         selector: StepSelector,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ):
         self._selector = selector
-        self._instance = selector.get_step(
-            img_shape, gridded_operations, vertical_coordinate, timestep
-        )
-        self._img_shape = img_shape
-        self._gridded_operations = gridded_operations
-        self._vertical_coordinate = vertical_coordinate
-        self._timestep = timestep
+        self._instance = selector.get_step(dataset_info)
+        self._dataset_info = dataset_info
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -79,6 +68,9 @@ class SerializableStep:
         return self._instance.ocean_fraction_name
 
     def replace_ocean(self, ocean: Optional[OceanConfig]):
+        """
+        Replace the ocean configuration.
+        """
         self._instance.replace_ocean(ocean)
 
     def validate_inference_data(self, data: InferenceDataProtocol):
@@ -135,10 +127,7 @@ class SerializableStep:
         return {
             "selector": self._selector.get_state(),
             "instance": self._instance.get_state(),
-            "gridded_operations": self._gridded_operations.to_state(),
-            "vertical_coordinate": self._vertical_coordinate.as_dict(),
-            "encoded_timestep": encode_timestep(self._timestep),
-            "img_shape": self._img_shape,
+            "dataset_info": self._dataset_info.to_state(),
         }
 
     @classmethod
@@ -153,18 +142,7 @@ class SerializableStep:
             The stepper.
         """
         selector = StepSelector.from_state(state["selector"])
-        gridded_operations = GriddedOperations.from_state(state["gridded_operations"])
-        vertical_coordinate = SerializableVerticalCoordinate.from_state(
-            state["vertical_coordinate"]
-        )
-        timestep = decode_timestep(state["encoded_timestep"])
-        img_shape = state["img_shape"]
-        stepper = cls(
-            selector,
-            img_shape,
-            gridded_operations,
-            vertical_coordinate,
-            timestep,
-        )
+        dataset_info = DatasetInfo.from_state(state["dataset_info"])
+        stepper = cls(selector, dataset_info)
         stepper._instance.load_state(state["instance"])
         return stepper
