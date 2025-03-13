@@ -18,7 +18,7 @@ python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 gantry run \
     --name $JOB_NAME \
     --description 'Run ACE training' \
-    --beaker-image oliverwm/fme-deps-only-2025-01-16 \
+    --beaker-image spencerc/fme-deps-only-b61e55ae \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \

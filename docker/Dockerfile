@@ -1,7 +1,15 @@
-FROM nvcr.io/nvidia/pytorch:23.08-py3 AS base
+FROM pytorch/pytorch:2.6.0-cuda12.6-cudnn9-runtime AS base
 
 ENV FME_DIR=/full-model
 ENV DGLBACKEND=pytorch
+ENV TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1
+
+RUN apt-get update -y && apt-get install -y \
+  build-essential \
+  curl \
+  git \
+  gnupg \
+  wget
 
 # Install gcloud- used for monthly netcdf data processing script
 # https://cloud.google.com/sdk/docs/install#deb
@@ -24,12 +32,10 @@ RUN cd $FME_DIR && pip install --no-deps -e .
 # copy after install so editing scripts does not trigger reinstall
 COPY scripts ${FME_DIR}/scripts
 
-FROM base AS ci-test
+FROM base AS deps-only
 
 # install github cli and yq
 RUN apt-get update && apt-get install -y \
-    curl \
-    git \
     ca-certificates \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \

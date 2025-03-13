@@ -189,7 +189,9 @@ def test_serialization(tmp_path):
 
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = Model.from_state(
-        torch.load(tmp_path / "test.ckpt"), area_weights, fine_topography
+        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        area_weights,
+        fine_topography,
     )
     torch.testing.assert_close(
         expected,

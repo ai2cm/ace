@@ -23,9 +23,9 @@ from fme.ace.inference.evaluator import (
     StepperOverrideConfig,
     main,
 )
-from fme.ace.multi_call import MultiCall, MultiCallConfig
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
+from fme.ace.stepper.single_module import SingleModuleStep
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
@@ -34,6 +34,7 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.testing import mock_wandb
@@ -91,19 +92,20 @@ def save_plus_one_stepper(
 def validate_stepper_ocean(
     stepper: SingleModuleStepper, expected_ocean_config: Optional[OceanConfig]
 ):
-    assert stepper._config.ocean == expected_ocean_config
+    assert isinstance(stepper._step_obj, SingleModuleStep)
+    assert stepper._step_obj._config.ocean == expected_ocean_config
     if expected_ocean_config is not None:
-        assert isinstance(stepper.ocean, Ocean)
+        assert isinstance(stepper._step_obj.ocean, Ocean)
         assert (
-            stepper.ocean.surface_temperature_name
+            stepper._step_obj.ocean.surface_temperature_name
             == expected_ocean_config.surface_temperature_name
         )
         assert (
-            stepper.ocean.ocean_fraction_name
+            stepper._step_obj.ocean.ocean_fraction_name
             == expected_ocean_config.ocean_fraction_name
         )
     else:
-        assert stepper.ocean is None
+        assert stepper._step_obj.ocean is None
 
 
 def validate_stepper_multi_call(
@@ -123,7 +125,9 @@ def validate_stepper_multi_call(
             stepper._multi_call.output_names == expected_multi_call_config.output_names
         )
         expected_all_names = set(
-            expected_multi_call_config.names + stepper.in_names + stepper.out_names
+            expected_multi_call_config.names
+            + stepper._config.in_names
+            + stepper.out_names
         )
         assert set(stepper._config.all_names) == expected_all_names
         expected_diagnostic_names = set(
@@ -895,7 +899,7 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     )
     use_prediction_data = False
     n_forward_steps = 2
-    with pytest.raises(ValueError, match="Timestep of the loaded stepper"):
+    with pytest.raises(ValueError, match="Timestep of step object"):
         inference_helper(
             tmp_path,
             in_names,

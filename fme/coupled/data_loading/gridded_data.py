@@ -7,6 +7,7 @@ import torch
 from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset.xarray import DatasetProperties
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
@@ -139,6 +140,14 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             )
         else:
             self._initial_condition = initial_condition.to_device()
+
+    @property
+    def atmosphere_properties(self) -> DatasetProperties:
+        return self._properties.atmosphere
+
+    @property
+    def ocean_properties(self) -> DatasetProperties:
+        return self._properties.ocean
 
     @property
     def initial_condition(self) -> CoupledPrognosticState:

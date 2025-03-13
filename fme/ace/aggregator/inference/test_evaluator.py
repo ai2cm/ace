@@ -39,6 +39,7 @@ def test_logs_labels_exist():
         log_video=True,
         log_zonal_mean_images=True,
         normalize=lambda x: dict(x),
+        save_diagnostics=False,
     )
     time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
 
@@ -119,6 +120,7 @@ def test_inference_logs_labels_exist():
         record_step_20=True,
         log_video=True,
         normalize=lambda x: dict(x),
+        save_diagnostics=False,
     )
     logs = agg.record_batch(
         data=PairedData(
@@ -173,6 +175,7 @@ def test_inference_logs_length(window_len: int, n_windows: int):
         n_timesteps=window_len * n_windows,
         initial_time=initial_time,
         normalize=lambda x: dict(x),
+        save_diagnostics=False,
     )
     target_data = BatchData.new_on_device(
         data={"a": torch.zeros([2, window_len, ny, nx], device=get_device())},
@@ -193,3 +196,64 @@ def test_inference_logs_length(window_len: int, n_windows: int):
         )
         assert len(logs) == window_len
         i_start += window_len
+
+
+def test_flush_diagnostics(tmpdir):
+    nx, ny, n_sample, n_time = 2, 2, 10, 21
+    horizontal_coordinates = LatLonCoordinates(
+        lon=torch.arange(nx),
+        lat=torch.arange(ny),
+        loaded_lon_name="lon",
+        loaded_lat_name="lat",
+    )
+    initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
+    agg = InferenceEvaluatorAggregator(
+        horizontal_coordinates=horizontal_coordinates,
+        timestep=TIMESTEP,
+        n_timesteps=n_time,
+        initial_time=initial_time,
+        normalize=lambda x: dict(x),
+        output_dir=tmpdir,
+        record_step_20=True,
+        log_zonal_mean_images=True,
+        log_video=True,
+        log_histograms=True,
+    )
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    time = get_zero_time(shape=[n_sample, n_time], dims=["sample", "time"])
+    agg.record_batch(
+        data=PairedData(
+            prediction=gen_data,
+            reference=target_data,
+            time=time,
+        ),
+    )
+    agg.flush_diagnostics()
+    expected_files = [  # note: time-dependent aggregators not tested here
+        "mean",
+        "mean_norm",
+        "mean_step_20",
+        "zonal_mean",
+        "time_mean",
+        "histogram",
+        "video",
+    ]
+    for file in expected_files:
+        assert (tmpdir / f"{file}_diagnostics.nc").exists()
+
+
+def test_agg_raises_without_output_dir():
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    with pytest.raises(
+        ValueError, match="Output directory must be set to save diagnostics"
+    ):
+        InferenceEvaluatorAggregator(
+            horizontal_coordinates=lat_lon_coordinates,
+            timestep=TIMESTEP,
+            n_timesteps=1,
+            initial_time=get_zero_time(shape=[1, 0], dims=["sample", "time"]),
+            normalize=lambda x: dict(x),
+            save_diagnostics=True,
+            output_dir=None,
+        )

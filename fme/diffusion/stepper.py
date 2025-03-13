@@ -17,7 +17,7 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.corrector.corrector import CorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -70,8 +70,8 @@ class DiffusionStepperConfig:
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    corrector: Union[CorrectorConfig, CorrectorSelector] = dataclasses.field(
-        default_factory=lambda: CorrectorConfig()
+    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+        default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[NormalizationConfig] = None
@@ -451,6 +451,12 @@ class DiffusionStepper(
         """
         return nn.ModuleList([self.module])
 
+    def set_train(self):
+        self.module.train()
+
+    def set_eval(self):
+        self.module.eval()
+
     def step(
         self,
         input: TensorMapping,
@@ -667,7 +673,7 @@ class DiffusionStepper(
         metrics: Dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
 
-        optimization.set_mode(self.module)
+        optimization.set_mode(self.modules)
         with optimization.autocast():
             # output from self.predict does not include initial condition
             output, _ = self.predict_paired(

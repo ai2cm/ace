@@ -12,6 +12,7 @@ import torch
 import xarray as xr
 import yaml
 
+import fme
 from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.registry.test_hpx import (
     conv_next_block_config,
@@ -66,6 +67,8 @@ def _get_test_yaml_files(
     segment_epochs=1,
     inference_forward_steps=2,
     use_healpix=False,
+    crps_training=False,
+    save_per_epoch_diagnostics=False,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -134,6 +137,7 @@ def _get_test_yaml_files(
         spatial_dimensions_str = "latlon"
 
     new_stepper_config = f"""
+  crps_training: {"true" if crps_training else "false"}
   in_names: {in_variable_names}
   out_names: {out_variable_names}
   normalization:
@@ -217,6 +221,7 @@ logging:
   project: fme
   entity: ai2cm
 experiment_dir: {results_dir}
+save_per_epoch_diagnostics: {str(save_per_epoch_diagnostics).lower()}
     """  # noqa: E501
     inference_string = f"""
 experiment_dir: {results_dir}
@@ -242,7 +247,6 @@ loader:
     n_initial_conditions: 2
     interval: 1
     """  # noqa: E501
-
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_string)
 
@@ -281,6 +285,8 @@ def _setup(
     timestep_days=5,
     inference_forward_steps=2,
     use_healpix=False,
+    save_per_epoch_diagnostics=False,
+    crps_training=False,
 ):
     if not path.exists():
         path.mkdir()
@@ -314,7 +320,7 @@ def _setup(
 
     data_dir = path / "data"
     stats_dir = path / "stats"
-    results_dir = path / "output"
+    results_dir = path / "results"
     data_dir.mkdir()
     stats_dir.mkdir()
     results_dir.mkdir()
@@ -364,20 +370,23 @@ def _setup(
         segment_epochs=segment_epochs,
         inference_forward_steps=inference_forward_steps,
         use_healpix=use_healpix,
+        crps_training=crps_training,
+        save_per_epoch_diagnostics=save_per_epoch_diagnostics,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype",
+    "nettype, crps_training",
     [
-        "SphericalFourierNeuralOperatorNet",
-        "HEALPixRecUNet",
-        "Samudra",
-        "NoiseConditionedSFNO",
+        ("SphericalFourierNeuralOperatorNet", False),
+        ("NoiseConditionedSFNO", True),
+        ("HEALPixRecUNet", False),
+        ("Samudra", False),
+        ("NoiseConditionedSFNO", False),
     ],
 )
-def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
+def test_train_and_inference(tmp_path, nettype, crps_training, very_fast_only: bool):
     """Ensure that ACE training and subsequent standalone inference run without errors.
 
     Args:
@@ -396,6 +405,8 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
         n_time=int(366 * 3 / 20 + 1),
         inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
         use_healpix=(nettype == "HEALPixRecUNet"),
+        crps_training=crps_training,
+        save_per_epoch_diagnostics=True,
     )
     # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
@@ -408,6 +419,29 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
             # ensure inference time series is not logged
             assert "inference/mean/forecast_step" not in log
 
+    validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
+    assert validation_output_dir.exists()
+    for diagnostic in ("mean", "snapshot", "mean_map"):
+        diagnostic_output = validation_output_dir / f"{diagnostic}_diagnostics.nc"
+        assert diagnostic_output.exists()
+        ds = xr.open_dataset(diagnostic_output)
+        assert len(ds) > 0
+
+    inline_inference_output_dir = (
+        tmp_path / "results" / "output" / "inference" / "epoch_0001"
+    )
+    assert inline_inference_output_dir.exists()
+    for diagnostic in (
+        "mean_step_20",
+        "time_mean",
+        "time_mean_norm",
+        "annual",
+    ):
+        diagnostic_output = inline_inference_output_dir / f"{diagnostic}_diagnostics.nc"
+        assert diagnostic_output.exists()
+        ds = xr.open_dataset(diagnostic_output)
+        assert len(ds) > 0
+
     # inference should not require stats files
     (tmp_path / "stats" / "stats-mean.nc").unlink()
     (tmp_path / "stats" / "stats-stddev.nc").unlink()
@@ -417,12 +451,12 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
         inference_evaluator_main(yaml_config=inference_config)
         inference_logs = wandb.get_logs()
 
-    prediction_output_path = tmp_path / "output" / "autoregressive_predictions.nc"
+    prediction_output_path = tmp_path / "results" / "autoregressive_predictions.nc"
     best_checkpoint_path = (
-        tmp_path / "output" / "training_checkpoints" / "best_ckpt.tar"
+        tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
     )
     best_inference_checkpoint_path = (
-        tmp_path / "output" / "training_checkpoints" / "best_inference_ckpt.tar"
+        tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
@@ -436,7 +470,7 @@ def test_train_and_inference(tmp_path, nettype, very_fast_only: bool):
     assert np.sum(np.isnan(ds_prediction["specific_total_water_0"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["specific_total_water_1"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["total_water_path"].values)) == 0
-    ds_target = xr.open_dataset(tmp_path / "output" / "autoregressive_target.nc")
+    ds_target = xr.open_dataset(tmp_path / "results" / "autoregressive_target.nc")
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
 
@@ -480,6 +514,9 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+@pytest.mark.skipif(
+    fme.get_device().type == "mps", reason="MPS does not support multi-device training."
+)
 def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.Path):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""
@@ -532,7 +569,7 @@ def test_fine_tuning(tmp_path, nettype, very_fast_only: bool):
 
     train_main(yaml_config=train_config)
 
-    results_dir = tmp_path / "output"
+    results_dir = tmp_path / "results"
     ckpt = f"{results_dir}/training_checkpoints/best_ckpt.tar"
 
     fine_tuning_config, new_results_dir = _create_fine_tuning_config(train_config, ckpt)
@@ -571,7 +608,7 @@ def test_copy_weights_after_batch(tmp_path, nettype, skip_slow: bool):
         yaml_config=train_config,
     )
 
-    results_dir = tmp_path / "output"
+    results_dir = tmp_path / "results"
     ckpt = f"{results_dir}/training_checkpoints/best_ckpt.tar"
 
     fine_tuning_config = _create_copy_weights_after_batch_config(

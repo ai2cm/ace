@@ -1,27 +1,36 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Generator, List, Literal, Optional, Tuple
 
 import dacite
 import numpy as np
 import pandas as pd
 import torch
-import xarray as xr
 from torch import nn
 
-from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
+from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import DataRequirements
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
+from fme.ace.stepper import (
+    SingleModuleStepper,
+    SingleModuleStepperConfig,
+    TrainOutput,
+    process_prediction_generator_list,
+    stack_list_of_tensor_dicts,
+)
 from fme.core.coordinates import (
+    DepthCoordinate,
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
+    SerializableVerticalCoordinate,
 )
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.optimization import NullOptimization
+from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
     CoupledBatchData,
@@ -29,6 +38,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPrognosticState,
 )
 from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
+from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -62,16 +72,11 @@ class CoupledStepperConfig:
         atmosphere: The atmosphere component configuration. The stepper
             configuration must include 'ocean'.
         sst_name: Name of the liquid sea surface temperature field in the ocean data.
-        sst_mask_name: Name of the static sea surface mask field in the ocean data.
-            Should be non-zero in every grid cell where the target ocean surface data
-            is non-NaN.
     """
 
     ocean: ComponentConfig
     atmosphere: ComponentConfig
-
     sst_name: str = "sst"
-    sst_mask_name: str = "mask_0"
 
     def __post_init__(self):
         if self.atmosphere.stepper.ocean is None:
@@ -264,6 +269,9 @@ class CoupledStepperConfig:
         vertical_coordinate: CoupledVerticalCoordinate,
     ):
         logging.info("Initializing coupler")
+        sst_mask = None
+        if isinstance(vertical_coordinate.ocean, DepthCoordinate):
+            sst_mask = vertical_coordinate.ocean.get_mask_level(0)
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
@@ -276,6 +284,7 @@ class CoupledStepperConfig:
                 gridded_operations=gridded_operations,
                 vertical_coordinate=vertical_coordinate.atmosphere,
             ),
+            sst_mask=sst_mask,
         )
 
     def get_state(self):
@@ -283,31 +292,17 @@ class CoupledStepperConfig:
 
     @classmethod
     def from_state(cls, state) -> "CoupledStepperConfig":
+        state = cls.remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
-
-def _concat_list_of_dicts(dict_list: List[TensorMapping], dim: int) -> Dict[str, Any]:
-    keys = next(iter(dict_list)).keys()
-    concat_dict = {}
-    for k in keys:
-        concat_dict[k] = torch.cat([d[k] for d in dict_list], dim=dim)
-    return concat_dict
-
-
-def _concat_list_of_paired_data(
-    paired_data_list: List[PairedData], dim: int
-) -> PairedData:
-    data_list = [paired_data.prediction for paired_data in paired_data_list]
-    target_list = [paired_data.reference for paired_data in paired_data_list]
-    data_concat = _concat_list_of_dicts(data_list, dim=dim)
-    target_concat = _concat_list_of_dicts(target_list, dim=dim)
-    times_list = [paired_data.time for paired_data in paired_data_list]
-    times_concat = xr.concat(times_list, dim="time")
-    return PairedData(
-        prediction=data_concat, reference=target_concat, time=times_concat
-    )
+    @classmethod
+    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+        state_copy = state.copy()
+        if "sst_mask_name" in state_copy:
+            del state_copy["sst_mask_name"]
+        return state_copy
 
 
 @dataclasses.dataclass
@@ -364,6 +359,13 @@ class CoupledTrainOutput(TrainOutputABC):
         return self.metrics
 
 
+@dataclasses.dataclass
+class ComponentStepPrediction:
+    realm: Literal["ocean", "atmosphere"]
+    data: TensorDict
+    step: int
+
+
 class CoupledStepper(
     TrainStepperABC[
         CoupledPrognosticState,
@@ -380,19 +382,29 @@ class CoupledStepper(
         config: CoupledStepperConfig,
         ocean: SingleModuleStepper,
         atmosphere: SingleModuleStepper,
+        sst_mask: Optional[torch.Tensor] = None,
     ):
+        """
+        Args:
+            config: The configuration.
+            ocean: The ocean stepper.
+            atmosphere: The atmosphere stepper.
+            sst_mask: (Optional) The ocean surface mask tensor, with value 1 at
+                valid ocean points and 0 elsewhere. If provided, ensures that
+                the ocean fraction variable used by the atmosphere to determine
+                where to prescribe the ocean's SST is 0 everywhere that the mask
+                is 0.
+
+        """
         if ocean.n_ic_timesteps != 1 or atmosphere.n_ic_timesteps != 1:
             raise ValueError("Only n_ic_timesteps = 1 is currently supported.")
 
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
-        self._atmos_vertical_coord = atmosphere.vertical_coordinate
-        self._ocean_vertical_coord = ocean.vertical_coordinate
-        assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
-        )
-        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
+        self._sst_mask = sst_mask
+        if self._sst_mask is not None:
+            self._sst_mask = self._sst_mask.to(get_device())
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -402,7 +414,15 @@ class CoupledStepper(
 
     @property
     def modules(self) -> nn.ModuleList:
-        return nn.ModuleList([self.atmosphere.module, self.ocean.module])
+        return nn.ModuleList([*self.atmosphere.modules, *self.ocean.modules])
+
+    def set_train(self):
+        self.atmosphere.set_train()
+        self.ocean.set_train()
+
+    def set_eval(self):
+        self.atmosphere.set_eval()
+        self.ocean.set_eval()
 
     def get_state(self):
         """
@@ -423,27 +443,9 @@ class CoupledStepper(
     def n_ic_timesteps(self) -> int:
         return 1
 
-    @property
-    def vertical_coordinate(self) -> CoupledVerticalCoordinate:
-        assert isinstance(
-            self._atmos_vertical_coord, OptionalHybridSigmaPressureCoordinate
-        )
-        assert isinstance(self._ocean_vertical_coord, OptionalDepthCoordinate)
-        return CoupledVerticalCoordinate(
-            self._ocean_vertical_coord, self._atmos_vertical_coord
-        )
-
-    @property
-    def timestep(self) -> datetime.timedelta:
-        return self._config.timestep
-
-    @property
-    def ocean_timestep(self) -> datetime.timedelta:
-        return self.timestep
-
-    @property
-    def atmosphere_timestep(self) -> datetime.timedelta:
-        return self.atmosphere.timestep
+    def validate_inference_data(self, data: InferenceGriddedData):
+        self.atmosphere.validate_inference_data(data.atmosphere_properties)
+        self.ocean.validate_inference_data(data.ocean_properties)
 
     @property
     def n_inner_steps(self) -> int:
@@ -481,10 +483,10 @@ class CoupledStepper(
 
     def _get_atmosphere_forcings(
         self,
-        atmos_data: BatchData,
-        ocean_ic: PrognosticState,
-        ocean_forcings: BatchData,
-    ) -> BatchData:
+        atmos_data: TensorMapping,
+        ocean_ic: TensorMapping,
+        ocean_forcings: TensorMapping,
+    ) -> TensorDict:
         """
         Get the forcings for the atmosphere component.
 
@@ -494,7 +496,7 @@ class CoupledStepper(
             ocean_ic: Ocean initial condition state, including SST.
             ocean_forcings: Ocean forcing data, including the SST mask.
         """
-        data = atmos_data.data
+        data = atmos_data
         time_dim = self.atmosphere.TIME_DIM
         sizes = [-1] * len(next(iter(data.values())).shape)
         # treat ocean-to-atmosphere forcings as "next step" forcings
@@ -502,11 +504,10 @@ class CoupledStepper(
         # exogenous forcings are used as is
         forcing_data = {k: data[k] for k in self._atmosphere_forcing_exogenous_names}
         # forcings from ocean are constant during the fast atmosphere steps
-        ocean_data = ocean_ic.as_batch_data()
         # NOTE: only n_ic_timesteps = 1 is currently supported
-        assert ocean_data.time["time"].values.size == 1
+        assert next(iter(ocean_ic.values())).shape[self.ocean.TIME_DIM] == 1
         forcings_from_ocean = {
-            k: ocean_data.data[k].expand(*sizes)
+            k: ocean_ic[k].expand(*sizes)
             for k in self._ocean_to_atmosphere_forcing_names
         }
         # rename the ocean surface temperature variable using the corresponding
@@ -515,67 +516,192 @@ class CoupledStepper(
             forcings_from_ocean.pop(self._config.sst_name)
         )
         # get the SST mask (0 if land, 1 if sea surface)
-        assert ocean_forcings.time["time"].values.size == 1
-        sst_mask = ocean_forcings.data[self._config.sst_mask_name].expand(*sizes)
-        # enforce agreement between the atmosphere ocean frac and the SST mask
-        # so that ocean frac is 0 everywhere the ocean target data is NaN
-        forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
-            torch.minimum(
-                forcing_data[self._config.atmosphere_ocean_fraction_name],
-                sst_mask,
+        assert next(iter(ocean_forcings.values())).shape[self.ocean.TIME_DIM] == 1
+        if self._sst_mask is not None:
+            # enforce agreement between the atmosphere ocean frac and the SST mask
+            # so that ocean frac is 0 everywhere the ocean target data is NaN
+            forcings_from_ocean[self._config.atmosphere_ocean_fraction_name] = (
+                torch.minimum(
+                    forcing_data[self._config.atmosphere_ocean_fraction_name],
+                    self._sst_mask,
+                )
             )
-        )
         # update atmosphere forcings
         forcing_data.update(forcings_from_ocean)
-        return BatchData(forcing_data, time=atmos_data.time)
+        return forcing_data
 
     def _get_ocean_forcings(
         self,
-        ocean_data: BatchData,
-        atmos_data: BatchData,
-    ) -> BatchData:
+        ocean_data: TensorMapping,
+        atmos_data: TensorMapping,
+    ) -> TensorDict:
         """
         Get the forcings for the ocean component.
 
         Args:
             ocean_data: Ocean batch data, including initial condition and forward
                 steps.
-            atmos_data: Atmosphere batch data, spanning the time covered by the ocean
-                data forward steps.
+            atmos_data: Atmosphere batch data, assumed to be.
         """
-        data = ocean_data.data
+        data = ocean_data
         time_dim = self.ocean.TIME_DIM
+        # NOTE: only n_ic_timesteps = 1 is currently supported
+        assert next(iter(data.values())).shape[time_dim] == self.n_ic_timesteps + 1
         # get n_ic_timesteps of ocean exognous forcings
         forcing_data = {k: data[k] for k in self._ocean_forcing_exogenous_names}
         # get time-averaged forcings from atmosphere
         forcings_from_atmosphere = {
-            k: atmos_data.data[k].mean(time_dim, keepdim=True)
+            k: atmos_data[k].mean(time_dim, keepdim=True)
             for k in self._atmosphere_to_ocean_forcing_names
         }
         # all forcings from the atmosphere are next_step_forcings in the ocean
         # stepper, so prepend nans in the initial condition position
-        # NOTE: only n_ic_timesteps = 1 is currently supported
-        assert ocean_data.time["time"].values.size == 2
         forcings_from_atmosphere = {
             k: torch.cat([torch.full_like(v, fill_value=np.nan), v], dim=time_dim)
             for k, v in forcings_from_atmosphere.items()
         }
         forcing_data.update(forcings_from_atmosphere)
-        return BatchData(forcing_data, time=ocean_data.time)
+        return forcing_data
 
-    def _get_step_loss(
+    def get_prediction_generator(
         self,
-        gen_data: TensorMapping,
-        target_data: TensorMapping,
-        step: int,
-        stepper: SingleModuleStepper,
-    ):
-        time_dim = stepper.TIME_DIM
-        gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
-        target_step = {k: v.select(time_dim, step) for k, v in target_data.items()}
-        gen_norm_step = stepper.loss_normalizer.normalize(gen_step)
-        target_norm_step = stepper.loss_normalizer.normalize(target_step)
-        return stepper.loss_obj(gen_norm_step, target_norm_step)
+        initial_condition: CoupledPrognosticState,
+        forcing_data: CoupledBatchData,
+        optimizer: OptimizationABC,
+    ) -> Generator[ComponentStepPrediction, None, None]:
+        if (
+            initial_condition.atmosphere_data.as_batch_data().n_timesteps
+            != self.atmosphere.n_ic_timesteps
+        ):
+            raise ValueError(
+                "Atmosphere initial condition must have "
+                f"{self.atmosphere.n_ic_timesteps} timesteps, got "
+                f"{initial_condition.atmosphere_data.as_batch_data().n_timesteps}."
+            )
+
+        if (
+            initial_condition.ocean_data.as_batch_data().n_timesteps
+            != self.n_ic_timesteps
+        ):
+            raise ValueError(
+                "Ocean initial condition must have "
+                f"{self.n_ic_timesteps} timesteps, got "
+                f"{initial_condition.ocean_data.as_batch_data().n_timesteps}."
+            )
+        atmos_ic_state = initial_condition.atmosphere_data
+        ocean_ic_state = initial_condition.ocean_data
+
+        n_outer_steps = forcing_data.ocean_data.n_timesteps - self.n_ic_timesteps
+
+        for i_outer in range(n_outer_steps):
+            # get the atmosphere window for the initial coupled step
+            atmos_window = forcing_data.atmosphere_data.select_time_slice(
+                slice(
+                    i_outer * self.n_inner_steps,
+                    (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
+                )
+            )
+            ocean_data_forcings = forcing_data.ocean_data.select_time_slice(
+                slice(i_outer, i_outer + 1)
+            )
+            atmos_forcings = BatchData(
+                data=self._get_atmosphere_forcings(
+                    atmos_window.data,
+                    ocean_ic_state.as_batch_data().data,
+                    ocean_data_forcings.data,
+                ),
+                time=atmos_window.time,
+            )
+
+            atmos_generator = self.atmosphere.get_prediction_generator(
+                atmos_ic_state,
+                atmos_forcings,
+                self.n_inner_steps,
+                optimizer,
+            )
+            atmos_steps = []
+
+            # predict and yield atmosphere steps
+            for i_inner, atmos_step in enumerate(atmos_generator):
+                atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
+                atmos_steps.append(atmos_step)
+                yield ComponentStepPrediction(
+                    realm="atmosphere",
+                    data=atmos_step,
+                    step=(i_outer * self.n_inner_steps + i_inner),
+                )
+
+            ocean_window = forcing_data.ocean_data.select_time_slice(
+                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
+            )
+            atmos_data = stack_list_of_tensor_dicts(
+                atmos_steps, self.atmosphere.TIME_DIM
+            )
+            ocean_forcings = BatchData(
+                data=self._get_ocean_forcings(ocean_window.data, atmos_data),
+                time=ocean_window.time,
+            )
+            # predict and yield a single ocean step
+            ocean_step = next(
+                iter(
+                    self.ocean.get_prediction_generator(
+                        ocean_ic_state,
+                        ocean_forcings,
+                        n_forward_steps=1,
+                        optimizer=optimizer,
+                    )
+                )
+            )
+            yield ComponentStepPrediction(
+                realm="ocean",
+                data=ocean_step,
+                step=i_outer,
+            )
+
+            # prepare ic states for next coupled step
+            atmos_ic_state = PrognosticState(
+                BatchData(
+                    data=optimizer.detach_if_using_gradient_accumulation(
+                        {
+                            k: v.unsqueeze(self.atmosphere.TIME_DIM)
+                            for k, v in atmos_steps[-1].items()
+                        }
+                    ),
+                    time=atmos_window.time.isel(
+                        time=slice(-self.atmosphere.n_ic_timesteps, None)
+                    ),
+                )
+            )
+            ocean_ic_state = PrognosticState(
+                BatchData(
+                    data=optimizer.detach_if_using_gradient_accumulation(
+                        {
+                            k: v.unsqueeze(self.ocean.TIME_DIM)
+                            for k, v in ocean_step.items()
+                        }
+                    ),
+                    time=ocean_window.time.isel(time=slice(-self.n_ic_timesteps, None)),
+                )
+            )
+
+    def _process_prediction_generator_list(
+        self,
+        output_list: List[ComponentStepPrediction],
+        forcing_data: CoupledBatchData,
+    ) -> CoupledBatchData:
+        atmos_data = process_prediction_generator_list(
+            [x.data for x in output_list if x.realm == "atmosphere"],
+            time_dim=self.atmosphere.TIME_DIM,
+            time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
+            horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
+        )
+        ocean_data = process_prediction_generator_list(
+            [x.data for x in output_list if x.realm == "ocean"],
+            time_dim=self.ocean.TIME_DIM,
+            time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
+            horizontal_dims=forcing_data.ocean_data.horizontal_dims,
+        )
+        return CoupledBatchData(ocean_data=ocean_data, atmosphere_data=atmos_data)
 
     def predict_paired(
         self,
@@ -586,85 +712,50 @@ class CoupledStepper(
         """
         Predict multiple steps forward given initial condition and reference data.
         """
-        output_atmos = []
-        output_ocean = []
-
-        atmos_prognostic = initial_condition.atmosphere_data
-        ocean_prognostic = initial_condition.ocean_data
-
-        n_outer_steps = (
-            list(forcing.ocean_data.data.values())[0].shape[1] - self.n_ic_timesteps
+        timer = GlobalTimer.get_instance()
+        output_list = list(
+            self.get_prediction_generator(
+                initial_condition, forcing, NullOptimization()
+            )
         )
-
-        for i_outer in range(n_outer_steps):
-            # atmosphere steps
-
-            # get the atmosphere window for the initial coupled step
-            atmos_window = forcing.atmosphere_data.select_time_slice(
-                slice(
-                    i_outer * self.n_inner_steps,
-                    (i_outer + 1) * self.n_inner_steps + self.atmosphere.n_ic_timesteps,
+        gen_data = self._process_prediction_generator_list(output_list, forcing)
+        if compute_derived_variables:
+            with timer.context("compute_derived_variables"):
+                gen_data = (
+                    gen_data.prepend(initial_condition)
+                    .compute_derived_variables(
+                        ocean_derive_func=self.ocean.derive_func,
+                        atmosphere_derive_func=self.atmosphere.derive_func,
+                        forcing_data=forcing,
+                    )
+                    .remove_initial_condition(
+                        n_ic_timesteps_ocean=self.ocean.n_ic_timesteps,
+                        n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
+                    )
                 )
-            )
-            ocean_forcings = forcing.ocean_data.select_time_slice(
-                slice(i_outer, i_outer + 1)
-            )
-            atmos_forcings = self._get_atmosphere_forcings(
-                atmos_window,
-                ocean_prognostic,
-                ocean_forcings,
-            )
-            # predict atmosphere forward n_inner_steps
-            output, atmos_prognostic = self.atmosphere.predict(
-                atmos_prognostic, atmos_forcings, compute_derived_variables
-            )
-            output_atmos.append(
-                PairedData.from_batch_data(
-                    prediction=output,
-                    reference=self.atmosphere.get_forward_data(
-                        atmos_window,
-                        compute_derived_variables=compute_derived_variables,
-                    ),
-                )
-            )
-
-            # ocean step
-
-            ocean_window = forcing.ocean_data.select_time_slice(
-                slice(i_outer, i_outer + self.n_ic_timesteps + 1)
-            )
-            # output here is from the atmosphere; we need the full
-            # sequence of n_inner_steps for time averaging the atmosphere
-            # over the ocean's timestep
-            ocean_forcings = self._get_ocean_forcings(ocean_window, output)
-
-            # ocean always predicts forward one step at a time
-            output, ocean_prognostic = self.ocean.predict(
-                ocean_prognostic,
-                ocean_forcings,
-                compute_derived_variables=False,
-            )
-            output_ocean.append(
-                PairedData.from_batch_data(
-                    prediction=output,
-                    reference=self.ocean.get_forward_data(
-                        ocean_window,
-                        compute_derived_variables=False,
-                    ),
-                )
-            )
-
+        atmos_forward_data = self.atmosphere.get_forward_data(
+            forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
+        )
+        ocean_forward_data = self.ocean.get_forward_data(
+            forcing.ocean_data, compute_derived_variables=compute_derived_variables
+        )
         return (
-            CoupledPairedData(
-                ocean_data=_concat_list_of_paired_data(
-                    output_ocean, dim=self.ocean.TIME_DIM
-                ),
-                atmosphere_data=_concat_list_of_paired_data(
-                    output_atmos, dim=self.atmosphere.TIME_DIM
+            CoupledPairedData.from_coupled_batch_data(
+                prediction=gen_data,
+                reference=CoupledBatchData(
+                    ocean_data=ocean_forward_data,
+                    atmosphere_data=atmos_forward_data,
                 ),
             ),
             CoupledPrognosticState(
-                ocean_data=ocean_prognostic, atmosphere_data=atmos_prognostic
+                ocean_data=gen_data.ocean_data.get_end(
+                    self.ocean.prognostic_names,
+                    self.n_ic_timesteps,
+                ),
+                atmosphere_data=gen_data.atmosphere_data.get_end(
+                    self.atmosphere.prognostic_names,
+                    self.atmosphere.n_ic_timesteps,
+                ),
             ),
         )
 
@@ -684,51 +775,70 @@ class CoupledStepper(
                 prediction and target atmosphere data.
 
         """
-        loss = torch.tensor(0.0, device=get_device())
         ocean_metrics = {}
 
         # get initial condition prognostic variables
-        atmos_prognostic = data.atmosphere_data.get_start(
-            self.atmosphere.prognostic_names, self.n_ic_timesteps
-        )
-        ocean_prognostic = data.ocean_data.get_start(
-            self.ocean.prognostic_names, self.n_ic_timesteps
-        )
         input_data = CoupledPrognosticState(
-            atmosphere_data=atmos_prognostic, ocean_data=ocean_prognostic
+            atmosphere_data=data.atmosphere_data.get_start(
+                self.atmosphere.prognostic_names, self.n_ic_timesteps
+            ),
+            ocean_data=data.ocean_data.get_start(
+                self.ocean.prognostic_names, self.n_ic_timesteps
+            ),
+        )
+
+        atmos_forward_data = self.atmosphere.get_forward_data(
+            data.atmosphere_data,
+            compute_derived_variables=False,
+        )
+        ocean_forward_data = self.ocean.get_forward_data(
+            data.ocean_data,
+            compute_derived_variables=False,
         )
 
         optimization.set_mode(self.modules)
         with optimization.autocast():
-            output, _ = self.predict_paired(input_data, data)
-            n_outer_steps = output.ocean_data.time.shape[1]
-            for outer_step in range(n_outer_steps):
-                # compute ocean step metrics
-                step_loss = self._get_step_loss(
-                    output.ocean_data.prediction,
-                    output.ocean_data.reference,
-                    0,
-                    self.ocean,
-                )
-                loss += step_loss
-                ocean_metrics[f"loss/ocean_step_{outer_step}"] = step_loss.detach()
+            output_generator = self.get_prediction_generator(
+                input_data,
+                data,
+                optimization,
+            )
+            output_list = []
+            for gen_step in output_generator:
+                output_list.append(gen_step)
+                if gen_step.realm == "ocean":
+                    # compute ocean step metrics
+                    target_step = {
+                        k: v.select(self.ocean.TIME_DIM, gen_step.step)
+                        for k, v in ocean_forward_data.data.items()
+                    }
+                    step_loss = self.ocean.loss_obj(
+                        gen_step.data,
+                        target_step,
+                    )
+                    ocean_metrics[f"loss/ocean_step_{gen_step.step}"] = (
+                        step_loss.detach()
+                    )
+                    optimization.accumulate_loss(step_loss)
 
-        optimization.accumulate_loss(loss)
+        loss = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
+
+        gen_data = self._process_prediction_generator_list(output_list, data)
 
         ocean_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(output.ocean_data.prediction),
-            target_data=dict(output.ocean_data.reference),
-            time=output.ocean_data.time,
+            gen_data=dict(gen_data.ocean_data.data),
+            target_data=dict(ocean_forward_data.data),
+            time=gen_data.ocean_data.time,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
             metrics={},
-            gen_data=dict(output.atmosphere_data.prediction),
-            target_data=dict(output.atmosphere_data.reference),
-            time=output.atmosphere_data.time,
+            gen_data=dict(gen_data.atmosphere_data.data),
+            target_data=dict(atmos_forward_data.data),
+            time=gen_data.atmosphere_data.time,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,
         )
@@ -736,7 +846,7 @@ class CoupledStepper(
         ocean_loss: torch.Tensor = sum(ocean_metrics.values())
         stepped = CoupledTrainOutput(
             metrics={
-                "loss": loss.detach(),
+                "loss": loss,
                 "loss/ocean": ocean_loss,
                 **ocean_metrics,
             },
@@ -767,4 +877,10 @@ class CoupledStepper(
         config = CoupledStepperConfig.from_state(state["config"])
         ocean = SingleModuleStepper.from_state(state["ocean_state"])
         atmosphere = SingleModuleStepper.from_state(state["atmosphere_state"])
-        return cls(config, ocean, atmosphere)
+        sst_mask = None
+        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
+            state["ocean_state"]["vertical_coordinate"]
+        ).to(get_device())
+        if isinstance(ocean_vertical_coord, DepthCoordinate):
+            sst_mask = ocean_vertical_coord.get_mask_level(0)
+        return cls(config, ocean, atmosphere, sst_mask)

@@ -1,3 +1,5 @@
+from typing import Any, Mapping, Optional
+
 import torch
 import torch.nn as nn
 
@@ -41,6 +43,8 @@ class ConvNeXtBlock(torch.nn.Module):
         n_layers: int = 1,
         activation: torch.nn.Module = CappedGELU,
         pad: str = "circular",
+        norm: Optional[str] = "instance",
+        norm_kwargs: Optional[Mapping[str, Any]] = None,
         upscale_factor: int = 4,
     ):
         super().__init__()
@@ -49,6 +53,10 @@ class ConvNeXtBlock(torch.nn.Module):
         self.N_in = in_channels
         self.N_pad = int((kernel_size + (kernel_size - 1) * (dilation - 1) - 1) / 2)
         self.pad = pad
+        self.norm = norm
+        self.norm_kwargs = norm_kwargs
+        if self.norm_kwargs is None:
+            self.norm_kwargs = {}
 
         assert n_layers == 1, "Can only use a single layer here!"  # Needs fixing
 
@@ -73,7 +81,28 @@ class ConvNeXtBlock(torch.nn.Module):
                 dilation=dilation,
             )
         )
-        convblock.append(torch.nn.BatchNorm2d(in_channels * upscale_factor))
+        # Batch Norm
+        if norm == "batch":
+            convblock.append(
+                torch.nn.BatchNorm2d(in_channels * upscale_factor, **self.norm_kwargs)
+            )
+        # Instance Norm
+        elif norm == "instance":
+            convblock.append(
+                torch.nn.InstanceNorm2d(
+                    in_channels * upscale_factor, **self.norm_kwargs
+                )
+            )
+        # Layer Norm
+        elif norm == "layer":
+            convblock.append(
+                torch.nn.LayerNorm(in_channels * upscale_factor, **self.norm_kwargs)
+            )
+        # No Norm
+        elif norm is None:
+            pass
+        else:
+            raise NotImplementedError(f"Normalization {norm} not implemented")
 
         convblock.append(activation())
 
@@ -85,7 +114,28 @@ class ConvNeXtBlock(torch.nn.Module):
                 dilation=dilation,
             )
         )
-        convblock.append(torch.nn.BatchNorm2d(in_channels * upscale_factor))
+        # Batch Norm
+        if norm == "batch":
+            convblock.append(
+                torch.nn.BatchNorm2d(in_channels * upscale_factor, **self.norm_kwargs)
+            )
+        # Instance Norm
+        elif norm == "instance":
+            convblock.append(
+                torch.nn.InstanceNorm2d(
+                    in_channels * upscale_factor, **self.norm_kwargs
+                )
+            )
+        # Layer Norm
+        elif norm == "layer":
+            convblock.append(
+                torch.nn.LayerNorm(in_channels * upscale_factor, **self.norm_kwargs)
+            )
+        # No Norm
+        elif norm is None:
+            pass
+        else:
+            raise NotImplementedError(f"Normalization {norm} not implemented")
 
         convblock.append(activation())
 
@@ -110,5 +160,10 @@ class ConvNeXtBlock(torch.nn.Module):
                 x = torch.nn.functional.pad(
                     x, (0, 0, self.N_pad, self.N_pad), mode="constant"
                 )
-            x = layer(x)
+            if isinstance(layer, torch.nn.LayerNorm):
+                x = x.permute(0, 2, 3, 1).contiguous()
+                x = layer(x)
+                x = x.permute(0, 3, 1, 2).contiguous()
+            else:
+                x = layer(x)
         return skip + x

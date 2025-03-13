@@ -102,6 +102,9 @@ class TrainConfigProtocol(Protocol):
     def experiment_dir(self) -> str: ...
 
     @property
+    def output_dir(self) -> str: ...
+
+    @property
     def checkpoint_dir(self) -> str: ...
 
     @property
@@ -320,6 +323,8 @@ class Trainer:
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
+                    "best_val_loss": self._best_validation_loss,
+                    "best_inference_error": self._best_inference_error,
                 },
             }
             if inference_end is not None:
@@ -332,6 +337,7 @@ class Trainer:
         wandb = WandB.get_instance()
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
+        self.stepper.set_train()
         if self.num_batches_seen == 0:
             # Before training, log the loss on the first batch.
             with torch.no_grad(), GlobalTimer():
@@ -373,7 +379,7 @@ class Trainer:
                 wandb.log(metrics, step=self.num_batches_seen)
                 n_samples_seen_since_logging = 0
         self._model_epoch += 1
-
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         return aggregator.get_logs(label="train")
 
     @contextlib.contextmanager
@@ -403,6 +409,7 @@ class Trainer:
             self._ema.restore(parameters=self.stepper.modules.parameters())
 
     def validate_one_epoch(self):
+        self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             for batch in self.valid_data.loader:
@@ -414,9 +421,11 @@ class Trainer:
                 aggregator.record_batch(
                     batch=stepped,
                 )
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
+        self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_inference_aggregator()
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             run_inference(
@@ -424,27 +433,27 @@ class Trainer:
                 data=self._inference_data,
                 aggregator=aggregator,
             )
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
 
-    def save_checkpoint(self, checkpoint_path):
+    def save_checkpoint(self, checkpoint_path, include_optimization=False):
         # save to a temporary file in case we get pre-empted during save
         temporary_location = os.path.join(
             os.path.dirname(checkpoint_path), f".{uuid.uuid4()}.tmp"
         )
         try:
-            torch.save(
-                {
-                    "num_batches_seen": self.num_batches_seen,
-                    "epoch": self._model_epoch,
-                    "best_validation_loss": self._best_validation_loss,
-                    "best_inference_error": self._best_inference_error,
-                    "stepper": self.stepper.get_state(),
-                    "optimization": self.optimization.get_state(),
-                    "ema": self._ema.get_state(),
-                },
-                temporary_location,
-            )
+            data = {
+                "num_batches_seen": self.num_batches_seen,
+                "epoch": self._model_epoch,
+                "best_validation_loss": self._best_validation_loss,
+                "best_inference_error": self._best_inference_error,
+                "stepper": self.stepper.get_state(),
+                "ema": self._ema.get_state(),
+            }
+            if include_optimization:
+                data["optimization"] = self.optimization.get_state()
+            torch.save(data, temporary_location)
             os.replace(temporary_location, checkpoint_path)
         finally:
             if os.path.exists(temporary_location):
@@ -494,7 +503,9 @@ class Trainer:
                 self.save_checkpoint(self.paths.best_checkpoint_path)
 
         logging.info(f"Saving latest checkpoint to {self.paths.latest_checkpoint_path}")
-        self.save_checkpoint(self.paths.latest_checkpoint_path)
+        self.save_checkpoint(
+            self.paths.latest_checkpoint_path, include_optimization=True
+        )
         with self._ema_context():
             logging.info(
                 f"Saving latest EMA checkpoint to {self.paths.ema_checkpoint_path}"
@@ -515,7 +526,9 @@ class Trainer:
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     # separated into a function only to make it easier to mock
-    checkpoint = torch.load(checkpoint_path, map_location=fme.get_device())
+    checkpoint = torch.load(
+        checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     # restore checkpoint is used for finetuning as well as resuming.
     # If finetuning (i.e., not resuming), restore checkpoint
     # does not load optimizer state, instead uses config specified lr.
@@ -525,7 +538,9 @@ def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
     trainer._start_epoch = checkpoint["epoch"]
     trainer._best_validation_loss = checkpoint["best_validation_loss"]
     trainer._best_inference_error = checkpoint["best_inference_error"]
-    ema_checkpoint = torch.load(ema_checkpoint_path, map_location=fme.get_device())
+    ema_checkpoint = torch.load(
+        ema_checkpoint_path, map_location=fme.get_device(), weights_only=False
+    )
     ema_stepper: TrainStepperABC = type(trainer.stepper).from_state(
         ema_checkpoint["stepper"]
     )

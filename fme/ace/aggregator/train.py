@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 import torch
 
@@ -38,3 +38,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
         for key in sorted(logs.keys()):
             logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
+
+    @torch.no_grad()
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+        pass

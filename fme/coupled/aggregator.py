@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
+import os
 import warnings
-from typing import Callable, Dict, Iterable, Mapping, Optional, Union
+from typing import Callable, Dict, Mapping, Optional, Union
 
 import torch
 import xarray as xr
@@ -20,7 +21,6 @@ from fme.core.generics.aggregator import (
     InferenceLog,
     InferenceLogs,
 )
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
@@ -47,6 +47,10 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
             logs[key] = float(dist.reduce_mean(logs[key].detach()).cpu().numpy())
         return logs
 
+    @torch.no_grad()
+    def flush_diagnostics(self, subdir: Optional[str]):
+        pass
+
 
 class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
     """
@@ -58,29 +62,50 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
 
     def __init__(
         self,
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         ocean_loss_scaling: Optional[TensorMapping] = None,
         atmosphere_loss_scaling: Optional[TensorMapping] = None,
     ):
         """
         Args:
-            gridded_operations: Operations for computing metrics on gridded data.
+            horizontal_coordinates: Horizontal coordinates for the data.
+            save_diagnostics: Whether to save diagnostics to disk.
+            output_dir: Directory to write diagnostics to.
             variable_metadata: Metadata for each variable.
             ocean_loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation for the ocean stepper.
             atmosphere_loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation for the atmosphere stepper.
         """
+        self._coords = horizontal_coordinates.coords
         self._dist = Distributed.get_instance()
         self._loss = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
         self._aggregators = {
             "ocean": OneStepAggregator_(
-                gridded_operations, variable_metadata, ocean_loss_scaling
+                horizontal_coordinates,
+                variable_metadata=variable_metadata,
+                loss_scaling=ocean_loss_scaling,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "ocean")
+                    if output_dir is not None
+                    else None
+                ),
             ),
             "atmosphere": OneStepAggregator_(
-                gridded_operations, variable_metadata, atmosphere_loss_scaling
+                horizontal_coordinates,
+                variable_metadata=variable_metadata,
+                loss_scaling=atmosphere_loss_scaling,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "atmosphere")
+                    if output_dir is not None
+                    else None
+                ),
             ),
         }
 
@@ -119,6 +144,15 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             self._dist.reduce_mean(loss.detach()).cpu().numpy()
         )
         return logs
+
+    @torch.no_grad()
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        """
+        Flushes diagnostics to netCDF files, in separate directories for ocean and
+        atmosphere.
+        """
+        for aggregator in self._aggregators.values():
+            aggregator.flush_diagnostics(subdir)
 
 
 @dataclasses.dataclass
@@ -163,6 +197,8 @@ class InferenceEvaluatorAggregatorConfig:
         initial_time: xr.DataArray,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
@@ -194,6 +230,8 @@ class InferenceEvaluatorAggregatorConfig:
             n_timesteps_ocean=n_timesteps_ocean,
             n_timesteps_atmosphere=n_timesteps_atmosphere,
             initial_time=initial_time,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
@@ -279,6 +317,8 @@ class InferenceEvaluatorAggregator(
         initial_time: xr.DataArray,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
         log_video: bool = False,
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
@@ -311,6 +351,12 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=ocean_normalize,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "ocean")
+                    if output_dir is not None
+                    else None
+                ),
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
                 horizontal_coordinates=horizontal_coordinates,
@@ -330,9 +376,16 @@ class InferenceEvaluatorAggregator(
                 variable_metadata=variable_metadata,
                 channel_mean_names=None,
                 normalize=atmosphere_normalize,
+                save_diagnostics=save_diagnostics,
+                output_dir=(
+                    os.path.join(output_dir, "atmosphere")
+                    if output_dir is not None
+                    else None
+                ),
                 log_nino34_index=False,
             ),
         }
+        self._coords = horizontal_coordinates.coords
         self._num_channels_ocean: Optional[int] = None
         self._num_channels_atmos: Optional[int] = None
 
@@ -406,19 +459,10 @@ class InferenceEvaluatorAggregator(
         }
 
     @torch.no_grad()
-    def get_datasets(
-        self, excluded_aggregators: Optional[Iterable[str]] = None
-    ) -> Dict[str, Dict[str, xr.Dataset]]:
+    def flush_diagnostics(self, subdir: Optional[str] = None):
         """
-        Returns datasets from combined aggregators.
-
-        Args:
-            excluded_aggregators: aggregator names for which `get_dataset`
-                should not be called and no output should be returned.
-
-        Returns:
-            Dictionary of datasets from aggregators.
+        Flushes diagnostics to netCDF files, in separate directories for ocean and
+        atmosphere.
         """
-        ocean_datasets = self.ocean.get_datasets(excluded_aggregators)
-        atmos_datasets = self.atmosphere.get_datasets(excluded_aggregators)
-        return {"ocean": ocean_datasets, "atmosphere": atmos_datasets}
+        for aggregator in self._aggregators.values():
+            aggregator.flush_diagnostics(subdir)

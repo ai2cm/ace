@@ -21,7 +21,6 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
-from fme.ace.inference.loop import write_reduced_metrics
 from fme.ace.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
@@ -248,6 +247,7 @@ def run_inference_from_config(config: InferenceConfig):
         config.initial_condition.get_dataset(), stepper_config.prognostic_names
     )
     stepper = config.load_stepper()
+    stepper.set_eval()
     logging.info("Initializing forcing data loaded")
     data = get_forcing_data(
         config=config.forcing_loader,
@@ -257,11 +257,7 @@ def run_inference_from_config(config: InferenceConfig):
         surface_temperature_name=stepper.surface_temperature_name,
         ocean_fraction_name=stepper.ocean_fraction_name,
     )
-    if stepper.timestep != data.timestep:
-        raise ValueError(
-            f"Timestep of the loaded stepper, {stepper.timestep}, does not "
-            f"match that of the forcing data, {data.timestep}."
-        )
+    stepper.validate_inference_data(data)
 
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     aggregator = config.aggregator.build(
@@ -269,6 +265,7 @@ def run_inference_from_config(config: InferenceConfig):
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
         timestep=data.timestep,
         variable_metadata=variable_metadata,
+        output_dir=config.experiment_dir,
     )
 
     writer = config.get_data_writer(data)
@@ -288,7 +285,7 @@ def run_inference_from_config(config: InferenceConfig):
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    write_reduced_metrics(aggregator, data.coords, config.experiment_dir)
+    aggregator.flush_diagnostics()
     timer.stop()
 
     timer.stop_outer("inference")

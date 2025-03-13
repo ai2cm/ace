@@ -1,6 +1,7 @@
-from typing import Dict, Mapping, Optional
+from typing import Dict, List, Mapping, Optional, Tuple
 
 import torch
+import xarray as xr
 
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
@@ -29,12 +30,16 @@ class SnapshotAggregator:
         ),
     }
 
-    def __init__(self, metadata: Optional[Mapping[str, VariableMetadata]] = None):
+    def __init__(
+        self, dims: List[str], metadata: Optional[Mapping[str, VariableMetadata]] = None
+    ):
         """
         Args:
+            dims: Dimensions of the data.
             metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
         """
+        self._dims = dims
         if metadata is None:
             self._metadata: Mapping[str, VariableMetadata] = {}
         else:
@@ -55,6 +60,33 @@ class SnapshotAggregator:
         self._target_data_norm = target_data_norm
         self._gen_data_norm = gen_data_norm
 
+    def _get_data(self) -> Tuple[TensorMapping, TensorMapping, TensorMapping]:
+        time_dim = 1
+        input_time = 0
+        target_time = 1
+        gen, target, input = {}, {}, {}
+        for name in self._gen_data.keys():
+            # use first sample in batch
+            gen[name] = (
+                self._gen_data[name]
+                .select(dim=time_dim, index=target_time)[0]
+                .cpu()
+                .numpy()
+            )
+            target[name] = (
+                self._target_data[name]
+                .select(dim=time_dim, index=target_time)[0]
+                .cpu()
+                .numpy()
+            )
+            input[name] = (
+                self._target_data[name]
+                .select(dim=time_dim, index=input_time)[0]
+                .cpu()
+                .numpy()
+            )
+        return gen, target, input
+
     @torch.no_grad()
     def get_logs(self, label: str) -> Dict[str, Image]:
         """
@@ -63,23 +95,16 @@ class SnapshotAggregator:
         Args:
             label: Label to prepend to all log keys.
         """
-        time_dim = 1
-        input_time = 0
-        target_time = 1
         image_logs = {}
-        for name in self._gen_data.keys():
-            # use first sample in batch
-            gen = self._gen_data[name].select(dim=time_dim, index=target_time)[0].cpu()
-            target = (
-                self._target_data[name].select(dim=time_dim, index=target_time)[0].cpu()
-            )
-            input = (
-                self._target_data[name].select(dim=time_dim, index=input_time)[0].cpu()
-            )
+        gen, target, input = self._get_data()
+        for name in gen:
             images = {}
-            images["error"] = [[(gen - target).numpy()]]
-            images["full-field"] = [[gen.numpy()], [target.numpy()]]
-            images["residual"] = [[(gen - input).numpy()], [(target - input).numpy()]]
+            images["error"] = [[(gen[name] - target[name])]]
+            images["full-field"] = [[gen[name]], [target[name]]]
+            images["residual"] = [
+                [(gen[name] - input[name])],
+                [(target[name] - input[name])],
+            ]
             for key, data in images.items():
                 if key == "error" or key == "residual":
                     diverging = True
@@ -99,3 +124,34 @@ class SnapshotAggregator:
             caption_name, units = name, "unknown_units"
         caption = self._captions[key].format(name=caption_name, units=units)
         return caption
+
+    def get_dataset(self) -> xr.Dataset:
+        gen, target, input = self._get_data()
+        ds = xr.Dataset()
+        for name in gen:
+            if name in self._metadata:
+                long_name = self._metadata[name].long_name
+                units = self._metadata[name].units
+            else:
+                long_name = name
+                units = "unknown_units"
+            metadata_attrs = {"long_name": long_name, "units": units}
+            ds[f"error_map-{name}"] = xr.DataArray(
+                data=(gen[name] - target[name]), dims=self._dims, attrs=metadata_attrs
+            )
+            ds[f"gen_full_field_map-{name}"] = xr.DataArray(
+                data=gen[name],
+                dims=self._dims,
+                attrs=metadata_attrs,
+            )
+            ds[f"gen_residual_map-{name}"] = xr.DataArray(
+                data=gen[name] - input[name],
+                dims=self._dims,
+                attrs=metadata_attrs,
+            )
+            ds[f"target_residual_map-{name}"] = xr.DataArray(
+                data=target[name] - input[name],
+                dims=self._dims,
+                attrs=metadata_attrs,
+            )
+        return ds

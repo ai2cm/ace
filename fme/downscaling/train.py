@@ -57,7 +57,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     if trainer.epoch_checkpoint_path is None:
         raise ValueError("Cannot restore checkpoint without a checkpoint path")
 
-    checkpoint = torch.load(trainer.epoch_checkpoint_path, map_location=get_device())
+    checkpoint = torch.load(
+        trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
+    )
     trainer.model = trainer.model.from_state(
         checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )
@@ -67,7 +69,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
 
     trainer.validate_using_ema = checkpoint["validate_using_ema"]
-    ema_checkpoint = torch.load(trainer.ema_checkpoint_path, map_location=get_device())
+    ema_checkpoint = torch.load(
+        trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
+    )
     ema_model = trainer.model.from_state(
         ema_checkpoint["model"], trainer.area_weights, trainer.fine_topography
     )
@@ -92,6 +96,7 @@ class Trainer:
         self.validate_using_ema = config.validate_using_ema
         self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
+        self.dims = self.train_data.horizontal_coordinates.fine.dims
         self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
@@ -130,6 +135,7 @@ class Trainer:
             self.config.train_data
         )
         train_aggregator = Aggregator(
+            self.dims,
             self.area_weights.fine.cpu(),
             self.latitudes,
             self.model.downscale_factor,
@@ -193,12 +199,14 @@ class Trainer:
         )
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
+                self.dims,
                 self.area_weights.fine.cpu(),
                 self.latitudes,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
             generation_aggregator = Aggregator(
+                self.dims,
                 self.area_weights.fine.cpu(),
                 self.latitudes,
                 self.model.downscale_factor,

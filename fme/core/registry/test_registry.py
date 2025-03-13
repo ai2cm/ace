@@ -15,7 +15,7 @@ def test_registry_without_base_type():
     class ModelA:
         pass
 
-    assert isinstance(model_registry.from_dict({"type": "model_a"}), ModelA)
+    assert isinstance(model_registry.get("model_a", {}), ModelA)
 
 
 def test_registry_type_checking():

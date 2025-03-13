@@ -11,9 +11,9 @@ from fme.core.derived_variables import total_water_path_budget_residual
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
 
-from .corrector import (
-    Corrector,
-    CorrectorConfig,
+from .atmosphere import (
+    AtmosphereCorrector,
+    AtmosphereCorrectorConfig,
     EnergyBudgetConfig,
     _force_conserve_dry_air,
     _force_conserve_moisture,
@@ -370,10 +370,32 @@ def test__force_conserve_total_energy():
     torch.testing.assert_close(temperature_correction_0, temperature_1_correction)
 
 
+def test__force_conserve_energy_doesnt_clobber():
+    tensor_shape = (5, 5)
+
+    ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    # add a prognostic variable to the forcing data
+    forcing_data["PRESsfc"] = 10.0 + torch.rand(size=tensor_shape)
+
+    corrected_gen_data = _force_conserve_total_energy(
+        input_data=input_data,
+        gen_data=gen_data,
+        forcing_data=forcing_data,
+        area_weighted_mean=ops.area_weighted_mean,
+        vertical_coordinate=vertical_coord,
+        timestep=timestep,
+    )
+    torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
+
+
 def test_corrector_integration():
     """Ensures that the corrector can be called with all methods active
     but doesn't check results."""
-    config = CorrectorConfig(
+    config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction="advection_and_precipitation",
@@ -385,5 +407,5 @@ def test_corrector_integration():
     input_data, gen_data, forcing_data, vertical_coord = test_input
     ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
     timestep = datetime.timedelta(seconds=3600)
-    corrector = Corrector(config, ops, vertical_coord, timestep)
+    corrector = AtmosphereCorrector(config, ops, vertical_coord, timestep)
     corrector(input_data, gen_data, forcing_data)

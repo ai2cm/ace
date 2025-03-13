@@ -1,8 +1,6 @@
 import dataclasses
 from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
 
-import dacite
-
 from .registry import Registry
 
 # Note we can either type hint register, which prevents registering
@@ -32,7 +30,6 @@ class CorrectorSelector:
     Parameters:
         type: the type of the CorrectorConfigProtocol
         config: data for a CorrectorConfigProtocol instance of the indicated type
-
     """
 
     type: str
@@ -49,24 +46,6 @@ class CorrectorSelector:
     @classmethod
     def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:
         return cls.registry.register(type_name)
-
-    def get_state(self) -> Mapping[str, Any]:
-        """
-        Get a dictionary containing all the information needed to build a
-        CorrectorConfigProtocol.
-
-        """
-        return {"type": self.type, "config": self.config}
-
-    @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "CorrectorSelector":
-        """
-        Create a CorrectorSelector from a dictionary containing all the information
-        needed to build a CorrectorConfigProtocol.
-        """
-        return dacite.from_dict(
-            data_class=cls, data=state, config=dacite.Config(strict=True)
-        )
 
     @classmethod
     def get_available_types(cls):

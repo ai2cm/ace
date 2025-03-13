@@ -21,10 +21,9 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_multi_call,
     validate_stepper_ocean,
 )
-from fme.ace.multi_call import MultiCallConfig
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
-from fme.ace.stepper import (
-    CorrectorConfig,
+from fme.ace.stepper.single_module import (
+    AtmosphereCorrectorConfig,
     SingleModuleStepper,
     SingleModuleStepperConfig,
     StepperOverrideConfig,
@@ -32,14 +31,21 @@ from fme.ace.stepper import (
     _combine_normalizers,
     load_stepper,
     load_stepper_config,
+    repeat_interleave_batch_dim,
+    reshape_with_sample_dim,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import (
@@ -278,6 +284,39 @@ def test_train_on_batch_addition_series():
     )
 
 
+def test_train_on_batch_crps_loss():
+    torch.manual_seed(0)
+
+    class AddOne(torch.nn.Module):
+        def forward(self, x):
+            return x + 1
+
+    n_steps = 4
+    data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
+    area = torch.ones((5, 5), device=DEVICE)
+    gridded_operations = LatLonOperations(area)
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.arange(7), bk=torch.arange(7)
+    )
+    config = SingleModuleStepperConfig(
+        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
+        in_names=["a", "b"],
+        out_names=["a", "b"],
+        normalization=NormalizationConfig(
+            means=get_scalar_data(["a", "b"], 0.0),
+            stds=get_scalar_data(["a", "b"], 1.0),
+        ),
+        loss=WeightedMappingLossConfig(type="MSE"),
+        crps_training=True,
+    )
+    stepper = config.get_stepper(
+        (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
+    )
+    stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
+    # output of train_on_batch does not include the initial condition
+    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+
+
 def test_train_on_batch_with_prescribed_ocean():
     torch.manual_seed(0)
 
@@ -504,11 +543,12 @@ def test_train_on_batch(
 def test_train_on_batch_one_step_aggregator(n_forward_steps):
     in_names, out_names, all_names = ["a"], ["a"], ["a"]
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
+    nx, ny = 5, 5
     stepper = _get_stepper(in_names, out_names, ocean_config=None, module_name="AddOne")
-
-    aggregator = OneStepAggregator(
-        gridded_operations=LatLonOperations(torch.ones((5, 5))),
-    )
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    aggregator = OneStepAggregator(lat_lon_coordinates, save_diagnostics=False)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
@@ -597,7 +637,7 @@ def test_stepper_corrector(
     else:
         force_positive_names = []
 
-    corrector_config = CorrectorConfig(
+    corrector_config = AtmosphereCorrectorConfig(
         conserve_dry_air=True,
         zero_global_mean_moisture_advection=True,
         moisture_budget_correction=terms_to_modify,
@@ -917,11 +957,14 @@ def test_next_step_forcing_names():
     )
     input_data, forcing_data = get_data_for_predict(n_steps=1, forcing_names=["b", "c"])
     stepper.predict(input_data, forcing_data)
+    assert len(stepper.modules) == 1
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 1, :], forcing_data.data["b"][:, 0]
+        stepper.modules[0].module.last_input[:, 1, :],
+        forcing_data.data["b"][:, 0],
     )
     torch.testing.assert_close(
-        stepper.module.module.last_input[:, 2, :], forcing_data.data["c"][:, 1]
+        stepper.modules[0].module.last_input[:, 2, :],
+        forcing_data.data["c"][:, 1],
     )
 
 
@@ -1032,16 +1075,36 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
-        assert stepper.loss_normalizer.means == {
+        assert stepper.loss_obj.normalizer.means == {
             **residual_means,
             "diagnostic": full_field_means["diagnostic"],
         }
-        assert stepper.loss_normalizer.stds == {
+        assert stepper.loss_obj.normalizer.stds == {
             **residual_stds,
             "diagnostic": full_field_stds["diagnostic"],
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
+
+
+@pytest.mark.parametrize("repeats", [1, 3])
+def test_sample_dim_operations_give_correct_data_order(repeats: int):
+    n_samples = 3
+    data = {
+        "a": torch.arange(n_samples)
+        .reshape(n_samples, 1, 1)
+        .broadcast_to(n_samples, 5, 5),
+        "b": torch.arange(n_samples)
+        .reshape(n_samples, 1, 1)
+        .broadcast_to(n_samples, 5, 5),
+    }
+    intermediate = repeat_interleave_batch_dim(data, repeats)
+    for k in data:
+        assert intermediate[k].shape == (n_samples * repeats, 5, 5)
+    result = reshape_with_sample_dim(intermediate, repeats)
+    for k in data:
+        assert result[k].shape == (n_samples, repeats, 5, 5)
+        assert torch.allclose(result[k], data[k][:, None, :, :])
 
 
 @pytest.mark.parametrize(
@@ -1244,3 +1307,15 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
     for k, v in data.target_data.items():
         return_dict[f"target_data.{k}"] = v
     return return_dict
+
+
+def test_set_train_eval():
+    stepper = _get_stepper(["a"], ["a"])
+    for module in stepper.modules:
+        assert module.training
+    stepper.set_eval()
+    for module in stepper.modules:
+        assert not module.training
+    stepper.set_train()
+    for module in stepper.modules:
+        assert module.training

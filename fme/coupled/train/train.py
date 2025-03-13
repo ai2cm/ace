@@ -5,7 +5,6 @@ from datetime import timedelta
 from typing import Callable, Mapping, Optional, Sequence
 
 import dacite
-import dask
 import torch
 import xarray as xr
 
@@ -30,9 +29,6 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
-
-# dask used on individual workers to load batches
-dask.config.set(scheduler="synchronous")
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
@@ -62,8 +58,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         inference_config=config.inference_aggregator,
         gridded_operations=train_data.gridded_operations,
         horizontal_coordinates=train_data.horizontal_coordinates,
-        ocean_timestep=stepper.ocean_timestep,
-        atmosphere_timestep=stepper.atmosphere_timestep,
+        ocean_timestep=builder.ocean_timestep,
+        atmosphere_timestep=builder.atmosphere_timestep,
         initial_inference_times=initial_inference_times,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
@@ -72,6 +68,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
         ocean_loss_scaling=stepper.ocean.effective_loss_scaling,
         atmosphere_loss_scaling=stepper.atmosphere.effective_loss_scaling,
         variable_metadata=train_data.variable_metadata,
+        save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        output_dir=config.output_dir,
     )
     return Trainer(
         train_data=train_data,
@@ -99,11 +97,13 @@ class CoupledAggregatorBuilder(
         initial_inference_times: xr.DataArray,
         n_timesteps_ocean: int,
         n_timesteps_atmosphere: int,
+        output_dir: str,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         ocean_loss_scaling: Optional[TensorMapping] = None,
         atmosphere_loss_scaling: Optional[TensorMapping] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
@@ -113,21 +113,25 @@ class CoupledAggregatorBuilder(
         self.initial_inference_times = initial_inference_times
         self.n_timesteps_ocean = n_timesteps_ocean
         self.n_timesteps_atmosphere = n_timesteps_atmosphere
+        self.output_dir = output_dir
         self.variable_metadata = variable_metadata
         self.ocean_normalize = ocean_normalize
         self.atmosphere_normalize = atmosphere_normalize
         self.ocean_loss_scaling = ocean_loss_scaling
         self.atmosphere_loss_scaling = atmosphere_loss_scaling
+        self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
 
     def get_validation_aggregator(self) -> OneStepAggregator:
         return OneStepAggregator(
-            gridded_operations=self.gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             ocean_loss_scaling=self.ocean_loss_scaling,
             atmosphere_loss_scaling=self.atmosphere_loss_scaling,
+            save_diagnostics=self.save_per_epoch_diagnostics,
+            output_dir=os.path.join(self.output_dir, "val"),
         )
 
     def get_inference_aggregator(self):
@@ -141,6 +145,8 @@ class CoupledAggregatorBuilder(
             ocean_normalize=self.ocean_normalize,
             atmosphere_normalize=self.atmosphere_normalize,
             variable_metadata=self.variable_metadata,
+            save_diagnostics=self.save_per_epoch_diagnostics,
+            output_dir=os.path.join(self.output_dir, "inference"),
         )
 
 

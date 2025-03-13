@@ -12,18 +12,20 @@
 
 import abc
 import dataclasses
+import logging
 import os
 import sys
+import time
 from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 import click
 import dacite
+import distributed
 import fsspec
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: F401
 import yaml
-from dask.diagnostics import ProgressBar
 
 try:
     from xtorch_harmonics import roundtrip_filter
@@ -46,6 +48,7 @@ SPECIFIC_TOTAL_WATER = "specific_total_water"
 # lat-lon 3D variables. This is the water path we want to use for training. It is not
 # necessarily exactly equal to the precipitable water path computed online by FV3GFS.
 TOTAL_WATER_PATH = "total_water_path"
+SURFACE_FROZEN_PRECIPITATION_NAME = "total_frozen_precipitation_rate"
 
 
 @dataclasses.dataclass
@@ -62,6 +65,10 @@ class StandardNameMapping(StandardDimMapping):
     surface_pressure: str = "PRESsfc"
     latent_heat_flux: str = "LHTFLsfc"
     precip_rate: str = "PRATEsfc"
+    surface_snow_rate: str = "SNOWsfc"
+    surface_ice_rate: str = "ICEsfc"
+    surface_graupel_rate: str = "GRAUPELsfc"
+    total_frozen_precip_rate: str = "total_frozen_precipitation_rate"
     precipitable_water_path: str = "precipitable_water_path"
     pressure_thickness: str = "pressure_thickness_of_atmospheric_layer"
     air_temperature: str = "air_temperature"
@@ -78,12 +85,16 @@ class StandardNameMapping(StandardDimMapping):
     ocean_fraction: str = "ocean_fraction"
     sea_ice_fraction: str = "sea_ice_fraction"
     hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
+    additional_vertically_resolved_names: List[str] = dataclasses.field(
+        default_factory=list
+    )
 
     def __post_init__(self):
         self.horizontal_dims: List[str] = [self.longitude_dim, self.latitude_dim]
 
         self.specific_total_water = SPECIFIC_TOTAL_WATER
         self.total_water_path = TOTAL_WATER_PATH
+        self.total_frozen_precip_rate_output_name = SURFACE_FROZEN_PRECIPITATION_NAME
         self.pwat_tendency = f"tendency_of_{self.total_water_path}"
         self.time_derivative_names = [self.total_water_path]
 
@@ -92,7 +103,7 @@ class StandardNameMapping(StandardDimMapping):
             self.air_temperature,
             self.northward_wind,
             self.eastward_wind,
-        ]
+        ] + self.additional_vertically_resolved_names
 
         # variables to drop after all derived variables are computed
         self.dropped_variables: List[str] = (
@@ -100,8 +111,14 @@ class StandardNameMapping(StandardDimMapping):
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim]
         )
-        if self.precipitable_water_path.lower() != "none":
-            self.dropped_variables.append(self.precipitable_water_path)
+        for name in [
+            self.precipitable_water_path,
+            self.surface_graupel_rate,
+            self.surface_ice_rate,
+            self.surface_snow_rate,
+        ]:
+            if name.lower() != "none":
+                self.dropped_variables.append(name)
 
     @property
     def water_species(self) -> List[str]:
@@ -117,6 +134,23 @@ class StandardNameMapping(StandardDimMapping):
             ]
             if item.lower() != "none"
         ]
+
+    @property
+    def frozen_precipitation_species(self) -> List[str]:
+        if self.total_frozen_precip_rate.lower() != "none":
+            # if total frozen precip rate is available, just use that
+            return [self.total_frozen_precip_rate]
+        else:
+            # return all frozen precip species
+            return [
+                item
+                for item in [
+                    self.surface_graupel_rate,
+                    self.surface_ice_rate,
+                    self.surface_snow_rate,
+                ]
+                if item.lower() != "none"
+            ]
 
 
 @dataclasses.dataclass
@@ -140,7 +174,7 @@ class DLWPNameMapping(StandardNameMapping):
 
 @dataclasses.dataclass
 class _ChunkingConfig(abc.ABC):
-    time_dim: int = 160
+    time_dim: int = 1
 
     @abc.abstractmethod
     def get_chunks(self, standard_names: StandardDimMapping) -> Dict[str, int]: ...
@@ -199,7 +233,12 @@ class DatasetComputationConfig:
         standard_names: (optional) mapping of standard names to corresponding
             names of variables in the dataset.
         chunking: (optional) mapping of standard dimension names to desired
-            output chunk sizes
+            output inner chunk sizes. Defaults to a chunk size of 1 along
+            the time dimension.
+        sharding: (optional) mapping of standard dimension names to desired
+            output shard sizes. Defaults to a shard size of 360 along the time
+            dimension. If None, then an unsharded zarr store will be written
+            with chunks as specified in ``chunking``.
         time_invariant_dir: (optional) path to directory containing time-invariant data
             This option is used for E3SMv2 dataset.
     """
@@ -214,7 +253,10 @@ class DatasetComputationConfig:
         default_factory=StandardNameMapping
     )
     chunking: Union[ChunkingConfig, DLWPChunkingConfig] = dataclasses.field(
-        default_factory=ChunkingConfig
+        default_factory=lambda: ChunkingConfig(time_dim=1)
+    )
+    sharding: Optional[Union[ChunkingConfig, DLWPChunkingConfig]] = dataclasses.field(
+        default_factory=lambda: ChunkingConfig(time_dim=360)
     )
     time_invariant_dir: Optional[str] = None
 
@@ -263,7 +305,7 @@ def open_datasets(
     datasets = []
     for store, names in config.variable_sources.items():
         url = urls[store]
-        ds = xr.open_zarr(url)[names]
+        ds = xr.open_zarr(url, decode_timedelta=True)[names]
         datasets.append(ds)
     return xr.merge(datasets, compat="equals")
 
@@ -304,7 +346,7 @@ def get_coarse_ak_bk(
         data[f"ak_{i}"].attrs["units"] = "Pa"
         data[f"bk_{i}"].attrs["units"] = ""  # unitless quantity
         for name in ["ak", "bk"]:
-            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop([z_dim, time_dim])
+            data[f"{name}_{i}"] = data[f"{name}_{i}"].drop_vars([z_dim, time_dim])
     return xr.Dataset(data)
 
 
@@ -342,7 +384,7 @@ def compute_latent_heat_flux(
     latent_heat_flux = ds[evaporation_name] * LATENT_HEAT_OF_VAPORIZATION
     latent_heat_flux.attrs["units"] = "W/m^2"
     latent_heat_flux.attrs["long_name"] = "Latent heat flux"
-    return ds.assign({output_name: latent_heat_flux}).drop(evaporation_name)
+    return ds.assign({output_name: latent_heat_flux}).drop_vars(evaporation_name)
 
 
 def compute_specific_total_water(
@@ -355,6 +397,16 @@ def compute_specific_total_water(
     specific_total_water.attrs["units"] = "kg/kg"
     specific_total_water.attrs["long_name"] = output_name.replace("_", " ")
     return ds.assign({output_name: specific_total_water})
+
+
+def compute_frozen_precipitation_rate(
+    ds: xr.Dataset, frozen_precip_names: Sequence[str], output_name: str
+) -> xr.Dataset:
+    """Compute the total surface frozen precipitation rate."""
+    frozen_precip: xr.DataArray = sum([ds[name] for name in frozen_precip_names])
+    frozen_precip.attrs["units"] = ds[frozen_precip_names[0]].units
+    frozen_precip.attrs["long_name"] = "Total surface frozen precipitation rate"
+    return ds.assign({output_name: frozen_precip})
 
 
 def compute_pressure_thickness(
@@ -467,8 +519,10 @@ def assert_column_integral_of_moisture_is_conserved(
     fregrid tool doing area-weighted average instead of mass-weighted."""
     expected_pwat = ds[precipitable_water_path_name]
     integrated_pwat = ds[total_water_path_name]
-    print("Mean absolute difference between expected and integrated pwat [kg/m^2]:")
-    print(np.abs(expected_pwat - integrated_pwat).mean().values)
+    logging.info(
+        f"Mean absolute difference between expected and integrated pwat [kg/m^2]: "
+        f"{np.abs(expected_pwat - integrated_pwat).mean().values}"
+    )
     xr.testing.assert_allclose(integrated_pwat, expected_pwat, rtol=1e-1, atol=1e-3)
 
 
@@ -492,8 +546,10 @@ def assert_global_dry_air_mass_conservation(
         global_dry_air_mass = column_dry_air_mass.mean(dim=dims)
 
     global_dry_air_mass_tendency = global_dry_air_mass.diff(time_dim)
-    print("Mean absolute global dry air pressure tendency [Pa]:")
-    print(np.abs(global_dry_air_mass_tendency).mean().values)
+    logging.info(
+        f"Mean absolute global dry air pressure tendency [Pa]: "
+        f"{np.abs(global_dry_air_mass_tendency).mean().values}"
+    )
     xr.testing.assert_allclose(
         global_dry_air_mass_tendency,
         xr.zeros_like(global_dry_air_mass_tendency),
@@ -524,9 +580,11 @@ def assert_global_moisture_conservation(
     expected_global_moisture_tendency = (
         evap_minus_precip.weighted(weights).mean(dim=dims).isel(time=slice(1, None))
     )
-    print("Mean absolute global moisture non-conservative source [kg/m^2/s]:")
     diff = actual_global_moisture_tendency - expected_global_moisture_tendency
-    print(np.abs(diff).mean().values)
+    logging.info(
+        f"Mean absolute global moisture non-conservative source [kg/m^2/s]: "
+        f"{np.abs(diff).mean().values}"
+    )
     xr.testing.assert_allclose(
         expected_global_moisture_tendency, actual_global_moisture_tendency
     )
@@ -541,7 +599,7 @@ def construct_lazy_dataset(
     for var in ds:
         del ds[var].encoding["chunks"]
         del ds[var].encoding["preferred_chunks"]
-    print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+    logging.info(f"Input dataset size is {ds.nbytes / 1e9} GB")
 
     if config.roundtrip_fraction_kept is not None:
         ds = roundtrip_filter(
@@ -565,6 +623,11 @@ def construct_lazy_dataset(
         ds,
         water_condensate_names=standard_names.water_species,
         output_name=standard_names.specific_total_water,
+    )
+    ds = compute_frozen_precipitation_rate(
+        ds,
+        frozen_precip_names=standard_names.frozen_precipitation_species,
+        output_name=standard_names.total_frozen_precip_rate_output_name,
     )
     ds = compute_pressure_thickness(
         ds,
@@ -604,8 +667,14 @@ def construct_lazy_dataset(
         config.vertical_coarsening_indices,
     )
     ds = xr.merge([ds, ak_bk_ds])
-    chunks = config.chunking.get_chunks(standard_names)
-    ds = ds.chunk(chunks)
+
+    if config.sharding is None:
+        outer_chunks = config.chunking.get_chunks(standard_names)
+    else:
+        outer_chunks = config.sharding.get_chunks(standard_names)
+
+    ds = ds.chunk(outer_chunks)
+
     ds.attrs["history"] = (
         "Dataset computed by full-model/scripts/data_process"
         "/compute_dataset_fv3gfs.py"
@@ -618,6 +687,26 @@ def construct_lazy_dataset(
         "volume layer, counting down from the top of atmosphere."
     )
     ds = ds.rename(config.renaming)
+    return ds
+
+
+def clear_compressors_encoding(ds: xr.Dataset) -> xr.Dataset:
+    """Clear "compressors" encoding of the Dataset.
+
+    This ensures that we use zarr's default zstd encoding when writing out the
+    Dataset. It also helps avoid errors resulting from lingering zarr v2
+    compression encoding parameters that are not compatible with zarr v3.
+
+    Args:
+        ds: input xr.Dataset to remove "compressors" encoding from.
+
+    Returns:
+        xr.Dataset with the "compressors" key in the encoding dictionary of
+        each variable removed, if it exists.
+    """
+    ds = ds.copy(deep=False)
+    for variable in {**ds.coords, **ds.data_vars}.values():
+        variable.encoding.pop("compressors", None)
     return ds
 
 
@@ -636,9 +725,12 @@ def main(
     subsample,
     check_conservation,
 ):
+    logging.basicConfig(level=logging.INFO)
+    distributed.Client(n_workers=16)
+
     config = DatasetConfig.from_file(config).dataset_computation
-    print(f"--run-directory is {run_directory}")
-    print(f"--output-store is {output_store}")
+    logging.info(f"--run-directory is {run_directory}")
+    logging.info(f"--output-store is {output_store}")
     standard_names = config.standard_names
     xr.set_options(keep_attrs=True)
     ds = construct_lazy_dataset(config, run_directory)
@@ -668,23 +760,34 @@ def main(
             precip_rate_name=standard_names.precip_rate,
             time_dim=standard_names.time_dim,
         )
-    ds = ds.drop(standard_names.dropped_variables)
-    print(f"Output dataset size is {ds.nbytes / 1e9} GB")
+    ds = ds.drop_vars(standard_names.dropped_variables)
+
+    if config.sharding is None:
+        inner_chunks = None
+    else:
+        inner_chunks = config.chunking.get_chunks(standard_names)
+
+    ds = clear_compressors_encoding(ds)
+
+    logging.info(f"Output dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
-            print(ds)
+            logging.info(ds)
     else:
-        ds.partition.initialize_store(output_store)
+        ds.partition.initialize_store(output_store, inner_chunks=inner_chunks)
         for i in range(config.n_split):
-            print(f"Writing segment {i + 1} / {config.n_split}")
-            with ProgressBar():
-                ds.partition.write(
-                    output_store,
-                    config.n_split,
-                    [config.standard_names.time_dim],
-                    i,
-                    collect_variable_writes=True,
-                )
+            segment_number = f"{i + 1} / {config.n_split}"
+            logging.info(f"Writing segment {segment_number}")
+            segment_time = time.time()
+            ds.partition.write(
+                output_store,
+                config.n_split,
+                [config.standard_names.time_dim],
+                i,
+                collect_variable_writes=True,
+            )
+            segment_time = time.time() - segment_time
+            logging.info(f"Segment {segment_number} time: {segment_time:0.2f} seconds")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ NAME_CLIMSST_1DEG = fv3gfs-ensemble
 NAME_CLIMSST_4DEG = fv3gfs-ensemble-4deg
 NAME_AMIP_1DEG = fv3gfs-AMIP-ensemble
 NAME_AMIP_4DEG = fv3gfs-AMIP-ensemble-4deg
+ATMOSPHERE_PROCESSING_IMAGE = us-central1-docker.pkg.dev/vcm-ml/full-model/atmosphere-processing
+ATMOSPHERE_PROCESSING_IMAGE_VERSION = v2025.03.1  # Use vYYYY.MM.MICRO (MICRO is zero-indexed)
 
 ifeq ($(RESOLUTION),1deg)
 	ROOT_INTERMEDIATE ?= $(ROOT_INTERMEDIATE_CLIMSST_1DEG)
@@ -241,13 +243,18 @@ compute_cm4_trial_run_atmosphere_dataset:
 compute_cm4_trial_run_atmosphere_stats:
 	python -u get_stats.py configs/pre-industrial-CM4-1deg-8layer-trial-run.yaml 0
 
-.PHONY: build_docker_image
-build_docker_image:
-	docker build -f beakerpy.Dockerfile -t us.gcr.io/vcm-ml/beaker-py .
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr
+cm4_picontrol_atmosphere_1deg_8layer_200yr:
+	./compute_dataset.sh --config configs/CM4-piControl-atmosphere-1deg-8layer-200yr.yaml
 
-.PHONY: push_docker_image
-push_docker_image: build_docker_image
-	docker push us.gcr.io/vcm-ml/beaker-py
+.PHONY: cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs
+cm4_picontrol_atmosphere_1deg_8layer_200yr_monthly_netcdfs:
+	./convert_to_monthly_netcdf_fv3gfs.sh \
+	--input-url $(NC_INPUT) \
+	--n-ic 1 \
+	--output-dir $(NC_OUTPUT) \
+	--start-date "0151-01-01T06:00:00" \
+	--end-date "0351-01-01T00:00:00"
 
 create_ocean_data_proc_env:
 	conda create -y -n ocean_data_proc python=3.10 pip yq
@@ -268,3 +275,14 @@ shield_som_c96_abrupt4xCO2_ensemble_dataset:
 shield_som_c96_idealized_0p1_heating_ensemble_dataset:
 	./compute_dataset.sh --config configs/shield-som-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
 
+.PHONY: shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset
+shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset:
+	./compute_dataset.sh --config configs/shield-som-increasing-co2-with-3d-heating-rate-diagnostics-1deg-$(LAYERS).yaml
+
+.PHONY: build_atmosphere_processing_image
+build_atmosphere_processing_image:
+	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
+
+.PHONY: push_atmosphere_processing_image
+push_atmosphere_processing_image:
+	docker push $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION)

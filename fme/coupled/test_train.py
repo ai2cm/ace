@@ -15,6 +15,7 @@ from .train.train import main as train_main
 _TRAIN_CONFIG_TEMPLATE = """
 experiment_dir: {experiment_dir}
 save_checkpoint: true
+save_per_epoch_diagnostics: {save_per_epoch_diagnostics}
 max_epochs: {max_epochs}
 n_coupled_steps: {n_coupled_steps}
 logging:
@@ -71,7 +72,6 @@ optimization:
   optimizer_type: Adam
 stepper:
   sst_name: {ocean_sfc_temp_name}
-  sst_mask_name: {ocean_sfc_mask_name}
   ocean:
     timedelta: 2D
     stepper:
@@ -81,6 +81,9 @@ stepper:
             ch_width: [8, 16]
             dilation: [2, 4]
             n_layers: [1, 1]
+            norm: batch
+            norm_kwargs:
+                track_running_stats: false
       loss:
         type: MSE
       normalization:
@@ -168,8 +171,9 @@ def _write_test_yaml_files(
     log_zonal_mean_images: bool = False,
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
+    save_per_epoch_diagnostics: bool = True,
 ):
-    exper_dir = tmp_path / "output"
+    exper_dir = tmp_path / "results"
     ocean_next_step_forcing_names = list(
         set(atmos_out_names).intersection(ocean_in_names)
     )
@@ -192,6 +196,7 @@ def _write_test_yaml_files(
         atmos_sfc_temp_name=atmos_sfc_temp_name,
         ocean_frac_name=ocean_frac_name,
         log_zonal_mean_images=str(log_zonal_mean_images).lower(),
+        save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -260,6 +265,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
 
     ocean_in_names = ["DLWRFsfc", "thetao_0", "thetao_1", "sst", "mask_0", "mask_1"]
     ocean_out_names = ["thetao_0", "thetao_1", "sst"]
+    ocean_derived_names = ["ocean_heat_content"]
     atmos_in_names = [
         "DLWRFsfc",
         "PRESsfc",
@@ -280,7 +286,9 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         "surface_pressure_due_to_dry_air_absolute_tendency",
         "total_water_path",
     ]
-    all_out_names = ocean_out_names + atmos_out_names + atmos_derived_names
+    all_out_names = (
+        ocean_out_names + ocean_derived_names + atmos_out_names + atmos_derived_names
+    )
 
     train_config_fname, inference_config_fname = _write_test_yaml_files(
         tmp_path,
@@ -321,7 +329,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
-    ocean_weight = len(ocean_out_names) / len(all_out_names)
+    ocean_weight = len(ocean_out_names + ocean_derived_names) / len(all_out_names)
     assert np.isclose(
         epoch_logs["inference/time_mean_norm/rmse/channel_mean"],
         (
@@ -344,11 +352,38 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         assert "[unknown_units]" not in captions[0]
         assert "[m]" in captions[0]  # set by _save_netcdf
 
+    for domain in ("ocean", "atmosphere"):
+        validation_output_dir = (
+            tmp_path / "results" / "output" / "val" / domain / "epoch_0001"
+        )
+        assert validation_output_dir.exists()
+        for diagnostic in ("mean", "snapshot", "mean_map"):
+            diagnostic_output = validation_output_dir / f"{diagnostic}_diagnostics.nc"
+            assert diagnostic_output.exists()
+            ds = xr.open_dataset(diagnostic_output)
+            assert len(ds) > 0
+
+    for domain in ("ocean", "atmosphere"):
+        inline_inference_output_dir = (
+            tmp_path / "results" / "output" / "inference" / domain / "epoch_0001"
+        )
+        assert inline_inference_output_dir.exists()
+        for diagnostic in (
+            "time_mean",
+            "time_mean_norm",
+        ):
+            diagnostic_output = (
+                inline_inference_output_dir / f"{diagnostic}_diagnostics.nc"
+            )
+            assert diagnostic_output.exists()
+            ds = xr.open_dataset(diagnostic_output)
+            assert len(ds) > 0
+
     best_checkpoint_path = (
-        tmp_path / "output" / "training_checkpoints" / "best_ckpt.tar"
+        tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar"
     )
     best_inference_checkpoint_path = (
-        tmp_path / "output" / "training_checkpoints" / "best_inference_ckpt.tar"
+        tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
     assert best_inference_checkpoint_path.exists()
@@ -377,11 +412,11 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in inference_logs[-1]
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in inference_logs[-1]
 
-    ocean_output_path = tmp_path / "output" / "ocean" / "autoregressive_predictions.nc"
+    ocean_output_path = tmp_path / "results" / "ocean" / "autoregressive_predictions.nc"
     assert ocean_output_path.exists()
 
     atmosphere_output_path = (
-        tmp_path / "output" / "atmosphere" / "autoregressive_predictions.nc"
+        tmp_path / "results" / "atmosphere" / "autoregressive_predictions.nc"
     )
     assert atmosphere_output_path.exists()
 

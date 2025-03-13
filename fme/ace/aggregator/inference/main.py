@@ -1,17 +1,7 @@
 import dataclasses
 import datetime
 import warnings
-from typing import (
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    Optional,
-    Protocol,
-    Sequence,
-    Union,
-)
+from typing import Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Union
 
 import torch
 import xarray as xr
@@ -19,6 +9,7 @@ import xarray as xr
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
 from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
     InferenceLog,
@@ -151,10 +142,14 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: Optional[str] = None,
         record_step_20: bool = False,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
+        save_diagnostics: bool = True,
     ) -> "InferenceEvaluatorAggregator":
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics.")
         if self.monthly_reference_data is None:
             monthly_reference_data = None
         else:
@@ -181,6 +176,7 @@ class InferenceEvaluatorAggregatorConfig:
             timestep=timestep,
             n_timesteps=n_timesteps,
             initial_time=initial_time,
+            output_dir=output_dir,
             log_histograms=self.log_histograms,
             log_video=self.log_video,
             enable_extended_videos=self.log_extended_video,
@@ -194,6 +190,7 @@ class InferenceEvaluatorAggregatorConfig:
             variable_metadata=variable_metadata,
             channel_mean_names=channel_mean_names,
             normalize=normalize,
+            save_diagnostics=save_diagnostics,
         )
 
 
@@ -217,6 +214,7 @@ class InferenceEvaluatorAggregator(
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
+        output_dir: Optional[str] = None,
         record_step_20: bool = False,
         log_video: bool = False,
         enable_extended_videos: bool = False,
@@ -230,6 +228,7 @@ class InferenceEvaluatorAggregator(
         time_mean_reference_data: Optional[xr.Dataset] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
         log_nino34_index: bool = True,
+        save_diagnostics: bool = True,
     ):
         """
         Args:
@@ -237,6 +236,7 @@ class InferenceEvaluatorAggregator(
             timestep: Timestep of the model.
             n_timesteps: Number of timesteps of inference that will be run.
             initial_time: Initial time for each sample.
+            output_dir: Directory to save diagnostic output.
             normalize: Normalization function to use.
             record_step_20: Whether to record the mean of the 20th steps.
             log_video: Whether to log videos of the state evolution.
@@ -257,12 +257,18 @@ class InferenceEvaluatorAggregator(
             channel_mean_names: Names over which to compute channel means. If not
                 provided, all available variables will be used.
             log_nino34_index: Whether to log the Nino34 index.
+            save_diagnostics: Whether to save reduced diagnostics to disk.
         """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
         self._aggregators: Dict[str, _EvaluatorAggregator] = {}
         self._time_dependent_aggregators: Dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
+        self._save_diagnostics = save_diagnostics
+        self._output_dir = output_dir
+        self._coords = horizontal_coordinates.coords
         ops = horizontal_coordinates.gridded_operations
         self._log_time_series = (
             log_global_mean_time_series or log_global_mean_norm_time_series
@@ -486,33 +492,20 @@ class InferenceEvaluatorAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def get_datasets(
-        self, excluded_aggregators: Optional[Iterable[str]] = None
-    ) -> Dict[str, xr.Dataset]:
-        """
-        Returns datasets from combined aggregators.
-
-        Args:
-            excluded_aggregators: aggregator names for which `get_dataset`
-                should not be called and no output should be returned.
-
-        Returns:
-            Dictionary of datasets from aggregators.
-        """
-        if excluded_aggregators is None:
-            excluded_aggregators = []
-
-        combined_aggregators: Dict[
-            str, Union[_Aggregator, _TimeDependentAggregator]
-        ] = {
-            **self._aggregators,
-            **self._time_dependent_aggregators,
-        }
-        return {
-            name: agg.get_dataset()
-            for name, agg in combined_aggregators.items()
-            if name not in excluded_aggregators
-        }
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        if self._save_diagnostics:
+            reduced_diagnostics = get_reduced_diagnostics(
+                sub_aggregators=(self._aggregators | self._time_dependent_aggregators),
+                coords=self._coords,
+            )
+            if self._output_dir is not None:
+                write_reduced_diagnostics(
+                    reduced_diagnostics=reduced_diagnostics,
+                    output_dir=self._output_dir,
+                    subdir=subdir,
+                )
+            else:
+                raise ValueError("Output directory not set.")
 
 
 def to_inference_logs(
@@ -568,6 +561,7 @@ class InferenceAggregatorConfig:
         horizontal_coordinates: HorizontalCoordinates,
         n_timesteps: int,
         timestep: datetime.timedelta,
+        output_dir: str,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
@@ -578,6 +572,7 @@ class InferenceAggregatorConfig:
             horizontal_coordinates=horizontal_coordinates,
             n_timesteps=n_timesteps,
             timestep=timestep,
+            output_dir=output_dir,
             variable_metadata=variable_metadata,
             time_mean_reference_data=time_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
@@ -602,6 +597,8 @@ class InferenceAggregator(
         horizontal_coordinates: HorizontalCoordinates,
         n_timesteps: int,
         timestep: datetime.timedelta,
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         time_mean_reference_data: Optional[xr.Dataset] = None,
         log_global_mean_time_series: bool = True,
@@ -611,12 +608,19 @@ class InferenceAggregator(
             horizontal_coordinates: Data horizontal coordinates.
             n_timesteps: Number of timesteps in the model.
             timestep: Timestep of the model.
+            save_diagnostics: Whether to save diagnostics.
+            output_dir: Directory to save diagnostic output.
             variable_metadata: Mapping of variable names their metadata that will
                 used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
             log_global_mean_time_series: Whether to log global mean time series metrics.
         """
+        if save_diagnostics and output_dir is None:
+            raise ValueError("Output directory must be set to save diagnostics")
         self._log_time_series = log_global_mean_time_series
+        self._coords = horizontal_coordinates.coords
+        self._save_diagnostics = save_diagnostics
+        self._output_dir = output_dir
         aggregators: Dict[str, _Aggregator] = {}
         gridded_operations = horizontal_coordinates.gridded_operations
         if log_global_mean_time_series:
@@ -752,24 +756,17 @@ class InferenceAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def get_datasets(
-        self, excluded_aggregators: Optional[Iterable[str]] = None
-    ) -> Dict[str, xr.Dataset]:
-        """
-        Returns datasets from combined aggregators.
-
-        Args:
-            excluded_aggregators: aggregator names for which `get_dataset`
-                should not be called and no output should be returned.
-
-        Returns:
-            Dictionary of datasets from aggregators.
-        """
-        if excluded_aggregators is None:
-            excluded_aggregators = []
-
-        return {
-            name: agg.get_dataset()
-            for name, agg in self._aggregators.items()
-            if name not in excluded_aggregators
-        }
+    def flush_diagnostics(self, subdir: Optional[str] = None):
+        if self._save_diagnostics:
+            reduced_diagnostics = get_reduced_diagnostics(
+                sub_aggregators=self._aggregators,
+                coords=self._coords,
+            )
+            if self._output_dir is not None:
+                write_reduced_diagnostics(
+                    reduced_diagnostics=reduced_diagnostics,
+                    output_dir=self._output_dir,
+                    subdir=subdir,
+                )
+            else:
+                raise ValueError("Output directory is not set.")

@@ -61,3 +61,11 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
     @abc.abstractmethod
     def predict_paired(self) -> PredictFunction[PS, FD, SD]:
         pass
+
+    def set_eval(self) -> None:
+        for module in self.modules:
+            module.eval()
+
+    def set_train(self) -> None:
+        for module in self.modules:
+            module.train()

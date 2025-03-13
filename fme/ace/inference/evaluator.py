@@ -15,11 +15,7 @@ from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
-from fme.ace.inference.loop import (
-    DeriverABC,
-    run_dataset_comparison,
-    write_reduced_metrics,
-)
+from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
 from fme.ace.stepper import (
     SingleModuleStepper,
     SingleModuleStepperConfig,
@@ -207,11 +203,8 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     )
 
     stepper = config.load_stepper()
-    if stepper.timestep != data.timestep:
-        raise ValueError(
-            f"Timestep of the loaded stepper, {stepper.timestep}, does not "
-            f"match that of the forcing data, {data.timestep}."
-        )
+    stepper.set_eval()
+    stepper.validate_inference_data(data)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:
@@ -225,8 +218,9 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         n_timesteps=config.n_forward_steps + stepper_config.n_ic_timesteps,
         variable_metadata=variable_metadata,
         initial_time=initial_time,
-        channel_mean_names=stepper.out_names,
+        channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
+        output_dir=config.experiment_dir,
     )
 
     writer = config.get_data_writer(data)
@@ -266,14 +260,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging.info("Starting final flush of data writer")
     writer.flush()
     logging.info("Writing reduced metrics to disk in netcdf format.")
-    write_reduced_metrics(
-        aggregator,
-        data.coords,
-        config.experiment_dir,
-        excluded=[
-            "video",
-        ],
-    )
+    aggregator.flush_diagnostics()
     timer.stop()
 
     timer.stop_outer("inference")

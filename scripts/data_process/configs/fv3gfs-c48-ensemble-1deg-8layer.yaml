@@ -75,3 +75,5 @@ dataset_computation:
       - ocean_fraction
       - sea_ice_fraction
   roundtrip_fraction_kept: 0.65
+  standard_names:
+    total_frozen_precip_rate: None

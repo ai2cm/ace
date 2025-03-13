@@ -86,3 +86,5 @@ dataset_computation:
       - land_fraction
       - ocean_fraction
       - sea_ice_fraction
+  standard_names:
+    total_frozen_precip_rate: None

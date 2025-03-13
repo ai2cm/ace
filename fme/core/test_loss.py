@@ -8,11 +8,12 @@ from fme.core.loss import (
     AreaWeightedMSELoss,
     GlobalMeanLoss,
     LossConfig,
-    MappingLoss,
     VariableWeightingLoss,
+    WeightedMappingLoss,
     WeightedMappingLossConfig,
     _construct_weight_tensor,
 )
+from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 
 
@@ -38,7 +39,12 @@ def test_loss_of_zeros_is_variance():
     result = loss(x, y)
     assert result.shape == ()
     assert isinstance(result, torch.Tensor)
-    tol = {"rtol": 1e-4, "atol": 1e-4} if str(get_device()).startswith("cuda") else {}
+    if str(get_device()).startswith("cuda"):
+        tol = {"rtol": 1e-4, "atol": 1e-4}
+    elif str(get_device()).startswith("mps"):
+        tol = {"rtol": 1e-3, "atol": 1e-3}
+    else:
+        tol = {}
     torch.testing.assert_close(result, y.var(), **tol)
 
 
@@ -118,11 +124,23 @@ def test__construct_weight_tensor():
             assert torch.allclose(weighted_gen_data[:, i], gen_data[:, i])
 
 
-def test_MappingLoss():
+@pytest.mark.parametrize("mean", [0.0, 1.0])
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_WeightedMappingLoss(mean, scale):
     loss = torch.nn.MSELoss()
     n_channels = 5
     packer = Packer([f"var_{i}" for i in range(n_channels)])
-    mapping_loss = MappingLoss(loss, packer)
+    out_names = [f"var_{i}" for i in range(n_channels)]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(mean) for name in out_names},
+        stds={name: torch.as_tensor(scale) for name in out_names},
+    )
+    mapping_loss = WeightedMappingLoss(
+        loss,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
     x = torch.randn(
         15,
         n_channels,
@@ -137,7 +155,7 @@ def test_MappingLoss():
     ).to(get_device(), dtype=torch.float)
     x_mapping = {name: x[:, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, i, :, :] for i, name in enumerate(packer.names)}
-    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y))
+    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
 
 
 def test_VariableWeightingLoss():
@@ -166,7 +184,16 @@ def test_WeightedMappingLossConfig_no_weights():
     area_weighted_mean = LatLonOperations(area).area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
     loss = loss_config.build(area_weighted_mean, reduction="mean")
-    mapping_loss = mapping_loss_config.build(area_weighted_mean, out_names, channel_dim)
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    mapping_loss = mapping_loss_config.build(
+        area_weighted_mean,
+        out_names=out_names,
+        channel_dim=channel_dim,
+        normalizer=normalizer,
+    )
     packer = Packer(out_names)
 
     x_mapping = {name: torch.randn(4, 5, 5).to(get_device()) for name in out_names}
@@ -184,8 +211,15 @@ def test_WeightedMappingLossConfig_weights():
     mapping_loss_config = WeightedMappingLossConfig(
         type="MSE", weights={"var_0": 4.0, "var_1": 1.0}
     )
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
     mapping_loss = mapping_loss_config.build(
-        LatLonOperations(area).area_weighted_mean, out_names, channel_dim
+        LatLonOperations(area).area_weighted_mean,
+        out_names=out_names,
+        channel_dim=channel_dim,
+        normalizer=normalizer,
     )
 
     x0 = torch.ones(4, 5, 5).to(get_device())

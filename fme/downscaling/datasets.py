@@ -443,6 +443,15 @@ class DataLoaderConfig:
             else None
         )
 
+        if properties_coarse.is_remote or properties_fine.is_remote:
+            # GCSFS and S3FS are not fork-safe, so we need to use forkserver
+            # these settings also work in the case of one or both datasets being local
+            mp_context = "forkserver"
+            persistent_workers = True
+        else:
+            mp_context = None
+            persistent_workers = False
+
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -452,6 +461,8 @@ class DataLoaderConfig:
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=BatchData.from_sample_tuples,
+            multiprocessing_context=mp_context,
+            persistent_workers=persistent_workers,
         )
 
         area_weights = FineResCoarseResPair(

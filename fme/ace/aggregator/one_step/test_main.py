@@ -5,8 +5,8 @@ import xarray as xr
 
 from fme.ace.aggregator.one_step import OneStepAggregator
 from fme.ace.stepper import TrainOutput
+from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 
 
 def test_labels_exist():
@@ -14,8 +14,12 @@ def test_labels_exist():
     n_time = 3
     nx, ny = 2, 2
     loss = 1.0
-    area_weights = torch.ones(ny).to(get_device())
-    agg = OneStepAggregator(LatLonOperations(area_weights))
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    agg = OneStepAggregator(
+        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
+    )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
     agg.record_batch(
@@ -42,9 +46,13 @@ def test_aggregator_raises_on_no_data():
     Basic test the aggregator combines loss correctly
     with multiple batches and no distributed training.
     """
-    ny = 2
-    area_weights = torch.ones(ny).to(get_device())
-    agg = OneStepAggregator(LatLonOperations(area_weights))
+    nx, ny = 2, 2
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
+    agg = OneStepAggregator(
+        lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
+    )
     with pytest.raises(ValueError) as excinfo:
         agg.record_batch(
             batch=TrainOutput(
@@ -64,11 +72,14 @@ def test__get_loss_scaled_mse_components():
         "a": torch.tensor(1.0),
         "b": torch.tensor(0.5),
     }
+    nx, ny = 10, 10
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    # keep area weights ones for simplicity
+    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
     agg = OneStepAggregator(
-        gridded_operations=LatLonOperations(
-            area_weights=torch.ones(10).to(get_device())
-        ),
+        lat_lon_coordinates.to(device=get_device()),
         loss_scaling=loss_scaling,
+        save_diagnostics=False,
     )
 
     logs = {
@@ -86,3 +97,47 @@ def test__get_loss_scaled_mse_components():
         == 64 / scaled_squared_errors_sum
     )
     assert "test/mean/mse_fractional_components/c" not in result
+
+
+@pytest.mark.parametrize(
+    "epoch", [pytest.param(None, id="no epoch"), pytest.param(2, id="epoch 2")]
+)
+def test_flush_diagnostics(tmpdir, epoch):
+    nx, ny, n_sample, n_time = 2, 2, 10, 3
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
+    agg = OneStepAggregator(
+        lat_lon_coordinates.to(device=get_device()), output_dir=(tmpdir / "val")
+    )
+    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+    agg.record_batch(
+        batch=TrainOutput(
+            metrics={"loss": 1.0},
+            target_data=target_data,
+            gen_data=gen_data,
+            time=time,
+            normalize=lambda x: x,
+        ),
+    )
+    if epoch is not None:
+        agg.flush_diagnostics(subdir=f"epoch_{epoch:04d}")
+        output_dir = tmpdir / "val" / f"epoch_{epoch:04d}"
+    else:
+        agg.flush_diagnostics()
+        output_dir = tmpdir / "val"
+    expected_files = [
+        "mean",
+        "snapshot",
+        "mean_map",
+    ]
+    for file in expected_files:
+        assert (output_dir / f"{file}_diagnostics.nc").exists()
+
+
+def test_agg_raises_without_output_dir():
+    lat_lon_coordinates = LatLonCoordinates(torch.arange(2), torch.arange(2))
+    with pytest.raises(
+        ValueError, match="Output directory must be set to save diagnostics"
+    ):
+        OneStepAggregator(lat_lon_coordinates, save_diagnostics=True, output_dir=None)

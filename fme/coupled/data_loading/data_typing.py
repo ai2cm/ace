@@ -49,6 +49,11 @@ class CoupledVerticalCoordinate:
             return False
         return self.ocean == other.ocean and self.atmosphere == other.atmosphere
 
+    def to(self, device: torch.device) -> "CoupledVerticalCoordinate":
+        return CoupledVerticalCoordinate(
+            ocean=self.ocean.to(device), atmosphere=self.atmosphere.to(device)
+        )
+
 
 class CoupledDatasetProperties:
     def __init__(

@@ -32,7 +32,7 @@ from .data_loading.data_typing import CoupledVerticalCoordinate
 from .stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
 
 DEVICE = fme.get_device()
-NZ = 7  # number of vertical interface levels in mock data from get_data
+NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
 
@@ -343,7 +343,9 @@ def get_data(
         ak, bk = torch.arange(NZ), torch.arange(NZ)
         vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
     elif realm == "ocean":
-        vertical_coord = DepthCoordinate(torch.arange(NZ), torch.ones(NZ - 1))
+        vertical_coord = DepthCoordinate(
+            torch.arange(NZ), torch.ones(N_LAT, N_LON, NZ - 1)
+        )
     data = BatchData.new_on_device(
         data=data_dict,
         time=xr.DataArray(
@@ -395,7 +397,6 @@ def get_stepper_config(
     atmosphere_in_names: List[str],
     atmosphere_out_names: List[str],
     sst_name_in_ocean_data: str = "sst",
-    sst_mask_name_in_ocean_data: str = "mask_0",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
@@ -410,7 +411,6 @@ def get_stepper_config(
     assert sst_name_in_ocean_data in ocean_out_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
-    assert sst_mask_name_in_ocean_data in ocean_in_names
     assert ocean_fraction_name in atmosphere_in_names
 
     ocean_norm_names = set(ocean_in_names + ocean_out_names)
@@ -458,12 +458,11 @@ def get_stepper_config(
             ),
         ),
         sst_name=sst_name_in_ocean_data,
-        sst_mask_name=sst_mask_name_in_ocean_data,
     )
     return config
 
 
-def _get_stepper_and_batch(
+def get_stepper_and_batch(
     ocean_in_names: List[str],
     ocean_out_names: List[str],
     atmosphere_in_names: List[str],
@@ -472,7 +471,6 @@ def _get_stepper_and_batch(
     n_forward_times_atmosphere: int,
     n_samples: int,
     sst_name_in_ocean_data: str = "sst",
-    sst_mask_name_in_ocean_data: str = "mask_0",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: Optional[ModuleSelector] = None,
@@ -501,7 +499,6 @@ def _get_stepper_and_batch(
         atmosphere_in_names=atmosphere_in_names,
         atmosphere_out_names=atmosphere_out_names,
         sst_name_in_ocean_data=sst_name_in_ocean_data,
-        sst_mask_name_in_ocean_data=sst_mask_name_in_ocean_data,
         sfc_temp_name_in_atmosphere_data=sfc_temp_name_in_atmosphere_data,
         ocean_fraction_name=ocean_fraction_name,
         ocean_builder=ocean_builder,
@@ -546,7 +543,7 @@ def test_predict_paired():
             a_diag = a_prog + x[:, -1:]
             return torch.concat([a_prog, a_sfc_temp, a_diag], dim=1) + 2
 
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -555,7 +552,6 @@ def test_predict_paired():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
         ocean_builder=ModuleSelector(type="prebuilt", config={"module": Ocean()}),
@@ -678,7 +674,7 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc_temp", "ocean_frac", "o_diag"]
     atmos_out_names = ["a_prog", "a_sfc_temp", "a_diag"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -687,7 +683,6 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
         n_forward_times_atmosphere=4,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc_temp",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc_temp",
         ocean_fraction_name="ocean_frac",
     )
@@ -710,7 +705,11 @@ def test_predict_paired_with_ocean_to_atmos_diag_forcing():
 
 
 def test_predict_paired_with_derived_variables():
-    ocean_in_names = ["thetao_0", "thetao_1", "sst", "mask_0"]
+    ocean_in_names = (
+        [f"thetao_{i}" for i in range(NZ - 1)]
+        + ["sst"]
+        + [f"mask_{i}" for i in range(NZ - 1)]
+    )
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
@@ -718,7 +717,7 @@ def test_predict_paired_with_derived_variables():
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
 
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -756,7 +755,7 @@ def test_train_on_batch_loss():
     ocean_out_names = ["o_sfc", "o_diag"]
     atmos_in_names = ["a_prog", "a_sfc", "ocean_frac"]
     atmos_out_names = ["a_prog", "a_sfc", "a_diag"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_in_names,
@@ -765,7 +764,6 @@ def test_train_on_batch_loss():
         n_forward_times_atmosphere=2,
         n_samples=3,
         sst_name_in_ocean_data="o_sfc",
-        sst_mask_name_in_ocean_data="o_mask",
         sfc_temp_name_in_atmosphere_data="a_sfc",
         ocean_fraction_name="ocean_frac",
     )
@@ -789,28 +787,18 @@ def test_train_on_batch_loss():
 
 
 def test_train_on_batch_with_derived_variables():
-    ocean_in_names = [
-        "thetao_0",
-        "thetao_1",
-        "thetao_2",
-        "thetao_3",
-        "thetao_4",
-        "thetao_5",
-        "sst",
-        "mask_0",
-        "mask_1",
-        "mask_2",
-        "mask_3",
-        "mask_4",
-        "mask_5",
-    ]
+    ocean_in_names = (
+        [f"thetao_{i}" for i in range(NZ - 1)]
+        + ["sst"]
+        + [f"mask_{i}" for i in range(NZ - 1)]
+    )
     ocean_out_names = ocean_in_names
     atmos_prog_names = [f"specific_total_water_{i}" for i in range(NZ - 1)] + [
         "PRESsfc",
         "surface_temperature",
     ]
     atmos_out_names = atmos_prog_names + ["LHFLX"]
-    coupler, coupled_data = _get_stepper_and_batch(
+    coupler, coupled_data = get_stepper_and_batch(
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
         atmosphere_in_names=atmos_prog_names + ["ocean_fraction"],
@@ -868,11 +856,10 @@ def test_reloaded_stepper_gives_same_prediction():
             ),
         ),
         sst_name="o_sfc",
-        sst_mask_name="o_mask",
     )
     area = torch.ones((N_LAT, N_LON), device=DEVICE)
     vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(2), torch.ones(1)),
+        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)),
         atmosphere=HybridSigmaPressureCoordinate(
             ak=torch.arange(7), bk=torch.arange(7)
         ),
@@ -942,3 +929,23 @@ def test_reloaded_stepper_gives_same_prediction():
         first_result.atmosphere_data.target_data["a_sfc"],
         second_result.atmosphere_data.target_data["a_sfc"],
     )
+
+
+def test_set_train_eval():
+    stepper, _ = get_stepper_and_batch(
+        ["sst", "mask_0"],
+        ["sst"],
+        ["surface_temperature", "ocean_fraction"],
+        ["surface_temperature"],
+        1,
+        1,
+        1,
+    )
+    for module in stepper.modules:
+        assert module.training
+    stepper.set_eval()
+    for module in stepper.modules:
+        assert not module.training
+    stepper.set_train()
+    for module in stepper.modules:
+        assert module.training

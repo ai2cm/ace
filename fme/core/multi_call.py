@@ -29,14 +29,24 @@ class MultiCallConfig:
     def __post_init__(self):
         self._names = []
         for name in self.output_names:
-            for suffix in self.forcing_multipliers:
-                self._names.append(TEMPLATE.format(name=name, suffix=suffix))
+            self._names.extend(self.get_multi_called_names(name))
+
+    def get_multi_called_names(self, name: str) -> List[str]:
+        names = []
+        for suffix in self.forcing_multipliers:
+            names.append(TEMPLATE.format(name=name, suffix=suffix))
+        return names
 
     def validate(self, in_names: List[str], out_names: List[str]):
         if self.forcing_name not in in_names:
             raise ValueError(
-                f"{self.forcing_name} not in input names. It is required "
+                f"forcing name {self.forcing_name} not in input names. It is required "
                 "as a forcing given provided radiation multi call configuration."
+            )
+        if self.forcing_name in out_names:
+            raise ValueError(
+                f"forcing name {self.forcing_name} is in the output names, "
+                "but it must be a forcing variable, not an output."
             )
         for name in self.output_names:
             if name not in out_names:
@@ -60,7 +70,9 @@ class MultiCallConfig:
 
     @property
     def names(self) -> List[str]:
-        """Return the names of all multi-called variables, often radiative fluxes.
+        """
+        Return the names of all multi-called output variables,
+        often radiative fluxes.
 
         E.g. ['ULWRFtoa_quadrupled_co2'].
         """

@@ -2,12 +2,17 @@
 
 set -e
 
-JOB_NAME="ace-cm4-atmosphere-evaluator"
+JOB_NAME="ace2-cm4-atmosphere-evaluator"
 JOB_GROUP="ace2-cm4-atmosphere"
 EXISTING_RESULTS_DATASET="01JJTTPQ948EKVK9K72M17RWH5"  # this contains the checkpoint to use for inference
-CONFIG_PATH=gantry_examples/ace-evaluator-config.yaml  # relative to the root of the repository
+CONFIG_FILENAME="ace-evaluator-config.yaml"
+SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
+CONFIG_PATH="${SCRIPT_PATH}${CONFIG_FILENAME}"
  # since we use a service account API key for wandb, we use the beaker username to set the wandb username
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
 python -m fme.ace.validate_config --config_type evaluator $CONFIG_PATH
 
@@ -15,7 +20,7 @@ gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
     --description 'Run ACE evaluator for CM4 atmosphere data' \
-    --beaker-image oliverwm/fme-deps-only-2025-01-16 \
+    --beaker-image spencerc/fme-deps-only-b61e55ae \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
@@ -35,5 +40,5 @@ gantry run \
     --weka climate-default:/climate-default \
     --budget ai2/climate \
     --no-conda \
-    --install "pip install --no-deps ./fme" \
+    --install "pip install --no-deps ." \
     -- python -I -m fme.ace.evaluator $CONFIG_PATH

@@ -10,7 +10,6 @@ import pytest
 import torch
 
 from fme.ace.data_loading.gridded_data import DataLoader
-from fme.ace.stepper import TrainOutputABC, TrainStepperABC
 from fme.core.ema import EMATracker
 from fme.core.generics.aggregator import (
     AggregatorABC,
@@ -25,6 +24,8 @@ from fme.core.generics.trainer import (
     CheckpointPaths,
     TrainConfigProtocol,
     Trainer,
+    TrainOutputABC,
+    TrainStepperABC,
 )
 from fme.core.optimization import Optimization
 from fme.core.scheduler import SchedulerConfig
@@ -167,11 +168,18 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         optimization.step_weights()
         return TrainOutput()
 
+    def set_train(self) -> None:
+        pass
+
+    def set_eval(self) -> None:
+        pass
+
 
 @dataclasses.dataclass
 class Config:
     experiment_dir: str = "test_experiment_dir"
     checkpoint_dir: str = "test_checkpoint_dir"
+    output_dir: str = "test_output_dir"
     max_epochs: int = 2
     save_checkpoint: bool = True
     validate_using_ema: bool = True
@@ -200,6 +208,9 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.train_loss}
 
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+        pass
+
 
 class ValidationAggregator(AggregatorABC[TrainOutput]):
     def __init__(self, validation_loss: float):
@@ -210,6 +221,9 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
 
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.validation_loss}
+
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+        pass
 
 
 class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
@@ -224,6 +238,9 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
 
     def get_summary_logs(self) -> InferenceLog:
         return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
+
+    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+        pass
 
 
 class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
@@ -531,7 +548,9 @@ def test_saves_correct_ema_checkpoints(
         best_weight,
         atol=1e-7,
     )
-    best_inference_checkpoint = torch.load(paths.best_inference_checkpoint_path)
+    best_inference_checkpoint = torch.load(
+        paths.best_inference_checkpoint_path, weights_only=False
+    )
     assert best_inference_checkpoint["best_validation_loss"] == valid_loss
     assert best_inference_checkpoint["best_inference_error"] == inference_error
     np.testing.assert_allclose(
@@ -604,7 +623,7 @@ def test_saves_correct_non_ema_epoch_checkpoints(
                 min((i + 1) * segment_epochs_value, config.max_epochs),
             )
         ]
-        latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+        latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
         assert latest_checkpoint["epoch"] == min(
             max_epochs, (i + 1) * segment_epochs_value
         )
@@ -617,7 +636,7 @@ def test_saves_correct_non_ema_epoch_checkpoints(
     assert os.path.exists(paths.best_checkpoint_path)
     assert os.path.exists(paths.best_inference_checkpoint_path)
     assert os.path.exists(paths.ema_checkpoint_path)
-    best_checkpoint = torch.load(paths.best_checkpoint_path)
+    best_checkpoint = torch.load(paths.best_checkpoint_path, weights_only=False)
     assert best_checkpoint["epoch"] == best_val_epoch
     assert best_checkpoint["best_validation_loss"] == 0.0
     assert best_checkpoint["best_inference_error"] == np.min(
@@ -627,13 +646,15 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         best_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         module_values[best_val_epoch - 1],
     )
-    best_inference_checkpoint = torch.load(paths.best_inference_checkpoint_path)
+    best_inference_checkpoint = torch.load(
+        paths.best_inference_checkpoint_path, weights_only=False
+    )
     assert best_inference_checkpoint["epoch"] == best_inference_epoch
     assert best_inference_checkpoint["best_validation_loss"] == np.min(
         val_losses[:best_inference_epoch]
     )
     assert best_inference_checkpoint["best_inference_error"] == 0.0
-    latest_checkpoint = torch.load(paths.latest_checkpoint_path)
+    latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
     assert latest_checkpoint["epoch"] == max_epochs
     np.testing.assert_allclose(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),

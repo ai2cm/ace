@@ -40,7 +40,7 @@ class EnergyBudgetConfig:
 
 @CorrectorSelector.register("atmosphere_corrector")
 @dataclasses.dataclass
-class CorrectorConfig:
+class AtmosphereCorrectorConfig:
     r"""
     Configuration for the post-step state corrector.
 
@@ -134,16 +134,16 @@ class CorrectorConfig:
     ] = None
 
     @classmethod
-    def from_state(cls, state: Mapping[str, Any]) -> "CorrectorConfig":
+    def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
 
 
-class Corrector(CorrectorABC):
+class AtmosphereCorrector(CorrectorABC):
     def __init__(
         self,
-        config: CorrectorConfig,
+        config: AtmosphereCorrectorConfig,
         gridded_operations: GriddedOperations,
         vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
         timestep: datetime.timedelta,
@@ -187,7 +187,7 @@ class Corrector(CorrectorABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorMapping:
+    ) -> TensorDict:
         """Apply corrections to the generated data.
 
         Args:
@@ -198,6 +198,7 @@ class Corrector(CorrectorABC):
         Returns:
             The corrected data.
         """
+        gen_data = dict(gen_data)
         if len(self._config.force_positive_names) > 0:
             # do this step before imposing other conservation correctors, since
             # otherwise it could end up creating violations of those constraints.
@@ -451,7 +452,12 @@ def _force_conserve_total_energy(
             f"Method {method} not implemented for total energy conservation"
         )
     input = AtmosphereData(input_data, vertical_coordinate)
-    gen = AtmosphereData(dict(gen_data) | dict(forcing_data), vertical_coordinate)
+    forcing = AtmosphereData(forcing_data)
+    required_forcing = {
+        "DSWRFtoa": forcing.toa_down_sw_radiative_flux,
+        "HGTsfc": forcing.surface_height,
+    }
+    gen = AtmosphereData(dict(gen_data) | required_forcing, vertical_coordinate)
     if torch.any(input.surface_pressure <= 0) or torch.any(gen.surface_pressure <= 0):
         warnings.warn(
             "Input or generated surface pressure has a non-positive value. Skipping "

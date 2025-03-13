@@ -44,7 +44,7 @@ class InlineInferenceConfig:
     loader: InferenceDataLoaderConfig
     n_forward_steps: int = 2
     forward_steps_in_memory: int = 2
-    epochs: Slice = Slice(start=0, stop=None, step=1)
+    epochs: Slice = dataclasses.field(default_factory=lambda: Slice())
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig(
             log_global_mean_time_series=False, log_global_mean_norm_time_series=False
@@ -103,6 +103,8 @@ class TrainConfig:
         segment_epochs: Exit after training for at most this many epochs
             in current job, without exceeding `max_epochs`. Use this if training
             must be run in segments, e.g. due to wall clock limit.
+        save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
+            training, validation and inline inference aggregators.
     """
 
     train_loader: DataLoaderConfig
@@ -124,6 +126,7 @@ class TrainConfig:
     ema_checkpoint_save_epochs: Optional[Slice] = None
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
+    save_per_epoch_diagnostics: bool = False
 
     @property
     def inference_n_forward_steps(self) -> int:
@@ -139,6 +142,13 @@ class TrainConfig:
         The directory where checkpoints are saved.
         """
         return os.path.join(self.experiment_dir, "training_checkpoints")
+
+    @property
+    def output_dir(self) -> str:
+        """
+        The directory where output files are saved.
+        """
+        return os.path.join(self.experiment_dir, "output")
 
     def get_inference_epochs(self) -> List[int]:
         return list(range(0, self.max_epochs))[self.inference.epochs.slice]

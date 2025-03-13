@@ -1,6 +1,6 @@
 import abc
 
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class CorrectorABC(abc.ABC):
@@ -10,4 +10,4 @@ class CorrectorABC(abc.ABC):
         input_data: TensorMapping,
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
-    ) -> TensorMapping: ...
+    ) -> TensorDict: ...
