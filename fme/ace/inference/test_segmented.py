@@ -105,7 +105,8 @@ def test_inference_segmented_entrypoint():
         initial_condition = xr.Dataset(
             {
                 "prog": xr.DataArray(
-                    np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+                    np.random.rand(2, 16, 32).astype(np.float32),
+                    dims=["sample", "lat", "lon"],
                 )
             }
         )

@@ -109,16 +109,17 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         timestep_days=0.25,
         save_vertical_coordinate=False,
     )
+    dims = ["sample", "lat", "lon"]
     initial_condition = xr.Dataset(
         {
             "prog": xr.DataArray(
-                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+                np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
             "forcing": xr.DataArray(
-                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+                np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
             "DSWRFtoa": xr.DataArray(
-                np.random.rand(2, 16, 32), dims=["sample", "lat", "lon"]
+                np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
         }
     )
@@ -200,8 +201,8 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     saved_data = xr.open_dataset(data.data_filename)
     ops = LatLonCoordinates(
-        lat=torch.as_tensor(saved_data["grid_yt"].values),
-        lon=torch.as_tensor(saved_data["grid_xt"].values),
+        lat=torch.as_tensor(saved_data["grid_yt"].values.astype(np.float32)),
+        lon=torch.as_tensor(saved_data["grid_xt"].values.astype(np.float32)),
     ).gridded_operations
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
