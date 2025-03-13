@@ -75,9 +75,12 @@ class StandaloneComponentCheckpointsConfig:
         )
 
     def _load_sst_mask(self) -> Optional[torch.Tensor]:
+        ocean_ckpt = torch.load(
+            self.ocean.path, map_location=fme.get_device(), weights_only=False
+        )
         ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
-            torch.load(self.ocean.path, weights_only=False)["vertical_coordinate"]
-        ).to(fme.get_device())
+            ocean_ckpt["stepper"]["vertical_coordinate"]
+        )
         if isinstance(ocean_vertical_coord, DepthCoordinate):
             return ocean_vertical_coord.get_mask_level(0)
         return None

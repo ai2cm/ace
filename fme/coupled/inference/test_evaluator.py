@@ -26,6 +26,7 @@ from fme.coupled.inference.data_writer import CoupledDataWriterConfig
 from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
     StandaloneComponentCheckpointsConfig,
+    StandaloneComponentConfig,
     main,
 )
 from fme.coupled.test_stepper import get_stepper_config
@@ -84,7 +85,17 @@ def save_coupled_stepper(
         atmos_path = base_dir / "atmos.pt"
         torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
         torch.save({"stepper": atmos_stepper.get_state()}, atmos_path)
-
+        return StandaloneComponentCheckpointsConfig(
+            ocean=StandaloneComponentConfig(
+                timedelta=ocean_timedelta,
+                path=str(ocean_path),
+            ),
+            atmosphere=StandaloneComponentConfig(
+                timedelta=atmosphere_timedelta,
+                path=str(atmos_path),
+            ),
+            sst_name=sst_name_in_ocean_data,
+        )
     coupled_stepper = config.get_stepper(
         img_shape=img_shape,
         gridded_operations=LatLonOperations(area),
