@@ -351,7 +351,10 @@ def to_dataset(data: TensorMapping, time: xr.DataArray) -> xr.Dataset:
     data_vars = {}
     for name, tensor in data.items():
         data_vars[name] = (["sample", "time"], tensor)
-    data_vars["counts"] = (["sample", "time"], np.ones(shape=time.shape))
+    data_vars["counts"] = (
+        ["sample", "time"],
+        np.ones(shape=time.shape, dtype=np.float32),
+    )
     return xr.Dataset(data_vars, coords={"valid_time": time})
 
 

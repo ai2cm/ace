@@ -136,11 +136,11 @@ def test_inference_logs_labels_exist(tmpdir):
     reference_time_means = xr.Dataset(
         {
             "ocean_var": xr.DataArray(
-                np.random.randn(ny, nx),
+                np.random.randn(ny, nx).astype(np.float32),
                 dims=["lat", "lon"],
             ),
             "atmos_var": xr.DataArray(
-                np.random.randn(ny, nx),
+                np.random.randn(ny, nx).astype(np.float32),
                 dims=["lat", "lon"],
             ),
         }
