@@ -22,7 +22,6 @@ import xarray as xr
 from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
-from fme.ace.multi_call import MultiCallConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
@@ -39,6 +38,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
@@ -688,6 +688,14 @@ class SingleModuleStep(StepABC):
         return sorted(self._config.diagnostic_names)
 
     @property
+    def output_names(self) -> List[str]:
+        return self._config.out_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self.output_names
+
+    @property
     def n_ic_timesteps(self) -> int:
         return 1
 
@@ -997,6 +1005,10 @@ class SingleModuleStepper(
     @property
     def out_names(self) -> List[str]:
         return self._step_obj.output_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self._step_obj.loss_names
 
     @property
     def n_ic_timesteps(self) -> int:

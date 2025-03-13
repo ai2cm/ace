@@ -7,7 +7,6 @@ import dacite
 import torch
 from torch import nn
 
-from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
@@ -107,17 +106,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         return 1
 
-    def get_evaluation_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return DataRequirements(
-            names=self._all_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-
-    def _window_steps_required(self, n_forward_steps: int) -> int:
-        return n_forward_steps + self.n_ic_timesteps
-
     def get_state(self):
         return dataclasses.asdict(self)
 
@@ -159,24 +147,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
         )
-
-    @property
-    def _all_names(self) -> List[str]:
-        """Names of all variables required, including auxiliary ones."""
-        extra_names = []
-        if self.ocean is not None:
-            extra_names.extend(self.ocean.forcing_names)
-        all_names = set()
-        for names in (
-            self.main_prognostic_names,
-            self.shared_forcing_names,
-            self.radiation_only_forcing_names,
-            self.main_diagnostic_names,
-            self.radiation_diagnostic_names,
-            extra_names,
-        ):
-            all_names.update(names)
-        return list(all_names)
 
     @property
     def normalize_names(self) -> List[str]:
@@ -342,6 +312,14 @@ class SeparateRadiationStep(StepABC):
     @property
     def diagnostic_names(self) -> List[str]:
         return self._config.diagnostic_names
+
+    @property
+    def output_names(self) -> List[str]:
+        return list(set(self.prognostic_names).union(self.diagnostic_names))
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self.output_names
 
     @property
     def next_step_input_names(self) -> List[str]:
