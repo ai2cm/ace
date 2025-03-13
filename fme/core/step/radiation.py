@@ -7,12 +7,11 @@ import dacite
 import torch
 from torch import nn
 
-from fme.core.coordinates import VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -120,26 +119,21 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_step(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "SeparateRadiationStep":
         logging.info("Initializing stepper from provided config")
-        corrector = vertical_coordinate.build_corrector(
+        corrector = dataset_info.vertical_coordinate.build_corrector(
             config=self.corrector,
-            gridded_operations=gridded_operations,
-            timestep=timestep,
+            gridded_operations=dataset_info.gridded_operations,
+            timestep=dataset_info.timestep,
         )
         normalizer = self.normalization.build(self.normalize_names)
         return SeparateRadiationStep(
             config=self,
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
+            img_shape=dataset_info.img_shape,
             corrector=corrector,
             normalizer=normalizer,
-            timestep=timestep,
+            timestep=dataset_info.timestep,
         )
 
     @classmethod
@@ -224,8 +218,6 @@ class SeparateRadiationStep(StepABC):
         self,
         config: SeparateRadiationStepConfig,
         img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -234,8 +226,6 @@ class SeparateRadiationStep(StepABC):
         Args:
             config: The configuration.
             img_shape: Shape of domain as (n_lat, n_lon).
-            gridded_operations: The gridded operations, e.g. for area weighting.
-            vertical_coordinate: The vertical coordinate.
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.

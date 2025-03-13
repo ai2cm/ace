@@ -1,11 +1,9 @@
 import dataclasses
-import datetime
-from typing import Any, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Dict, List, Optional, TypeVar
 
 import torch
 
-from fme.core.coordinates import VerticalCoordinate
-from fme.core.gridded_ops import GriddedOperations
+from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
@@ -37,14 +35,9 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_step(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> "MultiCallStep":
-        wrapped = self.wrapped_step.get_step(
-            img_shape, gridded_operations, vertical_coordinate, timestep
-        )
+        wrapped = self.wrapped_step.get_step(dataset_info)
         return MultiCallStep(
             wrapped_step=wrapped,
             config=self.config,
