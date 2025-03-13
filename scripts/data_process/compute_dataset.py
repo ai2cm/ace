@@ -12,18 +12,20 @@
 
 import abc
 import dataclasses
+import logging
 import os
 import sys
+import time
 from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tuple, Union
 
 import click
 import dacite
+import distributed
 import fsspec
 import numpy as np
 import xarray as xr
 import xpartition  # noqa: F401
 import yaml
-from dask.diagnostics import ProgressBar
 
 try:
     from xtorch_harmonics import roundtrip_filter
@@ -517,8 +519,10 @@ def assert_column_integral_of_moisture_is_conserved(
     fregrid tool doing area-weighted average instead of mass-weighted."""
     expected_pwat = ds[precipitable_water_path_name]
     integrated_pwat = ds[total_water_path_name]
-    print("Mean absolute difference between expected and integrated pwat [kg/m^2]:")
-    print(np.abs(expected_pwat - integrated_pwat).mean().values)
+    logging.info(
+        f"Mean absolute difference between expected and integrated pwat [kg/m^2]: "
+        f"{np.abs(expected_pwat - integrated_pwat).mean().values}"
+    )
     xr.testing.assert_allclose(integrated_pwat, expected_pwat, rtol=1e-1, atol=1e-3)
 
 
@@ -542,8 +546,10 @@ def assert_global_dry_air_mass_conservation(
         global_dry_air_mass = column_dry_air_mass.mean(dim=dims)
 
     global_dry_air_mass_tendency = global_dry_air_mass.diff(time_dim)
-    print("Mean absolute global dry air pressure tendency [Pa]:")
-    print(np.abs(global_dry_air_mass_tendency).mean().values)
+    logging.info(
+        f"Mean absolute global dry air pressure tendency [Pa]: "
+        f"{np.abs(global_dry_air_mass_tendency).mean().values}"
+    )
     xr.testing.assert_allclose(
         global_dry_air_mass_tendency,
         xr.zeros_like(global_dry_air_mass_tendency),
@@ -574,9 +580,11 @@ def assert_global_moisture_conservation(
     expected_global_moisture_tendency = (
         evap_minus_precip.weighted(weights).mean(dim=dims).isel(time=slice(1, None))
     )
-    print("Mean absolute global moisture non-conservative source [kg/m^2/s]:")
     diff = actual_global_moisture_tendency - expected_global_moisture_tendency
-    print(np.abs(diff).mean().values)
+    logging.info(
+        f"Mean absolute global moisture non-conservative source [kg/m^2/s]: "
+        f"{np.abs(diff).mean().values}"
+    )
     xr.testing.assert_allclose(
         expected_global_moisture_tendency, actual_global_moisture_tendency
     )
@@ -591,7 +599,7 @@ def construct_lazy_dataset(
     for var in ds:
         del ds[var].encoding["chunks"]
         del ds[var].encoding["preferred_chunks"]
-    print(f"Input dataset size is {ds.nbytes / 1e9} GB")
+    logging.info(f"Input dataset size is {ds.nbytes / 1e9} GB")
 
     if config.roundtrip_fraction_kept is not None:
         ds = roundtrip_filter(
@@ -717,9 +725,12 @@ def main(
     subsample,
     check_conservation,
 ):
+    logging.basicConfig(level=logging.INFO)
+    distributed.Client(n_workers=16)
+
     config = DatasetConfig.from_file(config).dataset_computation
-    print(f"--run-directory is {run_directory}")
-    print(f"--output-store is {output_store}")
+    logging.info(f"--run-directory is {run_directory}")
+    logging.info(f"--output-store is {output_store}")
     standard_names = config.standard_names
     xr.set_options(keep_attrs=True)
     ds = construct_lazy_dataset(config, run_directory)
@@ -758,22 +769,25 @@ def main(
 
     ds = clear_compressors_encoding(ds)
 
-    print(f"Output dataset size is {ds.nbytes / 1e9} GB")
+    logging.info(f"Output dataset size is {ds.nbytes / 1e9} GB")
     if debug:
         with xr.set_options(display_max_rows=500):
-            print(ds)
+            logging.info(ds)
     else:
         ds.partition.initialize_store(output_store, inner_chunks=inner_chunks)
         for i in range(config.n_split):
-            print(f"Writing segment {i + 1} / {config.n_split}")
-            with ProgressBar():
-                ds.partition.write(
-                    output_store,
-                    config.n_split,
-                    [config.standard_names.time_dim],
-                    i,
-                    collect_variable_writes=True,
-                )
+            segment_number = f"{i + 1} / {config.n_split}"
+            logging.info(f"Writing segment {segment_number}")
+            segment_time = time.time()
+            ds.partition.write(
+                output_store,
+                config.n_split,
+                [config.standard_names.time_dim],
+                i,
+                collect_variable_writes=True,
+            )
+            segment_time = time.time() - segment_time
+            logging.info(f"Segment {segment_number} time: {segment_time:0.2f} seconds")
 
 
 if __name__ == "__main__":
