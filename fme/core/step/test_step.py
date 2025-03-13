@@ -8,6 +8,7 @@ import torch
 
 import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
@@ -138,13 +139,13 @@ def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> Serializable
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    return SerializableStep(
-        selector=selector,
+    dataset_info = DatasetInfo(
         img_shape=img_shape,
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
+    return SerializableStep(selector, dataset_info)
 
 
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)

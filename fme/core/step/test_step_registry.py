@@ -1,11 +1,12 @@
 import dataclasses
 import datetime
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate, VerticalCoordinate
-from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
+from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean import OceanConfig
 
 from .step import InferenceDataProtocol, StepABC, StepConfigABC, StepSelector
@@ -14,15 +15,9 @@ from .step import InferenceDataProtocol, StepABC, StepConfigABC, StepSelector
 class MockStep(StepABC):
     def __init__(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ):
-        self.img_shape = img_shape
-        self.vertical_coordinate = vertical_coordinate
-        self.gridded_operations = gridded_operations
-        self.timestep = timestep
+        self.dataset_info = dataset_info
 
     @property
     def prognostic_names(self):
@@ -94,14 +89,8 @@ class MockStep(StepABC):
 @StepSelector.register("mock")
 @dataclasses.dataclass
 class MockStepConfig(StepConfigABC):
-    def get_step(
-        self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
-    ):
-        return MockStep(img_shape, gridded_operations, vertical_coordinate, timestep)
+    def get_step(self, dataset_info: DatasetInfo):
+        return MockStep(dataset_info)
 
 
 def test_register():
@@ -113,11 +102,12 @@ def test_register():
     )
     gridded_operations = LatLonOperations(area_weights=torch.ones(img_shape))
     timestep = datetime.timedelta(hours=6)
-    step = selector.get_step(
-        img_shape, gridded_operations, vertical_coordinate, timestep
+    dataset_info = DatasetInfo(
+        img_shape=img_shape,
+        gridded_operations=gridded_operations,
+        vertical_coordinate=vertical_coordinate,
+        timestep=timestep,
     )
+    step = selector.get_step(dataset_info)
     assert isinstance(step, MockStep)
-    assert step.img_shape == img_shape
-    assert step.vertical_coordinate == vertical_coordinate
-    assert step.gridded_operations == gridded_operations
-    assert step.timestep == timestep
+    assert step.dataset_info == dataset_info
