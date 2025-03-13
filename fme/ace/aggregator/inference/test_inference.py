@@ -65,7 +65,7 @@ def test_logs_labels_exist_with_reference_time_means():
     reference_time_means = xr.Dataset(
         {
             "a": xr.DataArray(
-                np.random.randn(ny, nx),
+                np.random.randn(ny, nx).astype(np.float32),
                 dims=["grid_yt", "grid_xt"],
             )
         }
