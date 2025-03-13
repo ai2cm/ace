@@ -37,6 +37,14 @@ class MockStep(StepABC):
         raise NotImplementedError()
 
     @property
+    def output_names(self):
+        raise NotImplementedError()
+
+    @property
+    def loss_names(self):
+        raise NotImplementedError()
+
+    @property
     def next_step_input_names(self):
         raise NotImplementedError()
 

@@ -23,7 +23,6 @@ from fme.ace.inference.evaluator import (
     StepperOverrideConfig,
     main,
 )
-from fme.ace.multi_call import MultiCall, MultiCallConfig
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
 from fme.ace.stepper.single_module import SingleModuleStep
@@ -35,6 +34,7 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.testing import mock_wandb
