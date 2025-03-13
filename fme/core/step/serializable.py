@@ -30,23 +30,6 @@ class SerializableStep:
         self._vertical_coordinate = vertical_coordinate
         self._timestep = timestep
 
-    @classmethod
-    def build(
-        cls,
-        selector: StepSelector,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
-    ) -> "SerializableStep":
-        return cls(
-            selector,
-            img_shape,
-            gridded_operations,
-            vertical_coordinate,
-            timestep,
-        )
-
     @property
     def modules(self) -> torch.nn.ModuleList:
         return self._instance.modules
@@ -70,6 +53,10 @@ class SerializableStep:
     @property
     def output_names(self) -> List[str]:
         return self._instance.output_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self._instance.loss_names
 
     @property
     def normalizer(self) -> StandardNormalizer:

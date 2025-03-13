@@ -9,8 +9,10 @@ import torch
 import fme
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry import ModuleSelector
+from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.serializable import SerializableStep
 from fme.core.step.step import StepSelector
 from fme.core.typing_ import TensorDict
@@ -73,6 +75,35 @@ SELECTOR_CONFIG_CASES = [
         ),
         id="separate_radiation",
     ),
+    pytest.param(
+        StepSelector(
+            type="multi_call",
+            config=dataclasses.asdict(
+                MultiCallStepConfig(
+                    wrapped_step=StepSelector(
+                        type="separate_radiation",
+                        config=dataclasses.asdict(SEPARATE_RADIATION_CONFIG),
+                    ),
+                    config=MultiCallConfig(
+                        forcing_name="forcing_rad",
+                        forcing_multipliers={"double": 2.0},
+                        output_names=["diagnostic_rad"],
+                    ),
+                ),
+            ),
+        ),
+        id="multi_call_separate_radiation",
+    ),
+]
+
+HAS_NEXT_STEP_FORCING_NAME_CASES = [
+    pytest.param(
+        StepSelector(
+            type="separate_radiation",
+            config=dataclasses.asdict(SEPARATE_RADIATION_CONFIG),
+        ),
+        id="multi_call_separate_radiation",
+    ),
 ]
 
 HAS_NEXT_STEP_FORCING_NAME_CASES = [
@@ -107,7 +138,7 @@ def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> Serializable
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    return SerializableStep.build(
+    return SerializableStep(
         selector=selector,
         img_shape=img_shape,
         gridded_operations=LatLonOperations(area),

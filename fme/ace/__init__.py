@@ -31,7 +31,6 @@ from fme.ace.models.healpix.healpix_activations import (
     DownsamplingBlockConfig,
 )
 from fme.ace.models.healpix.healpix_blocks import ConvBlockConfig, RecurrentBlockConfig
-from fme.ace.multi_call import MultiCallConfig
 from fme.ace.registry.hpx import (
     HEALPixRecUNetBuilder,
     UNetDecoderConfig,
@@ -49,6 +48,7 @@ from fme.core.dataset.config import (
 )
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import SchedulerConfig

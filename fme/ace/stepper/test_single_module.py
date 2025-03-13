@@ -21,7 +21,6 @@ from fme.ace.inference.test_evaluator import (
     validate_stepper_multi_call,
     validate_stepper_ocean,
 )
-from fme.ace.multi_call import MultiCallConfig
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
@@ -46,6 +45,7 @@ from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import (
