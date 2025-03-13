@@ -12,6 +12,7 @@ import torch
 import xarray as xr
 import yaml
 
+import fme
 from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.registry.test_hpx import (
     conv_next_block_config,
@@ -513,6 +514,9 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])
+@pytest.mark.skipif(
+    fme.get_device().type == "mps", reason="MPS does not support multi-device training."
+)
 def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.Path):
     """Make sure the training is resumed from a checkpoint when restarted, using
     torchrun with NPROC_PER_NODE set to 2."""

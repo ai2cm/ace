@@ -8,6 +8,8 @@ from fme.ace.aggregator.inference.video import VideoAggregator
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
 
+USING_MPS = get_device().type == "mps"
+
 
 def _make_data(
     names: List[str], n_samples: int, nx: int, ny: int, offsets: np.ndarray
@@ -70,6 +72,7 @@ def time_select(
         np.array([0, 1, 2, 3, 4, 5.5]),
     ],
 )
+@pytest.mark.skipif(USING_MPS, reason="Requires double precision and MPS is enabled.")
 def test_video_data(offsets: np.ndarray):
     aggregator = VideoAggregator(n_timesteps=len(offsets), enable_extended_videos=True)
     names = ["a"]
@@ -110,6 +113,7 @@ def test_video_data(offsets: np.ndarray):
         np.array([0, 1, 2, 3, 4, 5.5]),
     ],
 )
+@pytest.mark.skipif(USING_MPS, reason="Requires double precision and MPS is enabled.")
 def test_video_data_without_extended_videos(offsets: np.ndarray):
     aggregator = VideoAggregator(n_timesteps=len(offsets), enable_extended_videos=False)
     names = ["a"]
@@ -142,6 +146,7 @@ def slice_samples(data: TensorDict, i_start: int, i_end: int):
 
 
 @pytest.mark.parametrize("n_batches", [1, 5])
+@pytest.mark.skipif(USING_MPS, reason="Requires double precision and MPS is enabled.")
 def test_video_data_values_on_random_inputs(n_batches: int):
     torch.manual_seed(0)
     names = ["a"]
