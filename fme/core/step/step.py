@@ -123,8 +123,20 @@ class StepABC(abc.ABC):
         return list(set(self.prognostic_names).union(self.forcing_names))
 
     @property
+    @abc.abstractmethod
     def output_names(self) -> List[str]:
-        return list(set(self.prognostic_names).union(self.diagnostic_names))
+        """
+        Names of variables output by the step.
+        """
+        pass
+
+    @property
+    @abc.abstractmethod
+    def loss_names(self) -> List[str]:
+        """
+        Names of variables to be included in the loss function.
+        """
+        pass
 
     @property
     @abc.abstractmethod
