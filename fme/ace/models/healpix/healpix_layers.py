@@ -149,7 +149,11 @@ class HEALPixPadding(nn.Module):
         Returns:
             The padded tensor where each face's height and width are increased by 2*p
         """
-        th.cuda.nvtx.range_push("HEALPixPadding:forward")
+        try:
+            th.cuda.nvtx.range_push("HEALPixPadding:forward")
+        except RuntimeError:
+            # Don't bother with NVTX profiling if it's not available
+            pass
 
         # unfold faces from batch dim
         data = self.unfold(data)
@@ -241,7 +245,11 @@ class HEALPixPadding(nn.Module):
         # fold faces into batch dim
         res = self.fold(res)
 
-        th.cuda.nvtx.range_pop()
+        try:
+            th.cuda.nvtx.range_pop()
+        except RuntimeError:
+            # Don't bother with NVTX profiling if it's not available
+            pass
 
         return res
 
