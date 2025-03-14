@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
 
@@ -30,8 +30,16 @@ class MultiCallStepConfig(StepConfigABC):
     """
 
     wrapped_step: StepSelector
-    config: MultiCallConfig
+    config: Optional[MultiCallConfig] = None
     include_multi_call_in_loss: bool = True
+
+    def __post_init__(self):
+        if self.config is not None:
+            self.config.validate(
+                self.wrapped_step.input_names, self.wrapped_step.output_names
+            )
+        if self.config is None and self.include_multi_call_in_loss:
+            raise ValueError("include_multi_call_in_loss is True, but config is None")
 
     def get_step(
         self,
@@ -40,9 +48,49 @@ class MultiCallStepConfig(StepConfigABC):
         wrapped = self.wrapped_step.get_step(dataset_info)
         return MultiCallStep(
             wrapped_step=wrapped,
-            config=self.config,
-            include_multi_call_in_loss=self.include_multi_call_in_loss,
+            config=self,
         )
+
+    def build(
+        self,
+        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
+    ):
+        if self.config is None:
+            return step_method
+        return self.config.build(step_method)
+
+    @property
+    def _multi_call_outputs(self) -> List[str]:
+        if self.config is None:
+            return []
+        return self.config.names
+
+    @property
+    def forcing_names(self) -> List[str]:
+        return self.wrapped_step.forcing_names
+
+    @property
+    def diagnostic_names(self) -> List[str]:
+        return self.wrapped_step.diagnostic_names + self._multi_call_outputs
+
+    @property
+    def prognostic_names(self) -> List[str]:
+        return self.wrapped_step.prognostic_names
+
+    @property
+    def output_names(self) -> List[str]:
+        return self.wrapped_step.output_names + self._multi_call_outputs
+
+    @property
+    def loss_names(self) -> List[str]:
+        if self.include_multi_call_in_loss:
+            return self.wrapped_step.loss_names + self._multi_call_outputs
+        else:
+            return self.wrapped_step.loss_names
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self.wrapped_step.n_ic_timesteps
 
 
 class MultiCallStep(StepABC):
@@ -58,8 +106,7 @@ class MultiCallStep(StepABC):
     def __init__(
         self,
         wrapped_step: StepABC,
-        config: MultiCallConfig,
-        include_multi_call_in_loss: bool = True,
+        config: MultiCallStepConfig,
     ):
         """
         Args:
@@ -70,50 +117,16 @@ class MultiCallStep(StepABC):
         """
         self._wrapped_step = wrapped_step
         self._config = config
-        self._config.validate(
-            self._wrapped_step.input_names, self._wrapped_step.output_names
-        )
         self._multi_call = config.build(self._wrapped_step.step)
-        residual_scaled_names = []
-        for prog_name in set(self._wrapped_step.prognostic_names).intersection(
-            config.output_names
-        ):
-            residual_scaled_names.extend(config.get_multi_called_names(prog_name))
-        self._multi_call_residual_scaled_names = residual_scaled_names
-        self._include_multi_call_in_loss = include_multi_call_in_loss
+        self._include_multi_call_in_loss = config.include_multi_call_in_loss
+
+    @property
+    def config(self) -> MultiCallStepConfig:
+        return self._config
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return self._wrapped_step.modules
-
-    @property
-    def prognostic_names(self) -> List[str]:
-        return self._wrapped_step.prognostic_names
-
-    @property
-    def residual_scaled_names(self) -> List[str]:
-        return (
-            self._wrapped_step.prognostic_names + self._multi_call_residual_scaled_names
-        )
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._wrapped_step.forcing_names
-
-    @property
-    def diagnostic_names(self) -> List[str]:
-        return self._wrapped_step.diagnostic_names + self._multi_call.names
-
-    @property
-    def output_names(self) -> List[str]:
-        return self._wrapped_step.output_names + self._multi_call.names
-
-    @property
-    def loss_names(self) -> List[str]:
-        if self._include_multi_call_in_loss:
-            return self._wrapped_step.loss_names + self._multi_call.names
-        else:
-            return self._wrapped_step.loss_names
 
     @property
     def normalizer(self) -> StandardNormalizer:
@@ -140,10 +153,6 @@ class MultiCallStep(StepABC):
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         self._wrapped_step.validate_inference_data(data)
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return self._wrapped_step.n_ic_timesteps
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
