@@ -2,11 +2,11 @@
 
 set -e
 
-JOB_NAME="ptd_fixed-zero_fill-inst_norm--ace-samudra-cm4-9fb4l2ax--evaluator"  # recommnended but not required to change this
-JOB_GROUP="ptd_fixed-zero_fill-inst_norm--ace-samudra-cm4-9fb4l2ax"
+JOB_NAME="ptd_fixed-sea_ice_prog--ocean-emulator-86u2yiwa--evaluator"  # recommnended but not required to change this
+JOB_GROUP="ptd_fixed-sea_ice_prog--ocean-emulator-86u2yiwa"
 
 EXISTING_RESULTS_ATMOS_DATASET="01JE8017VZVRBGCEK5S3DA5G08"  # this contains the atmosphere checkpoint to use for inference
-EXISTING_RESULTS_OCEAN_DATASET="01JNJVMWQ6KQ42BQDV9SCK7BQE"  # this contains the ocean checkpoint to use for inference
+EXISTING_RESULTS_OCEAN_DATASET="01JNPV22RQF89C9WWG7J21JZD7"  # this contains the ocean checkpoint to use for inference
 
 CONFIG_FILENAME="coupled-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
