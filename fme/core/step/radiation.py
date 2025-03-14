@@ -205,6 +205,10 @@ class SeparateRadiationStepConfig(StepConfigABC):
             + self.radiation_diagnostic_names
         )
 
+    @property
+    def loss_names(self) -> List[str]:
+        return self.output_names
+
 
 class SeparateRadiationStep(StepABC):
     """
@@ -265,6 +269,10 @@ class SeparateRadiationStep(StepABC):
         self._activation_checkpointing = config.activation_checkpointing
 
     @property
+    def config(self) -> SeparateRadiationStepConfig:
+        return self._config
+
+    @property
     def surface_temperature_name(self) -> Optional[str]:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
@@ -292,26 +300,6 @@ class SeparateRadiationStep(StepABC):
             )
 
     @property
-    def prognostic_names(self) -> List[str]:
-        return self._config.prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._config.forcing_names
-
-    @property
-    def diagnostic_names(self) -> List[str]:
-        return self._config.diagnostic_names
-
-    @property
-    def output_names(self) -> List[str]:
-        return list(set(self.prognostic_names).union(self.diagnostic_names))
-
-    @property
-    def loss_names(self) -> List[str]:
-        return self.output_names
-
-    @property
     def next_step_input_names(self) -> List[str]:
         if self.ocean is None:
             return list(self.forcing_names)
@@ -320,10 +308,6 @@ class SeparateRadiationStep(StepABC):
     @property
     def next_step_forcing_names(self) -> List[str]:
         return self._config.next_step_forcing_names
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return self._config.n_ic_timesteps
 
     @property
     def normalizer(self) -> StandardNormalizer:
