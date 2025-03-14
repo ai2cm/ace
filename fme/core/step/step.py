@@ -13,6 +13,7 @@ from typing import (
     Type,
     TypeVar,
     cast,
+    final,
 )
 
 import torch
@@ -38,59 +39,9 @@ class StepConfigABC(abc.ABC):
             The state of the stepper.
         """
 
-
-T = TypeVar("T", bound=StepConfigABC)
-
-
-@dataclasses.dataclass
-class StepSelector:
-    type: str
-    config: Dict[str, Any]
-    registry: ClassVar[Registry] = Registry()
-
-    def __post_init__(self):
-        self._step_config_instance: StepConfigABC = cast(
-            StepConfigABC, self.registry.get(self.type, self.config)
-        )
-
-    @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
-        return cls.registry.register(name)
-
-    def get_step(
-        self,
-        dataset_info: DatasetInfo,
-    ) -> "StepABC":
-        return self._step_config_instance.get_step(dataset_info)
-
-    def get_state(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "config": self.config,
-        }
-
-    @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "StepSelector":
-        return cls(type=state["type"], config=state["config"])
-
-    @classmethod
-    def get_available_types(cls) -> Set[str]:
-        """This class method is used to expose all available types of Steps."""
-        return set(cls(type="", config={}).registry._types.keys())
-
-
-class InferenceDataProtocol(Protocol):
-    @property
-    def timestep(self) -> datetime.timedelta:
-        pass
-
-
-class StepABC(abc.ABC):
-    SelfType = TypeVar("SelfType", bound="StepABC")
-
     @property
     @abc.abstractmethod
-    def modules(self) -> torch.nn.ModuleList:
+    def n_ic_timesteps(self) -> int:
         pass
 
     @property
@@ -126,6 +77,135 @@ class StepABC(abc.ABC):
         """
         Names of variables to be included in the loss function.
         """
+        pass
+
+
+T = TypeVar("T", bound=StepConfigABC)
+
+
+@dataclasses.dataclass
+class StepSelector(StepConfigABC):
+    type: str
+    config: Dict[str, Any]
+    registry: ClassVar[Registry] = Registry()
+
+    def __post_init__(self):
+        self._step_config_instance: StepConfigABC = cast(
+            StepConfigABC, self.registry.get(self.type, self.config)
+        )
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._step_config_instance.n_ic_timesteps
+
+    @classmethod
+    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
+        return cls.registry.register(name)
+
+    def get_step(
+        self,
+        dataset_info: DatasetInfo,
+    ) -> "StepABC":
+        return self._step_config_instance.get_step(dataset_info)
+
+    def get_state(self) -> Dict[str, Any]:
+        return {
+            "type": self.type,
+            "config": self.config,
+        }
+
+    @classmethod
+    def from_state(cls, state: Dict[str, Any]) -> "StepSelector":
+        return cls(type=state["type"], config=state["config"])
+
+    @classmethod
+    def get_available_types(cls) -> Set[str]:
+        """This class method is used to expose all available types of Steps."""
+        return set(cls(type="", config={}).registry._types.keys())
+
+    @property
+    def prognostic_names(self) -> List[str]:
+        return self._step_config_instance.prognostic_names
+
+    @property
+    def forcing_names(self) -> List[str]:
+        return self._step_config_instance.forcing_names
+
+    @property
+    def diagnostic_names(self) -> List[str]:
+        return self._step_config_instance.diagnostic_names
+
+    @property
+    def input_names(self) -> List[str]:
+        return self._step_config_instance.input_names
+
+    @property
+    def output_names(self) -> List[str]:
+        """
+        Names of variables output by the step.
+        """
+        return self._step_config_instance.output_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        """
+        Names of variables to be included in the loss function.
+        """
+        return self._step_config_instance.loss_names
+
+
+class InferenceDataProtocol(Protocol):
+    @property
+    def timestep(self) -> datetime.timedelta:
+        pass
+
+
+class StepABC(abc.ABC):
+    SelfType = TypeVar("SelfType", bound="StepABC")
+
+    @property
+    @abc.abstractmethod
+    def config(self) -> StepConfigABC:
+        pass
+
+    @property
+    @final
+    def n_ic_timesteps(self) -> int:
+        return self.config.n_ic_timesteps
+
+    @property
+    @final
+    def input_names(self) -> List[str]:
+        return self.config.input_names
+
+    @property
+    @final
+    def output_names(self) -> List[str]:
+        return self.config.output_names
+
+    @property
+    @final
+    def prognostic_names(self) -> List[str]:
+        return self.config.prognostic_names
+
+    @property
+    @final
+    def forcing_names(self) -> List[str]:
+        return self.config.forcing_names
+
+    @property
+    @final
+    def diagnostic_names(self) -> List[str]:
+        return self.config.diagnostic_names
+
+    @property
+    @final
+    def loss_names(self) -> List[str]:
+        return self.config.loss_names
+
+    @property
+    @abc.abstractmethod
+    def modules(self) -> torch.nn.ModuleList:
         pass
 
     @property
@@ -172,11 +252,6 @@ class StepABC(abc.ABC):
         """
         Validate the inference data.
         """
-        pass
-
-    @property
-    @abc.abstractmethod
-    def n_ic_timesteps(self) -> int:
         pass
 
     @abc.abstractmethod
