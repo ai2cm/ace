@@ -83,7 +83,7 @@ class RegionalIndexAggregator:
         self._calendar: Optional[str] = None
         self._already_logged: List[str] = []
 
-    def record_batch(self, data: TensorMapping, time: xr.DataArray) -> None:
+    def record_batch(self, time: xr.DataArray, data: TensorMapping) -> None:
         for sst_name in self.sea_surface_temperature_names:
             if sst_name not in data:
                 if sst_name not in self._already_logged:
@@ -227,8 +227,8 @@ class PairedRegionalIndexAggregator:
         target_data: TensorMapping,
         gen_data: TensorMapping,
     ) -> None:
-        self._target_aggregator.record_batch(target_data, time)
-        self._prediction_aggregator.record_batch(gen_data, time)
+        self._target_aggregator.record_batch(time=time, data=target_data)
+        self._prediction_aggregator.record_batch(time=time, data=gen_data)
 
     def get_logs(self, label: str) -> Dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()

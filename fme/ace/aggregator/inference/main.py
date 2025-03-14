@@ -678,7 +678,9 @@ class InferenceAggregator(
             raise ValueError("data is empty")
         for name in self._aggregators:
             if name in self._time_dependent_aggregator_names:
-                self._aggregators[name].record_batch(data.time, data.prediction)
+                self._aggregators[name].record_batch(
+                    time=data.time, data=data.prediction
+                )
             else:
                 self._aggregators[name].record_batch(
                     data=data.prediction,
