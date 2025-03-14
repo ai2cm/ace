@@ -27,7 +27,12 @@ from fme.coupled.inference.data_writer import (
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
 )
-from fme.coupled.stepper import ComponentConfig, CoupledStepper, CoupledStepperConfig
+from fme.coupled.stepper import (
+    ComponentConfig,
+    CoupledOceanFractionConfig,
+    CoupledStepper,
+    CoupledStepperConfig,
+)
 
 
 @dataclasses.dataclass
@@ -60,6 +65,7 @@ class StandaloneComponentCheckpointsConfig:
     ocean: StandaloneComponentConfig
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
+    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -72,6 +78,7 @@ class StandaloneComponentCheckpointsConfig:
                 stepper=load_single_stepper_config(self.atmosphere.path),
             ),
             sst_name=self.sst_name,
+            ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
     def _load_sst_mask(self) -> Optional[torch.Tensor]:
