@@ -8,6 +8,10 @@ checkpoint_path:
   atmosphere:
     timedelta: 6h
     path: /atmos_ckpt.tar
+  sst_name: "sst"
+  ocean_fraction_prediction:
+    sea_ice_fraction_name: sea_ice_fraction
+    land_fraction_name: land_fraction
 data_writer:
   ocean:
     save_prediction_files: false
@@ -15,10 +19,6 @@ data_writer:
   atmosphere:
     save_prediction_files: false
     save_monthly_files: true
-  sst_name: "sst"
-  ocean_fraction_prediction:
-    sea_ice_fraction_name: sea_ice_fraction
-    land_fraction_name: land_fraction
 logging:
   log_to_screen: true
   log_to_wandb: true
