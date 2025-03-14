@@ -45,7 +45,6 @@ from fme.core.optimization import ActivationCheckpointingConfig, NullOptimizatio
 from fme.core.packer import Packer
 from fme.core.parameter_init import ParameterInitializationConfig
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step import StepABC
 from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -567,7 +566,7 @@ def process_prediction_generator_list(
     )
 
 
-class SingleModuleStep(StepABC):
+class SingleModuleStep:
     """
     Step class for a single pytorch module.
     """
@@ -636,6 +635,14 @@ class SingleModuleStep(StepABC):
         self._activation_checkpointing = config.activation_checkpointing
 
     @property
+    def input_names(self) -> List[str]:
+        return self.in_names
+
+    @property
+    def output_names(self) -> List[str]:
+        return self.out_names
+
+    @property
     def normalizer(self) -> StandardNormalizer:
         return self._normalizer
 
@@ -686,10 +693,6 @@ class SingleModuleStep(StepABC):
     @property
     def diagnostic_names(self) -> List[str]:
         return sorted(self._config.diagnostic_names)
-
-    @property
-    def output_names(self) -> List[str]:
-        return self._config.out_names
 
     @property
     def loss_names(self) -> List[str]:
@@ -876,7 +879,7 @@ class SingleModuleStepper(
     def __init__(
         self,
         config: SingleModuleStepperConfig,
-        step: StepABC,
+        step: SingleModuleStep,
         post_process_func: Callable[[TensorMapping], TensorDict],
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
