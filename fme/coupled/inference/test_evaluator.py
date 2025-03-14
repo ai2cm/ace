@@ -1,4 +1,5 @@
 import dataclasses
+import inspect
 import pathlib
 from typing import List
 
@@ -29,7 +30,23 @@ from fme.coupled.inference.evaluator import (
     StandaloneComponentConfig,
     main,
 )
+from fme.coupled.stepper import CoupledStepperConfig
 from fme.coupled.test_stepper import get_stepper_config
+
+
+def test_standalone_checkpoints_config_init_args():
+    stepper_config_init_args = set(
+        inspect.signature(CoupledStepperConfig.__init__).parameters.keys()
+    )
+    init_args = set(
+        inspect.signature(
+            StandaloneComponentCheckpointsConfig.__init__
+        ).parameters.keys()
+    )
+    assert init_args == stepper_config_init_args, (
+        "StandaloneComponentCheckpointsConfig should have the same init args as "
+        "CoupledStepperConfig. Were new args added?"
+    )
 
 
 def save_coupled_stepper(
