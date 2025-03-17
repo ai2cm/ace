@@ -17,8 +17,8 @@ from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
 from fme.ace.stepper import (
-    SingleModuleStepper,
     SingleModuleStepperConfig,
+    Stepper,
     StepperOverrideConfig,
     load_stepper,
     load_stepper_config,
@@ -107,7 +107,7 @@ class InferenceEvaluatorConfig:
             config=config, env_vars=env_vars, resumable=resumable, **kwargs
         )
 
-    def load_stepper(self) -> SingleModuleStepper:
+    def load_stepper(self) -> Stepper:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper(self.checkpoint_path, self.stepper_override)
 

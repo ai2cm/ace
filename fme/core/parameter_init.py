@@ -71,7 +71,7 @@ class ParameterInitializationConfig:
     pre-trained model, only the initial slice of the weights is overwritten.
 
     Parameters:
-        weight_path: path to a SingleModuleStepper checkpoint
+        weight_path: path to a Stepper checkpoint
             containing weights to load
         exclude_parameters: list of parameter names to exclude from the loaded
             weights. Used for example to keep the random initialization for
