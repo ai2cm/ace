@@ -1,9 +1,9 @@
 runs:
-  increasing-CO2: gs://vcm-ml-raw-flexible-retention/2025-03-04-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/increasing-CO2
-data_output_directory: gs://vcm-ml-intermediate/2025-03-07-vertically-resolved-1deg-c96-shield-som-increasing-co2-fme-dataset
+  increasing-CO2: gs://vcm-ml-raw-flexible-retention/2025-03-14-C96-SHiELD-SOM/regridded-zarrs/gaussian_grid_180_by_360/increasing-CO2
+data_output_directory: gs://vcm-ml-intermediate/2025-03-14-vertically-resolved-1deg-c96-shield-som-increasing-co2-fme-dataset
 stats:
-  output_directory: gs://vcm-ml-intermediate/2024-03-07-vertically-resolved-1deg-c96-shield-som-increasing-co2-fme-dataset-stats
-  beaker_dataset: 2025-03-07-vertically-resolved-1deg-fme-c96-shield-som-increasing-co2-dataset-stats
+  output_directory: gs://vcm-ml-intermediate/2025-03-14-vertically-resolved-1deg-c96-shield-som-increasing-co2-fme-dataset-stats
+  beaker_dataset: 2025-03-14-vertically-resolved-1deg-fme-c96-shield-som-increasing-co2-dataset-stats
   start_date: "2031-01-01T06:00:00"  # Ignore one year spin up period.
   end_date: null
   data_type: FV3GFS
