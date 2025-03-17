@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import SingleModuleStepperConfig, Stepper
-from fme.core import parameter_init
+from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
