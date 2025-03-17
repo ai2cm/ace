@@ -88,6 +88,9 @@ class MultiCallStepConfig(StepConfigABC):
         else:
             return self.wrapped_step.loss_names
 
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.wrapped_step.replace_ocean(ocean)
+
     @property
     def n_ic_timesteps(self) -> int:
         return self.wrapped_step.n_ic_timesteps
@@ -147,9 +150,6 @@ class MultiCallStep(StepABC):
     @property
     def ocean_fraction_name(self) -> Optional[str]:
         return self._wrapped_step.ocean_fraction_name
-
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        self._wrapped_step.replace_ocean(ocean)
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         self._wrapped_step.validate_inference_data(data)

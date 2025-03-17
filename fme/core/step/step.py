@@ -79,6 +79,10 @@ class StepConfigABC(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        pass
+
 
 T = TypeVar("T", bound=StepConfigABC)
 
@@ -152,6 +156,10 @@ class StepSelector(StepConfigABC):
         Names of variables to be included in the loss function.
         """
         return self._step_config_instance.loss_names
+
+    def replace_ocean(self, ocean: OceanConfig | None):
+        self._step_config_instance.replace_ocean(ocean)
+        self.config = dataclasses.asdict(self._step_config_instance)
 
 
 class InferenceDataProtocol(Protocol):
@@ -241,10 +249,6 @@ class StepABC(abc.ABC):
         """
         Name of the ocean fraction variable, if one is available.
         """
-        pass
-
-    @abc.abstractmethod
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
         pass
 
     @abc.abstractmethod

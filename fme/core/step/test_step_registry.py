@@ -52,9 +52,6 @@ class MockStep(StepABC):
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        raise NotImplementedError()
-
     def validate_inference_data(self, data: InferenceDataProtocol):
         raise NotImplementedError()
 
@@ -99,6 +96,9 @@ class MockStepConfig(StepConfigABC):
 
     @property
     def n_ic_timesteps(self) -> int:
+        raise NotImplementedError()
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
         raise NotImplementedError()
 
 
