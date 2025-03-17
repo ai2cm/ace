@@ -24,8 +24,8 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
-    SingleModuleStepper,
     SingleModuleStepperConfig,
+    Stepper,
     StepperOverrideConfig,
     TrainOutput,
     _combine_normalizers,
@@ -398,7 +398,7 @@ def test_reloaded_stepper_gives_same_prediction():
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
-    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
+    new_stepper = Stepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.train_on_batch(
         data=data,
@@ -1072,7 +1072,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
+    stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
         assert stepper.loss_obj.normalizer.means == {

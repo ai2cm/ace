@@ -40,7 +40,7 @@ class StandaloneComponentConfig:
     """
     Configuration specifying the path to one of the components (ocean or
     atmosphere) within a CoupledStepper. Intended for inference with separate
-    pretrained SingleModuleStepper training checkpoints.
+    pretrained Stepper training checkpoints.
 
     """
 
@@ -51,7 +51,7 @@ class StandaloneComponentConfig:
 @dataclasses.dataclass
 class StandaloneComponentCheckpointsConfig:
     """
-    Configuration for creating a CoupledStepper from two separate SingleModuleStepper
+    Configuration for creating a CoupledStepper from two separate Stepper
     checkpoints, for standalone inference.
 
     Parameters:
@@ -174,7 +174,7 @@ class InferenceEvaluatorConfig:
         experiment_dir: Directory to save results to.
         n_coupled_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to a CoupledStepper training checkpoint to load, or a
-            mapping to two separate SingleModuleStepper training checkpoints.
+            mapping to two separate Stepper training checkpoints.
         logging: configuration for logging.
         loader: Configuration for data to be used as initial conditions, forcing, and
             target in inference.

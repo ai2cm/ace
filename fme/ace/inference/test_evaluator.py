@@ -24,7 +24,7 @@ from fme.ace.inference.evaluator import (
     main,
 )
 from fme.ace.registry import ModuleSelector
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig, TrainOutput
+from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
 from fme.ace.stepper.single_module import SingleModuleStep
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
@@ -90,7 +90,7 @@ def save_plus_one_stepper(
 
 
 def validate_stepper_ocean(
-    stepper: SingleModuleStepper, expected_ocean_config: Optional[OceanConfig]
+    stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
 ):
     assert isinstance(stepper._step_obj, SingleModuleStep)
     assert stepper._step_obj._config.ocean == expected_ocean_config
@@ -109,7 +109,7 @@ def validate_stepper_ocean(
 
 
 def validate_stepper_multi_call(
-    stepper: SingleModuleStepper, expected_multi_call_config: Optional[MultiCallConfig]
+    stepper: Stepper, expected_multi_call_config: Optional[MultiCallConfig]
 ):
     assert stepper._config.multi_call == expected_multi_call_config
     if expected_multi_call_config is not None:
