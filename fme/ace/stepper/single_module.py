@@ -23,6 +23,7 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     SerializableVerticalCoordinate,
@@ -43,7 +44,6 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
 from fme.core.packer import Packer
-from fme.core.parameter_init import ParameterInitializationConfig
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
