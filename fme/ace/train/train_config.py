@@ -11,11 +11,7 @@ from fme.ace.data_loading.getters import get_data_loader, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.ace.stepper import (
-    ExistingStepperConfig,
-    SingleModuleStepper,
-    SingleModuleStepperConfig,
-)
+from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -208,7 +204,7 @@ class TrainBuilders:
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
-    ) -> SingleModuleStepper:
+    ) -> Stepper:
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,

@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
+from fme.ace.stepper import SingleModuleStepperConfig, Stepper
 from fme.core import parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
@@ -258,8 +258,8 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
-    stepper = SingleModuleStepper.from_state(stepper_state)
-    assert isinstance(stepper, SingleModuleStepper)
+    stepper = Stepper.from_state(stepper_state)
+    assert isinstance(stepper, Stepper)
 
 
 class SimpleLinearModule(torch.nn.Module):
