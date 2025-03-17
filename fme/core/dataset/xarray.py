@@ -616,8 +616,6 @@ class XarrayDataset(Dataset):
         total_steps = 0
         for i, file_idx in enumerate(idxs):
             ds = self._open_file(file_idx)
-            if self.fill_nans is not None:
-                ds = ds.fillna(self.fill_nans.value)
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
@@ -629,6 +627,7 @@ class XarrayDataset(Dataset):
                 names=self._time_dependent_names,
                 time_dim="time",
                 spatial_dim_names=self._horizontal_coordinates.loaded_dims,
+                fill_nans=self.fill_nans,
             )
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
