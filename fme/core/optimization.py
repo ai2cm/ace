@@ -156,7 +156,7 @@ class OptimizationConfig:
             from separate losses to reduce memory consumption. The stepper may choose
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
-            your stepper (e.g. SingleModuleStepper) for more details.
+            your stepper (e.g. Stepper) for more details.
     """
 
     optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
