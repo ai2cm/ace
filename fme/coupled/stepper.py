@@ -12,8 +12,8 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import DataRequirements
 from fme.ace.stepper import (
-    SingleModuleStepper,
     SingleModuleStepperConfig,
+    Stepper,
     TrainOutput,
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
@@ -385,7 +385,7 @@ class CoupledStepperConfig:
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: OptionalDepthCoordinate,
-    ) -> SingleModuleStepper:
+    ) -> Stepper:
         return self.ocean.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
@@ -398,7 +398,7 @@ class CoupledStepperConfig:
         img_shape: Tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: OptionalHybridSigmaPressureCoordinate,
-    ) -> SingleModuleStepper:
+    ) -> Stepper:
         return self.atmosphere.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
@@ -524,8 +524,8 @@ class CoupledStepper(
     def __init__(
         self,
         config: CoupledStepperConfig,
-        ocean: SingleModuleStepper,
-        atmosphere: SingleModuleStepper,
+        ocean: Stepper,
+        atmosphere: Stepper,
         sst_mask: Optional[torch.Tensor] = None,
     ):
         """
@@ -1066,8 +1066,8 @@ class CoupledStepper(
     @classmethod
     def from_state(cls, state) -> "CoupledStepper":
         config = CoupledStepperConfig.from_state(state["config"])
-        ocean = SingleModuleStepper.from_state(state["ocean_state"])
-        atmosphere = SingleModuleStepper.from_state(state["atmosphere_state"])
+        ocean = Stepper.from_state(state["ocean_state"])
+        atmosphere = Stepper.from_state(state["atmosphere_state"])
         sst_mask = None
         ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
             state["ocean_state"]["vertical_coordinate"]

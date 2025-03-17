@@ -176,7 +176,7 @@ class SingleModuleStepperConfig:
         If the model is being initialized from another model's weights for fine-tuning,
         returns those weights. Otherwise, returns None.
 
-        The list mirrors the order of `modules` in the `SingleModuleStepper` class.
+        The list mirrors the order of `modules` in the `Stepper` class.
         """
         base_weights = self.parameter_init.get_base_weights()
         if base_weights is not None:
@@ -210,7 +210,7 @@ class SingleModuleStepperConfig:
             timestep=timestep,
         )
         post_process_func = vertical_coordinate.build_post_process_function()
-        return SingleModuleStepper(
+        return Stepper(
             config=self,
             step=step,
             post_process_func=post_process_func,
@@ -365,7 +365,7 @@ class ExistingStepperConfig:
     ):
         del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
-        return SingleModuleStepper.from_state(self._load_checkpoint()["stepper"])
+        return Stepper.from_state(self._load_checkpoint()["stepper"])
 
 
 def _combine_normalizers(
@@ -860,7 +860,7 @@ class SingleModuleStep:
         return step
 
 
-class SingleModuleStepper(
+class Stepper(
     TrainStepperABC[
         PrognosticState,
         BatchData,
@@ -1406,7 +1406,7 @@ class SingleModuleStepper(
         self._step_obj.load_state(state)
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepper":
+    def from_state(cls, state) -> "Stepper":
         """
         Load the state of the stepper.
 
@@ -1524,7 +1524,7 @@ def load_stepper_config(
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
     override_config: Optional[StepperOverrideConfig] = None,
-) -> SingleModuleStepper:
+) -> Stepper:
     """Load a stepper, optionally overriding certain aspects.
 
     Args:
@@ -1541,7 +1541,7 @@ def load_stepper(
     checkpoint = torch.load(
         checkpoint_path, map_location=get_device(), weights_only=False
     )
-    stepper = SingleModuleStepper.from_state(checkpoint["stepper"])
+    stepper = Stepper.from_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":
         logging.info(
