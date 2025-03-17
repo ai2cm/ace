@@ -1,6 +1,8 @@
 import dataclasses
 from typing import Iterable, List, Tuple
 
+import dacite
+import pytest
 import torch
 
 from .module import ModuleConfig, ModuleSelector
@@ -36,3 +38,8 @@ def test_register():
     selector = ModuleSelector(type="mock", config={"param_shapes": [(1, 2, 3)]})
     module = selector.build(1, 1, (16, 32))
     assert isinstance(module, MockModule)
+
+
+def test_module_selector_raises_with_bad_config():
+    with pytest.raises(dacite.UnexpectedDataError):
+        ModuleSelector(type="mock", config={"non_existent_key": 1})
