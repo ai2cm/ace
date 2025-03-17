@@ -5,6 +5,8 @@ from typing import Hashable, List, Optional, Sequence, Tuple
 import torch
 import xarray as xr
 
+from fme.core.dataset.config import FillNaNsConfig
+
 SLICE_NONE = slice(None)
 
 
@@ -89,9 +91,6 @@ def _load_all_variables(
 
     This function leverages xarray's lazy loading to load only the time slice
     (or chunk[s] for the time slice) of the variables we need.
-
-    Consolidating the dask tasks into a single call of .compute() sped up remote
-    zarr loads by nearly a factor of 2.
     """
     if "time" in ds.dims:
         ds = ds.isel(time=time_slice)
@@ -105,11 +104,16 @@ def load_series_data(
     names: List[str],
     time_dim: Hashable,
     spatial_dim_names: List[str],
+    fill_nans: Optional[FillNaNsConfig] = None,
 ):
     time_slice = slice(idx, idx + n_steps)
     dims = [time_dim] + spatial_dim_names
     shape = [n_steps] + [ds.sizes[spatial_dim] for spatial_dim in dims[1:]]
     loaded = _load_all_variables(ds, names, time_slice)
+    # Fill NaNs after subsetting time slice to avoid triggering loading all
+    # data, since we do not use dask.
+    if fill_nans is not None:
+        loaded = loaded.fillna(fill_nans.value)
     arrays = {}
     for n in names:
         variable = loaded[n].variable
