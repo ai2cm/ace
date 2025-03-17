@@ -38,6 +38,10 @@ from fme.ace.registry.hpx import (
 )
 from fme.ace.registry.sfno import SFNO_V0_1_0, SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper import StepperOverrideConfig
+from fme.ace.stepper.parameter_init import (
+    FrozenParameterConfig,
+    ParameterInitializationConfig,
+)
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.ocean import OceanCorrectorConfig
 from fme.core.dataset.config import (
@@ -52,7 +56,6 @@ from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import SchedulerConfig
-from fme.core.parameter_init import FrozenParameterConfig, ParameterInitializationConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.typing_ import Slice

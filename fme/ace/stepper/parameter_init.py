@@ -5,9 +5,8 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.weight_ops import overwrite_weights, strip_leading_module
 from fme.core.wildcard import apply_by_wildcard, wildcard_match
-
-from .weight_ops import overwrite_weights, strip_leading_module
 
 
 @dataclasses.dataclass
