@@ -4,7 +4,6 @@ import torch
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
-from fme.core.ocean import OceanConfig
 from fme.core.step.step import InferenceDataProtocol, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -66,12 +65,6 @@ class SerializableStep:
     @property
     def ocean_fraction_name(self) -> Optional[str]:
         return self._instance.ocean_fraction_name
-
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        """
-        Replace the ocean configuration.
-        """
-        self._instance.replace_ocean(ocean)
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         """

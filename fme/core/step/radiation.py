@@ -209,6 +209,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def loss_names(self) -> List[str]:
         return self.output_names
 
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.ocean = ocean
+
 
 class SeparateRadiationStep(StepABC):
     """
@@ -283,21 +286,6 @@ class SeparateRadiationStep(StepABC):
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
-
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        """
-        Replace the ocean model with a new one.
-
-        Args:
-            ocean: The new ocean model configuration or None.
-        """
-        self._config.ocean = ocean
-        if ocean is None:
-            self.ocean = ocean
-        else:
-            self.ocean = ocean.build(
-                self.input_names, self.output_names, self._timestep
-            )
 
     @property
     def next_step_input_names(self) -> List[str]:
