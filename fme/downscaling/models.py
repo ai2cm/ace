@@ -188,6 +188,10 @@ class Model:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
+            "normalization": {
+                "coarse": self.normalizer.coarse.get_state(),
+                "fine": self.normalizer.fine.get_state(),
+            },
         }
 
     @classmethod
@@ -197,6 +201,8 @@ class Model:
         area_weights: FineResCoarseResPair[torch.Tensor],
         fine_topography: torch.Tensor,
     ) -> "Model":
+        # Use serialized normalization data for loaded models
+        state["config"]["normalization"] = state["normalization"]
         config = DownscalingModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
