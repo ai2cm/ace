@@ -15,6 +15,7 @@ from fme.core.normalizer import NetworkAndLossNormalizationConfig, Normalization
 from fme.core.registry import ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.serializable import SerializableStep
+from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.typing_ import TensorDict
 
@@ -77,6 +78,42 @@ SELECTOR_CONFIG_CASES = [
             config=dataclasses.asdict(SEPARATE_RADIATION_CONFIG),
         ),
         id="separate_radiation",
+    ),
+    pytest.param(
+        StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={
+                            "scale_factor": 1,
+                            "embed_dim": 4,
+                            "num_layers": 2,
+                        },
+                    ),
+                    in_names=["forcing_shared", "forcing_rad"],
+                    out_names=["diagnostic_main", "diagnostic_rad"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={
+                                "forcing_shared": 0.0,
+                                "forcing_rad": 0.0,
+                                "diagnostic_main": 0.0,
+                                "diagnostic_rad": 0.0,
+                            },
+                            stds={
+                                "forcing_shared": 1.0,
+                                "forcing_rad": 1.0,
+                                "diagnostic_main": 1.0,
+                                "diagnostic_rad": 1.0,
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        id="single_module",
     ),
     pytest.param(
         StepSelector(
