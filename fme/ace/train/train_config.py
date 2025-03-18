@@ -113,8 +113,8 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
-    copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
-        default_factory=lambda: CopyWeightsConfig(exclude=["*"])
+    copy_weights_after_batch: List[CopyWeightsConfig] = dataclasses.field(
+        default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
@@ -220,6 +220,13 @@ class TrainBuilders:
     ) -> EndOfBatchCallback:
         base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:
-            copy_after_batch = self.config.copy_weights_after_batch
-            return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)
+
+            def copy_after_batch():
+                for module, copy_config in zip(
+                    modules, self.config.copy_weights_after_batch
+                ):
+                    copy_config.apply(weights=base_weights, modules=[module])
+                return
+
+            return copy_after_batch
         return lambda: None

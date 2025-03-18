@@ -581,11 +581,10 @@ def test_fine_tuning(tmp_path, nettype, very_fast_only: bool):
 def _create_copy_weights_after_batch_config(
     path_to_train_config_yaml: str, path_to_checkpoint: str, experiment_dir: str
 ):
-    # TODO(gideond) rename to "overwrite" or something of that nature
     with open(path_to_train_config_yaml, "r") as config_file:
         config_data = yaml.safe_load(config_file)
         config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
-        config_data["copy_weights_after_batch"] = {"include": ["*"], "exclude": []}
+        config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": []}]
         config_data["experiment_dir"] = experiment_dir
         with tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".yaml"
