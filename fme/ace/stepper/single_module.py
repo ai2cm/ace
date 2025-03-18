@@ -48,6 +48,7 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.weight_ops import strip_leading_module
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -178,11 +179,7 @@ class SingleModuleStepperConfig:
 
         The list mirrors the order of `modules` in the `Stepper` class.
         """
-        base_weights = self.parameter_init.get_base_weights()
-        if base_weights is not None:
-            return [base_weights]
-        else:
-            return None
+        return self.parameter_init.get_base_weights(_load_weights)
 
     def get_stepper(
         self,
@@ -311,6 +308,14 @@ class SingleModuleStepperConfig:
                 }
             del state_copy["prescriber"]
         return state_copy
+
+
+def _load_weights(path: str) -> List[Mapping[str, Any]]:
+    stepper = load_stepper(path)
+    return_weights: List[Mapping[str, Any]] = []
+    for module in stepper.modules:
+        return_weights.append(strip_leading_module(module.state_dict()))
+    return return_weights
 
 
 @dataclasses.dataclass
@@ -614,10 +619,10 @@ class SingleModuleStep:
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         )
-        module, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            self.module, init_weights=init_weights
+        modules, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
+            [self.module], init_weights=init_weights, load_weights=_load_weights
         )
-        self.module = module.to(get_device())
+        self.module = modules[0].to(get_device())
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()

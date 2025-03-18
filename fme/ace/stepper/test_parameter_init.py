@@ -351,23 +351,23 @@ def test_parameter_init_with_regularizer(tmpdir):
     device = get_device()
     saved_module = ComplexModule(10, 20).to(device)
     weights_path = str(tmpdir / "weights.ckpt")
-    torch.save(
-        {
-            "stepper": {
-                "module": saved_module.state_dict(),
-            },
-        },
-        weights_path,
-    )
     config = parameter_init.ParameterInitializationConfig(
         weights_path=weights_path,
-        exclude_parameters=["linear1.linear.weight"],
+        parameters=[
+            parameter_init.ParameterClassification(
+                exclude=["linear1.linear.weight"],
+            ),
+        ],
         alpha=1.0,
         beta=1.0,
     )
     # new_module = module
     module = ComplexModule(10, 20).to(device)
-    module, regularizer = config.apply(module, init_weights=True)
+    modules, regularizer = config.apply(
+        [module], init_weights=True, load_weights=lambda _: [saved_module.state_dict()]
+    )
+    assert len(modules) == 1
+    module = modules[0]
 
     original_state = copy.deepcopy(module.state_dict())
     # overwrite new_module weights with random values
@@ -382,7 +382,9 @@ def test_parameter_init_with_regularizer(tmpdir):
     optimizer.step()
 
     for name, param in module.named_parameters():
-        if any(wildcard_match(pattern, name) for pattern in config.exclude_parameters):
+        if any(
+            wildcard_match(pattern, name) for pattern in config.parameters[0].exclude
+        ):
             # L2 regularization against 0
             assert torch.all(param.data**2 < pre_step_state[name] ** 2)
         else:
