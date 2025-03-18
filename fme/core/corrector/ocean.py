@@ -87,9 +87,10 @@ class OceanCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
     ) -> TensorDict:
-        if self._masking is not None:
-            gen_data = self._masking(gen_data)
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         gen_data = self._correct_sea_ice_fraction(gen_data, input_data)
-        return gen_data
+        if self._masking is not None:
+            # NOTE: masking should be applied last to avoid overwriting
+            gen_data = self._masking(gen_data)
+        return dict(gen_data)
