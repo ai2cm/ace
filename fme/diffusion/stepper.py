@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 import logging
+import pathlib
 from copy import copy
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
@@ -33,6 +34,7 @@ from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -137,18 +139,16 @@ class DiffusionStepperConfig:
     def get_state(self):
         return dataclasses.asdict(self)
 
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+    def get_base_weights(
+        self,
+    ) -> Optional[List[Mapping[str, Any]]]:
         """
         If the model is being initialized from another model's weights for fine-tuning,
         returns those weights. Otherwise, returns None.
 
         The list mirrors the order of `modules` in the `DiffusionStepper` class.
         """
-        base_weights = self.parameter_init.get_base_weights()
-        if base_weights is not None:
-            return [base_weights]
-        else:
-            return None
+        return self.parameter_init.get_base_weights(_load_weights)
 
     def get_stepper(
         self,
@@ -254,6 +254,14 @@ class DiffusionStepperConfig:
         return state_copy
 
 
+def _load_weights(path: str) -> List[Mapping[str, Any]]:
+    stepper = load_stepper(path)
+    return_weights: List[Mapping[str, Any]] = []
+    for module in stepper.modules:
+        return_weights.append(strip_leading_module(module.state_dict()))
+    return return_weights
+
+
 def _combine_normalizers(
     residual_normalizer: StandardNormalizer,
     model_normalizer: StandardNormalizer,
@@ -326,10 +334,10 @@ class DiffusionStepper(
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         )
-        module, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            self.module, init_weights=init_weights
+        modules, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
+            [self.module], init_weights=init_weights, load_weights=_load_weights
         )
-        self.module = module.to(get_device())
+        self.module = modules[0].to(get_device())
         self.derive_func = derive_func
         self._img_shape = img_shape
         self._config = config
@@ -821,3 +829,13 @@ class DiffusionStepper(
         )
         stepper.load_state(state)
         return stepper
+
+
+def load_stepper(
+    checkpoint_path: str | pathlib.Path,
+) -> DiffusionStepper:
+    checkpoint = torch.load(
+        checkpoint_path, map_location=get_device(), weights_only=False
+    )
+    stepper = DiffusionStepper.from_state(checkpoint["stepper"])
+    return stepper
