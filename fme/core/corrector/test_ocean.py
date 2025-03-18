@@ -1,4 +1,5 @@
 import datetime
+import math
 
 import pytest
 import torch
@@ -66,7 +67,8 @@ class _MockDepth:
 _VERTICAL_COORD = _MockDepth()
 
 
-def test_ocean_corrector_integration():
+@pytest.mark.parametrize("fill_value", [float("nan"), -1.0, 100.0])
+def test_ocean_corrector_integration(fill_value):
     """Ensures that OceanCorrector can be called with all methods active
     but doesn't check results."""
     torch.manual_seed(0)
@@ -74,7 +76,7 @@ def test_ocean_corrector_integration():
         masking=StaticMaskingConfig(
             variable_names_and_prefixes=["sst", "so_"],
             mask_value=0,
-            fill_value=float("nan"),
+            fill_value=fill_value,
         ),
         force_positive_names=["so_0", "so_1"],
     )
@@ -87,7 +89,15 @@ def test_ocean_corrector_integration():
     gen_data["sst"] = torch.randn(IMG_SHAPE, device=DEVICE)
     corrected_gen = corrector(input_data, gen_data, {})
     for name in ["so_0", "so_1", "sst"]:
-        assert corrected_gen[name][_LAT, _LON].isnan().all()
+        if math.isnan(fill_value):
+            assert corrected_gen[name][_LAT, _LON].isnan().item()
+        else:
+            torch.testing.assert_close(
+                corrected_gen[name][_LAT, _LON],
+                torch.tensor(fill_value, device=DEVICE),
+                rtol=0,
+                atol=0,
+            )
     for name in ["so_0", "so_1"]:
         x = corrected_gen[name].clone()
         x[_LAT, _LON] = 0.0
