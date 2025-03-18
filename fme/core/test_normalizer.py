@@ -2,7 +2,11 @@ import pytest
 import torch
 
 from fme.core.device import move_tensordict_to_device
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import (
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+    StandardNormalizer,
+)
 
 
 def test_normalize_depends_on_mean():
@@ -53,8 +57,8 @@ def test_normalize_and_denormalize_random_tensor():
     normalizer = StandardNormalizer(means=means, stds=stds)
     tensors = move_tensordict_to_device({"a": torch.randn(10), "b": torch.randn(10)})
     denormalized = normalizer.denormalize(normalizer.normalize(tensors))
-    assert torch.allclose(denormalized["a"], tensors["a"])
-    assert torch.allclose(denormalized["b"], tensors["b"])
+    torch.testing.assert_close(denormalized["a"], tensors["a"])
+    torch.testing.assert_close(denormalized["b"], tensors["b"])
 
 
 def test_missing_normalization_build_raises_error():
@@ -126,3 +130,96 @@ def test_normalization_with_nans(fill_nans_on_normalize, fill_nans_on_denormaliz
     else:
         assert torch.isnan(denormalized["a"][1]), "denormalized_nans_not_removed_a"
         assert torch.isnan(denormalized["b"][1]), "denormalized_nans_not_removed_b"
+
+
+def test_combined_normalization_uses_network_normalizer_for_loss():
+    torch.manual_seed(0)
+    network_config = NormalizationConfig(
+        means={"a": 1.0, "b": 2.0},
+        stds={"a": 1.0, "b": 2.0},
+    )
+    combined_config = NetworkAndLossNormalizationConfig(
+        network=network_config,
+    )
+    direct_normalizer = network_config.build(["a", "b"])
+    loss_normalizer = combined_config.get_loss_normalizer(
+        names=["a", "b"],
+        residual_scaled_names=["a", "b"],
+    )
+    data = move_tensordict_to_device({"a": torch.randn(10), "b": torch.randn(10)})
+    direct_normalized = direct_normalizer.normalize(data)
+    loss_normalized = loss_normalizer.normalize(data)
+    torch.testing.assert_close(direct_normalized["a"], loss_normalized["a"])
+    torch.testing.assert_close(direct_normalized["b"], loss_normalized["b"])
+
+
+@pytest.mark.parametrize("are_prognostic", [True, False])
+def test_combined_normalization_uses_loss_normalizer_for_loss(are_prognostic: bool):
+    torch.manual_seed(0)
+    network_config = NormalizationConfig(
+        means={"a": torch.randn(1), "b": torch.randn(1)},
+        stds={"a": torch.randn(1), "b": torch.randn(1)},
+    )
+    loss_config = NormalizationConfig(
+        means={"a": torch.randn(1), "b": torch.randn(1)},
+        stds={"a": torch.randn(1), "b": torch.randn(1)},
+    )
+    combined_config = NetworkAndLossNormalizationConfig(
+        network=network_config,
+        loss=loss_config,
+    )
+    direct_normalizer = loss_config.build(["a", "b"])
+    if are_prognostic:
+        prognostic_names = ["a", "b"]
+    else:
+        prognostic_names = []
+    loss_normalizer = combined_config.get_loss_normalizer(
+        names=["a", "b"],
+        residual_scaled_names=prognostic_names,
+    )
+    data = move_tensordict_to_device({"a": torch.randn(10), "b": torch.randn(10)})
+    direct_normalized = direct_normalizer.normalize(data)
+    loss_normalized = loss_normalizer.normalize(data)
+    torch.testing.assert_close(direct_normalized["a"], loss_normalized["a"])
+    torch.testing.assert_close(direct_normalized["b"], loss_normalized["b"])
+
+
+def test_combined_normalization_uses_residual_normalizer_for_prognostic_loss():
+    torch.manual_seed(0)
+    network_config = NormalizationConfig(
+        means={"a": torch.randn(1), "b": torch.randn(1)},
+        stds={"a": torch.randn(1), "b": torch.randn(1)},
+    )
+    residual_config = NormalizationConfig(
+        means={"a": torch.randn(1), "b": torch.randn(1)},
+        stds={"a": torch.randn(1), "b": torch.randn(1)},
+    )
+    combined_config = NetworkAndLossNormalizationConfig(
+        network=network_config,
+        residual=residual_config,
+    )
+    direct_residual_normalizer = residual_config.build(["a", "b"])
+    direct_network_normalizer = network_config.build(["a", "b"])
+    loss_normalizer = combined_config.get_loss_normalizer(
+        names=["a", "b"],
+        residual_scaled_names=["a"],
+    )
+    data = move_tensordict_to_device({"a": torch.randn(10), "b": torch.randn(10)})
+    direct_residual_normalized = direct_residual_normalizer.normalize(data)
+    direct_network_noramlized = direct_network_normalizer.normalize(data)
+    loss_normalized = loss_normalizer.normalize(data)
+    torch.testing.assert_close(direct_residual_normalized["a"], loss_normalized["a"])
+    torch.testing.assert_close(direct_network_noramlized["b"], loss_normalized["b"])
+
+
+def test_combined_normalization_cannot_set_both_loss_and_residual():
+    network_config = NormalizationConfig(
+        means={"a": torch.randn(1), "b": torch.randn(1)},
+        stds={"a": torch.randn(1), "b": torch.randn(1)},
+    )
+    with pytest.raises(ValueError):
+        NetworkAndLossNormalizationConfig(
+            network=network_config,
+            loss=network_config,
+            residual=network_config,
+        )
