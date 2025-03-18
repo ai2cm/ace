@@ -1,4 +1,6 @@
-from fme.core.dicts import to_flat_dict, to_nested_dict
+import pytest
+
+from fme.core.dicts import add_names, to_flat_dict, to_nested_dict
 
 
 def get_cfg_and_args_dicts():
@@ -39,3 +41,29 @@ def test_flat_dict_round_trip():
     result = to_nested_dict(args_d)
 
     assert result == config_d
+
+
+def test_add_names():
+    input = {"a": 1, "b": 2}
+    output = {"a": 3, "b": 4}
+    names = ["a"]
+    new_output = add_names(input, output, names)
+    assert new_output["a"] == 4
+    assert new_output["b"] == 4
+
+
+def test_add_names_passes_with_extra_name():
+    input = {"a": 1, "b": 2}
+    output = {"a": 3, "b": 4}
+    names = ["a", "c"]
+    new_output = add_names(input, output, names)
+    assert new_output["a"] == 4
+    assert new_output["b"] == 4
+
+
+def test_add_names_raises_key_error_on_missing_input():
+    input = {"a": 1}
+    output = {"a": 3, "b": 4}
+    names = ["b"]
+    with pytest.raises(KeyError):
+        add_names(input, output, names)
