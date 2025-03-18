@@ -82,8 +82,11 @@ from fme.core.typing_ import TensorDict, TensorMapping
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     # note for devs: you don't have to use this function to build a custom
     # trainer, you can build it however you like. This is here for convenience.
+    logging.info("Initializing training data loader")
     train_data = builder.get_train_data()
+    logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
+    logging.info("Initializing inline inference data loader")
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
