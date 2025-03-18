@@ -5,7 +5,7 @@ import torch
 
 from fme import get_device
 from fme.core.loss import LossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
@@ -267,3 +267,48 @@ def test_interleaved_samples_round_trip():
     )
     assert with_batch_sample_dims.shape == (batch_size, n_samples, 5)
     assert torch.equal(batch, with_batch_sample_dims[:, 0])
+
+
+def test_normalizer_serialization(tmp_path):
+    fine_shape = (16, 32)
+    coarse_shape = (8, 16)
+    downscale_factor = 2
+    module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    area_weights = FineResCoarseResPair(
+        torch.ones(*fine_shape), torch.ones(*coarse_shape)
+    )
+    fine_topography = torch.zeros(*fine_shape)
+    model = DownscalingModelConfig(
+        ModuleRegistrySelector("prebuilt", {"module": module}),
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalizer,
+        use_fine_topography=False,
+    ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
+
+    # change model normalizer to check that new values are serialized and loaded
+    model.normalizer = FineResCoarseResPair(
+        fine=StandardNormalizer(
+            means={"x": torch.tensor(1.0)}, stds={"x": torch.tensor(2.0)}
+        ),
+        coarse=StandardNormalizer(
+            means={"x": torch.tensor(3.0)}, stds={"x": torch.tensor(4.0)}
+        ),
+    )
+
+    torch.save(model.get_state(), tmp_path / "test.ckpt")
+
+    model_from_disk = Model.from_state(
+        torch.load(tmp_path / "test.ckpt", weights_only=False),
+        area_weights,
+        fine_topography,
+    )
+    assert model_from_disk.normalizer.fine.means == {"x": 1.0}
+    assert model_from_disk.normalizer.fine.stds == {"x": 2.0}
+    assert model_from_disk.normalizer.coarse.means == {"x": 3.0}
+    assert model_from_disk.normalizer.coarse.stds == {"x": 4.0}
