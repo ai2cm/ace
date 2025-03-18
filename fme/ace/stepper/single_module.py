@@ -691,10 +691,6 @@ class SingleModuleStep:
         return sorted(self._config.prognostic_names)
 
     @property
-    def diagnostic_names(self) -> List[str]:
-        return sorted(self._config.diagnostic_names)
-
-    @property
     def loss_names(self) -> List[str]:
         return self.output_names
 

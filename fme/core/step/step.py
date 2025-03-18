@@ -55,11 +55,6 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
-    def diagnostic_names(self) -> List[str]:
-        pass
-
-    @property
     def input_names(self) -> List[str]:
         return list(set(self.prognostic_names).union(self.forcing_names))
 
@@ -80,6 +75,22 @@ class StepConfigABC(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        """
+        Args:
+            extra_diagnostic_names: Names of diagnostics to include in the loss
+                normalizer. These will generally use full-field scale factors.
+            extra_prognostic_names: Names of prognostics to include in the loss
+                normalizer. These may use residual scale factors.
+
+        Returns:
+            The loss normalizer.
+        """
+
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         pass
 
@@ -136,10 +147,6 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.forcing_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
-        return self._step_config_instance.diagnostic_names
-
-    @property
     def input_names(self) -> List[str]:
         return self._step_config_instance.input_names
 
@@ -156,6 +163,15 @@ class StepSelector(StepConfigABC):
         Names of variables to be included in the loss function.
         """
         return self._step_config_instance.loss_names
+
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        return self._step_config_instance.get_loss_normalizer(
+            extra_diagnostic_names, extra_prognostic_names
+        )
 
     def replace_ocean(self, ocean: OceanConfig | None):
         self._step_config_instance.replace_ocean(ocean)
@@ -200,11 +216,6 @@ class StepABC(abc.ABC):
     @final
     def forcing_names(self) -> List[str]:
         return self.config.forcing_names
-
-    @property
-    @final
-    def diagnostic_names(self) -> List[str]:
-        return self.config.diagnostic_names
 
     @property
     @final
