@@ -2,10 +2,11 @@ import dataclasses
 from copy import copy
 from typing import Dict, Iterable, List, Mapping, Optional, Union
 
-import netCDF4
+import fsspec
 import numpy as np
 import torch
 import torch.jit
+import xarray as xr
 
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -206,12 +207,13 @@ def load_dict_from_netcdf(
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
-    ds = netCDF4.Dataset(path)
-    ds.set_auto_mask(False)
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f, mask_and_scale=False)
+
     result = {}
     for c in names:
         if c in ds.variables:
-            result[c] = ds.variables[c][:]
+            result[c] = ds.variables[c].values
         elif c in defaults:
             result[c] = defaults[c]
         else:
