@@ -33,6 +33,7 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
+from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
@@ -78,6 +79,8 @@ class SingleModuleStepperConfig:
         activation_checkpointing: Configuration for activation checkpointing to trade
             increased computation for lowered memory during training.
         crps_training: Whether to use CRPS training for stochastic models.
+        residual_prediction: Whether to have ML module predict tendencies for
+            prognostic variables.
     """
 
     builder: ModuleSelector
@@ -103,6 +106,7 @@ class SingleModuleStepperConfig:
         default_factory=lambda: ActivationCheckpointingConfig()
     )
     crps_training: bool = False
+    residual_prediction: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -748,6 +752,8 @@ class SingleModuleStep:
         else:
             output_tensor = self.module(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        if self._config.residual_prediction:
+            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
         output = self.normalizer.denormalize(output_norm)
         if self._corrector is not None:
             output = self._corrector(input, output, next_step_input_data)

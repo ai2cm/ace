@@ -753,6 +753,7 @@ def _get_stepper(
     out_names: List[str],
     ocean_config: Optional[OceanConfig] = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
+    norm_mean: float = 0.0,
     **kwargs,
 ):
     if module_name == "AddOne":
@@ -792,7 +793,7 @@ def _get_stepper(
         in_names=in_names,
         out_names=out_names,
         normalization=NormalizationConfig(
-            means={n: np.array([0.0], dtype=np.float32) for n in all_names},
+            means={n: np.array([norm_mean], dtype=np.float32) for n in all_names},
             stds={n: np.array([1.0], dtype=np.float32) for n in all_names},
         ),
         ocean=ocean_config,
@@ -821,11 +822,22 @@ def test_step_with_diagnostic():
     torch.testing.assert_close(output["c"], input_data["a"])
 
 
-def test_step_with_forcing_and_diagnostic():
-    stepper = _get_stepper(["a", "b"], ["a", "c"])
+@pytest.mark.parametrize("residual_prediction", [False, True])
+def test_step_with_forcing_and_diagnostic(residual_prediction):
+    norm_mean = 2.0
+    stepper = _get_stepper(
+        ["a", "b"],
+        ["a", "c"],
+        norm_mean=norm_mean,
+        residual_prediction=residual_prediction,
+    )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(input_data, {})
-    torch.testing.assert_close(output["a"], input_data["a"] + 1)
+    if residual_prediction:
+        expected_a_output = 2 * input_data["a"] + 1 - norm_mean
+    else:
+        expected_a_output = input_data["a"] + 1
+    torch.testing.assert_close(output["a"], expected_a_output)
     assert "b" not in output
     assert "c" in output
 
