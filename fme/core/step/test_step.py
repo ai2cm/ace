@@ -11,7 +11,7 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.serializable import SerializableStep
@@ -42,29 +42,31 @@ SEPARATE_RADIATION_CONFIG = SeparateRadiationStepConfig(
     radiation_only_forcing_names=["forcing_rad"],
     radiation_diagnostic_names=["diagnostic_rad"],
     main_diagnostic_names=["diagnostic_main"],
-    normalization=NormalizationConfig(
-        means={
-            name: 0.0
-            for name in [
-                "prog_a",
-                "prog_b",
-                "forcing_shared",
-                "forcing_rad",
-                "diagnostic_rad",
-                "diagnostic_main",
-            ]
-        },
-        stds={
-            name: 1.0
-            for name in [
-                "prog_a",
-                "prog_b",
-                "forcing_shared",
-                "forcing_rad",
-                "diagnostic_rad",
-                "diagnostic_main",
-            ]
-        },
+    normalization=NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={
+                name: 0.0
+                for name in [
+                    "prog_a",
+                    "prog_b",
+                    "forcing_shared",
+                    "forcing_rad",
+                    "diagnostic_rad",
+                    "diagnostic_main",
+                ]
+            },
+            stds={
+                name: 1.0
+                for name in [
+                    "prog_a",
+                    "prog_b",
+                    "forcing_shared",
+                    "forcing_rad",
+                    "diagnostic_rad",
+                    "diagnostic_main",
+                ]
+            },
+        ),
     ),
 )
 

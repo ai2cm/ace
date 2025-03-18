@@ -1,4 +1,5 @@
 import dataclasses
+from copy import copy
 from typing import Dict, Iterable, List, Mapping, Optional, Union
 
 import netCDF4
@@ -217,3 +218,68 @@ def load_dict_from_netcdf(
             raise ValueError(f"Variable {c} not found in {path}")
     ds.close()
     return result
+
+
+def _combine_normalizers(
+    base_normalizer: StandardNormalizer,
+    override_normalizer: StandardNormalizer,
+) -> StandardNormalizer:
+    """
+    Combine two normalizers by overwriting the base normalizer values that are
+    present in the override normalizer.
+
+    NaN-filling behavior is inherited from the base normalizer.
+    """
+    means, stds = copy(base_normalizer.means), copy(base_normalizer.stds)
+    means.update(override_normalizer.means)
+    stds.update(override_normalizer.stds)
+    return StandardNormalizer(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=base_normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=base_normalizer.fill_nans_on_denormalize,
+    )
+
+
+@dataclasses.dataclass
+class NetworkAndLossNormalizationConfig:
+    """
+    Combined configuration for network and loss normalization.
+
+    Allows loss normalization to be defined as equal to the network
+    normalization, apart from a set of residual-scaled variables.
+
+    Parameters:
+        network: The normalization configuration for the network.
+        loss: The normalization configuration for the loss. Default is to
+            use the network configuration, except for residual-scaled variables
+            which instead use the residual configuration if given.
+        residual: The normalization configuration for residuals. Cannot be
+            provided if loss normalization is also provided.
+    """
+
+    network: NormalizationConfig
+    loss: Optional[NormalizationConfig] = None
+    residual: Optional[NormalizationConfig] = None
+
+    def __post_init__(self):
+        if self.loss is not None and self.residual is not None:
+            raise ValueError("Cannot provide both loss and residual normalization.")
+
+    def get_network_normalizer(self, names: List[str]) -> StandardNormalizer:
+        return self.network.build(names=names)
+
+    def get_loss_normalizer(
+        self,
+        names: List[str],
+        residual_scaled_names: List[str],
+    ) -> StandardNormalizer:
+        if self.loss is not None:
+            return self.loss.build(names=names)
+        elif self.residual is not None:
+            return _combine_normalizers(
+                base_normalizer=self.network.build(names=names),
+                override_normalizer=self.residual.build(names=residual_scaled_names),
+            )
+        else:
+            return self.network.build(names=names)

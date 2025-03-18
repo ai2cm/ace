@@ -31,10 +31,6 @@ class SerializableStep:
         return self._instance.forcing_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
-        return self._instance.diagnostic_names
-
-    @property
     def input_names(self) -> List[str]:
         return self._instance.input_names
 
