@@ -32,8 +32,11 @@ from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
 
 def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
+    logging.info("Initializing training data loader")
     train_data = builder.get_train_data()
+    logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
+    logging.info("Initializing inline inference data loader")
     inference_data = builder.get_evaluation_inference_data()
 
     batch = next(iter(train_data.loader))
