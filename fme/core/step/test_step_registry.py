@@ -98,6 +98,13 @@ class MockStepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         raise NotImplementedError()
 
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ):
+        raise NotImplementedError()
+
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         raise NotImplementedError()
 

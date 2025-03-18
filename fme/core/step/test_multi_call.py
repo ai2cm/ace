@@ -1,14 +1,16 @@
 import unittest.mock
+from typing import List, Optional
 
 import pytest
 import torch
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCallConfig
+from fme.core.normalizer import StandardNormalizer
 
-from .multi_call import MultiCallStepConfig
+from .multi_call import MultiCallStepConfig, _extend_normalizer_with_multi_call_outputs
 from .step import StepSelector
-from .test_step_registry import MockStep
+from .test_step_registry import MockStep, MockStepConfig
 
 
 @pytest.mark.parametrize("include_multi_call_in_loss", [True, False])
@@ -50,3 +52,120 @@ def test_multi_call(include_multi_call_in_loss: bool):
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)
+
+
+def test_extend_normalizer_with_multi_call_outputs():
+    torch.manual_seed(0)
+    c_mean, c_std = torch.randn(2)
+    normalizer = StandardNormalizer(
+        means={"a": torch.tensor(0), "b": torch.tensor(0), "c": c_mean},
+        stds={"a": torch.tensor(1), "b": torch.tensor(1), "c": c_std},
+    )
+    config = MultiCallConfig(
+        forcing_name="CO2",
+        forcing_multipliers={"_doubled_co2": 2, "_halved_co2": 0.5},
+        output_names=["c"],
+    )
+    result = _extend_normalizer_with_multi_call_outputs(config, normalizer)
+    assert result.means == {
+        "a": torch.tensor(0),
+        "b": torch.tensor(0),
+        "c": c_mean,
+        "c_doubled_co2": c_mean,
+        "c_halved_co2": c_mean,
+    }
+    assert result.stds == {
+        "a": torch.tensor(1),
+        "b": torch.tensor(1),
+        "c": c_std,
+        "c_doubled_co2": c_std,
+        "c_halved_co2": c_std,
+    }
+
+
+@pytest.mark.parametrize("include_multi_call_in_loss", [True, False])
+def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool):
+    torch.manual_seed(0)
+    a_mean, a_std = torch.randn(2)
+    b_mean, b_std = torch.randn(2)
+    c_mean, c_std = torch.randn(2)
+    c_doubled_mean, c_doubled_std = torch.randn(2)
+    c_halved_mean, c_halved_std = torch.randn(2)
+    means = {
+        "a": a_mean,
+        "b": b_mean,
+        "c": c_mean,
+        "c_doubled_co2": c_doubled_mean,
+        "c_halved_co2": c_halved_mean,
+    }
+    stds = {
+        "a": a_std,
+        "b": b_std,
+        "c": c_std,
+        "c_doubled_co2": c_doubled_std,
+        "c_halved_co2": c_halved_std,
+    }
+
+    def _get_loss_normalizer(
+        extra_diagnostic_names: Optional[List[str]],
+        extra_prognostic_names: Optional[List[str]],
+    ):
+        base_names = ["a", "b", "c"]
+        if extra_diagnostic_names is None:
+            extra_diagnostic_names = []
+        if extra_prognostic_names is None:
+            extra_prognostic_names = []
+        extra_names = extra_diagnostic_names + extra_prognostic_names
+        return StandardNormalizer(
+            means={
+                **{k: means[k] for k in base_names},
+                **{k: means[k] for k in extra_names},
+            },
+            stds={
+                **{k: stds[k] for k in base_names},
+                **{k: stds[k] for k in extra_names},
+            },
+        )
+
+    mock_get_loss_normalizer = unittest.mock.Mock(side_effect=_get_loss_normalizer)
+    with unittest.mock.patch.object(
+        MockStepConfig, "get_loss_normalizer", side_effect=mock_get_loss_normalizer
+    ):
+        config = MultiCallStepConfig(
+            wrapped_step=StepSelector(
+                type="mock",
+                config={"in_names": ["CO2", "a", "b"], "out_names": ["b", "c"]},
+            ),
+            config=MultiCallConfig(
+                forcing_name="CO2",
+                forcing_multipliers={"_doubled_co2": 2, "_halved_co2": 0.5},
+                output_names=["c"],
+            ),
+            # we expect multi-call in loss normalizer regardless of
+            # include_multi_call_in_loss
+            include_multi_call_in_loss=include_multi_call_in_loss,
+        )
+        normalizer = config.get_loss_normalizer(
+            # contrived example to test both arguments are used correctly
+            extra_diagnostic_names=["c_doubled_co2"],
+            extra_prognostic_names=["c_halved_co2"],
+        )
+        assert normalizer.means == {
+            "a": a_mean,
+            "b": b_mean,
+            "c": c_mean,
+            "c_doubled_co2": c_doubled_mean,
+            "c_halved_co2": c_halved_mean,
+        }
+        assert normalizer.stds == {
+            "a": a_std,
+            "b": b_std,
+            "c": c_std,
+            "c_doubled_co2": c_doubled_std,
+            "c_halved_co2": c_halved_std,
+        }
+        assert mock_get_loss_normalizer.call_count == 1
+        assert mock_get_loss_normalizer.call_args[0] == (
+            ["c_doubled_co2"],
+            ["c_halved_co2"],
+        )
