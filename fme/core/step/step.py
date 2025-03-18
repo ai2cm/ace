@@ -173,7 +173,7 @@ class StepSelector(StepConfigABC):
             extra_diagnostic_names, extra_prognostic_names
         )
 
-    def replace_ocean(self, ocean: OceanConfig | None):
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
         self._step_config_instance.replace_ocean(ocean)
         self.config = dataclasses.asdict(self._step_config_instance)
 
