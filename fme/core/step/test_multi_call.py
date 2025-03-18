@@ -1,3 +1,4 @@
+import dataclasses
 import unittest.mock
 from typing import List, Optional
 
@@ -8,7 +9,11 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import StandardNormalizer
 
-from .multi_call import MultiCallStepConfig, _extend_normalizer_with_multi_call_outputs
+from .multi_call import (
+    MultiCallStepConfig,
+    _extend_normalizer_with_multi_call_outputs,
+    replace_multi_call,
+)
 from .step import StepSelector
 from .test_step_registry import MockStep, MockStepConfig
 
@@ -52,6 +57,86 @@ def test_multi_call(include_multi_call_in_loss: bool):
     torch.testing.assert_close(out["b"], input["CO2"])
     torch.testing.assert_close(out["c"], input["CO2"])
     torch.testing.assert_close(out["c_doubled_co2"], input["CO2"] * 2)
+
+
+def test_replace_multi_call_adds_wrapper():
+    selector = StepSelector(
+        type="mock", config={"in_names": ["a", "b"], "out_names": ["c", "d"]}
+    )
+    multi_call = MultiCallConfig(
+        forcing_name="a",
+        forcing_multipliers={"_doubled_a": 2},
+        output_names=["c"],
+    )
+    new_selector = replace_multi_call(selector, multi_call)
+    assert new_selector.type == "multi_call"
+    assert new_selector.config["wrapped_step"] == dataclasses.asdict(selector)
+    assert new_selector.config["config"] == dataclasses.asdict(multi_call)
+    new_step_config = new_selector._step_config_instance
+    assert isinstance(new_step_config, MultiCallStepConfig)
+    assert new_step_config.wrapped_step == selector
+    assert new_step_config.config == multi_call
+    assert new_step_config.include_multi_call_in_loss
+
+
+def test_replace_multi_call_updates_wrapper():
+    mock_selector = StepSelector(
+        type="mock", config={"in_names": ["a", "b"], "out_names": ["c", "d"]}
+    )
+    multi_call = MultiCallConfig(
+        forcing_name="a",
+        forcing_multipliers={"_doubled_a": 2},
+        output_names=["c"],
+    )
+    selector = StepSelector(
+        type="multi_call",
+        config={
+            "wrapped_step": dataclasses.asdict(mock_selector),
+            "config": dataclasses.asdict(multi_call),
+        },
+    )
+    new_multi_call = MultiCallConfig(
+        forcing_name="b",
+        forcing_multipliers={"_doubled_b": 2},
+        output_names=["d"],
+    )
+    new_selector = replace_multi_call(selector, new_multi_call)
+    assert new_selector.type == "multi_call"
+    assert new_selector.config["wrapped_step"] == dataclasses.asdict(mock_selector)
+    assert new_selector.config["config"] == dataclasses.asdict(new_multi_call)
+    new_step_config = new_selector._step_config_instance
+    assert isinstance(new_step_config, MultiCallStepConfig)
+    assert isinstance(new_step_config.wrapped_step, StepSelector)
+    assert new_step_config.wrapped_step.type == "mock"
+    assert new_step_config.wrapped_step == mock_selector
+    assert new_step_config.config == new_multi_call
+
+
+def test_replace_multi_call_updates_wrapper_with_none():
+    mock_selector = StepSelector(
+        type="mock", config={"in_names": ["a", "b"], "out_names": ["c", "d"]}
+    )
+    multi_call = MultiCallConfig(
+        forcing_name="a",
+        forcing_multipliers={"_doubled_a": 2},
+        output_names=["c"],
+    )
+    selector = StepSelector(
+        type="multi_call",
+        config={
+            "wrapped_step": dataclasses.asdict(mock_selector),
+            "config": dataclasses.asdict(multi_call),
+        },
+    )
+    new_selector = replace_multi_call(selector, None)
+    assert new_selector.type == "multi_call"
+    assert new_selector.config["wrapped_step"] == dataclasses.asdict(mock_selector)
+    assert new_selector.config["config"] is None
+    new_step_config = new_selector._step_config_instance
+    assert isinstance(new_step_config, MultiCallStepConfig)
+    assert new_step_config.wrapped_step.type == "mock"
+    assert new_step_config.wrapped_step == mock_selector
+    assert new_step_config.config is None
 
 
 def test_extend_normalizer_with_multi_call_outputs():

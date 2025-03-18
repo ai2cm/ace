@@ -17,6 +17,39 @@ from fme.core.step.step import (
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
+def replace_multi_call(
+    selector: StepSelector, multi_call: Optional[MultiCallConfig]
+) -> StepSelector:
+    """
+    Replace the multi-call configuration in a StepSelector.
+
+    A value of `None` for `multi_call` will remove the multi-call configuration.
+
+    If the selected type supports it, the multi-call configuration will be
+    updated in place. Otherwise, it will be wrapped in the multi_call step
+    configuration with the given multi_call config or None.
+    """
+    if selector.type == "multi_call":
+        wrapped_selector_dict: Dict[str, Any] = selector.config["wrapped_step"]
+        include_multi_call_in_loss = selector.config.get(
+            "include_multi_call_in_loss", True
+        )
+    else:
+        wrapped_selector_dict = dataclasses.asdict(selector)
+        include_multi_call_in_loss = True
+    if multi_call is None:
+        include_multi_call_in_loss = False
+    new_selector = StepSelector(
+        type="multi_call",
+        config={
+            "wrapped_step": wrapped_selector_dict,
+            "config": dataclasses.asdict(multi_call) if multi_call else None,
+            "include_multi_call_in_loss": include_multi_call_in_loss,
+        },
+    )
+    return new_selector
+
+
 @StepSelector.register("multi_call")
 @dataclasses.dataclass
 class MultiCallStepConfig(StepConfigABC):
