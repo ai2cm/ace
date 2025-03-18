@@ -1,10 +1,11 @@
 import dataclasses
+from copy import copy
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.multi_call import MultiCallConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step.step import (
@@ -46,6 +47,8 @@ class MultiCallStepConfig(StepConfigABC):
         dataset_info: DatasetInfo,
     ) -> "MultiCallStep":
         wrapped = self.wrapped_step.get_step(dataset_info)
+        if self.config is not None:
+            self.config.validate(wrapped.input_names, wrapped.output_names)
         return MultiCallStep(
             wrapped_step=wrapped,
             config=self,
@@ -54,10 +57,53 @@ class MultiCallStepConfig(StepConfigABC):
     def build(
         self,
         step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
-    ):
+    ) -> "Optional[MultiCall]":
         if self.config is None:
-            return step_method
-        return self.config.build(step_method)
+            return None
+        else:
+            return self.config.build(step_method)
+
+    def extend_normalizer_with_multi_call_outputs(
+        self, normalizer: StandardNormalizer
+    ) -> StandardNormalizer:
+        """
+        Extend the normalizer by setting multi-call output names to use the same
+        normalization as their base counterparts.
+        """
+        if self.config is None:
+            return normalizer
+        else:
+            return _extend_normalizer_with_multi_call_outputs(self.config, normalizer)
+
+    @property
+    def multi_call_output_names(self) -> List[str]:
+        if self.config is None:
+            return []
+        else:
+            return self.config.output_names
+
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        """
+        Get the loss normalizer for the multi-call step.
+
+        Normalizer will use statistics from multi-call variables in the stats
+        dataset, meaning the normalization for multi-call output versions will be
+        different from the normalization for the base variables.
+
+        Args:
+            extra_diagnostic_names: Names of diagnostics to include in the loss
+                normalizer. These will generally use full-field scale factors.
+            extra_prognostic_names: Names of prognostics to include in the loss
+                normalizer. These may use residual scale factors.
+        """
+        return self.wrapped_step.get_loss_normalizer(
+            extra_diagnostic_names=extra_diagnostic_names,
+            extra_prognostic_names=extra_prognostic_names,
+        )
 
     @property
     def _multi_call_outputs(self) -> List[str]:
@@ -68,10 +114,6 @@ class MultiCallStepConfig(StepConfigABC):
     @property
     def forcing_names(self) -> List[str]:
         return self.wrapped_step.forcing_names
-
-    @property
-    def diagnostic_names(self) -> List[str]:
-        return self.wrapped_step.diagnostic_names + self._multi_call_outputs
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -96,6 +138,27 @@ class MultiCallStepConfig(StepConfigABC):
         return self.wrapped_step.n_ic_timesteps
 
 
+def _extend_normalizer_with_multi_call_outputs(
+    config: MultiCallConfig, normalizer: StandardNormalizer
+) -> StandardNormalizer:
+    means = copy(normalizer.means)
+    stds = copy(normalizer.stds)
+    for name in config.output_names:
+        if name not in means or name not in stds:
+            raise ValueError(
+                f"Normalizer does not contain {name} present in multi-call output names"
+            )
+        for multi_call_name in config.get_multi_called_names(name):
+            means[multi_call_name] = means[name]
+            stds[multi_call_name] = stds[name]
+    return StandardNormalizer(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
+    )
+
+
 class MultiCallStep(StepABC):
     """
     Step class for a single pytorch module.
@@ -114,9 +177,7 @@ class MultiCallStep(StepABC):
         """
         Args:
             wrapped_step: The step to wrap.
-            config: The multi-call configuration.
-            include_multi_call_in_loss: Whether to include multi-call diagnostics in the
-                loss.
+            config: The multi-call step configuration.
         """
         self._wrapped_step = wrapped_step
         self._config = config
@@ -133,7 +194,9 @@ class MultiCallStep(StepABC):
 
     @property
     def normalizer(self) -> StandardNormalizer:
-        return self._wrapped_step.normalizer
+        return self._config.extend_normalizer_with_multi_call_outputs(
+            self._wrapped_step.normalizer
+        )
 
     @property
     def next_step_input_names(self) -> List[str]:

@@ -12,8 +12,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
 from fme.core.packer import Packer
@@ -49,10 +48,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         next_step_forcing_names: Names of forcing variables which come from
             the output timestep.
         ocean: The ocean configuration.
-        loss: The loss configuration.
         corrector: The corrector configuration.
-        residual_normalization: Optional alternative to configure loss normalization.
-            If provided, it will be used for all *prognostic* variables in loss scaling.
         activation_checkpointing: Configuration for activation checkpointing to trade
             increased computation for lowered memory during training.
     """
@@ -64,16 +60,12 @@ class SeparateRadiationStepConfig(StepConfigABC):
     radiation_only_forcing_names: List[str]
     radiation_diagnostic_names: List[str]
     main_diagnostic_names: List[str]
-    normalization: NormalizationConfig
+    normalization: NetworkAndLossNormalizationConfig
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     ocean: Optional[OceanConfig] = None
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
-    residual_normalization: Optional[NormalizationConfig] = None
     activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
         default_factory=lambda: ActivationCheckpointingConfig()
     )
@@ -127,13 +119,29 @@ class SeparateRadiationStepConfig(StepConfigABC):
             gridded_operations=dataset_info.gridded_operations,
             timestep=dataset_info.timestep,
         )
-        normalizer = self.normalization.build(self.normalize_names)
+        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
             img_shape=dataset_info.img_shape,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+        )
+
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        if extra_diagnostic_names is None:
+            extra_diagnostic_names = []
+        if extra_prognostic_names is None:
+            extra_prognostic_names = []
+        return self.normalization.get_loss_normalizer(
+            names=(
+                self._normalize_names + extra_diagnostic_names + extra_prognostic_names
+            ),
+            residual_scaled_names=self.prognostic_names + extra_prognostic_names,
         )
 
     @classmethod
@@ -143,7 +151,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def normalize_names(self) -> List[str]:
+    def _normalize_names(self) -> List[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
         all_names = set()
         for names in (
