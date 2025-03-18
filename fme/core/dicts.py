@@ -1,4 +1,4 @@
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, List, Mapping
 
 
 def to_flat_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
@@ -37,3 +37,20 @@ def to_nested_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
             new_config[k] = v
 
     return new_config
+
+
+def add_names(
+    left: Mapping[str, Any], right: Mapping[str, Any], names: List[str]
+) -> Dict[str, Any]:
+    """Add the 'names' from left dict to the right dict and return result.
+
+    Args:
+        left: These values will be added to the right dict.
+        right: The dict to add the values to.
+        names: The names of the keys to add.
+
+    Returns:
+        A new dict with the same keys as 'right', but with the values from 'left' added
+        for specified names.
+    """
+    return {k: left[k] + right[k] if k in names else right[k] for k in right}
