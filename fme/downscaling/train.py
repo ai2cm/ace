@@ -10,6 +10,7 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
+from fme.core.cli import prepare_directory
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -377,6 +378,7 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
+    prepare_directory(train_config.experiment_dir, config)
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
