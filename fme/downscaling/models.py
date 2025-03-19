@@ -486,6 +486,10 @@ class DiffusionModel:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
+            "normalization": {
+                "coarse": self.normalizer.coarse.get_state(),
+                "fine": self.normalizer.fine.get_state(),
+            },
         }
 
     @classmethod
@@ -495,6 +499,8 @@ class DiffusionModel:
         area_weights: FineResCoarseResPair[torch.Tensor],
         fine_topography: torch.Tensor,
     ) -> "DiffusionModel":
+        # Use serialized normalization data for loaded models
+        state["config"]["normalization"] = state["normalization"]
         config = DiffusionModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
