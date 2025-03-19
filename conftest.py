@@ -17,6 +17,12 @@ def pytest_addoption(parser):
         default=False,
         help="Run only very fast tests (< 5 seconds)",
     )
+    parser.addoption(
+        "--no-timeout",
+        action="store_true",
+        default=False,
+        help="Disable test timeout",
+    )
 
 
 @pytest.fixture
@@ -42,9 +48,14 @@ def pdb_enabled(request):
     return request.config.getoption("--pdb")
 
 
+@pytest.fixture
+def no_timeout(request):
+    return request.config.getoption("--no-timeout")
+
+
 @pytest.fixture(autouse=True, scope="function")
-def enforce_timeout(skip_slow, very_fast_only, pdb_enabled):
-    if pdb_enabled:
+def enforce_timeout(skip_slow, very_fast_only, pdb_enabled, no_timeout):
+    if pdb_enabled or no_timeout:
         yield  # Do not enforce timeout if we are debugging
         return
     if very_fast_only:
