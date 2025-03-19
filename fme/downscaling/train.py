@@ -137,7 +137,6 @@ class Trainer:
         train_aggregator = Aggregator(
             self.dims,
             self.area_weights.fine.cpu(),
-            self.latitudes,
             self.model.downscale_factor,
             include_positional_comparisons=include_positional_comparisons,
         )
@@ -201,14 +200,12 @@ class Trainer:
             validation_aggregator = Aggregator(
                 self.dims,
                 self.area_weights.fine.cpu(),
-                self.latitudes,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
             generation_aggregator = Aggregator(
                 self.dims,
                 self.area_weights.fine.cpu(),
-                self.latitudes,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )

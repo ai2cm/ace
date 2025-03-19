@@ -50,7 +50,6 @@ class Evaluator:
         aggregator = Aggregator(
             self.data.horizontal_coordinates.fine.dims,
             self.data.area_weights.fine,
-            self.data.horizontal_coordinates.fine.lat.cpu(),
             self.model.downscale_factor,
         )
 

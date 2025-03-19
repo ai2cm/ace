@@ -149,18 +149,18 @@ class MeanComparison:
 
 
 class ZonalPowerSpectrum:
-    def __init__(self, latitudes: torch.Tensor) -> None:
+    def __init__(self) -> None:
         self._wandb = WandB.get_instance()
 
-        def _compute_zonal_power_spectrum(x):
+        def _compute_batch_mean_zonal_power(x):
             assert (
                 len(x.shape) == 3
             ), f"Expected input (batch, height, width) but received {x.shape}"
-            return compute_zonal_power_spectrum(x, latitudes).mean(  # type: ignore
-                axis=-2
+            return compute_zonal_power_spectrum(x).mean(  # type: ignore
+                axis=0
             )  # (batch, wavenumber) -> (wavenumber,)
 
-        self._mean_aggregator = Mean(_compute_zonal_power_spectrum)
+        self._mean_aggregator = Mean(_compute_batch_mean_zonal_power)
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping) -> None:
@@ -476,7 +476,6 @@ class Aggregator:
     Args:
         dims: Dimensions of the data.
         area_weights: Tensor of area weights.
-        latitudes: Tensor of latitudes.
         downscale_factor: Downscaling factor.
         n_histogram_bins: Number of bins for histogram comparisons.
         percentiles: Percentiles for histogram comparisons.
@@ -488,7 +487,6 @@ class Aggregator:
         self,
         dims: List[str],
         area_weights: Optional[torch.Tensor],
-        latitudes: torch.Tensor,
         downscale_factor: int,
         n_histogram_bins: int = 300,
         percentiles: Optional[List[float]] = None,
@@ -522,7 +520,7 @@ class Aggregator:
                 str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
             ] = {
                 input_type: {
-                    "spectrum": ZonalPowerSpectrum(latitudes),
+                    "spectrum": ZonalPowerSpectrum(),
                 }
                 for input_type in ("target", "prediction")
             }
