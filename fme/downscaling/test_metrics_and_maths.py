@@ -136,12 +136,15 @@ def test_compute_zonal_power_spectrum_constant_value(const):
     batch_size, nlat, nlon = 2, 8, 16
     tensor = torch.full((2, nlat, nlon), const, dtype=torch.float32)
 
-    lats = torch.linspace(-89.5, 89.5, nlat)
-    spectrum = compute_zonal_power_spectrum(tensor, lats)
+    spectrum = compute_zonal_power_spectrum(tensor)
 
     assert spectrum.shape == torch.Size((batch_size, nlon // 2 + 1))
     assert torch.all(spectrum[:, 0] != 0)
     assert torch.all(spectrum[:, 1:] == 0.0)
+
+    # Check that non 2D input fails
+    with pytest.raises(ValueError):
+        compute_zonal_power_spectrum(torch.ones(5))
 
 
 def test_filter_tensor_mapping():
