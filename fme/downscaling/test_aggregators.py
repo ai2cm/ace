@@ -74,18 +74,12 @@ def test_mean_comparison_values(
     )
 
 
-def _compute_zonal_spectrum_for_testing(x):
-    """Hard codes latitudes."""
-    lats = torch.linspace(-89.5, 89.5, x.shape[-2])
-    return metrics_and_maths.compute_zonal_power_spectrum(x, lats)
-
-
 @pytest.mark.parametrize(
     "metric, input_shape, output_shape",
     [
         (torch.mean, (1,), ()),
         (torch.mean, (1, 2, 3), ()),
-        (_compute_zonal_spectrum_for_testing, (2, 1, 16, 32), (2, 1, 17)),
+        (metrics_and_maths.compute_zonal_power_spectrum, (2, 1, 16, 32), (2, 1, 17)),
     ],
 )
 def test_mean_shapes(metric, input_shape, output_shape):
@@ -160,7 +154,6 @@ def test_performance_metrics(
     n_lat, n_lon = 16, 32
     shape = (2, n_lat, n_lon)
     area_weights = torch.ones(n_lon)
-    latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
     target = {"x": torch.zeros(*shape)}
     prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
@@ -178,7 +171,6 @@ def test_performance_metrics(
         aggregator = Aggregator(
             ["lat", "lon"],
             area_weights,
-            latitudes,
             downscale_factor,
             n_histogram_bins=n_bins,
             percentiles=percentiles,

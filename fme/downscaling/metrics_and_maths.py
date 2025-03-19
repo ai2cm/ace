@@ -224,29 +224,26 @@ def compute_ssim(
     return piq.ssim(prediction_norm, target_norm, *args, **kwargs)  # type: ignore
 
 
-def compute_zonal_power_spectrum(
-    tensor: torch.Tensor,
-    lats: torch.Tensor,
-    min_abs_lat: int = 30,
-    max_abs_lat: int = 60,
-) -> torch.Tensor:
+def compute_zonal_power_spectrum(tensor: torch.Tensor) -> torch.Tensor:
     """
-    Zonal power spectrum of a given tensor over specified latitude ranges.
+    Zonal power spectrum of a given tensor.
 
     This function computes the zonal power spectrum by first performing a real
     Fourier transform along the longitudinal axis of the tensor, then
-    calculating the power spectrum and averaging over the specified latitudinal
-    range.
+    calculating the power spectrum and averaging over the latitude.
 
     Args:
-        tensor: Tensor of shape [..., latitude, longitude].
-        lats: Tensor containing latitude values corresponding to the tensor.
-        min_abs_lat: Minimum latitude value for the computation.
-        max_abs_lat: Maximum latitude value for the computation.
+        tensor: Tensor of shape [..., latitude, longitude]
 
     Returns:
-        torch.Tensor: Averaged zonal power spectrum over the specified latitude range.
+        torch.Tensor: Averaged zonal power spectrum.
     """
+    if tensor.ndim < 2:
+        raise ValueError(
+            "Input tensor must have at least 2 dimensions (lat, lon). "
+            f"Got: {tensor.shape}"
+        )
+
     uhat = torch.fft.rfft(tensor, dim=-1)
     power = torch.real(uhat * torch.conj(uhat))
 
@@ -255,10 +252,6 @@ def compute_zonal_power_spectrum(
         [1] + [2] * (power.shape[-1] - 1), device=tensor.device
     )
     power *= ones_and_twos
-
-    # Apply latitude mask
-    mask = (min_abs_lat <= torch.abs(lats)) & (torch.abs(lats) <= max_abs_lat)
-    power = power[..., mask, :]
 
     return power.mean(dim=-2)
 
