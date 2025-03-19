@@ -279,6 +279,10 @@ shield_som_c96_idealized_0p1_heating_ensemble_dataset:
 shield_som_c96_increasing_co2_with_3d_heating_rate_diagnostics_dataset:
 	./compute_dataset.sh --config configs/shield-som-increasing-co2-with-3d-heating-rate-diagnostics-1deg-$(LAYERS).yaml
 
+.PHONY: shield_amip_c96_idealized_0p1_heating_ensemble_dataset
+shield_amip_c96_idealized_0p1_heating_ensemble_dataset:
+	./compute_dataset.sh --config configs/shield-amip-idealized-0p1-heating-ensemble-c96-1deg-$(LAYERS).yaml
+
 .PHONY: build_atmosphere_processing_image
 build_atmosphere_processing_image:
 	docker build -f atmosphere.Dockerfile -t $(ATMOSPHERE_PROCESSING_IMAGE):$(ATMOSPHERE_PROCESSING_IMAGE_VERSION) .
