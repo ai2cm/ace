@@ -1475,6 +1475,20 @@ class Stepper(
         return stepper
 
 
+def get_serialized_stepper_vertical_coordinate(
+    state: Dict[str, Any],
+) -> VerticalCoordinate:
+    if "sigma_coordinates" in state:
+        data = state["sigma_coordinates"]
+    else:
+        data = state["vertical_coordinate"]
+    return dacite.from_dict(
+        data_class=SerializableVerticalCoordinate,
+        data={"vertical_coordinate": data},
+        config=dacite.Config(strict=True),
+    ).vertical_coordinate.to(get_device())
+
+
 @dataclasses.dataclass
 class StepperOverrideConfig:
     """
