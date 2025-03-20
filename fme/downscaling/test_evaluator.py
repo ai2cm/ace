@@ -73,7 +73,6 @@ def get_trainer_model_config(model_type: str):
                     means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
                 ),
             ),
-            use_fine_topography=False,
         )
     elif model_type == "diffusion":
         return DiffusionModelConfig(
@@ -98,7 +97,6 @@ def get_trainer_model_config(model_type: str):
                     means={"x": 0.0, "y": 0.0}, stds={"x": 1.0, "y": 1.0}
                 ),
             ),
-            use_fine_topography=False,
             p_mean=0,
             p_std=1,
             sigma_min=1,

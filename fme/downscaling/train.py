@@ -61,9 +61,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    trainer.model = trainer.model.from_state(
-        checkpoint["model"], trainer.area_weights, trainer.fine_topography
-    )
+    trainer.model = trainer.model.from_state(checkpoint["model"], trainer.area_weights)
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -73,9 +71,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     ema_checkpoint = torch.load(
         trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    ema_model = trainer.model.from_state(
-        ema_checkpoint["model"], trainer.area_weights, trainer.fine_topography
-    )
+    ema_model = trainer.model.from_state(ema_checkpoint["model"], trainer.area_weights)
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
 
 
@@ -98,7 +94,6 @@ class Trainer:
         self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
         self.dims = self.train_data.horizontal_coordinates.fine.dims
-        self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
@@ -335,7 +330,6 @@ class TrainerConfig:
             train_data.img_shape.coarse,
             train_data.downscale_factor,
             train_data.area_weights,
-            train_data.fine_topography,
         )
 
         optimization = self.optimization.build(
