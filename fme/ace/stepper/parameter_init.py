@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Callable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, List, Mapping, Optional
 
 import torch
 from torch import nn
@@ -133,7 +133,7 @@ class ParameterInitializationConfig:
         modules: List[nn.Module],
         init_weights: bool,
         load_weights: Callable[[str], List[Mapping[str, Any]]],
-    ) -> Tuple[List[nn.Module], RegularizerFunction]:
+    ) -> RegularizerFunction:
         """
         Apply the weight initialization to a module.
 
@@ -147,7 +147,6 @@ class ParameterInitializationConfig:
             a list of nn.Modules with initialization applied
             a function which returns the regularization loss term
         """
-        modules = list(modules)
         filled_parameters = self._filled_parameters(len(modules))
         if init_weights and self.weights_path is not None:
             loaded_state_dicts = self.get_base_weights(load_weights)
@@ -170,7 +169,7 @@ class ParameterInitializationConfig:
             def regularizer():
                 return torch.tensor(0.0, device=device)
 
-            return modules, regularizer
+            return regularizer
 
         else:
             for classification, state_dict in zip(
@@ -221,7 +220,7 @@ class ParameterInitializationConfig:
 
                 return loss
 
-        return modules, regularizer
+        return regularizer
 
     def get_base_weights(
         self, load_weights: Callable[[str], List[torch.nn.Module]]

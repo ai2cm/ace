@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -81,15 +81,6 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_state(self):
         return dataclasses.asdict(self)
-
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
-        """
-        If the model is being initialized from another model's weights for fine-tuning,
-        returns those weights. Otherwise, returns None.
-
-        The list mirrors the order of `modules` in the `Stepper` class.
-        """
-        return None
 
     def get_loss_normalizer(
         self,
@@ -191,7 +182,6 @@ class SingleModuleStep(StepABC):
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
-        init_weights: bool = True,
     ):
         """
         Args:
