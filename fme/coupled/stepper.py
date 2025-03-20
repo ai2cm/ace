@@ -18,11 +18,11 @@ from fme.ace.stepper import (
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
+from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
 from fme.core.coordinates import (
     DepthCoordinate,
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
-    SerializableVerticalCoordinate,
 )
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
@@ -1069,9 +1069,9 @@ class CoupledStepper(
         ocean = Stepper.from_state(state["ocean_state"])
         atmosphere = Stepper.from_state(state["atmosphere_state"])
         sst_mask = None
-        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
-            state["ocean_state"]["vertical_coordinate"]
-        ).to(get_device())
+        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
+            state["ocean_state"]
+        )
         if isinstance(ocean_vertical_coord, DepthCoordinate):
             sst_mask = ocean_vertical_coord.get_mask_level(0)
         return cls(config, ocean, atmosphere, sst_mask)
