@@ -39,7 +39,7 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
-from fme.core.loss import WeightedMappingLossConfig
+from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -253,6 +253,13 @@ class SingleModuleStepperConfig:
     def prognostic_names(self) -> List[str]:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).intersection(self.in_names))
+
+    @property
+    def loss_names(self) -> List[str]:
+        extra_names = []
+        if self.multi_call is not None:
+            extra_names.extend(self.multi_call.names)
+        return list(set(self.out_names).union(extra_names))
 
     @property
     def diagnostic_names(self) -> List[str]:
@@ -755,6 +762,30 @@ class SingleModuleStep:
             output = self.ocean(input, output, next_step_input_data)
         return output
 
+    def get_loss_normalizer(
+        self,
+    ) -> StandardNormalizer:
+        if self._config.loss_normalization is not None:
+            loss_normalizer = self._config.loss_normalization.build(
+                names=self._config.normalize_names
+            )
+        elif self._config.residual_normalization is not None:
+            # Use residual norm for prognostic variables and input/output
+            # normalizer for diagnostic variables in loss
+            loss_normalizer = _combine_normalizers(
+                residual_normalizer=self._config.residual_normalization.build(
+                    self._config.prognostic_names
+                ),
+                model_normalizer=self._config.normalization.build(
+                    self._config.normalize_names
+                ),
+            )
+        else:
+            loss_normalizer = self._config.normalization.build(
+                self._config.normalize_names
+            )
+        return loss_normalizer
+
     def validate_inference_data(self, data: InferenceDataProtocol):
         if self._timestep != data.timestep:
             raise ValueError(
@@ -899,28 +930,17 @@ class Stepper(
         self._config = config
         self._no_optimization = NullOptimization()
 
-        if config.loss_normalization is not None:
-            loss_normalizer = config.loss_normalization.build(
-                names=config.normalize_names
+        def get_loss_obj():
+            loss_normalizer = step.get_loss_normalizer()
+            return config.loss.build(
+                area_weighted_mean,
+                out_names=config.loss_names,
+                channel_dim=self.CHANNEL_DIM,
+                normalizer=loss_normalizer,
             )
-        elif config.residual_normalization is not None:
-            # Use residual norm for prognostic variables and input/output
-            # normalizer for diagnostic variables in loss
-            loss_normalizer = _combine_normalizers(
-                residual_normalizer=config.residual_normalization.build(
-                    config.prognostic_names
-                ),
-                model_normalizer=config.normalization.build(config.normalize_names),
-            )
-        else:
-            loss_normalizer = config.normalization.build(config.normalize_names)
 
-        self.loss_obj = config.loss.build(
-            area_weighted_mean,
-            out_names=config.out_names,
-            channel_dim=self.CHANNEL_DIM,
-            normalizer=loss_normalizer,
-        )
+        self._get_loss_obj = get_loss_obj
+        self._loss_obj: Optional[WeightedMappingLoss] = None
 
         self._l2_sp_tuning_regularizer = config.parameter_init.apply(
             step.modules, init_weights=init_weights, load_weights=_load_weights
@@ -928,20 +948,28 @@ class Stepper(
 
         if config.multi_call is not None:
             self._multi_call = config.multi_call.build(self.step)
+        else:
+            self._multi_call = None
+
+        def get_multi_call_loss_obj():
+            zero_loss = torch.tensor(0.0, device=get_device())
+            if self._multi_call is None:
+                return lambda x, y: zero_loss
             if config.include_multi_call_in_loss:
-                self._multi_call_loss: Callable[
-                    [TensorMapping, TensorMapping], torch.Tensor
-                ] = config.loss.build(
+                loss_normalizer = step.get_loss_normalizer()
+                return config.loss.build(
                     area_weighted_mean,
                     out_names=self._multi_call.names,
                     channel_dim=self.CHANNEL_DIM,
                     normalizer=loss_normalizer,
                 )
             else:
-                zero_loss = torch.tensor(0.0, device=get_device())
-                self._multi_call_loss = lambda x, y: zero_loss
-        else:
-            self._multi_call = None
+                return lambda x, y: zero_loss
+
+        self._get_multi_call_loss_obj = get_multi_call_loss_obj
+        self._multi_call_loss_obj: Optional[
+            Callable[[TensorMapping, TensorMapping], torch.Tensor]
+        ] = None
 
         self._activation_checkpointing = config.activation_checkpointing
 
@@ -956,6 +984,20 @@ class Stepper(
             BatchData,
             PairedData,
         ] = self.predict_paired
+
+    @property
+    def loss_obj(self) -> WeightedMappingLoss:
+        if self._loss_obj is None:
+            self._loss_obj = self._get_loss_obj()
+        return self._loss_obj
+
+    @property
+    def multi_call_loss_obj(
+        self,
+    ) -> Callable[[TensorMapping, TensorMapping], torch.Tensor]:
+        if self._multi_call_loss_obj is None:
+            self._multi_call_loss_obj = self._get_multi_call_loss_obj()
+        return self._multi_call_loss_obj
 
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
@@ -1383,7 +1425,7 @@ class Stepper(
                         gen_step, target_step, names=self._multi_call.names
                     )
                 else:
-                    mc_loss = self._multi_call_loss(gen_step, target_step)
+                    mc_loss = self.multi_call_loss_obj(gen_step, target_step)
                 step_loss = step_loss + mc_loss
                 metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
 
