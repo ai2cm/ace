@@ -54,7 +54,6 @@ def test_swinir_output_shapes(
         n_out_channels=n_out_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
@@ -102,7 +101,6 @@ def test_swinir_downscaling_options(
         n_out_channels=n_out_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_in_channels, *coarse_shape)
@@ -149,7 +147,6 @@ def test_swinir_values(
         n_out_channels=n_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        fine_topography=None,
     )
     batch_size = 2
     inputs = torch.rand(batch_size, n_channels, *coarse_shape)
@@ -184,11 +181,9 @@ def test_interpolate(
 
 
 @pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
-@pytest.mark.parametrize("use_topography", [True, False])
-def test_unets_output_shape(type_, use_topography):
+def test_unets_output_shape(type_):
     coarse_shape = (8, 16)
     downscale_factor = 2
-    fine_topography = torch.zeros(1, *[s * downscale_factor for s in coarse_shape])
     unet = (
         ModuleRegistrySelector(
             type_,
@@ -201,7 +196,6 @@ def test_unets_output_shape(type_, use_topography):
             n_out_channels=3,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if use_topography else None,
         )
         .to(get_device())
     )

@@ -16,7 +16,6 @@ def test_UNetDiffusionModule_forward_pass():
         n_out_channels=n_channels,
         coarse_shape=coarse_shape,
         downscale_factor=downscale_factor,
-        fine_topography=None,
         sigma_data=1.0,
     )
 

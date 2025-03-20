@@ -346,7 +346,6 @@ class GriddedData:
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
     variable_metadata: Mapping[str, VariableMetadata]
-    fine_topography: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         assert (
@@ -501,16 +500,10 @@ class DataLoaderConfig:
             **dataset_coarse_subset.variable_metadata,
         }
 
-        if requirements.use_fine_topography:
-            fine_topography = get_topography(self.fine)
-        else:
-            fine_topography = None
-
         return GriddedData(
             dataloader,
             area_weights,
             horizontal_coordinates,
             img_shape,
             variable_metadata,
-            fine_topography=fine_topography,
         )

@@ -3,17 +3,7 @@ return tensors of shape (batch, channel, height, width).
 """
 
 import dataclasses
-from typing import (
-    Any,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-    Type,
-)
+from typing import Any, List, Literal, Mapping, Protocol, Sequence, Tuple, Type
 
 import dacite
 import torch
@@ -31,7 +21,6 @@ class ModuleConfig(Protocol):
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ) -> torch.nn.Module: ...
 
 
@@ -50,11 +39,7 @@ class SwinirConfig:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ):
-        if fine_topography is not None:
-            raise NotImplementedError("Fine grid topography not supported by SwinIR")
-
         height, width = coarse_shape
         # TODO(gideond): The SwinIR docs appear to be wrong, dig into why these
         # need to take these values to give the right output shapes
@@ -115,32 +100,19 @@ class UNetRegressionModule(torch.nn.Module):
         target_shape: The input and output shape required by the u-net.
         downscale_factor: The factor by which the coarse input is downscaled to
             the target output.
-        fine_topography: Optional fine topography to condition the latent
-            variables on.
     """  # noqa: E501
 
     def __init__(
         self,
         unet: torch.nn.Module,
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ):
         super(UNetRegressionModule, self).__init__()
         self.unet = unet
         self.downscale_factor = downscale_factor
-        self.fine_topography = fine_topography
 
     def forward(self, x: torch.Tensor):
         inputs = interpolate(x, self.downscale_factor)
-
-        if self.fine_topography is not None:
-            batch_size = inputs.shape[0]
-            topography = (
-                self.fine_topography.unsqueeze(0)
-                .expand(batch_size, -1, -1, -1)
-                .to(get_device())
-            )
-            inputs = torch.concat((inputs, topography), dim=1)
 
         return self.unet(inputs, torch.tensor([0], device=get_device()), None)
 
@@ -168,7 +140,6 @@ class UNetRegressionSong:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ):
         divisor = 2 ** (len(self.channel_mult) - 1)
         target_height, target_width = [
@@ -178,7 +149,7 @@ class UNetRegressionSong:
         ]
         unet = SongUNet(
             min(target_height, target_width),
-            n_in_channels if fine_topography is None else n_in_channels + 1,
+            n_in_channels,
             n_out_channels,
             model_channels=self.model_channels,
             channel_mult=self.channel_mult,
@@ -196,7 +167,6 @@ class UNetRegressionSong:
         return UNetRegressionModule(
             unet,
             downscale_factor,
-            fine_topography,
         )
 
 
@@ -217,7 +187,6 @@ class UNetRegressionDhariwal:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ):
         divisor = 2 ** (len(self.channel_mult) - 1)
         target_height, target_width = [
@@ -227,7 +196,7 @@ class UNetRegressionDhariwal:
         ]
         unet = DhariwalUNet(
             min(target_height, target_width),
-            n_in_channels if fine_topography is None else n_in_channels + 1,
+            n_in_channels,
             n_out_channels,
             model_channels=self.model_channels,
             channel_mult=self.channel_mult,
@@ -240,7 +209,6 @@ class UNetRegressionDhariwal:
         return UNetRegressionModule(
             unet,
             downscale_factor,
-            fine_topography,
         )
 
 
@@ -255,7 +223,6 @@ class ModuleRegistrySelector:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ) -> torch.nn.Module:
         return dacite.from_dict(
             data_class=NET_REGISTRY[self.type],
@@ -266,7 +233,6 @@ class ModuleRegistrySelector:
             n_out_channels=n_out_channels,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography,
         )
 
 
@@ -280,7 +246,6 @@ class PreBuiltBuilder:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor] = None,
     ) -> torch.nn.Module:
         return self.module
 
@@ -314,7 +279,6 @@ class InterpolateConfig:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor] = None,
     ) -> torch.nn.Module:
         return Interpolate(downscale_factor, self.mode)
 

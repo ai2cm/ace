@@ -87,7 +87,6 @@ class InterpolateModelConfig:
     def build(
         self,
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> Model:
         del area_weights  # unused
         module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
@@ -111,12 +110,10 @@ class InterpolateModelConfig:
             self.in_names,
             self.out_names,
             normalization_config,
-            use_fine_topography=False,  # topography is irrelevant for interpolation
         ).build(
             (-1, -1),
             self.downscale_factor,
             area_weights,
-            fine_topography,
         )
 
     @property
@@ -125,7 +122,6 @@ class InterpolateModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=False,  # topography is irrelevant for interpolation
         )
 
 
@@ -185,7 +181,6 @@ class CheckpointModelConfig:
     def build(
         self,
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> Union[Model, DiffusionModel]:
         model = _CheckpointModelConfigSelector.from_state(
             self.checkpoint_dict["model"]["config"]
@@ -193,7 +188,6 @@ class CheckpointModelConfig:
             coarse_shape=self.checkpoint_dict["model"]["coarse_shape"],
             downscale_factor=self.checkpoint_dict["model"]["downscale_factor"],
             area_weights=area_weights,
-            fine_topography=fine_topography,
         )
         model.module.load_state_dict(self.checkpoint_dict["model"]["module"])
         return model
@@ -206,7 +200,6 @@ class CheckpointModelConfig:
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
-            use_fine_topography=self.checkpoint_dict.get("use_fine_topography", False),
         )
 
 
@@ -232,7 +225,7 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False, requirements=self.model.data_requirements
         )
-        model = self.model.build(dataset.area_weights, dataset.fine_topography)
+        model = self.model.build(dataset.area_weights)
         return Evaluator(
             data=dataset,
             model=model,

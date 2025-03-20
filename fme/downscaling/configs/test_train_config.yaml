@@ -49,4 +49,3 @@ model:
   out_names:
     - "x"
     - "y"
-  use_fine_topography: False
