@@ -182,20 +182,28 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def main_in_names(self) -> List[str]:
-        return self.main_prognostic_names + self.shared_forcing_names
-
-    @property
-    def main_out_names(self) -> List[str]:
-        return self.main_prognostic_names + self.main_diagnostic_names
-
-    @property
     def radiation_in_names(self) -> List[str]:
-        return self.shared_forcing_names + self.radiation_only_forcing_names
+        return (
+            self.main_prognostic_names
+            + self.shared_forcing_names
+            + self.radiation_only_forcing_names
+        )
 
     @property
     def radiation_out_names(self) -> List[str]:
         return self.radiation_diagnostic_names
+
+    @property
+    def main_in_names(self) -> List[str]:
+        return (
+            self.main_prognostic_names
+            + self.shared_forcing_names
+            + self.radiation_out_names
+        )
+
+    @property
+    def main_out_names(self) -> List[str]:
+        return self.main_prognostic_names + self.main_diagnostic_names
 
     @property
     def input_names(self) -> List[str]:
