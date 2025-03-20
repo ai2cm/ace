@@ -7,4 +7,3 @@ class DataRequirements:
     fine_names: List[str]
     coarse_names: List[str]
     n_timesteps: int
-    use_fine_topography: bool

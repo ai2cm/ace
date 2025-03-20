@@ -179,7 +179,6 @@ def _update_model_type(trainer_config: Dict, module_type: str):
             "predict_residual": True,
             "sigma_max": 80.0,
             "sigma_min": 0.002,
-            "use_fine_topography": False,
         }
         trainer_config["model"].update(model_config_kwargs)
         trainer_config["generate_n_samples"] = 2

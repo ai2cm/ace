@@ -55,14 +55,12 @@ class DownscalingModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
-    use_fine_topography: bool
 
     def build(
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine, reduction="mean")
@@ -71,7 +69,6 @@ class DownscalingModelConfig:
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
         )
         return Model(
             module,
@@ -97,7 +94,6 @@ class DownscalingModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -199,7 +195,6 @@ class Model:
         cls,
         state: Mapping[str, Any],
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "Model":
         # Use serialized normalization data for loaded models
         state["config"]["normalization"] = state["normalization"]
@@ -208,7 +203,6 @@ class Model:
             state["coarse_shape"],
             state["downscale_factor"],
             area_weights,
-            fine_topography,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -227,7 +221,6 @@ class DiffusionModelConfig:
         in_names: The input variable names for the diffusion model.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
-        use_fine_topography: Indicates whether to use the fine topography.
         p_mean: The mean of noise distribution used during training.
         p_std: The std of the noise distribution used during training.
         sigma_min: Min noise level for generation.
@@ -241,7 +234,6 @@ class DiffusionModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
-    use_fine_topography: bool
     p_mean: float
     p_std: float
     sigma_min: float
@@ -255,7 +247,6 @@ class DiffusionModelConfig:
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(area_weights.fine, "none")
@@ -269,7 +260,6 @@ class DiffusionModelConfig:
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
             sigma_data=sigma_data,
         )
         return DiffusionModel(
@@ -295,7 +285,6 @@ class DiffusionModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -497,7 +486,6 @@ class DiffusionModel:
         cls,
         state: Mapping[str, Any],
         area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "DiffusionModel":
         # Use serialized normalization data for loaded models
         state["config"]["normalization"] = state["normalization"]
@@ -506,7 +494,6 @@ class DiffusionModel:
             state["coarse_shape"],
             state["downscale_factor"],
             area_weights,
-            fine_topography,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
