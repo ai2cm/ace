@@ -1,6 +1,10 @@
+import pathlib
+import tempfile
+
 import pytest
 import torch
 
+from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.device import move_tensordict_to_device
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
@@ -223,3 +227,84 @@ def test_combined_normalization_cannot_set_both_loss_and_residual():
             loss=network_config,
             residual=network_config,
         )
+
+
+def test_build_from_files():
+    mean_ds = get_scalar_dataset(["a", "b", "c"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b", "c"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        normalizer = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+        ).build(["a", "b"])
+        for name in ["a", "b"]:
+            assert normalizer.means[name] == 1.0
+            assert normalizer.stds[name] == 2.0
+        assert "c" not in normalizer.means
+        assert "c" not in normalizer.stds
+
+
+@pytest.mark.parametrize("fill_nans_on_normalize", [True, False])
+@pytest.mark.parametrize("fill_nans_on_denormalize", [True, False])
+def test_load_from_files(fill_nans_on_normalize: bool, fill_nans_on_denormalize: bool):
+    mean_ds = get_scalar_dataset(["a", "b", "c"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b", "c"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        config = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+            fill_nans_on_normalize=fill_nans_on_normalize,
+            fill_nans_on_denormalize=fill_nans_on_denormalize,
+        )
+        config.load()
+    assert config.fill_nans_on_normalize == fill_nans_on_normalize
+    assert config.fill_nans_on_denormalize == fill_nans_on_denormalize
+    normalizer = config.build(["a", "b"])
+    for name in ["a", "b"]:
+        assert normalizer.means[name] == 1.0
+        assert normalizer.stds[name] == 2.0
+    assert "c" not in normalizer.means
+    assert "c" not in normalizer.stds
+
+
+def test_cannot_build_without_load_or_files():
+    mean_ds = get_scalar_dataset(["a", "b", "c"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b", "c"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        config = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+        )
+    with pytest.raises(FileNotFoundError):
+        config.build(["a", "b"])
+
+
+def test_cannot_load_without_files():
+    mean_ds = get_scalar_dataset(["a", "b", "c"], fill_value=1.0)
+    std_ds = get_scalar_dataset(["a", "b", "c"], fill_value=2.0)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = pathlib.Path(tmp_dir)
+        mean_ds.to_netcdf(tmp_path / "mean.nc")
+        std_ds.to_netcdf(tmp_path / "std.nc")
+        config = NormalizationConfig(
+            global_means_path=tmp_path / "mean.nc",
+            global_stds_path=tmp_path / "std.nc",
+        )
+    with pytest.raises(FileNotFoundError):
+        config.load()
+
+
+def test_can_create_config_without_files():
+    NormalizationConfig(
+        global_means_path="/not/a/real/path",
+        global_stds_path="/not/a/real/path",
+    )

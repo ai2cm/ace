@@ -282,12 +282,15 @@ def get_nd_dataset(
 
 def get_scalar_dataset(
     variable_names: Sequence[str],
+    fill_value: Optional[float] = None,
 ):
     data_vars = {}
     for name in variable_names:
-        data_vars[name] = xr.DataArray(
-            np.random.randn(), attrs={"units": "m", "long_name": name}
-        )
+        if fill_value is not None:
+            value = fill_value
+        else:
+            value = np.random.randn()
+        data_vars[name] = xr.DataArray(value, attrs={"units": "m", "long_name": name})
 
     ds = xr.Dataset(data_vars=data_vars)
     return ds
