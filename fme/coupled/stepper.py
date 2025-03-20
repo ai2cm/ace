@@ -509,6 +509,14 @@ class ComponentStepPrediction:
     data: TensorDict
     step: int
 
+    def detach(self, optimizer: OptimizationABC) -> "ComponentStepPrediction":
+        """Detach the data tensor map from the computation graph."""
+        return ComponentStepPrediction(
+            realm=self.realm,
+            data=optimizer.detach_if_using_gradient_accumulation(self.data),
+            step=self.step,
+        )
+
 
 class CoupledStepper(
     TrainStepperABC[
@@ -805,13 +813,13 @@ class CoupledStepper(
 
             # predict and yield atmosphere steps
             for i_inner, atmos_step in enumerate(atmos_generator):
-                atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
-                atmos_steps.append(atmos_step)
                 yield ComponentStepPrediction(
                     realm="atmosphere",
                     data=atmos_step,
                     step=(i_outer * self.n_inner_steps + i_inner),
                 )
+                atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
+                atmos_steps.append(atmos_step)
 
             ocean_window = forcing_data.ocean_data.select_time_slice(
                 slice(i_outer, i_outer + self.n_ic_timesteps + 1)
@@ -996,7 +1004,6 @@ class CoupledStepper(
             )
             output_list = []
             for gen_step in output_generator:
-                output_list.append(gen_step)
                 if gen_step.realm == "ocean":
                     # compute ocean step metrics
                     target_step = {
@@ -1011,6 +1018,8 @@ class CoupledStepper(
                         step_loss.detach()
                     )
                     optimization.accumulate_loss(step_loss)
+                gen_step = gen_step.detach(optimization)
+                output_list.append(gen_step)
 
         loss = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
