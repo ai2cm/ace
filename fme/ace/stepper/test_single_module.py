@@ -29,6 +29,7 @@ from fme.ace.stepper.single_module import (
     StepperOverrideConfig,
     TrainOutput,
     _combine_normalizers,
+    get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
     repeat_interleave_batch_dim,
@@ -40,6 +41,7 @@ from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    VerticalCoordinate,
 )
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -1331,3 +1333,10 @@ def test_set_train_eval():
     stepper.set_train()
     for module in stepper.modules:
         assert module.training
+
+
+def test_get_serialized_stepper_vertical_coordinate():
+    stepper = _get_stepper(["a"], ["a"])
+    state = stepper.get_state()
+    vertical_coordinate = get_serialized_stepper_vertical_coordinate(state)
+    assert isinstance(vertical_coordinate, VerticalCoordinate)

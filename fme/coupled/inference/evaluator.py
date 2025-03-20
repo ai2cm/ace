@@ -12,8 +12,9 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
+from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import DepthCoordinate, SerializableVerticalCoordinate
+from fme.core.coordinates import DepthCoordinate
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -85,8 +86,8 @@ class StandaloneComponentCheckpointsConfig:
         ocean_ckpt = torch.load(
             self.ocean.path, map_location=fme.get_device(), weights_only=False
         )
-        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
-            ocean_ckpt["stepper"]["vertical_coordinate"]
+        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
+            ocean_ckpt["stepper"]
         )
         if isinstance(ocean_vertical_coord, DepthCoordinate):
             return ocean_vertical_coord.get_mask_level(0)
