@@ -363,11 +363,9 @@ def test_parameter_init_with_regularizer(tmpdir):
     )
     # new_module = module
     module = ComplexModule(10, 20).to(device)
-    modules, regularizer = config.apply(
+    regularizer = config.apply(
         [module], init_weights=True, load_weights=lambda _: [saved_module.state_dict()]
     )
-    assert len(modules) == 1
-    module = modules[0]
 
     original_state = copy.deepcopy(module.state_dict())
     # overwrite new_module weights with random values

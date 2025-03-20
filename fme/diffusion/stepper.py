@@ -334,10 +334,10 @@ class DiffusionStepper(
             n_out_channels=n_out_channels,
             img_shape=img_shape,
         )
-        modules, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
+        self._l2_sp_tuning_regularizer = config.parameter_init.apply(
             [self.module], init_weights=init_weights, load_weights=_load_weights
         )
-        self.module = modules[0].to(get_device())
+        self.module = self.module.to(get_device())
         self.derive_func = derive_func
         self._img_shape = img_shape
         self._config = config

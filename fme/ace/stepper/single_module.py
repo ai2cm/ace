@@ -49,7 +49,6 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import InferenceDataProtocol
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.core.weight_ops import strip_leading_module
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -318,7 +317,7 @@ def _load_weights(path: str) -> List[Mapping[str, Any]]:
     stepper = load_stepper(path)
     return_weights: List[Mapping[str, Any]] = []
     for module in stepper.modules:
-        return_weights.append(strip_leading_module(module.state_dict()))
+        return_weights.append(module.state_dict())
     return return_weights
 
 
@@ -592,7 +591,6 @@ class SingleModuleStep:
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
-        init_weights: bool = True,
     ):
         """
         Args:
@@ -622,11 +620,7 @@ class SingleModuleStep:
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             img_shape=img_shape,
-        )
-        modules, self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            [self.module], init_weights=init_weights, load_weights=_load_weights
-        )
-        self.module = modules[0].to(get_device())
+        ).to(get_device())
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
@@ -769,7 +763,7 @@ class SingleModuleStep:
             )
 
     def get_regularizer_loss(self):
-        return self._l2_sp_tuning_regularizer()
+        return torch.tensor(0.0)
 
     def get_state(self):
         """
@@ -860,8 +854,6 @@ class SingleModuleStep:
             corrector=corrector,
             timestep=timestep,
             normalizer=config.normalization.build(config.normalize_names),
-            # don't need to initialize weights, we're about to load_state
-            init_weights=False,
         )
         step.load_state(state)
         return step
@@ -890,6 +882,7 @@ class Stepper(
         post_process_func: Callable[[TensorMapping], TensorDict],
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
+        init_weights: bool = True,
     ):
         """
         Args:
@@ -898,6 +891,7 @@ class Stepper(
             post_process_func: Function to post-process the output of the step function.
             area_weighted_mean: Function to compute the area weighted mean of a tensor.
             derive_func: Function to compute derived variables.
+            init_weights: Whether to initialize the weights of the module.
         """
         self._step_obj = step
         self._derive_func = derive_func
@@ -926,6 +920,10 @@ class Stepper(
             out_names=config.out_names,
             channel_dim=self.CHANNEL_DIM,
             normalizer=loss_normalizer,
+        )
+
+        self._l2_sp_tuning_regularizer = config.parameter_init.apply(
+            step.modules, init_weights=init_weights, load_weights=_load_weights
         )
 
         if config.multi_call is not None:
@@ -1256,6 +1254,9 @@ class Stepper(
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
+    def _get_regularizer_loss(self) -> torch.Tensor:
+        return self._l2_sp_tuning_regularizer() + self._step_obj.get_regularizer_loss()
+
     def train_on_batch(
         self,
         data: BatchData,
@@ -1296,7 +1297,7 @@ class Stepper(
             use_crps=self._config.crps_training,
         )
 
-        regularizer_loss = self._step_obj.get_regularizer_loss()
+        regularizer_loss = self._get_regularizer_loss()
         if torch.any(regularizer_loss > 0):
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
@@ -1467,6 +1468,8 @@ class Stepper(
             area_weighted_mean=area_weighted_mean,
             post_process_func=post_process_func,
             derive_func=derive_func,
+            # don't need to initialize weights, we're about to load_state
+            init_weights=False,
         )
         stepper.load_state(state)
         return stepper

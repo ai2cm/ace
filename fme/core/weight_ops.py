@@ -71,13 +71,7 @@ class CopyWeightsConfig:
         for module, weight in zip(modules, weights):
 
             def func(module, name):
-                # Strip leading "module." from name if present
-                if name.startswith("module."):
-                    weight_name = name[len("module.") :]
-                else:
-                    weight_name = name
-
-                overwrite_weight_initial_slice(module, name, weight[weight_name])
+                overwrite_weight_initial_slice(module, name, weight[name])
 
             apply_by_wildcard(module, func, self.include, self.exclude)
         return module
