@@ -1,15 +1,16 @@
 runs:
-  2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr: gs://vcm-ml-raw-flexible-retention/2024-11-01-CM4-piControl/regridded-zarrs/gaussian_grid_180_by_360/pre-industrial-control
+  2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr: gs://vcm-ml-raw-flexible-retention/2024-11-01-CM4-piControl/regridded-zarrs/gaussian_grid_180_by_360/pre-industrial-control
 data_output_directory: gs://vcm-ml-intermediate
 stats:
-  output_directory: gs://vcm-ml-intermediate/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr-stats
+  output_directory: gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats
   start_date: "0151-01-01T06:00:00"
   end_date: "0351-01-01T00:00:00"
   data_type: CM4
-  beaker_dataset: 2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr
+  beaker_dataset: 2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr
 dataset_computation:
   n_split: 457 # aiming small partitions avoid overloading dask; 200 years * 1461 steps/yr / 160 steps/chunk / 4 chunks/partition ~= 457 partitions
   reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-08-10-pre-industrial-CM4-simulation/vertical-coordinate-file/fv_core.res.nc
+  reference_vertical_coordinate_file_land: gs://vcm-ml-raw-flexible-retention/2024-11-01-CM4-piControl/land-vertical-coordinate-file/land-vertical-coordinate.nc
   vertical_coarsening_indices:
     # computed here: https://github.com/ai2cm/explore/blob/master/jamesd/2024-08-13-pre-industiral-CM4-eda/2024-08-28-AM4-vertical-indices.ipynb
     - [0, 7]
@@ -20,6 +21,12 @@ dataset_computation:
     - [18, 22]
     - [22, 25]
     - [25, 33]
+  vertical_coarsening_indices_land:
+    # computed here: https://github.com/ai2cm/explore2/blob/main/troya/2025-02-28-LS-evaluation/soil-levels-lm4.ipynb
+    - [0, 2]
+    - [2, 6]
+    - [6, 10]
+    - [10, 15]
   renaming:
     specific_humidity_at_two_meters: Q2m
     air_temperature_at_two_meters: TMP2m
@@ -71,8 +78,8 @@ dataset_computation:
       - downward_longwave_radiative_flux
       - net_surface_longwave_radiative_flux
       # below are vertically resolved soil layer variables -- need to be coarsened
-      # - total_moisture_content_of_soil_layer
-      # - temperature_of_soil_layer
+      - total_moisture_content_of_soil_layer
+      - temperature_of_soil_layer
     land_static.zarr:
       - land_fraction
     ice_6hourly.zarr:
@@ -89,3 +96,7 @@ dataset_computation:
     surface_snow_rate: None
     surface_ice_rate: None
     surface_graupel_rate: None
+    land_names_to_vertically_coarsen_by_height_weighting:
+      - temperature_of_soil_layer
+    land_names_to_vertically_coarsen_by_sum:
+      - total_moisture_content_of_soil_layer
