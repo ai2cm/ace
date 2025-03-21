@@ -1,10 +1,6 @@
 # This script is used to compute a training dataset from the "raw"
 # FV3GFS data stored in zarr form on GCS.
 
-# The dependencies of this script are installed in the "fv3net" conda environment
-# which can be installed using fv3net's Makefile. See
-# https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
-
 # The resulting dataset is about 194GB (the input is about 2.5TB). Running this script
 # on my 8-CPU VM takes about 2.5 hours. See "compute_dataset_fv3gfs_argo_workflow.yaml"
 # for a workflow which parallelizes this script across the 11-member ensemble and runs
@@ -84,8 +80,17 @@ class StandardNameMapping(StandardDimMapping):
     land_fraction: str = "land_fraction"
     ocean_fraction: str = "ocean_fraction"
     sea_ice_fraction: str = "sea_ice_fraction"
+    vertical_dim_land: str = "zfull_soil"
+    height_thickness: str = "height_thickness_of_land_layer"
+    total_moisture_content_of_soil_layer: str = "total_moisture_content_of_soil_layer"
     hybrid_level_coeffs: List[str] = dataclasses.field(default_factory=list)
     additional_vertically_resolved_names: List[str] = dataclasses.field(
+        default_factory=list
+    )
+    land_names_to_vertically_coarsen_by_height_weighting: List[str] = dataclasses.field(
+        default_factory=list
+    )
+    land_names_to_vertically_coarsen_by_sum: List[str] = dataclasses.field(
         default_factory=list
     )
 
@@ -105,11 +110,19 @@ class StandardNameMapping(StandardDimMapping):
             self.eastward_wind,
         ] + self.additional_vertically_resolved_names
 
+        self.vertically_resolved_names_land: List[str] = (
+            self.land_names_to_vertically_coarsen_by_height_weighting
+            + self.land_names_to_vertically_coarsen_by_sum
+        )
+
         # variables to drop after all derived variables are computed
         self.dropped_variables: List[str] = (
             self.water_species
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim]
+            + self.land_names_to_vertically_coarsen_by_height_weighting
+            + self.land_names_to_vertically_coarsen_by_sum
+            + [self.vertical_dim_land]
         )
         for name in [
             self.precipitable_water_path,
@@ -241,6 +254,12 @@ class DatasetComputationConfig:
             with chunks as specified in ``chunking``.
         time_invariant_dir: (optional) path to directory containing time-invariant data
             This option is used for E3SMv2 dataset.
+        vertical_coarsening_indices_land: (optional) list of tuples defining the ranges
+            of reference levels that go into each vertically coarsened layer for the
+            land model variables.
+        reference_vertical_coordinate_file_land: (optional) path to netCDF file
+            containing vertical coordinate definition for the land model of the
+            reference simulation.
     """
 
     reference_vertical_coordinate_file: str
@@ -259,6 +278,8 @@ class DatasetComputationConfig:
         default_factory=lambda: ChunkingConfig(time_dim=360)
     )
     time_invariant_dir: Optional[str] = None
+    vertical_coarsening_indices_land: Optional[Sequence[Tuple[int, int]]] = None
+    reference_vertical_coordinate_file_land: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -466,6 +487,60 @@ def compute_vertical_coarsening(
     return ds.assign(coarsened_arrays)
 
 
+def compute_vertical_coarsening_land(
+    ds: xr.Dataset,
+    vertically_resolved_names: Sequence[str],
+    interface_indices: Optional[Sequence[Tuple[int, int]]],
+    vertical_coordinate_file: Optional[str],
+    dim: str,
+    height_thickness_name: str,
+    summed_variables: Sequence[str],
+) -> xr.Dataset:
+    """Compute vertical coarsening of 3D land variables by height-weighted mean or
+    unweighted sum. Outputs are saved as new variables in the dataset with the
+    name '{name}_{i}' where i is the new coarse vertical level index. Variables are
+    coarsened by a height-weighted mean by default. Variables listed in
+    summed_variables are coarsened using an unweighted sum. This is useful, for
+    example, for the total_moisture_content_of_soil_layer in LM4, which has units
+    of total moisture (kg / m^2).
+    """
+
+    assert interface_indices is not None, (
+        "Land variables for coarsening are provided, but there"
+        "are not corresponding coarsening indices"
+    )
+
+    assert vertical_coordinate_file is not None, (
+        "Land variables for coarsening are provided, but there"
+        "is not a corresponding reference file"
+    )
+
+    if not vertically_resolved_names:
+        return ds
+
+    with fsspec.open(vertical_coordinate_file) as f:
+        thickness = xr.open_dataset(f).load()
+
+    coarsened_arrays = {}
+    for i, (start, end) in enumerate(interface_indices):
+        height_thickness = thickness[height_thickness_name].isel(
+            {dim: slice(start, end)}
+        )
+        for name in vertically_resolved_names:
+            array_slice = ds[name].isel({dim: slice(start, end)})
+
+            # some land variables are total quantity in layer so just need to sum
+            if name in summed_variables:
+                coarsened_da = array_slice.sum(dim)
+            else:
+                coarsened_da = weighted_mean(array_slice, height_thickness, dim)
+
+            current_long_name = array_slice.long_name
+            coarsened_da.attrs["long_name"] = current_long_name + f" level-{i}"
+            coarsened_arrays[f"{name}_{i}"] = coarsened_da
+    return ds.assign(coarsened_arrays)
+
+
 def compute_tendencies(
     ds: xr.Dataset, time_derivative_names: Sequence[str], dim: str
 ) -> xr.Dataset:
@@ -643,6 +718,18 @@ def construct_lazy_dataset(
         dim=standard_names.vertical_dim,
         pressure_thickness_name=standard_names.pressure_thickness,
     )
+
+    if standard_names.vertically_resolved_names_land:
+        ds = compute_vertical_coarsening_land(
+            ds,
+            vertically_resolved_names=standard_names.vertically_resolved_names_land,
+            interface_indices=config.vertical_coarsening_indices_land,
+            vertical_coordinate_file=config.reference_vertical_coordinate_file_land,
+            dim=standard_names.vertical_dim_land,
+            height_thickness_name=standard_names.height_thickness,
+            summed_variables=standard_names.land_names_to_vertically_coarsen_by_sum,
+        )
+
     ds = compute_column_moisture_integral(
         ds,
         input_name=standard_names.specific_total_water,
