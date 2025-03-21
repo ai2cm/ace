@@ -60,10 +60,9 @@ class DownscalingModelConfig:
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.fine, reduction="mean")
+        loss = self.loss.build(reduction="mean")
         module = self.module.build(
             n_in_channels=len(self.in_names),
             n_out_channels=len(self.out_names),
@@ -194,7 +193,6 @@ class Model:
     def from_state(
         cls,
         state: Mapping[str, Any],
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> "Model":
         # Use serialized normalization data for loaded models
         state["config"]["normalization"] = state["normalization"]
@@ -202,7 +200,6 @@ class Model:
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
-            area_weights,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -246,10 +243,9 @@ class DiffusionModelConfig:
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.fine, "none")
+        loss = self.loss.build("none")
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
         # https://en.wikipedia.org/wiki/Standard_score
@@ -485,7 +481,6 @@ class DiffusionModel:
     def from_state(
         cls,
         state: Mapping[str, Any],
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> "DiffusionModel":
         # Use serialized normalization data for loaded models
         state["config"]["normalization"] = state["normalization"]
@@ -493,7 +488,6 @@ class DiffusionModel:
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
-            area_weights,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

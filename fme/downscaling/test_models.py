@@ -68,9 +68,6 @@ def test_train_and_generate(use_opt):
             )
         },
     )
-    area_weights = FineResCoarseResPair(
-        fine=torch.ones(*fine_shape), coarse=torch.ones(*coarse_shape)
-    )
     model = DownscalingModelConfig(
         module_selector,
         LossConfig(type="MSE"),
@@ -80,7 +77,6 @@ def test_train_and_generate(use_opt):
     ).build(
         coarse_shape,
         upscaling_factor,
-        area_weights,
     )
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
         fine={"x": torch.ones(batch_size, *fine_shape)},
@@ -116,10 +112,6 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     )
 
     img_shape, downscale_factor = (4, 8), 4
-    area_weights = FineResCoarseResPair[torch.Tensor](
-        torch.ones(img_shape[0] * downscale_factor, img_shape[1] * downscale_factor),
-        torch.ones(img_shape[0], img_shape[1]),
-    )
     loss = LossConfig(type="L1")
     model_config = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": LinearDownscaling(4, (4, 8))}),
@@ -131,7 +123,6 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     model_config.build(
         img_shape,
         downscale_factor,
-        area_weights,
     )
 
 
@@ -144,16 +135,13 @@ def test_serialization(tmp_path):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
-    )
     model = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": module}),
         LossConfig(type="MSE"),
         ["x"],
         ["x"],
         normalizer,
-    ).build(coarse_shape, downscale_factor, area_weights)
+    ).build(coarse_shape, downscale_factor)
 
     batch_size = 3
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
@@ -164,7 +152,6 @@ def test_serialization(tmp_path):
 
     model_from_state = Model.from_state(
         model.get_state(),
-        area_weights,
     )
     torch.testing.assert_close(
         expected,
@@ -174,7 +161,6 @@ def test_serialization(tmp_path):
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
-        area_weights,
     )
     torch.testing.assert_close(
         expected,
@@ -190,9 +176,6 @@ def test_diffusion_model_train_and_generate(predict_residual):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-    )
-    area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
     )
 
     model = DiffusionModelConfig(
@@ -210,7 +193,7 @@ def test_diffusion_model_train_and_generate(predict_residual):
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
-    ).build(coarse_shape, downscale_factor, area_weights)
+    ).build(coarse_shape, downscale_factor)
 
     batch_size = 2
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
@@ -259,16 +242,13 @@ def test_normalizer_serialization(tmp_path):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
-    )
     model = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": module}),
         LossConfig(type="MSE"),
         ["x"],
         ["x"],
         normalizer,
-    ).build(coarse_shape, downscale_factor, area_weights)
+    ).build(coarse_shape, downscale_factor)
 
     # change model normalizer to check that new values are serialized and loaded
     model.normalizer = FineResCoarseResPair(
@@ -284,7 +264,6 @@ def test_normalizer_serialization(tmp_path):
 
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
-        area_weights,
     )
     assert model_from_disk.normalizer.fine.means == {"x": 1.0}
     assert model_from_disk.normalizer.fine.stds == {"x": 2.0}
