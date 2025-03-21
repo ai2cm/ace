@@ -61,7 +61,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    trainer.model = trainer.model.from_state(checkpoint["model"], trainer.area_weights)
+    trainer.model = trainer.model.from_state(checkpoint["model"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -71,7 +71,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     ema_checkpoint = torch.load(
         trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    ema_model = trainer.model.from_state(ema_checkpoint["model"], trainer.area_weights)
+    ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
 
 
@@ -91,7 +91,6 @@ class Trainer:
         self.validation_data = validation_data
         self.ema = config.ema.build(self.model.modules)
         self.validate_using_ema = config.validate_using_ema
-        self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
         self.dims = self.train_data.horizontal_coordinates.fine.dims
         wandb = WandB.get_instance()
@@ -132,7 +131,6 @@ class Trainer:
         )
         train_aggregator = Aggregator(
             self.dims,
-            self.area_weights.fine.cpu(),
             self.model.downscale_factor,
             include_positional_comparisons=include_positional_comparisons,
         )
@@ -149,6 +147,7 @@ class Trainer:
                 train_aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
+                    area_weights=self.train_data.area_weights.fine.to(get_device()),
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
@@ -195,13 +194,11 @@ class Trainer:
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.dims,
-                self.area_weights.fine.cpu(),
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
             generation_aggregator = Aggregator(
                 self.dims,
-                self.area_weights.fine.cpu(),
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
@@ -214,9 +211,11 @@ class Trainer:
                 inputs = FineResCoarseResPair[TensorMapping](fine, coarse)
 
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
+                area_weights = self.validation_data.area_weights.fine.to(get_device())
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
+                    area_weights=area_weights,
                 )
                 generated_outputs = self.model.generate_on_batch(
                     inputs, n_samples=self.config.generate_n_samples
@@ -224,6 +223,7 @@ class Trainer:
                 generation_aggregator.record_batch(
                     outputs=generated_outputs,
                     coarse=inputs.coarse,
+                    area_weights=area_weights,
                 )
 
         wandb = WandB.get_instance()
@@ -329,7 +329,6 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             train_data.img_shape.coarse,
             train_data.downscale_factor,
-            train_data.area_weights,
         )
 
         optimization = self.optimization.build(

@@ -9,6 +9,7 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
@@ -49,7 +50,6 @@ class Evaluator:
             )
         aggregator = Aggregator(
             self.data.horizontal_coordinates.fine.dims,
-            self.data.area_weights.fine,
             self.model.downscale_factor,
         )
 
@@ -63,6 +63,7 @@ class Evaluator:
                 aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
+                    area_weights=self.data.area_weights.fine.to(get_device()),
                 )
                 # TODO: write generated outputs to disk
 
@@ -86,9 +87,7 @@ class InterpolateModelConfig:
 
     def build(
         self,
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> Model:
-        del area_weights  # unused
         module = ModuleRegistrySelector(type="interpolate", config={"mode": self.mode})
         var_names = list(set(self.in_names).union(set(self.out_names)))
         normalization_config = PairedNormalizationConfig(
@@ -102,8 +101,6 @@ class InterpolateModelConfig:
             ),
         )
 
-        area_weights = FineResCoarseResPair(torch.tensor(1.0), torch.tensor(1.0))
-
         return DownscalingModelConfig(
             module,
             LossConfig("NaN"),
@@ -113,7 +110,6 @@ class InterpolateModelConfig:
         ).build(
             (-1, -1),
             self.downscale_factor,
-            area_weights,
         )
 
     @property
@@ -180,14 +176,12 @@ class CheckpointModelConfig:
 
     def build(
         self,
-        area_weights: FineResCoarseResPair[torch.Tensor],
     ) -> Union[Model, DiffusionModel]:
         model = _CheckpointModelConfigSelector.from_state(
             self.checkpoint_dict["model"]["config"]
         ).build(
             coarse_shape=self.checkpoint_dict["model"]["coarse_shape"],
             downscale_factor=self.checkpoint_dict["model"]["downscale_factor"],
-            area_weights=area_weights,
         )
         model.module.load_state_dict(self.checkpoint_dict["model"]["module"])
         return model
@@ -225,7 +219,7 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False, requirements=self.model.data_requirements
         )
-        model = self.model.build(dataset.area_weights)
+        model = self.model.build()
         return Evaluator(
             data=dataset,
             model=model,

@@ -1,6 +1,18 @@
 """Contains classes for aggregating evaluation metrics and various statistics."""
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol, Tuple, Union
+from functools import partial
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    Tuple,
+    TypeAlias,
+    Union,
+)
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -13,7 +25,6 @@ from fme.ace.aggregator.one_step.snapshot import (
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core import metrics
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.device import get_device
 from fme.core.histogram import ComparedDynamicHistograms
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
@@ -26,9 +37,8 @@ from fme.downscaling.metrics_and_maths import (
 )
 from fme.downscaling.models import ModelOutputs
 
-
-def _detach_and_to_cpu(x: TensorMapping) -> TensorMapping:
-    return {k: v.detach().cpu() for k, v in x.items()}
+SingleInputFunc: TypeAlias = Callable[[torch.Tensor], torch.Tensor]
+ComparisonInputFunc: TypeAlias = Callable[[torch.Tensor, torch.Tensor], torch.Tensor]
 
 
 class Mean:
@@ -44,7 +54,7 @@ class Mean:
 
     def __init__(
         self,
-        metric: Callable[[torch.Tensor], torch.Tensor],
+        metric: SingleInputFunc,
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
         self._sum: Optional[TensorMapping] = None
@@ -58,13 +68,10 @@ class Mean:
         Args:
             data: the data to record.
         """
-        data = _detach_and_to_cpu(data)
         metric = self._mapped_metric(data)
 
         if self._sum is None:
-            self._sum = {
-                k: torch.zeros_like(v, dtype=torch.float64) for k, v in metric.items()
-            }
+            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
 
         self._sum = self._add(self._sum, metric)
         self._count += 1
@@ -94,37 +101,47 @@ class MeanComparison:
 
     Args:
         metric: The metric function to be calculated which compares two tensors
-        (e.g. target and prediction)
+            (e.g. target and prediction).  If not provided, you must provide a
+            dynamic metric when calling record_batch.
 
     Raises:
-        ValueError: If no values have been added to the running average.
+        ValueError: If no values have been added to the running average or if
+            no default metric or dynamic metric are provided.
     """
 
     def __init__(
         self,
-        metric: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+        metric: Optional[ComparisonInputFunc] = None,
     ) -> None:
-        self._mapped_metric = map_tensor_mapping(metric)
+        self._mapped_metric = map_tensor_mapping(metric) if metric is not None else None
         self._sum: Optional[TensorMapping] = None
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
 
-    def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
+    def record_batch(
+        self,
+        target: TensorMapping,
+        prediction: TensorMapping,
+        dynamic_metric: Optional[ComparisonInputFunc] = None,
+    ) -> None:
         """
         Records the metric values of a batch.
 
         Args:
             target: the 'truth' target values.
             prediction: the predicted values.
+            dynamic_metric: a metric that changes with the batch. overrides the
+                default metric if both are provided.
         """
-        target = _detach_and_to_cpu(target)
-        prediction = _detach_and_to_cpu(prediction)
-        metric = self._mapped_metric(target, prediction)
+        if dynamic_metric is not None:
+            metric = map_tensor_mapping(dynamic_metric)(target, prediction)
+        elif self._mapped_metric is not None:
+            metric = self._mapped_metric(target, prediction)
+        else:
+            raise ValueError("No metric function provided to MeanComparisonAggregator")
 
         if self._sum is None:
-            self._sum = {
-                k: torch.zeros_like(v, dtype=torch.float64) for k, v in metric.items()
-            }
+            self._sum = {k: torch.zeros_like(v) for k, v in metric.items()}
 
         self._sum = self._add(self._sum, metric)
         self._count += 1
@@ -335,13 +352,13 @@ class MeanMapAggregator:
             )._asdict()
             datum = torch.stack(
                 (
-                    target[var_name],
-                    prediction[var_name],
+                    target[var_name].cpu(),
+                    prediction[var_name].cpu(),
                 ),
                 dim=0,
             )
             dataset[var_name] = xr.DataArray(
-                datum,
+                datum.numpy(),
                 dims=dims,
                 attrs=metadata,
             )
@@ -417,6 +434,17 @@ class _ComparisonAggregator(Protocol):
     def get_wandb(self) -> Mapping[str, Any]: ...
 
 
+class _DynamicMetricComparisonAggregator(Protocol):
+    def record_batch(
+        self,
+        target: TensorMapping,
+        prediction: TensorMapping,
+        dynamic_metric: Optional[ComparisonInputFunc] = None,
+    ) -> None: ...
+
+    def get_wandb(self) -> Mapping[str, Any]: ...
+
+
 def _fold_sample_dim(
     truth: TensorMapping,
     pred: TensorMapping,
@@ -475,18 +503,18 @@ class Aggregator:
 
     Args:
         dims: Dimensions of the data.
-        area_weights: Tensor of area weights.
         downscale_factor: Downscaling factor.
         n_histogram_bins: Number of bins for histogram comparisons.
         percentiles: Percentiles for histogram comparisons.
         ssim_kwargs: Optional keyword arguments for SSIM computation.
         variable_metadata: Metadata for each variable.
+        include_positional_comparisons: Flag to include aggregation components
+            that rely on a static location (e.g., area weighting or maps)
     """
 
     def __init__(
         self,
         dims: List[str],
-        area_weights: Optional[torch.Tensor],
         downscale_factor: int,
         n_histogram_bins: int = 300,
         percentiles: Optional[List[float]] = None,
@@ -495,13 +523,6 @@ class Aggregator:
         include_positional_comparisons: bool = True,
     ) -> None:
         self.downscale_factor = downscale_factor
-        if area_weights is not None:
-            area_weights = area_weights.to(get_device())
-
-        def _area_weighted_rmse(truth, pred):
-            return metrics.root_mean_squared_error(
-                truth.to(get_device()), pred.to(get_device()), area_weights
-            )
 
         if ssim_kwargs is None:
             ssim_kwargs = {}
@@ -513,19 +534,26 @@ class Aggregator:
                 n_bins=n_histogram_bins, percentiles=percentiles
             ),
         }
+
+        self._area_weighted: Mapping[
+            str, Tuple[Callable, _DynamicMetricComparisonAggregator]
+        ] = {}
+
         if include_positional_comparisons:
-            self._comparisons["weighted_rmse"] = MeanComparison(_area_weighted_rmse)
+            self._area_weighted["weighted_rmse"] = (
+                metrics.root_mean_squared_error,
+                MeanComparison(),
+            )
             self._comparisons["time_mean_map"] = MeanMapAggregator(variable_metadata)
-            self._intrinsics: Mapping[
-                str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
-            ] = {
-                input_type: {
-                    "spectrum": ZonalPowerSpectrum(),
-                }
-                for input_type in ("target", "prediction")
+
+        self._intrinsics: Mapping[
+            str, Mapping[str, Union[ComparedDynamicHistograms, ZonalPowerSpectrum]]
+        ] = {
+            input_type: {
+                "spectrum": ZonalPowerSpectrum(),
             }
-        else:
-            self._intrinsics = {}
+            for input_type in ("target", "prediction")
+        }
         self._coarse_comparisons = {
             "relative_mse_bicubic": RelativeMSEInterpAggregator(downscale_factor)
         }
@@ -541,6 +569,7 @@ class Aggregator:
         self,
         outputs: ModelOutputs,
         coarse: TensorMapping,
+        area_weights: torch.Tensor,
     ) -> None:
         """
         Records a batch of target and prediction tensors for metric computation.
@@ -548,6 +577,7 @@ class Aggregator:
         Args:
             outputs: the model predictions and target data.
             coarse: the coarse data used as input for downscaling.
+            area_weights: the area weights for the data.
         """
         for _, prob_comparison_aggregator in self._probabilistic_comparisons.items():
             prob_comparison_aggregator.record_batch(outputs.target, outputs.prediction)
@@ -561,6 +591,15 @@ class Aggregator:
         for _, coarse_comparison_aggregator in self._coarse_comparisons.items():
             coarse_comparison_aggregator.record_batch(
                 folded_target, folded_prediction, folded_coarse
+            )
+
+        for _, (
+            area_weighted_metric,
+            area_weighted_aggregator,
+        ) in self._area_weighted.items():
+            dynamic = partial(area_weighted_metric, weights=area_weights)
+            area_weighted_aggregator.record_batch(
+                folded_target, folded_prediction, dynamic_metric=dynamic
             )
 
         for input, input_type in zip(
@@ -596,6 +635,14 @@ class Aggregator:
                 {
                     f"{prefix}{metric_name}/{k}": v
                     for (k, v) in relative_agg.get_wandb().items()
+                }
+            )
+
+        for metric_name, area_weighted_agg in self._area_weighted.items():
+            ret.update(
+                {
+                    f"{prefix}{metric_name}/{k}": v
+                    for (k, v) in area_weighted_agg[1].get_wandb().items()
                 }
             )
 
