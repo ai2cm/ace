@@ -21,7 +21,9 @@ from fme.core.packer import Packer
 def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
+    loss = config.build(
+        reduction="mean", area_weighted_mean=LatLonOperations(area).area_weighted_mean
+    )
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -32,8 +34,7 @@ def test_loss_builds_and_runs(global_mean_type):
 def test_loss_of_zeros_is_variance():
     torch.manual_seed(0)
     config = LossConfig(global_mean_type=None)
-    area = torch.randn(10, 10, device=get_device())
-    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
+    loss = config.build(reduction="mean")
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -55,7 +56,9 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         global_mean_type="LpLoss", global_mean_weight=global_mean_weight
     )
     area = torch.randn(10, 10, device=get_device())
-    loss = config.build(LatLonOperations(area).area_weighted_mean, reduction="mean")
+    loss = config.build(
+        reduction="mean", area_weighted_mean=LatLonOperations(area).area_weighted_mean
+    )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -68,6 +71,16 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
         else {"atol": 0.01, "rtol": 0.0}
     )
     torch.testing.assert_close(result.cpu(), expected, **tol)
+
+
+def test_loss_fails_when_area_weighted_mean_not_provided():
+    config = LossConfig(type="AreaWeightedMSE")
+    with pytest.raises(ValueError):
+        config.build(reduction="mean")
+
+    config = LossConfig(global_mean_type="LpLoss")
+    with pytest.raises(ValueError):
+        config.build(reduction="mean")
 
 
 def test_global_mean_loss():
@@ -183,7 +196,7 @@ def test_WeightedMappingLossConfig_no_weights():
     area = torch.tensor([])  # area not used by this config
     area_weighted_mean = LatLonOperations(area).area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
-    loss = loss_config.build(area_weighted_mean, reduction="mean")
+    loss = loss_config.build(reduction="mean", area_weighted_mean=area_weighted_mean)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
