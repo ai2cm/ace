@@ -27,6 +27,13 @@ class OceanCorrectorConfig:
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: Optional[SeaIceFractionConfig] = None
 
+    def __post_init__(self):
+        if self.masking is not None and self.masking.mask_value != 0:
+            raise ValueError(
+                "mask_value must be 0 for OceanCorrector, but got "
+                f"{self.masking.mask_value}"
+            )
+
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
         return dacite.from_dict(
