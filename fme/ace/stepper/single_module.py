@@ -199,7 +199,19 @@ class SingleModuleStepperConfig:
         logging.info("Initializing stepper from provided config")
         vertical_coordinate = vertical_coordinate.to(get_device())
         derive_func = vertical_coordinate.build_derive_function(timestep)
-        step_config = self.to_single_module_step_config()
+
+        normalizer = self.normalization.build(self.normalize_names)
+        combined_normalization_config = NetworkAndLossNormalizationConfig(
+            network=self.normalization,
+            loss=self.loss_normalization,
+            residual=self.residual_normalization,
+        )
+        loss_normalizer = combined_normalization_config.get_loss_normalizer(
+            self.normalize_names, residual_scaled_names=self.prognostic_names
+        )
+        step_config = self.to_single_module_step_config(
+            normalizer=normalizer, loss_normalizer=loss_normalizer
+        )
         dataset_info = DatasetInfo(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
@@ -330,15 +342,29 @@ class SingleModuleStepperConfig:
 
     def to_single_module_step_config(
         self,
+        normalizer: Optional[StandardNormalizer] = None,
+        loss_normalizer: Optional[StandardNormalizer] = None,
     ) -> "SingleModuleStepConfig":
+        if normalizer is not None:
+            normalization = normalizer.get_normalization_config()
+        else:
+            normalization = self.normalization
+        if loss_normalizer is not None:
+            loss_normalization: Optional[NormalizationConfig] = (
+                loss_normalizer.get_normalization_config()
+            )
+            residual_normalization: Optional[NormalizationConfig] = None
+        else:
+            loss_normalization = self.loss_normalization
+            residual_normalization = self.residual_normalization
         return SingleModuleStepConfig(
             builder=self.builder,
             in_names=self.in_names,
             out_names=self.out_names,
             normalization=NetworkAndLossNormalizationConfig(
-                network=self.normalization,
-                loss=self.loss_normalization,
-                residual=self.residual_normalization,
+                network=normalization,
+                loss=loss_normalization,
+                residual=residual_normalization,
             ),
             ocean=self.ocean,
             corrector=self.corrector,
@@ -1196,6 +1222,7 @@ class Stepper(
         self._config.load()
         return {
             "config": self._config.get_state(),
+            "normalization": self.normalizer.get_state(),
             "loss_normalizer": self.loss_obj.get_normalizer_state(),
             "vertical_coordinate": self._dataset_info.vertical_coordinate.as_dict(),
             "gridded_operations": self._dataset_info.gridded_operations.to_state(),
@@ -1263,7 +1290,22 @@ class Stepper(
             )
 
         area_weighted_mean = gridded_operations.area_weighted_mean
-        step_config = config.to_single_module_step_config()
+
+        normalizer = StandardNormalizer.from_state(
+            state.get("normalizer", state.get("normalization", None))
+        )
+        if normalizer is None:
+            raise KeyError(f"No normalizer found in state, keys include {state.keys()}")
+        loss_normalizer_config = state.get(
+            "loss_normalizer", state.get("loss_normalization")
+        )
+        if loss_normalizer_config is None:
+            loss_normalizer = normalizer
+        else:
+            loss_normalizer = StandardNormalizer.from_state(loss_normalizer_config)
+        step_config = config.to_single_module_step_config(
+            normalizer=normalizer, loss_normalizer=loss_normalizer
+        )
         dataset_info = DatasetInfo(
             img_shape=state["img_shape"],
             gridded_operations=gridded_operations,
