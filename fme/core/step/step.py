@@ -91,7 +91,12 @@ class StepConfigABC(abc.ABC):
             The loss normalizer.
         """
 
+    @abc.abstractmethod
     def replace_ocean(self, ocean: Optional[OceanConfig]):
+        pass
+
+    @abc.abstractmethod
+    def get_ocean(self) -> Optional[OceanConfig]:
         pass
 
 
@@ -177,6 +182,9 @@ class StepSelector(StepConfigABC):
         self._step_config_instance.replace_ocean(ocean)
         self.config = dataclasses.asdict(self._step_config_instance)
 
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self._step_config_instance.get_ocean()
+
 
 class InferenceDataProtocol(Protocol):
     @property
@@ -191,6 +199,23 @@ class StepABC(abc.ABC):
     @abc.abstractmethod
     def config(self) -> StepConfigABC:
         pass
+
+    @final
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
+        extra_diagnostic_names = list(
+            set(extra_names).difference(extra_residual_scaled_names)
+        )
+        return self.config.get_loss_normalizer(
+            extra_diagnostic_names, extra_residual_scaled_names
+        )
 
     @property
     @final

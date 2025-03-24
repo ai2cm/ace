@@ -12,6 +12,7 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -48,6 +49,7 @@ class SingleModuleStepConfig(StepConfigABC):
         activation_checkpointing: Configuration for activation checkpointing to trade
             increased computation for lowered memory during training.
         crps_training: Whether to use CRPS training for stochastic models.
+        residual_prediction: Whether to use residual prediction.
     """
 
     builder: ModuleSelector
@@ -63,6 +65,7 @@ class SingleModuleStepConfig(StepConfigABC):
         default_factory=lambda: ActivationCheckpointingConfig()
     )
     crps_training: bool = False
+    residual_prediction: bool = False
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -141,6 +144,9 @@ class SingleModuleStepConfig(StepConfigABC):
             ocean: The new ocean model configuration or None.
         """
         self.ocean = ocean
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.ocean
 
     @classmethod
     def _remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -300,6 +306,8 @@ class SingleModuleStep(StepABC):
         else:
             output_tensor = self.module(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        if self._config.residual_prediction:
+            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
         output = self.normalizer.denormalize(output_norm)
         if self._corrector is not None:
             output = self._corrector(input, output, next_step_input_data)
