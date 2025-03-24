@@ -3,9 +3,10 @@ from copy import copy
 from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.multi_call import MultiCall, MultiCallConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step.step import (
@@ -89,7 +90,7 @@ class MultiCallStepConfig(StepConfigABC):
 
     def build(
         self,
-        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
+        step_method: StepMethod,
     ) -> "Optional[MultiCall]":
         if self.config is None:
             return None
@@ -269,16 +270,16 @@ class MultiCallStep(StepABC):
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         state = self._wrapped_step.step(
             input,
             next_step_input_data,
-            use_activation_checkpointing,
+            wrapper=wrapper,
         )
         if self._multi_call is not None:
             multi_called_outputs = self._multi_call.step(
-                input, next_step_input_data, use_activation_checkpointing
+                input, next_step_input_data, wrapper=wrapper
             )
             state = {**multi_called_outputs, **state}
         return state

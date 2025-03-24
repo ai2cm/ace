@@ -51,7 +51,7 @@ from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import (
-    ActivationCheckpointingConfig,
+    CheckpointConfig,
     NullOptimization,
     Optimization,
     OptimizationConfig,
@@ -517,24 +517,23 @@ def test_train_on_batch(
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
 
     if is_train:
-        optimization = OptimizationConfig()
+        if with_activation_checkpointing:
+            optimization = OptimizationConfig(
+                checkpoint=CheckpointConfig(after_n_forward_steps=n_forward_steps - 1)
+            )
+        else:
+            optimization = OptimizationConfig()
     else:
         optimization = None
-
-    stepper_config_kwargs = {}
-    if with_activation_checkpointing:
-        stepper_config_kwargs["activation_checkpointing"] = (
-            ActivationCheckpointingConfig(after_n_forward_steps=n_forward_steps - 1)
-        )
 
     with patch("torch.utils.checkpoint.checkpoint") as mock_checkpoint:
         # have the mock call the module and return the step
         mock_checkpoint.side_effect = lambda f, x, **_: f(x)
         _setup_and_train_on_batch(
-            data, in_names, out_names, ocean_config, optimization, stepper_config_kwargs
+            data, in_names, out_names, ocean_config, optimization, {}
         )
 
-        if with_activation_checkpointing:
+        if is_train and with_activation_checkpointing:
             # should be called exactly once, for the final forward step
             mock_checkpoint.assert_called_once()
         else:
