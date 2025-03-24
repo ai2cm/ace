@@ -8,7 +8,13 @@ import torch.random
 import yaml
 
 import fme
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import (
+    Checkpoint,
+    CheckpointConfig,
+    NoCheckpoint,
+    NullOptimization,
+    Optimization,
+)
 from fme.core.scheduler import SchedulerConfig
 
 
@@ -219,3 +225,14 @@ def test_change_identical_with_or_without_gradient_accumulation():
     state_with_gradient_accumulation = get_change(True)
     state_without_gradient_accumulation = get_change(False)
     assert state_with_gradient_accumulation == state_without_gradient_accumulation
+
+
+@pytest.mark.parametrize("after_n_forward_steps", [0, 1, 2])
+@pytest.mark.parametrize("step", [0, 1, 2])
+def test_checkpoint(after_n_forward_steps: int, step: int):
+    config = CheckpointConfig(after_n_forward_steps=after_n_forward_steps)
+    checkpoint = config.build(step)
+    if step >= after_n_forward_steps:
+        assert isinstance(checkpoint, Checkpoint)
+    else:
+        assert isinstance(checkpoint, NoCheckpoint)

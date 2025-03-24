@@ -23,7 +23,7 @@ def test_multi_call(include_multi_call_in_loss: bool):
     output_names = ["b", "c"]
     multi_call_output_names = ["c"]
 
-    def _step(input, next_step_input_data, *_):
+    def _step(input, next_step_input_data, wrapper):
         prediction = {k: input["CO2"].detach().clone() for k in output_names}
         return prediction
 
