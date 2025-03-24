@@ -449,26 +449,50 @@ class CoupledStepperConfig:
         return state_copy
 
 
+class ComponentStepMetrics:
+    def __init__(self):
+        self._ocean: TensorDict = {}
+        self._atmos: TensorDict = {}
+
+    def add_metric(self, key, value, realm: Literal["ocean", "atmosphere"]) -> None:
+        if realm == "ocean":
+            self._ocean[key] = value
+        elif realm == "atmosphere":
+            self._atmos[key] = value
+
+    def get_ocean_metrics(self) -> torch.Tensor:
+        loss = sum(self._ocean.values())
+        return {
+            "loss/ocean": loss,
+            **self._ocean,
+        }
+
+    def get_atmosphere_metrics(self) -> torch.Tensor:
+        loss = sum(self._atmos.values())
+        return {
+            "loss/atmosphere": loss,
+            **self._atmos,
+        }
+
+
 @dataclasses.dataclass
 class CoupledTrainOutput(TrainOutputABC):
-    metrics: TensorDict
-    ocean_data: TrainOutput
-    atmosphere_data: TrainOutput
+    total_metrics: TensorDict
+    ocean: TrainOutput
+    atmosphere: TrainOutput
 
     def remove_initial_condition(self, n_ic_timesteps: int) -> "CoupledTrainOutput":
         return CoupledTrainOutput(
-            metrics=self.metrics,
-            ocean_data=self.ocean_data.remove_initial_condition(n_ic_timesteps),
-            atmosphere_data=self.atmosphere_data.remove_initial_condition(
-                n_ic_timesteps
-            ),
+            total_metrics=self.total_metrics,
+            ocean=self.ocean.remove_initial_condition(n_ic_timesteps),
+            atmosphere=self.atmosphere.remove_initial_condition(n_ic_timesteps),
         )
 
     def copy(self) -> "CoupledTrainOutput":
         return CoupledTrainOutput(
-            metrics=self.metrics,
-            ocean_data=self.ocean_data.copy(),
-            atmosphere_data=self.atmosphere_data.copy(),
+            total_metrics=self.total_metrics.copy(),
+            ocean=self.ocean.copy(),
+            atmosphere=self.atmosphere.copy(),
         )
 
     def prepend_initial_condition(
@@ -483,24 +507,42 @@ class CoupledTrainOutput(TrainOutputABC):
             initial_condition: Initial condition data.
         """
         return CoupledTrainOutput(
-            metrics=self.metrics,
-            ocean_data=self.ocean_data.prepend_initial_condition(
+            total_metrics=self.total_metrics,
+            ocean=self.ocean.prepend_initial_condition(
                 initial_condition.ocean_data,
             ),
-            atmosphere_data=self.atmosphere_data.prepend_initial_condition(
+            atmosphere=self.atmosphere.prepend_initial_condition(
                 initial_condition.atmosphere_data,
             ),
         )
 
     def compute_derived_variables(self) -> "CoupledTrainOutput":
         return CoupledTrainOutput(
-            metrics=self.metrics,
-            ocean_data=self.ocean_data.compute_derived_variables(),
-            atmosphere_data=self.atmosphere_data.compute_derived_variables(),
+            total_metrics=self.total_metrics,
+            ocean=self.ocean.compute_derived_variables(),
+            atmosphere=self.atmosphere.compute_derived_variables(),
         )
 
     def get_metrics(self) -> TensorDict:
-        return self.metrics
+        ocean_keys = set(self.ocean.metrics.keys())
+        atmos_keys = set(self.atmosphere.metrics.keys())
+        overlap = ocean_keys.intersection(atmos_keys)
+        if len(overlap) > 0:
+            raise ValueError(
+                "The following metrics have the same name in the atmosphere and ocean: "
+                f"{overlap}."
+            )
+        overlap = ocean_keys.union(atmos_keys).intersection(self.total_metrics.keys())
+        if len(overlap) > 0:
+            raise ValueError(
+                "The following total metric names conflict with ocean or atmosphere "
+                f"metric names: {overlap}."
+            )
+        return {
+            **self.total_metrics,
+            **self.ocean.metrics,
+            **self.atmosphere.metrics,
+        }
 
 
 @dataclasses.dataclass
@@ -974,8 +1016,6 @@ class CoupledStepper(
                 prediction and target atmosphere data.
 
         """
-        ocean_metrics = {}
-
         # get initial condition prognostic variables
         input_data = CoupledPrognosticState(
             atmosphere_data=data.atmosphere_data.get_start(
@@ -995,6 +1035,7 @@ class CoupledStepper(
             compute_derived_variables=False,
         )
 
+        metrics = ComponentStepMetrics()
         optimization.set_mode(self.modules)
         with optimization.autocast():
             output_generator = self.get_prediction_generator(
@@ -1014,9 +1055,8 @@ class CoupledStepper(
                         gen_step.data,
                         target_step,
                     )
-                    ocean_metrics[f"loss/ocean_step_{gen_step.step}"] = (
-                        step_loss.detach()
-                    )
+                    label = f"loss/ocean_step_{gen_step.step}"
+                    metrics.add_metric(label, step_loss.detach(), "ocean")
                     optimization.accumulate_loss(step_loss)
                 gen_step = gen_step.detach(optimization)
                 output_list.append(gen_step)
@@ -1027,7 +1067,7 @@ class CoupledStepper(
         gen_data = self._process_prediction_generator_list(output_list, data)
 
         ocean_stepped = TrainOutput(
-            metrics={},
+            metrics=metrics.get_ocean_metrics(),
             gen_data=dict(gen_data.ocean_data.data),
             target_data=dict(ocean_forward_data.data),
             time=gen_data.ocean_data.time,
@@ -1035,7 +1075,7 @@ class CoupledStepper(
             derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
-            metrics={},
+            metrics=metrics.get_atmosphere_metrics(),
             gen_data=dict(gen_data.atmosphere_data.data),
             target_data=dict(atmos_forward_data.data),
             time=gen_data.atmosphere_data.time,
@@ -1043,15 +1083,10 @@ class CoupledStepper(
             derive_func=self.atmosphere.derive_func,
         )
 
-        ocean_loss: torch.Tensor = sum(ocean_metrics.values())
         stepped = CoupledTrainOutput(
-            metrics={
-                "loss": loss,
-                "loss/ocean": ocean_loss,
-                **ocean_metrics,
-            },
-            ocean_data=ocean_stepped,
-            atmosphere_data=atmos_stepped,
+            total_metrics={"loss": loss},
+            ocean=ocean_stepped,
+            atmosphere=atmos_stepped,
         )
 
         # prepend initial conditions
