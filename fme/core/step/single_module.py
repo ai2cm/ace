@@ -87,18 +87,16 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
-        if extra_diagnostic_names is None:
-            extra_diagnostic_names = []
-        if extra_prognostic_names is None:
-            extra_prognostic_names = []
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=(
-                self._normalize_names + extra_diagnostic_names + extra_prognostic_names
-            ),
-            residual_scaled_names=self.prognostic_names + extra_prognostic_names,
+            names=self._normalize_names + extra_names,
+            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -114,14 +112,19 @@ class SingleModuleStepConfig(StepConfigABC):
         return list(set(self.in_names).union(self.out_names))
 
     @property
-    def forcing_names(self) -> List[str]:
-        """Names of variables which are inputs only."""
-        return list(set(self.in_names) - set(self.out_names))
+    def input_names(self) -> List[str]:
+        """
+        Names of variables required as inputs to `step`,
+        either in `input` or `next_step_input_data`.
+        """
+        if self.ocean is None:
+            return self.in_names
+        else:
+            return list(set(self.in_names).union(self.ocean.forcing_names))
 
-    @property
-    def prognostic_names(self) -> List[str]:
-        """Names of variables which both inputs and outputs."""
-        return list(set(self.out_names).intersection(self.in_names))
+    def get_next_step_forcing_names(self) -> List[str]:
+        """Names of input-only variables which come from the output timestep."""
+        return self.next_step_forcing_names
 
     @property
     def diagnostic_names(self) -> List[str]:
@@ -251,15 +254,14 @@ class SingleModuleStep(StepABC):
         return None
 
     @property
-    def next_step_forcing_names(self) -> List[str]:
-        return self._config.next_step_forcing_names
-
-    @property
     def next_step_input_names(self) -> List[str]:
         """Names of variables provided in next_step_input_data."""
+        input_only_names = set(self._config.input_names).difference(
+            self._config.output_names
+        )
         if self.ocean is None:
-            return list(self.forcing_names)
-        return list(set(self.forcing_names).union(self.ocean.forcing_names))
+            return list(input_only_names)
+        return list(input_only_names.union(self.ocean.forcing_names))
 
     @property
     def modules(self) -> nn.ModuleList:

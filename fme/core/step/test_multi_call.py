@@ -173,34 +173,43 @@ def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool
     torch.manual_seed(0)
     a_mean, a_std = torch.randn(2)
     b_mean, b_std = torch.randn(2)
+    b_doubled_mean, b_doubled_std = torch.randn(2)
+    b_halved_mean, b_halved_std = torch.randn(2)
     c_mean, c_std = torch.randn(2)
+    d_mean, d_std = torch.randn(2)
     c_doubled_mean, c_doubled_std = torch.randn(2)
     c_halved_mean, c_halved_std = torch.randn(2)
     means = {
         "a": a_mean,
         "b": b_mean,
+        "b_doubled_co2": b_doubled_mean,
+        "b_halved_co2": b_halved_mean,
         "c": c_mean,
         "c_doubled_co2": c_doubled_mean,
         "c_halved_co2": c_halved_mean,
+        "d": d_mean,
     }
     stds = {
         "a": a_std,
         "b": b_std,
+        "b_doubled_co2": b_doubled_std,
+        "b_halved_co2": b_halved_std,
         "c": c_std,
         "c_doubled_co2": c_doubled_std,
         "c_halved_co2": c_halved_std,
+        "d": d_std,
     }
 
     def _get_loss_normalizer(
-        extra_diagnostic_names: Optional[List[str]],
-        extra_prognostic_names: Optional[List[str]],
+        extra_names: Optional[List[str]],
+        extra_residual_scaled_names: Optional[List[str]],
     ):
-        base_names = ["a", "b", "c"]
-        if extra_diagnostic_names is None:
-            extra_diagnostic_names = []
-        if extra_prognostic_names is None:
-            extra_prognostic_names = []
-        extra_names = extra_diagnostic_names + extra_prognostic_names
+        base_names = ["a", "b", "c", "d"]
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
+        extra_names = extra_names + extra_residual_scaled_names
         return StandardNormalizer(
             means={
                 **{k: means[k] for k in base_names},
@@ -219,38 +228,47 @@ def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool
         config = MultiCallStepConfig(
             wrapped_step=StepSelector(
                 type="mock",
-                config={"in_names": ["CO2", "a", "b"], "out_names": ["b", "c"]},
+                config={"in_names": ["CO2", "a", "b"], "out_names": ["b", "c", "d"]},
             ),
             config=MultiCallConfig(
                 forcing_name="CO2",
                 forcing_multipliers={"_doubled_co2": 2, "_halved_co2": 0.5},
-                output_names=["c"],
+                output_names=["b", "c"],
             ),
             # we expect multi-call in loss normalizer regardless of
             # include_multi_call_in_loss
             include_multi_call_in_loss=include_multi_call_in_loss,
         )
-        normalizer = config.get_loss_normalizer(
-            # contrived example to test both arguments are used correctly
-            extra_diagnostic_names=["c_doubled_co2"],
-            extra_prognostic_names=["c_halved_co2"],
-        )
+        normalizer = config.get_loss_normalizer()
         assert normalizer.means == {
             "a": a_mean,
             "b": b_mean,
+            "b_doubled_co2": b_doubled_mean,
+            "b_halved_co2": b_halved_mean,
             "c": c_mean,
             "c_doubled_co2": c_doubled_mean,
             "c_halved_co2": c_halved_mean,
+            "d": d_mean,
         }
         assert normalizer.stds == {
             "a": a_std,
             "b": b_std,
+            "b_doubled_co2": b_doubled_std,
+            "b_halved_co2": b_halved_std,
             "c": c_std,
             "c_doubled_co2": c_doubled_std,
             "c_halved_co2": c_halved_std,
+            "d": d_std,
         }
         assert mock_get_loss_normalizer.call_count == 1
-        assert mock_get_loss_normalizer.call_args[0] == (
-            ["c_doubled_co2"],
-            ["c_halved_co2"],
-        )
+        call_args = mock_get_loss_normalizer.call_args
+        assert set(call_args.kwargs["extra_names"]) == {
+            "b_doubled_co2",
+            "b_halved_co2",
+            "c_doubled_co2",
+            "c_halved_co2",
+        }
+        assert set(call_args.kwargs["extra_residual_scaled_names"]) == {
+            "b_doubled_co2",
+            "b_halved_co2",
+        }
