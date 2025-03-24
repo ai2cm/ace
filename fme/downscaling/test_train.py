@@ -179,7 +179,6 @@ def _update_model_type(trainer_config: Dict, module_type: str):
             "predict_residual": True,
             "sigma_max": 80.0,
             "sigma_min": 0.002,
-            "use_fine_topography": False,
         }
         trainer_config["model"].update(model_config_kwargs)
         trainer_config["generate_n_samples"] = 2
@@ -328,8 +327,8 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    batch.fine = {k: v.to(torch.float64) for (k, v) in batch.fine.items()}
-    batch.coarse = {k: v.to(torch.float32) for (k, v) in batch.coarse.items()}
+    batch.fine = {k: v for (k, v) in batch.fine.items()}
+    batch.coarse = {k: v for (k, v) in batch.coarse.items()}
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
     assert torch.any(outputs1.prediction["x"] != outputs2.prediction["x"])

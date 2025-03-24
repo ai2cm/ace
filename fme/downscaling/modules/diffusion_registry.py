@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional, Protocol, Tuple, Type
+from typing import Any, List, Mapping, Protocol, Tuple, Type
 
 import dacite
 import torch
@@ -16,7 +16,6 @@ class ModuleConfig(Protocol):
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
         sigma_data: float,
     ) -> torch.nn.Module: ...
 
@@ -31,7 +30,6 @@ class PreBuiltBuilder:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
         sigma_data: float,
     ) -> torch.nn.Module:
         return self.module
@@ -60,7 +58,6 @@ class UNetDiffusionSong:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
         sigma_data: float,
     ):
         target_height, target_width = [s * downscale_factor for s in coarse_shape]
@@ -68,11 +65,7 @@ class UNetDiffusionSong:
         n_in_channels_conditioned = n_in_channels + n_out_channels
         unet = SongUNet(
             min(target_height, target_width),
-            (
-                n_in_channels_conditioned
-                if fine_topography is None
-                else n_in_channels_conditioned + 1
-            ),
+            n_in_channels_conditioned,
             n_out_channels,
             model_channels=self.model_channels,
             channel_mult=self.channel_mult,
@@ -93,7 +86,6 @@ class UNetDiffusionSong:
                 sigma_data=sigma_data,
             ),
             downscale_factor,
-            fine_topography,
         )
 
 
@@ -108,7 +100,6 @@ class DiffusionModuleRegistrySelector:
         n_out_channels: int,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
         sigma_data: float,
     ) -> torch.nn.Module:
         return dacite.from_dict(
@@ -120,7 +111,6 @@ class DiffusionModuleRegistrySelector:
             n_out_channels=n_out_channels,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography,
             sigma_data=sigma_data,
         )
 

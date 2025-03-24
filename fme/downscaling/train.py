@@ -10,6 +10,7 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
+from fme.core.cli import prepare_directory
 from fme.core.device import get_device, move_tensordict_to_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -60,9 +61,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    trainer.model = trainer.model.from_state(
-        checkpoint["model"], trainer.area_weights, trainer.fine_topography
-    )
+    trainer.model = trainer.model.from_state(checkpoint["model"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
@@ -72,9 +71,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     ema_checkpoint = torch.load(
         trainer.ema_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    ema_model = trainer.model.from_state(
-        ema_checkpoint["model"], trainer.area_weights, trainer.fine_topography
-    )
+    ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
 
 
@@ -94,10 +91,8 @@ class Trainer:
         self.validation_data = validation_data
         self.ema = config.ema.build(self.model.modules)
         self.validate_using_ema = config.validate_using_ema
-        self.area_weights = self.train_data.area_weights
         self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
         self.dims = self.train_data.horizontal_coordinates.fine.dims
-        self.fine_topography = self.train_data.fine_topography
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
@@ -136,8 +131,6 @@ class Trainer:
         )
         train_aggregator = Aggregator(
             self.dims,
-            self.area_weights.fine.cpu(),
-            self.latitudes,
             self.model.downscale_factor,
             include_positional_comparisons=include_positional_comparisons,
         )
@@ -154,6 +147,7 @@ class Trainer:
                 train_aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
+                    area_weights=self.train_data.area_weights.fine.to(get_device()),
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
@@ -200,15 +194,11 @@ class Trainer:
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.dims,
-                self.area_weights.fine.cpu(),
-                self.latitudes,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
             generation_aggregator = Aggregator(
                 self.dims,
-                self.area_weights.fine.cpu(),
-                self.latitudes,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
@@ -221,9 +211,11 @@ class Trainer:
                 inputs = FineResCoarseResPair[TensorMapping](fine, coarse)
 
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
+                area_weights = self.validation_data.area_weights.fine.to(get_device())
                 validation_aggregator.record_batch(
                     outputs=outputs,
                     coarse=inputs.coarse,
+                    area_weights=area_weights,
                 )
                 generated_outputs = self.model.generate_on_batch(
                     inputs, n_samples=self.config.generate_n_samples
@@ -231,6 +223,7 @@ class Trainer:
                 generation_aggregator.record_batch(
                     outputs=generated_outputs,
                     coarse=inputs.coarse,
+                    area_weights=area_weights,
                 )
 
         wandb = WandB.get_instance()
@@ -336,8 +329,6 @@ class TrainerConfig:
         downscaling_model = self.model.build(
             train_data.img_shape.coarse,
             train_data.downscale_factor,
-            train_data.area_weights,
-            train_data.fine_topography,
         )
 
         optimization = self.optimization.build(
@@ -380,6 +371,7 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
+    prepare_directory(train_config.experiment_dir, config)
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()

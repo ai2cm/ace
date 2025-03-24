@@ -163,7 +163,7 @@ def test_regional__raw_index():
         regional_mean=gridded_operations.regional_area_weighted_mean,
     )
     first_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(first_data, first_times)
+    agg.record_batch(first_times, first_data)
     i_start += n_times // 2
     second_data = _get_windowed_data(
         n_samples,
@@ -173,7 +173,7 @@ def test_regional__raw_index():
         i_start,
     )
     second_times = _get_windowed_times(start_date, n_samples, n_times // 2, i_start)
-    agg.record_batch(second_data, second_times)
+    agg.record_batch(second_times, second_data)
 
     expected_values = torch.arange(16.0, 16.0 + n_times, 1.0).to(device=get_device())
     raw_indices: torch.Tensor = agg._raw_indices
@@ -329,7 +329,7 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
         regional_weights=region.regional_weights,
         regional_mean=lat_lon_coordinates.gridded_operations.regional_area_weighted_mean,
     )
-    agg.record_batch(sample_data, sample_times)
+    agg.record_batch(sample_times, sample_data)
     if use_mock_distributed:
         world_size = 2
         with mock_distributed(world_size=world_size):

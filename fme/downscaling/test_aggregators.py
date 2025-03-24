@@ -45,9 +45,7 @@ def test_mean_values(metric, input_, expected_outputs, n_batches):
     for _ in range(n_batches):
         aggregator.record_batch(input_)
     result = aggregator.get()
-    assert_tensor_mapping_all_close(
-        result, {k: v.to(torch.float64) for k, v in expected_outputs.items()}
-    )
+    assert_tensor_mapping_all_close(result, {k: v for k, v in expected_outputs.items()})
 
 
 @pytest.mark.parametrize(
@@ -70,14 +68,33 @@ def test_mean_comparison_values(
         aggregator.record_batch(target, prediction)
     result = aggregator.get()
     assert_tensor_mapping_all_close(
-        result, {k: v.to(torch.float64) for (k, v) in expected_outputs.items()}
+        result, {k: v for (k, v) in expected_outputs.items()}
     )
 
 
-def _compute_zonal_spectrum_for_testing(x):
-    """Hard codes latitudes."""
-    lats = torch.linspace(-89.5, 89.5, x.shape[-2])
-    return metrics_and_maths.compute_zonal_power_spectrum(x, lats)
+def test_mean_comparison_dynamic_metric():
+    def add(x, y):
+        return (x + y).sum()
+
+    def multiply(x, y):
+        return (x * y).sum()
+
+    target = {"x": torch.tensor([1.0, 1.0])}
+    prediction = {"x": torch.tensor([2.0, 2.0])}
+    aggregator = MeanComparison(add)
+    aggregator.record_batch(target, prediction)
+    result = aggregator.get()
+    assert result["x"] == 6.0
+
+    # overrides default metric
+    aggregator.record_batch(target, prediction, dynamic_metric=multiply)
+    result = aggregator.get()
+    assert result["x"] == 5.0
+
+    # Test that no function fails
+    aggregator = MeanComparison()
+    with pytest.raises(ValueError):
+        aggregator.record_batch(target, prediction)
 
 
 @pytest.mark.parametrize(
@@ -85,7 +102,7 @@ def _compute_zonal_spectrum_for_testing(x):
     [
         (torch.mean, (1,), ()),
         (torch.mean, (1, 2, 3), ()),
-        (_compute_zonal_spectrum_for_testing, (2, 1, 16, 32), (2, 1, 17)),
+        (metrics_and_maths.compute_zonal_power_spectrum, (2, 1, 16, 32), (2, 1, 17)),
     ],
 )
 def test_mean_shapes(metric, input_shape, output_shape):
@@ -159,8 +176,6 @@ def test_performance_metrics(
     downscale_factor = 2
     n_lat, n_lon = 16, 32
     shape = (2, n_lat, n_lon)
-    area_weights = torch.ones(n_lon)
-    latitudes = torch.linspace(-89.5, 89.5, n_lat)
     n_bins = 300
     target = {"x": torch.zeros(*shape)}
     prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
@@ -177,12 +192,11 @@ def test_performance_metrics(
     with mock_wandb():
         aggregator = Aggregator(
             ["lat", "lon"],
-            area_weights,
-            latitudes,
             downscale_factor,
             n_histogram_bins=n_bins,
             percentiles=percentiles,
         )
+        area_weights = torch.randn(n_lat, n_lon)
         aggregator.record_batch(
             outputs=ModelOutputs(
                 prediction=prediction,
@@ -191,6 +205,7 @@ def test_performance_metrics(
                 loss=torch.tensor(0.0),
             ),
             coarse=coarse,
+            area_weights=area_weights,
         )
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 

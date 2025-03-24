@@ -1,9 +1,16 @@
 import dataclasses
 from typing import Callable, Dict, List
 
+from torch import nn
+
 from fme.core.typing_ import TensorDict, TensorMapping
 
 TEMPLATE = "{name}{suffix}"
+
+
+StepMethod = Callable[
+    [TensorMapping, TensorMapping, Callable[[nn.Module], nn.Module]], TensorDict
+]
 
 
 @dataclasses.dataclass
@@ -78,10 +85,7 @@ class MultiCallConfig:
         """
         return self._names
 
-    def build(
-        self,
-        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
-    ):
+    def build(self, step_method: StepMethod) -> "MultiCall":
         return MultiCall(self, step_method)
 
 
@@ -98,7 +102,7 @@ class MultiCall:
     def __init__(
         self,
         config: MultiCallConfig,
-        step_method: Callable[[TensorMapping, TensorMapping, bool], TensorDict],
+        step_method: StepMethod,
     ):
         self.forcing_name = config.forcing_name
         self.forcing_multipliers = config.forcing_multipliers
@@ -114,7 +118,7 @@ class MultiCall:
         self,
         input: TensorMapping,
         next_step_forcing_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         predictions = {}
         unscaled_forcing = input[self.forcing_name]
@@ -122,9 +126,7 @@ class MultiCall:
             scaled_input = dict(input) | {
                 self.forcing_name: multiplier * unscaled_forcing
             }
-            output = self._step(
-                scaled_input, next_step_forcing_data, use_activation_checkpointing
-            )
+            output = self._step(scaled_input, next_step_forcing_data, wrapper)
 
             for name in self.output_names:
                 new_name = TEMPLATE.format(name=name, suffix=suffix)

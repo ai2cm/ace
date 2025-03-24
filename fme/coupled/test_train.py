@@ -86,6 +86,8 @@ stepper:
     land_fraction_name: {land_frac_name}
   ocean:
     timedelta: 2D
+    loss_contributions:
+      weight: {loss_ocean_weight}
     stepper:
       builder:
         type: Samudra
@@ -112,6 +114,8 @@ stepper:
       out_names: {ocean_out_names}
   atmosphere:
     timedelta: 1D
+    loss_contributions:
+      n_steps: {loss_atmos_n_steps}
     stepper:
       builder:
         type: SphericalFourierNeuralOperatorNet
@@ -192,6 +196,8 @@ def _write_test_yaml_files(
     inference_n_coupled_steps: int = 6,
     coupled_steps_in_memory: int = 2,
     save_per_epoch_diagnostics: bool = True,
+    loss_atmos_n_steps: int = 1000,  # large number ~= inf
+    loss_ocean_weight: float = 1.0,
 ):
     exper_dir = tmp_path / "results"
     ocean_next_step_forcing_names = list(
@@ -219,6 +225,8 @@ def _write_test_yaml_files(
         ocean_frac_name=ocean_frac_name,
         log_zonal_mean_images=str(log_zonal_mean_images).lower(),
         save_per_epoch_diagnostics=str(save_per_epoch_diagnostics).lower(),
+        loss_atmos_n_steps=loss_atmos_n_steps,
+        loss_ocean_weight=loss_ocean_weight,
     )
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
         f_train.write(train_config)
@@ -346,18 +354,19 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         atmos_sfc_temp_name="surface_temperature",
         ocean_frac_name="ocean_fraction",
         log_zonal_mean_images=log_zonal_mean_images,
-        n_coupled_steps=1,
+        n_coupled_steps=2,
         max_epochs=1,
         inline_inference_n_coupled_steps=3,
         inference_n_coupled_steps=6,
         coupled_steps_in_memory=2,
+        loss_atmos_n_steps=3,
     )
 
     with mock_wandb() as wandb:
         train_main(yaml_config=train_config_fname)
         train_logs = wandb.get_logs()
 
-    assert len(train_logs) == 5  # initialization + 4 batches
+    assert len(train_logs) == 4  # initialization + 3 batches
 
     for log in train_logs:
         # ensure inference time series is not logged
@@ -366,6 +375,16 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     batch_logs = train_logs[0]
     assert "batch_loss" in batch_logs
     assert "batch_loss/ocean" in batch_logs
+    assert "batch_loss/atmosphere" in batch_logs
+    # NOTE: step numbers start at 0
+    for i in range(2):
+        assert f"batch_loss/ocean_step_{i}" in batch_logs
+    # only 2 ocean steps configured
+    assert f"batch_loss/ocean_step_2" not in batch_logs
+    for i in range(3):
+        assert f"batch_loss/atmosphere_step_{i}" in batch_logs
+    # atmos loss contributions config with n_steps = 3
+    assert f"batch_loss/atmosphere_step_3" not in batch_logs
 
     epoch_logs = train_logs[-1]
     assert "train/mean/loss" in epoch_logs

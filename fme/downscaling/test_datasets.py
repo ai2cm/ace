@@ -185,7 +185,7 @@ def test_dataloader_build(tmp_path):
 
     loader = config.build(
         True,
-        DataRequirements(fine_names, coarse_names, 1, use_fine_topography=False),
+        DataRequirements(fine_names, coarse_names, 1),
         None,
     )
     assert len(loader.loader) == num_timesteps // batch_size

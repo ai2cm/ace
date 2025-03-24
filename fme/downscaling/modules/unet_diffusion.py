@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 
 from fme.core.device import get_device
@@ -20,22 +18,16 @@ class UNetDiffusionModule(torch.nn.Module):
         target_shape: The input and output shape of the u-net.
         downscale_factor: The factor by which the coarse input is downscaled to
             the target output.
-        fine_topography: Optional fine topography to condition the latent
-            variables on.
     """
 
     def __init__(
         self,
         unet: torch.nn.Module,
         downscale_factor: int,
-        fine_topography: Optional[torch.Tensor],
     ):
         super(UNetDiffusionModule, self).__init__()
         self.unet = unet.to(get_device())
         self.downscale_factor = downscale_factor
-        if fine_topography is not None:
-            fine_topography = fine_topography.to(get_device())
-        self.fine_topography = fine_topography
 
     def forward(
         self,
@@ -58,20 +50,9 @@ class UNetDiffusionModule(torch.nn.Module):
             align_corners=True,
         )
 
-        if self.fine_topography is not None:
-            batch_size = interpolated.shape[0]
-            topography = (
-                self.fine_topography.unsqueeze(0)
-                .expand(batch_size, -1, -1, -1)
-                .to(get_device())
-            )
-            inputs = torch.concat((interpolated, topography), dim=1)
-        else:
-            inputs = interpolated
-
         return self.unet(
             latent.to(get_device()),
-            inputs,
+            interpolated,
             sigma=noise_level.to(get_device()),
             class_labels=None,
         )

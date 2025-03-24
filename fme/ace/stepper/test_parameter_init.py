@@ -9,8 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import SingleModuleStepper, SingleModuleStepperConfig
-from fme.core import parameter_init
+from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -258,8 +257,8 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
     (tmpdir / "weights.ckpt").remove()
-    stepper = SingleModuleStepper.from_state(stepper_state)
-    assert isinstance(stepper, SingleModuleStepper)
+    stepper = Stepper.from_state(stepper_state)
+    assert isinstance(stepper, Stepper)
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -349,26 +348,25 @@ def test_parameter_init_with_regularizer(tmpdir):
     the distance between the weights and the original state for
     weights initialized from that state.
     """
+    torch.manual_seed(0)
     device = get_device()
     saved_module = ComplexModule(10, 20).to(device)
     weights_path = str(tmpdir / "weights.ckpt")
-    torch.save(
-        {
-            "stepper": {
-                "module": saved_module.state_dict(),
-            },
-        },
-        weights_path,
-    )
     config = parameter_init.ParameterInitializationConfig(
         weights_path=weights_path,
-        exclude_parameters=["linear1.linear.weight"],
+        parameters=[
+            parameter_init.ParameterClassification(
+                exclude=["linear1.linear.weight"],
+            ),
+        ],
         alpha=1.0,
         beta=1.0,
     )
     # new_module = module
     module = ComplexModule(10, 20).to(device)
-    module, regularizer = config.apply(module, init_weights=True)
+    regularizer = config.apply(
+        [module], init_weights=True, load_weights=lambda _: [saved_module.state_dict()]
+    )
 
     original_state = copy.deepcopy(module.state_dict())
     # overwrite new_module weights with random values
@@ -383,7 +381,9 @@ def test_parameter_init_with_regularizer(tmpdir):
     optimizer.step()
 
     for name, param in module.named_parameters():
-        if any(wildcard_match(pattern, name) for pattern in config.exclude_parameters):
+        if any(
+            wildcard_match(pattern, name) for pattern in config.parameters[0].exclude
+        ):
             # L2 regularization against 0
             assert torch.all(param.data**2 < pre_step_state[name] ** 2)
         else:

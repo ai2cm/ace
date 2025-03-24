@@ -27,6 +27,13 @@ class OceanCorrectorConfig:
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: Optional[SeaIceFractionConfig] = None
 
+    def __post_init__(self):
+        if self.masking is not None and self.masking.mask_value != 0:
+            raise ValueError(
+                "mask_value must be 0 for OceanCorrector, but got "
+                f"{self.masking.mask_value}"
+            )
+
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "OceanCorrectorConfig":
         return dacite.from_dict(
@@ -87,9 +94,10 @@ class OceanCorrector(CorrectorABC):
         gen_data: TensorMapping,
         forcing_data: TensorMapping,
     ) -> TensorDict:
-        if self._masking is not None:
-            gen_data = self._masking(gen_data)
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
         gen_data = self._correct_sea_ice_fraction(gen_data, input_data)
-        return gen_data
+        if self._masking is not None:
+            # NOTE: masking should be applied last to avoid overwriting
+            gen_data = self._masking(gen_data)
+        return dict(gen_data)

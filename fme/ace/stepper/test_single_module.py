@@ -24,11 +24,12 @@ from fme.ace.inference.test_evaluator import (
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
-    SingleModuleStepper,
     SingleModuleStepperConfig,
+    Stepper,
     StepperOverrideConfig,
     TrainOutput,
     _combine_normalizers,
+    get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
     repeat_interleave_batch_dim,
@@ -40,6 +41,7 @@ from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    VerticalCoordinate,
 )
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
@@ -49,7 +51,7 @@ from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import (
-    ActivationCheckpointingConfig,
+    CheckpointConfig,
     NullOptimization,
     Optimization,
     OptimizationConfig,
@@ -398,7 +400,7 @@ def test_reloaded_stepper_gives_same_prediction():
         timestep=TIMESTEP,
     )
     area = torch.ones((5, 5), device=DEVICE)
-    new_stepper = SingleModuleStepper.from_state(stepper.get_state())
+    new_stepper = Stepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.train_on_batch(
         data=data,
@@ -515,24 +517,23 @@ def test_train_on_batch(
     data, _, _ = get_data(all_names, 3, n_forward_steps + 1)
 
     if is_train:
-        optimization = OptimizationConfig()
+        if with_activation_checkpointing:
+            optimization = OptimizationConfig(
+                checkpoint=CheckpointConfig(after_n_forward_steps=n_forward_steps - 1)
+            )
+        else:
+            optimization = OptimizationConfig()
     else:
         optimization = None
-
-    stepper_config_kwargs = {}
-    if with_activation_checkpointing:
-        stepper_config_kwargs["activation_checkpointing"] = (
-            ActivationCheckpointingConfig(after_n_forward_steps=n_forward_steps - 1)
-        )
 
     with patch("torch.utils.checkpoint.checkpoint") as mock_checkpoint:
         # have the mock call the module and return the step
         mock_checkpoint.side_effect = lambda f, x, **_: f(x)
         _setup_and_train_on_batch(
-            data, in_names, out_names, ocean_config, optimization, stepper_config_kwargs
+            data, in_names, out_names, ocean_config, optimization, {}
         )
 
-        if with_activation_checkpointing:
+        if is_train and with_activation_checkpointing:
             # should be called exactly once, for the final forward step
             mock_checkpoint.assert_called_once()
         else:
@@ -753,6 +754,7 @@ def _get_stepper(
     out_names: List[str],
     ocean_config: Optional[OceanConfig] = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
+    norm_mean: float = 0.0,
     **kwargs,
 ):
     if module_name == "AddOne":
@@ -792,7 +794,7 @@ def _get_stepper(
         in_names=in_names,
         out_names=out_names,
         normalization=NormalizationConfig(
-            means={n: np.array([0.0], dtype=np.float32) for n in all_names},
+            means={n: np.array([norm_mean], dtype=np.float32) for n in all_names},
             stds={n: np.array([1.0], dtype=np.float32) for n in all_names},
         ),
         ocean=ocean_config,
@@ -821,11 +823,22 @@ def test_step_with_diagnostic():
     torch.testing.assert_close(output["c"], input_data["a"])
 
 
-def test_step_with_forcing_and_diagnostic():
-    stepper = _get_stepper(["a", "b"], ["a", "c"])
+@pytest.mark.parametrize("residual_prediction", [False, True])
+def test_step_with_forcing_and_diagnostic(residual_prediction):
+    norm_mean = 2.0
+    stepper = _get_stepper(
+        ["a", "b"],
+        ["a", "c"],
+        norm_mean=norm_mean,
+        residual_prediction=residual_prediction,
+    )
     input_data = {x: torch.rand(3, 5, 5).to(DEVICE) for x in ["a", "b"]}
     output = stepper.step(input_data, {})
-    torch.testing.assert_close(output["a"], input_data["a"] + 1)
+    if residual_prediction:
+        expected_a_output = 2 * input_data["a"] + 1 - norm_mean
+    else:
+        expected_a_output = input_data["a"] + 1
+    torch.testing.assert_close(output["a"], expected_a_output)
     assert "b" not in output
     assert "c" in output
 
@@ -1072,7 +1085,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    stepper_from_state = SingleModuleStepper.from_state(orig_stepper.get_state())
+    stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
         assert stepper.loss_obj.normalizer.means == {
@@ -1319,3 +1332,10 @@ def test_set_train_eval():
     stepper.set_train()
     for module in stepper.modules:
         assert module.training
+
+
+def test_get_serialized_stepper_vertical_coordinate():
+    stepper = _get_stepper(["a"], ["a"])
+    state = stepper.get_state()
+    vertical_coordinate = get_serialized_stepper_vertical_coordinate(state)
+    assert isinstance(vertical_coordinate, VerticalCoordinate)

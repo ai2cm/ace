@@ -1,5 +1,7 @@
 import dataclasses
 import datetime
+import unittest
+import unittest.mock
 from typing import List, Tuple
 
 import dacite
@@ -11,10 +13,11 @@ from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.serializable import SerializableStep
+from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.typing_ import TensorDict
 
@@ -42,29 +45,31 @@ SEPARATE_RADIATION_CONFIG = SeparateRadiationStepConfig(
     radiation_only_forcing_names=["forcing_rad"],
     radiation_diagnostic_names=["diagnostic_rad"],
     main_diagnostic_names=["diagnostic_main"],
-    normalization=NormalizationConfig(
-        means={
-            name: 0.0
-            for name in [
-                "prog_a",
-                "prog_b",
-                "forcing_shared",
-                "forcing_rad",
-                "diagnostic_rad",
-                "diagnostic_main",
-            ]
-        },
-        stds={
-            name: 1.0
-            for name in [
-                "prog_a",
-                "prog_b",
-                "forcing_shared",
-                "forcing_rad",
-                "diagnostic_rad",
-                "diagnostic_main",
-            ]
-        },
+    normalization=NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={
+                name: 0.0
+                for name in [
+                    "prog_a",
+                    "prog_b",
+                    "forcing_shared",
+                    "forcing_rad",
+                    "diagnostic_rad",
+                    "diagnostic_main",
+                ]
+            },
+            stds={
+                name: 1.0
+                for name in [
+                    "prog_a",
+                    "prog_b",
+                    "forcing_shared",
+                    "forcing_rad",
+                    "diagnostic_rad",
+                    "diagnostic_main",
+                ]
+            },
+        ),
     ),
 )
 
@@ -75,6 +80,42 @@ SELECTOR_CONFIG_CASES = [
             config=dataclasses.asdict(SEPARATE_RADIATION_CONFIG),
         ),
         id="separate_radiation",
+    ),
+    pytest.param(
+        StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={
+                            "scale_factor": 1,
+                            "embed_dim": 4,
+                            "num_layers": 2,
+                        },
+                    ),
+                    in_names=["forcing_shared", "forcing_rad"],
+                    out_names=["diagnostic_main", "diagnostic_rad"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={
+                                "forcing_shared": 0.0,
+                                "forcing_rad": 0.0,
+                                "diagnostic_main": 0.0,
+                                "diagnostic_rad": 0.0,
+                            },
+                            stds={
+                                "forcing_shared": 1.0,
+                                "forcing_rad": 1.0,
+                                "diagnostic_main": 1.0,
+                                "diagnostic_rad": 1.0,
+                            },
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        id="single_module",
     ),
     pytest.param(
         StepSelector(
@@ -203,3 +244,25 @@ def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
         dacite.from_dict(config.__class__, data, config=dacite.Config(strict=True))
     assert "next_step_forcing_name" in str(err.value)
     assert name in str(err.value)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_applies_wrapper(config: StepSelector):
+    torch.manual_seed(0)
+    img_shape = (5, 5)
+    n_samples = 5
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    multi_calls = 1
+    if isinstance(config._step_config_instance, MultiCallStepConfig):
+        if config._step_config_instance.config is not None:
+            multi_calls += len(config._step_config_instance.config.forcing_multipliers)
+
+    wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
+    step.step(input_data, next_step_input_data, wrapper=wrapper)
+    assert wrapper.call_count == multi_calls * len(step.modules)
+    for module in step.modules:
+        wrapper.assert_any_call(module)

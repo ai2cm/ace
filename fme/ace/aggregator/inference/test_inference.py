@@ -26,7 +26,7 @@ def test_logs_labels_exist():
     agg = InferenceAggregator(
         LatLonCoordinates(lat, lon).to(device=get_device()),
         n_time,
-        datetime.timedelta(seconds=1),
+        datetime.timedelta(days=365),
         save_diagnostics=False,
     )
     target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}

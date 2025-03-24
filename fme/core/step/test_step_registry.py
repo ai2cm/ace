@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Optional
+from typing import List, Optional
 
 import torch
 
@@ -15,41 +15,15 @@ from .step import InferenceDataProtocol, StepABC, StepConfigABC, StepSelector
 class MockStep(StepABC):
     def __init__(
         self,
+        config: "MockStepConfig",
         dataset_info: DatasetInfo,
     ):
         self.dataset_info = dataset_info
+        self._config = config
 
     @property
-    def prognostic_names(self):
-        raise NotImplementedError()
-
-    @property
-    def diagnostic_names(self):
-        raise NotImplementedError()
-
-    @property
-    def forcing_names(self):
-        raise NotImplementedError()
-
-    @property
-    def output_names(self):
-        raise NotImplementedError()
-
-    @property
-    def loss_names(self):
-        raise NotImplementedError()
-
-    @property
-    def next_step_input_names(self):
-        raise NotImplementedError()
-
-    @property
-    def next_step_forcing_names(self):
-        raise NotImplementedError()
-
-    @property
-    def n_ic_timesteps(self):
-        raise NotImplementedError()
+    def config(self) -> "MockStepConfig":
+        return self._config
 
     @property
     def modules(self):
@@ -67,11 +41,12 @@ class MockStep(StepABC):
     def ocean_fraction_name(self):
         return None
 
+    @property
+    def next_step_input_names(self):
+        raise NotImplementedError()
+
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
-
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        raise NotImplementedError()
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         raise NotImplementedError()
@@ -89,8 +64,50 @@ class MockStep(StepABC):
 @StepSelector.register("mock")
 @dataclasses.dataclass
 class MockStepConfig(StepConfigABC):
+    in_names: List[str] = dataclasses.field(default_factory=list)
+    out_names: List[str] = dataclasses.field(default_factory=list)
+
     def get_step(self, dataset_info: DatasetInfo):
-        return MockStep(dataset_info)
+        return MockStep(self, dataset_info)
+
+    @property
+    def diagnostic_names(self) -> List[str]:
+        return list(set(self.out_names).difference(self.in_names))
+
+    def get_next_step_forcing_names(self) -> List[str]:
+        return []
+
+    @property
+    def input_names(self) -> List[str]:
+        return self.in_names
+
+    @property
+    def output_names(self) -> List[str]:
+        return self.out_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self.out_names
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        raise NotImplementedError()
+
+    def get_base_weights(self):
+        raise NotImplementedError()
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        raise NotImplementedError()
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return None
+
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ):
+        raise NotImplementedError()
 
 
 def test_register():

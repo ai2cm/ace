@@ -1,10 +1,13 @@
 import dataclasses
+import pathlib
+from copy import copy
 from typing import Dict, Iterable, List, Mapping, Optional, Union
 
-import netCDF4
+import fsspec
 import numpy as np
 import torch
 import torch.jit
+import xarray as xr
 
 from fme.core.device import move_tensordict_to_device
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -31,8 +34,8 @@ class NormalizationConfig:
             the denormalized output.
     """
 
-    global_means_path: Optional[str] = None
-    global_stds_path: Optional[str] = None
+    global_means_path: Optional[Union[str, pathlib.Path]] = None
+    global_stds_path: Optional[Union[str, pathlib.Path]] = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
@@ -53,6 +56,30 @@ class NormalizationConfig:
                 "Must use either global_means_path and global_stds_path "
                 "or explicit means and stds."
             )
+
+    def load(self):
+        """
+        Load the normalization configuration from the netCDF files.
+
+        Updates the configuration so it no longer requires external files.
+        """
+        if self.global_means_path is not None and self.global_stds_path is not None:
+            # convert to explicit means and stds so if the object is stored
+            # and reloaded, we no longer need the netCDF files
+            means = load_dict_from_netcdf(
+                self.global_means_path,
+                names=None,
+                defaults={"x": 0.0, "y": 0.0, "z": 0.0},
+            )
+            stds = load_dict_from_netcdf(
+                self.global_stds_path,
+                names=None,
+                defaults={"x": 1.0, "y": 1.0, "z": 1.0},
+            )
+            self.means = means
+            self.stds = stds
+            self.global_means_path = None
+            self.global_stds_path = None
 
     def build(self, names: List[str]):
         using_path = (
@@ -148,6 +175,14 @@ class StandardNormalizer:
             fill_nans_on_denormalize=state.get("fill_nans_on_denormalize", False),
         )
 
+    def get_normalization_config(self) -> NormalizationConfig:
+        return NormalizationConfig(
+            means={k: float(v.cpu().numpy().item()) for k, v in self.means.items()},
+            stds={k: float(v.cpu().numpy().item()) for k, v in self.stds.items()},
+            fill_nans_on_normalize=self.fill_nans_on_normalize,
+            fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+        )
+
 
 @torch.jit.script
 def _normalize(
@@ -194,26 +229,102 @@ def get_normalizer(
 
 
 def load_dict_from_netcdf(
-    path: str, names: Iterable[str], defaults: Mapping[str, Union[float, np.ndarray]]
-) -> Dict[str, Union[float, np.ndarray]]:
+    path: Union[str, pathlib.Path],
+    names: Optional[Iterable[str]],
+    defaults: Mapping[str, Union[float, np.ndarray]],
+) -> Dict[str, float]:
     """
-    Load a dictionary of variables from a netCDF file.
+    Load a dictionary of scalar variables from a netCDF file.
 
     Args:
         path: Path to the netCDF file.
-        names: List of variable names to load.
+        names: List of variable names to load. If None, all variables in the netCDF
+            file are loaded.
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
     """
-    ds = netCDF4.Dataset(path)
-    ds.set_auto_mask(False)
+    with fsspec.open(path, "rb") as f:
+        ds = xr.load_dataset(f, mask_and_scale=False)
+
     result = {}
+    if names is None:
+        names = set(ds.variables.keys()).union(defaults.keys())
+        skip_non_scalar = True
+    else:
+        skip_non_scalar = False
     for c in names:
         if c in ds.variables:
-            result[c] = ds.variables[c][:]
+            if skip_non_scalar and ds.variables[c].ndim > 0:
+                continue
+            result[c] = float(ds.variables[c].values.item())
         elif c in defaults:
-            result[c] = defaults[c]
+            result[c] = float(defaults[c])
         else:
             raise ValueError(f"Variable {c} not found in {path}")
     ds.close()
     return result
+
+
+def _combine_normalizers(
+    base_normalizer: StandardNormalizer,
+    override_normalizer: StandardNormalizer,
+) -> StandardNormalizer:
+    """
+    Combine two normalizers by overwriting the base normalizer values that are
+    present in the override normalizer.
+
+    NaN-filling behavior is inherited from the base normalizer.
+    """
+    means, stds = copy(base_normalizer.means), copy(base_normalizer.stds)
+    means.update(override_normalizer.means)
+    stds.update(override_normalizer.stds)
+    return StandardNormalizer(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=base_normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=base_normalizer.fill_nans_on_denormalize,
+    )
+
+
+@dataclasses.dataclass
+class NetworkAndLossNormalizationConfig:
+    """
+    Combined configuration for network and loss normalization.
+
+    Allows loss normalization to be defined as equal to the network
+    normalization, apart from a set of residual-scaled variables.
+
+    Parameters:
+        network: The normalization configuration for the network.
+        loss: The normalization configuration for the loss. Default is to
+            use the network configuration, except for residual-scaled variables
+            which instead use the residual configuration if given.
+        residual: The normalization configuration for residuals. Cannot be
+            provided if loss normalization is also provided.
+    """
+
+    network: NormalizationConfig
+    loss: Optional[NormalizationConfig] = None
+    residual: Optional[NormalizationConfig] = None
+
+    def __post_init__(self):
+        if self.loss is not None and self.residual is not None:
+            raise ValueError("Cannot provide both loss and residual normalization.")
+
+    def get_network_normalizer(self, names: List[str]) -> StandardNormalizer:
+        return self.network.build(names=names)
+
+    def get_loss_normalizer(
+        self,
+        names: List[str],
+        residual_scaled_names: List[str],
+    ) -> StandardNormalizer:
+        if self.loss is not None:
+            return self.loss.build(names=names)
+        elif self.residual is not None:
+            return _combine_normalizers(
+                base_normalizer=self.network.build(names=names),
+                override_normalizer=self.residual.build(names=residual_scaled_names),
+            )
+        else:
+            return self.network.build(names=names)

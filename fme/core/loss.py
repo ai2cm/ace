@@ -261,8 +261,8 @@ class LossConfig:
 
     def build(
         self,
-        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         reduction: Literal["mean", "none"],
+        area_weighted_mean: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ) -> Any:
         """
         Args:
@@ -279,11 +279,20 @@ class LossConfig:
         elif self.type == "MSE":
             main_loss = torch.nn.MSELoss(reduction=reduction)
         elif self.type == "AreaWeightedMSE":
+            if area_weighted_mean is None:
+                raise ValueError(
+                    "area_weighted_mean must be provided for building AreaWeightedMSE"
+                    " loss type"
+                )
             main_loss = AreaWeightedMSELoss(area_weighted_mean)
         elif self.type == "NaN":
             main_loss = NaNLoss()
 
         if self.global_mean_type is not None:
+            if area_weighted_mean is None:
+                raise ValueError(
+                    "area_weighted_mean must be provided for building global mean loss"
+                )
             global_mean_loss = GlobalMeanLoss(
                 area_weighted_mean=area_weighted_mean,
                 loss=LpLoss(**self.global_mean_kwargs),
@@ -345,7 +354,9 @@ class WeightedMappingLossConfig:
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ) -> WeightedMappingLoss:
-        loss = self.loss_config.build(area_weighted_mean, reduction="mean")
+        loss = self.loss_config.build(
+            reduction="mean", area_weighted_mean=area_weighted_mean
+        )
         return WeightedMappingLoss(
             loss=loss,
             weights=self.weights,

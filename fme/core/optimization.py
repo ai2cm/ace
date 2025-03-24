@@ -1,7 +1,7 @@
 import contextlib
 import dataclasses
 import itertools
-from typing import Any, Iterable, Literal, Mapping, Optional
+from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
 
 import numpy as np
 import torch
@@ -11,6 +11,63 @@ from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.scheduler import SchedulerConfig
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+class Checkpoint:
+    def __init__(self, kwargs: Mapping[str, Any]):
+        self._kwargs = kwargs
+
+    def __call__(self, module: nn.Module):
+        def wrapped(*args):
+            return torch.utils.checkpoint.checkpoint(
+                module,
+                *args,
+                use_reentrant=False,
+                **self._kwargs,
+            )
+
+        return wrapped
+
+
+class NoCheckpoint:
+    def __call__(self, module: nn.Module):
+        return module
+
+
+@dataclasses.dataclass
+class CheckpointConfig:
+    """
+    Configuration for activation checkpointing.
+
+    Trades increased computation in exchange for lowered memory consumption during
+    training by recomputing activations in the backward pass.
+
+    Parameters:
+        after_n_forward_steps: Number of forward steps to generate before activation
+            checkpointing is applied. Activation checkpointing is not used unless this
+            number is less than the number of forward steps in the optimization.
+        kwargs: Keyword arguments to pass to torch.utils.checkpoint.checkpoint.
+            Note that use_reentrant=False is always explicitly passed
+            as is recommended by the docs.
+    """
+
+    after_n_forward_steps: float = np.inf
+    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+    def build(self, step: int) -> Union[Checkpoint, NoCheckpoint]:
+        """
+        Builds a checkpoint function.
+
+        Args:
+            step: The current zero-indexed step number.
+
+        Returns:
+            A checkpoint function.
+        """
+        if step >= self.after_n_forward_steps:
+            return Checkpoint(self.kwargs)
+        else:
+            return NoCheckpoint()
 
 
 class Optimization(OptimizationABC):
@@ -24,6 +81,9 @@ class Optimization(OptimizationABC):
         enable_automatic_mixed_precision: bool,
         kwargs: Mapping[str, Any],
         use_gradient_accumulation: bool = False,
+        get_checkpoint: Callable[
+            [int], Union[Checkpoint, NoCheckpoint]
+        ] = lambda _: NoCheckpoint(),
     ):
         if optimizer_type == "FusedAdam":
             self.optimizer = torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
@@ -39,6 +99,10 @@ class Optimization(OptimizationABC):
         self.scheduler = scheduler.build(self.optimizer, max_epochs)
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
         self._use_gradient_accumulation = use_gradient_accumulation
+        self._get_checkpoint = get_checkpoint
+
+    def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
+        return self._get_checkpoint(step)(module)
 
     @contextlib.contextmanager
     def autocast(self):
@@ -156,7 +220,7 @@ class OptimizationConfig:
             from separate losses to reduce memory consumption. The stepper may choose
             to accumulate gradients differently when this is enabled, such as by
             detaching the computational graph between steps. See the documentation of
-            your stepper (e.g. SingleModuleStepper) for more details.
+            your stepper (e.g. Stepper) for more details.
     """
 
     optimizer_type: Literal["Adam", "FusedAdam"] = "Adam"
@@ -167,6 +231,9 @@ class OptimizationConfig:
         default_factory=lambda: SchedulerConfig()
     )
     use_gradient_accumulation: bool = False
+    checkpoint: CheckpointConfig = dataclasses.field(
+        default_factory=lambda: CheckpointConfig()
+    )
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         parameters = itertools.chain(*[module.parameters() for module in modules])
@@ -179,6 +246,7 @@ class OptimizationConfig:
             enable_automatic_mixed_precision=self.enable_automatic_mixed_precision,
             kwargs=self.kwargs,
             use_gradient_accumulation=self.use_gradient_accumulation,
+            get_checkpoint=self.checkpoint.build,
         )
 
     def get_state(self) -> Mapping[str, Any]:
@@ -200,6 +268,9 @@ class NullOptimization(OptimizationABC):
     @property
     def learning_rate(self) -> float:
         return float("nan")
+
+    def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
+        return module
 
     def step_scheduler(self, valid_loss: float):
         return
@@ -229,20 +300,3 @@ class NullOptimization(OptimizationABC):
         """
         for m in modules:
             m.eval()
-
-
-@dataclasses.dataclass
-class ActivationCheckpointingConfig:
-    """
-    Trade increased computation in exchange for lowered memory consumption during
-    training by recomputing activations in the backward pass.
-
-    after_n_forward_steps: Number of forward steps to generate before activation
-        checkpointing is applied. Activation checkpointing is not used unless this
-        number is less than the number of forward steps in the optimization.
-    kwargs: Keyword arguments to pass to torch.utils.checkpoint.checkpoint. Note that
-        use_reentrant=False is always explicitly passed as recommended by the docs.
-    """
-
-    after_n_forward_steps: float = np.inf
-    kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)

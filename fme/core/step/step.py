@@ -13,9 +13,11 @@ from typing import (
     Type,
     TypeVar,
     cast,
+    final,
 )
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
@@ -38,12 +40,72 @@ class StepConfigABC(abc.ABC):
             The state of the stepper.
         """
 
+    @property
+    @abc.abstractmethod
+    def n_ic_timesteps(self) -> int:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def input_names(self) -> List[str]:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def output_names(self) -> List[str]:
+        """
+        Names of variables output by the step.
+        """
+        pass
+
+    @property
+    @final
+    def prognostic_names(self) -> List[str]:
+        return list(set(self.input_names).intersection(self.output_names))
+
+    @property
+    @abc.abstractmethod
+    def loss_names(self) -> List[str]:
+        """
+        Names of variables to be included in the loss function.
+        """
+        pass
+
+    @abc.abstractmethod
+    def get_next_step_forcing_names(self) -> List[str]:
+        pass
+
+    @abc.abstractmethod
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        """
+        Args:
+            extra_names: Names of additional variables to include in the
+                loss normalizer.
+            extra_residual_scaled_names: extra_names which use residual scale factors,
+                if enabled.
+
+        Returns:
+            The loss normalizer.
+        """
+
+    @abc.abstractmethod
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        pass
+
+    @abc.abstractmethod
+    def get_ocean(self) -> Optional[OceanConfig]:
+        pass
+
 
 T = TypeVar("T", bound=StepConfigABC)
 
 
 @dataclasses.dataclass
-class StepSelector:
+class StepSelector(StepConfigABC):
     type: str
     config: Dict[str, Any]
     registry: ClassVar[Registry] = Registry()
@@ -52,6 +114,10 @@ class StepSelector:
         self._step_config_instance: StepConfigABC = cast(
             StepConfigABC, self.registry.get(self.type, self.config)
         )
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self._step_config_instance.n_ic_timesteps
 
     @classmethod
     def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
@@ -78,6 +144,44 @@ class StepSelector:
         """This class method is used to expose all available types of Steps."""
         return set(cls(type="", config={}).registry._types.keys())
 
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self._step_config_instance.get_next_step_forcing_names()
+
+    @property
+    def input_names(self) -> List[str]:
+        return self._step_config_instance.input_names
+
+    @property
+    def output_names(self) -> List[str]:
+        """
+        Names of variables output by the step.
+        """
+        return self._step_config_instance.output_names
+
+    @property
+    def loss_names(self) -> List[str]:
+        """
+        Names of variables to be included in the loss function.
+        """
+        return self._step_config_instance.loss_names
+
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        return self._step_config_instance.get_loss_normalizer(
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
+        )
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self._step_config_instance.replace_ocean(ocean)
+        self.config = dataclasses.asdict(self._step_config_instance)
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self._step_config_instance.get_ocean()
+
 
 class InferenceDataProtocol(Protocol):
     @property
@@ -90,42 +194,54 @@ class StepABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def modules(self) -> torch.nn.ModuleList:
+    def config(self) -> StepConfigABC:
         pass
 
-    @property
-    @abc.abstractmethod
-    def prognostic_names(self) -> List[str]:
-        pass
+    @final
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
+        extra_diagnostic_names = list(
+            set(extra_names).difference(extra_residual_scaled_names)
+        )
+        return self.config.get_loss_normalizer(
+            extra_diagnostic_names, extra_residual_scaled_names
+        )
 
     @property
-    @abc.abstractmethod
-    def forcing_names(self) -> List[str]:
-        pass
+    @final
+    def n_ic_timesteps(self) -> int:
+        return self.config.n_ic_timesteps
 
     @property
-    @abc.abstractmethod
-    def diagnostic_names(self) -> List[str]:
-        pass
-
-    @property
+    @final
     def input_names(self) -> List[str]:
-        return list(set(self.prognostic_names).union(self.forcing_names))
+        return self.config.input_names
 
     @property
-    @abc.abstractmethod
+    @final
     def output_names(self) -> List[str]:
-        """
-        Names of variables output by the step.
-        """
-        pass
+        return self.config.output_names
+
+    @property
+    @final
+    def prognostic_names(self) -> List[str]:
+        return self.config.prognostic_names
+
+    @property
+    @final
+    def loss_names(self) -> List[str]:
+        return self.config.loss_names
 
     @property
     @abc.abstractmethod
-    def loss_names(self) -> List[str]:
-        """
-        Names of variables to be included in the loss function.
-        """
+    def modules(self) -> torch.nn.ModuleList:
         pass
 
     @property
@@ -142,10 +258,10 @@ class StepABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
+    @final
     def next_step_forcing_names(self) -> List[str]:
         """Names of input variables which come from the output timestep."""
-        pass
+        return self.config.get_next_step_forcing_names()
 
     @property
     @abc.abstractmethod
@@ -164,19 +280,10 @@ class StepABC(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        pass
-
-    @abc.abstractmethod
     def validate_inference_data(self, data: InferenceDataProtocol):
         """
         Validate the inference data.
         """
-        pass
-
-    @property
-    @abc.abstractmethod
-    def n_ic_timesteps(self) -> int:
         pass
 
     @abc.abstractmethod
@@ -191,7 +298,7 @@ class StepABC(abc.ABC):
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -205,10 +312,7 @@ class StepABC(abc.ABC):
                 [n_batch, n_lat, n_lon]. This must contain the necessary input
                 data at the output timestep, such as might be needed to prescribe
                 sea surface temperature or use a corrector.
-            use_activation_checkpointing: If True, wrap module calls with
-                torch.utils.checkpoint.checkpoint, reducing memory consumption
-                in exchange for increased computation. This is only relevant during
-                training and otherwise has no effect.
+            wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.

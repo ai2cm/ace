@@ -1,9 +1,10 @@
-from typing import Optional, Tuple
+import os
+from typing import Tuple
 
 import pytest
 import torch
+import xarray as xr
 
-from fme import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
@@ -27,14 +28,10 @@ class LinearDownscaling(torch.nn.Module):
         factor: int,
         fine_img_shape: Tuple[int, int],
         n_channels: int = 1,
-        fine_topography: Optional[torch.Tensor] = None,
     ):
         super(LinearDownscaling, self).__init__()
         self.img_shape = fine_img_shape
         self.n_channels = n_channels
-        if fine_topography is not None:
-            fine_topography = fine_topography.to(get_device())
-        self.fine_topography = fine_topography
         height, width = fine_img_shape
         self.linear = torch.nn.Linear(
             ((height * width) // factor**2) * n_channels,
@@ -50,14 +47,11 @@ class LinearDownscaling(torch.nn.Module):
             )
         x = self.linear(torch.flatten(x, start_dim=1))
         x = x.view(x.shape[0], self.n_channels, *self.img_shape)
-        if self.fine_topography is not None:
-            x = x + self.fine_topography  # arbitrary use of fine_topography
         return x
 
 
 @pytest.mark.parametrize("use_opt", [True, False])
-@pytest.mark.parametrize("use_fine_topography", [True, False])
-def test_train_and_generate(use_opt, use_fine_topography):
+def test_train_and_generate(use_opt):
     fine_shape = (8, 16)
     coarse_shape = (4, 8)
     upscaling_factor = 2
@@ -66,8 +60,6 @@ def test_train_and_generate(use_opt, use_fine_topography):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
 
-    fine_topography = torch.zeros(1, *fine_shape)
-
     batch_size = 3
     module_selector = ModuleRegistrySelector(
         "prebuilt",
@@ -75,12 +67,8 @@ def test_train_and_generate(use_opt, use_fine_topography):
             "module": LinearDownscaling(
                 factor=upscaling_factor,
                 fine_img_shape=fine_shape,
-                fine_topography=fine_topography if use_fine_topography else None,
             )
         },
-    )
-    area_weights = FineResCoarseResPair(
-        fine=torch.ones(*fine_shape), coarse=torch.ones(*coarse_shape)
     )
     model = DownscalingModelConfig(
         module_selector,
@@ -88,12 +76,9 @@ def test_train_and_generate(use_opt, use_fine_topography):
         ["x"],
         ["x"],
         normalization_config,
-        use_fine_topography=False,
     ).build(
         coarse_shape,
         upscaling_factor,
-        area_weights,
-        fine_topography=fine_topography,
     )
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
         fine={"x": torch.ones(batch_size, *fine_shape)},
@@ -129,10 +114,6 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     )
 
     img_shape, downscale_factor = (4, 8), 4
-    area_weights = FineResCoarseResPair[torch.Tensor](
-        torch.ones(img_shape[0] * downscale_factor, img_shape[1] * downscale_factor),
-        torch.ones(img_shape[0], img_shape[1]),
-    )
     loss = LossConfig(type="L1")
     model_config = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": LinearDownscaling(4, (4, 8))}),
@@ -140,13 +121,10 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
         ["x"],
         ["x"],
         normalization,
-        use_fine_topography=False,
     )
     model_config.build(
         img_shape,
         downscale_factor,
-        area_weights,
-        torch.zeros(*[s * downscale_factor for s in img_shape]),
     )
 
 
@@ -159,18 +137,13 @@ def test_serialization(tmp_path):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
-    )
-    fine_topography = torch.zeros(*fine_shape)
     model = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": module}),
         LossConfig(type="MSE"),
         ["x"],
         ["x"],
         normalizer,
-        use_fine_topography=False,
-    ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
+    ).build(coarse_shape, downscale_factor)
 
     batch_size = 3
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
@@ -180,7 +153,7 @@ def test_serialization(tmp_path):
     expected = model.generate_on_batch(batch).prediction["x"]
 
     model_from_state = Model.from_state(
-        model.get_state(), area_weights, fine_topography
+        model.get_state(),
     )
     torch.testing.assert_close(
         expected,
@@ -190,8 +163,6 @@ def test_serialization(tmp_path):
     torch.save(model.get_state(), tmp_path / "test.ckpt")
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
-        area_weights,
-        fine_topography,
     )
     torch.testing.assert_close(
         expected,
@@ -208,10 +179,6 @@ def test_diffusion_model_train_and_generate(predict_residual):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
-    area_weights = FineResCoarseResPair(
-        torch.ones(*fine_shape), torch.ones(*coarse_shape)
-    )
-    fine_topography = torch.zeros(*fine_shape)
 
     model = DiffusionModelConfig(
         module=DiffusionModuleRegistrySelector(
@@ -221,7 +188,6 @@ def test_diffusion_model_train_and_generate(predict_residual):
         in_names=["x"],
         out_names=["x"],
         normalization=normalizer,
-        use_fine_topography=False,
         p_mean=-1.0,
         p_std=1.0,
         sigma_min=0.1,
@@ -229,7 +195,7 @@ def test_diffusion_model_train_and_generate(predict_residual):
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
-    ).build(coarse_shape, downscale_factor, area_weights, fine_topography)
+    ).build(coarse_shape, downscale_factor)
 
     batch_size = 2
     batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
@@ -267,3 +233,47 @@ def test_interleaved_samples_round_trip():
     )
     assert with_batch_sample_dims.shape == (batch_size, n_samples, 5)
     assert torch.equal(batch, with_batch_sample_dims[:, 0])
+
+
+def test_normalizer_serialization(tmp_path):
+    fine_shape = (16, 32)
+    coarse_shape = (8, 16)
+    downscale_factor = 2
+    module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
+
+    means = xr.Dataset({"x": 0.0})
+    stds = xr.Dataset({"x": 1.0})
+    means.to_netcdf(tmp_path / "means.nc")
+    stds.to_netcdf(tmp_path / "stds.nc")
+
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(
+            global_means_path=tmp_path / "means.nc",
+            global_stds_path=tmp_path / "stds.nc",
+        ),
+        NormalizationConfig(
+            global_means_path=tmp_path / "means.nc",
+            global_stds_path=tmp_path / "stds.nc",
+        ),
+    )
+    model = DownscalingModelConfig(
+        ModuleRegistrySelector("prebuilt", {"module": module}),
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalizer,
+    ).build(coarse_shape, downscale_factor)
+    torch.save(model.get_state(), tmp_path / "test.ckpt")
+
+    # normalization should be loaded into model config when get_state called,
+    # delete netcdfs to check that data is dumped and loaded with checkpoint
+    os.remove(tmp_path / "means.nc")
+    os.remove(tmp_path / "stds.nc")
+
+    model_from_disk = Model.from_state(
+        torch.load(tmp_path / "test.ckpt", weights_only=False),
+    )
+    assert model_from_disk.normalizer.fine.means == {"x": 0}
+    assert model_from_disk.normalizer.fine.stds == {"x": 1}
+    assert model_from_disk.normalizer.coarse.means == {"x": 0}
+    assert model_from_disk.normalizer.coarse.stds == {"x": 1}

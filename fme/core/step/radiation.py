@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -12,10 +12,9 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
-from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
+from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import (
@@ -49,12 +48,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         next_step_forcing_names: Names of forcing variables which come from
             the output timestep.
         ocean: The ocean configuration.
-        loss: The loss configuration.
         corrector: The corrector configuration.
-        residual_normalization: Optional alternative to configure loss normalization.
-            If provided, it will be used for all *prognostic* variables in loss scaling.
-        activation_checkpointing: Configuration for activation checkpointing to trade
-            increased computation for lowered memory during training.
     """
 
     builder: ModuleSelector
@@ -64,18 +58,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
     radiation_only_forcing_names: List[str]
     radiation_diagnostic_names: List[str]
     main_diagnostic_names: List[str]
-    normalization: NormalizationConfig
+    normalization: NetworkAndLossNormalizationConfig
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     ocean: Optional[OceanConfig] = None
-    loss: WeightedMappingLossConfig = dataclasses.field(
-        default_factory=lambda: WeightedMappingLossConfig()
-    )
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
-    )
-    residual_normalization: Optional[NormalizationConfig] = None
-    activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
-        default_factory=lambda: ActivationCheckpointingConfig()
     )
 
     def __post_init__(self):
@@ -95,10 +82,10 @@ class SeparateRadiationStepConfig(StepConfigABC):
                     )
             seen_names[name] = label
         for name in self.next_step_forcing_names:
-            if name not in self.forcing_names:
+            if name not in self._forcing_names:
                 raise ValueError(
                     "next_step_forcing_name not in forcing_names: "
-                    f"'{name}' not in {self.forcing_names}"
+                    f"'{name}' not in {self._forcing_names}"
                 )
 
     @property
@@ -107,15 +94,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_state(self):
         return dataclasses.asdict(self)
-
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
-        """
-        If the model is being initialized from another model's weights for fine-tuning,
-        returns those weights. Otherwise, returns None.
-
-        The list mirrors the order of `modules` in the `SeparateRadiationStepper` class.
-        """
-        return None
 
     def get_step(
         self,
@@ -127,13 +105,29 @@ class SeparateRadiationStepConfig(StepConfigABC):
             gridded_operations=dataset_info.gridded_operations,
             timestep=dataset_info.timestep,
         )
-        normalizer = self.normalization.build(self.normalize_names)
+        normalizer = self.normalization.get_network_normalizer(self._normalize_names)
         return SeparateRadiationStep(
             config=self,
             img_shape=dataset_info.img_shape,
             corrector=corrector,
             normalizer=normalizer,
             timestep=dataset_info.timestep,
+        )
+
+    def get_loss_normalizer(
+        self,
+        extra_diagnostic_names: Optional[List[str]] = None,
+        extra_prognostic_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        if extra_diagnostic_names is None:
+            extra_diagnostic_names = []
+        if extra_prognostic_names is None:
+            extra_prognostic_names = []
+        return self.normalization.get_loss_normalizer(
+            names=(
+                self._normalize_names + extra_diagnostic_names + extra_prognostic_names
+            ),
+            residual_scaled_names=self.prognostic_names + extra_prognostic_names,
         )
 
     @classmethod
@@ -143,7 +137,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def normalize_names(self) -> List[str]:
+    def _normalize_names(self) -> List[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
         all_names = set()
         for names in (
@@ -157,15 +151,13 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return list(all_names)
 
     @property
-    def prognostic_names(self) -> List[str]:
-        """Names of variables which both inputs and outputs."""
-        return self.main_prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
+    def _forcing_names(self) -> List[str]:
         return list(
             set(self.shared_forcing_names).union(self.radiation_only_forcing_names)
         )
+
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self.next_step_forcing_names
 
     @property
     def diagnostic_names(self) -> List[str]:
@@ -174,28 +166,40 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def main_in_names(self) -> List[str]:
-        return self.main_prognostic_names + self.shared_forcing_names
-
-    @property
-    def main_out_names(self) -> List[str]:
-        return self.main_prognostic_names + self.main_diagnostic_names
-
-    @property
     def radiation_in_names(self) -> List[str]:
-        return self.shared_forcing_names + self.radiation_only_forcing_names
+        return (
+            self.main_prognostic_names
+            + self.shared_forcing_names
+            + self.radiation_only_forcing_names
+        )
 
     @property
     def radiation_out_names(self) -> List[str]:
         return self.radiation_diagnostic_names
 
     @property
-    def input_names(self) -> List[str]:
+    def main_in_names(self) -> List[str]:
         return (
+            self.main_prognostic_names
+            + self.shared_forcing_names
+            + self.radiation_out_names
+        )
+
+    @property
+    def main_out_names(self) -> List[str]:
+        return self.main_prognostic_names + self.main_diagnostic_names
+
+    @property
+    def input_names(self) -> List[str]:
+        ml_in_names = (
             self.main_prognostic_names
             + self.shared_forcing_names
             + self.radiation_only_forcing_names
         )
+        if self.ocean is None:
+            return ml_in_names
+        else:
+            return list(set(ml_in_names).union(self.ocean.forcing_names))
 
     @property
     def output_names(self) -> List[str]:
@@ -204,6 +208,16 @@ class SeparateRadiationStepConfig(StepConfigABC):
             + self.main_diagnostic_names
             + self.radiation_diagnostic_names
         )
+
+    @property
+    def loss_names(self) -> List[str]:
+        return self.output_names
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.ocean = ocean
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.ocean
 
 
 class SeparateRadiationStep(StepABC):
@@ -262,7 +276,10 @@ class SeparateRadiationStep(StepABC):
         self.radiation_module = dist.wrap_module(self.radiation_module)
         self._timestep = timestep
         self._corrector = corrector
-        self._activation_checkpointing = config.activation_checkpointing
+
+    @property
+    def config(self) -> SeparateRadiationStepConfig:
+        return self._config
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -276,54 +293,12 @@ class SeparateRadiationStep(StepABC):
             return self._config.ocean.ocean_fraction_name
         return None
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        """
-        Replace the ocean model with a new one.
-
-        Args:
-            ocean: The new ocean model configuration or None.
-        """
-        self._config.ocean = ocean
-        if ocean is None:
-            self.ocean = ocean
-        else:
-            self.ocean = ocean.build(
-                self.input_names, self.output_names, self._timestep
-            )
-
-    @property
-    def prognostic_names(self) -> List[str]:
-        return self._config.prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._config.forcing_names
-
-    @property
-    def diagnostic_names(self) -> List[str]:
-        return self._config.diagnostic_names
-
-    @property
-    def output_names(self) -> List[str]:
-        return list(set(self.prognostic_names).union(self.diagnostic_names))
-
-    @property
-    def loss_names(self) -> List[str]:
-        return self.output_names
-
     @property
     def next_step_input_names(self) -> List[str]:
+        input_only_names = list(set(self.input_names) - set(self.output_names))
         if self.ocean is None:
-            return list(self.forcing_names)
-        return list(set(self.forcing_names).union(self.ocean.forcing_names))
-
-    @property
-    def next_step_forcing_names(self) -> List[str]:
-        return self._config.next_step_forcing_names
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return self._config.n_ic_timesteps
+            return input_only_names
+        return list(set(input_only_names).union(self.ocean.forcing_names))
 
     @property
     def normalizer(self) -> StandardNormalizer:
@@ -335,7 +310,7 @@ class SeparateRadiationStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module])
+        return nn.ModuleList([self.module, self.radiation_module])
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         if self._timestep != data.timestep:
@@ -348,7 +323,7 @@ class SeparateRadiationStep(StepABC):
         self,
         input: TensorMapping,
         next_step_forcing_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -360,10 +335,7 @@ class SeparateRadiationStep(StepABC):
             next_step_forcing_data: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon]. This must contain the necessary forcing
                 data at the output timestep for the ocean model and corrector.
-            use_activation_checkpointing: If True, wrap the module call with
-                torch.utils.checkpoint.checkpoint, reducing memory consumption
-                in exchange for increased computation. This is only relevant during
-                training and otherwise has no effect.
+            wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
@@ -372,30 +344,14 @@ class SeparateRadiationStep(StepABC):
         radiation_input_tensor = self.radiation_in_packer.pack(
             input_norm, axis=self.CHANNEL_DIM
         )
-        if use_activation_checkpointing:
-            radiation_output_tensor = torch.utils.checkpoint.checkpoint(
-                self.radiation_module,
-                radiation_input_tensor,
-                use_reentrant=False,
-                **self._activation_checkpointing.kwargs,
-            )
-        else:
-            radiation_output_tensor = self.radiation_module(radiation_input_tensor)
+        radiation_output_tensor = wrapper(self.radiation_module)(radiation_input_tensor)
         radiation_output_norm = self.radiation_out_packer.unpack(
             radiation_output_tensor, axis=self.CHANNEL_DIM
         )
         input_tensor = self.in_packer.pack(
             {**input_norm, **radiation_output_norm}, axis=self.CHANNEL_DIM
         )
-        if use_activation_checkpointing:
-            output_tensor = torch.utils.checkpoint.checkpoint(
-                self.module,
-                input_tensor,
-                use_reentrant=False,
-                **self._activation_checkpointing.kwargs,
-            )
-        else:
-            output_tensor = self.module(input_tensor)
+        output_tensor = wrapper(self.module)(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})
         if self._corrector is not None:

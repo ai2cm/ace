@@ -204,10 +204,8 @@ class Trainer:
         self.config = config
         self.paths = CheckpointPaths(config.checkpoint_dir)
 
-        logging.info("rank %d, begin data loader init" % self.dist.rank)
         self.train_data = train_data
         self.valid_data = validation_data
-        logging.info("rank %d, data loader initialized" % self.dist.rank)
         for gridded_data, name in zip(
             (self.train_data, self.valid_data), ("train", "valid")
         ):
@@ -237,12 +235,8 @@ class Trainer:
         wandb = WandB.get_instance()
         wandb.watch(self.stepper.modules)
 
-        logging.info(
-            (
-                "Number of trainable model parameters: "
-                f"{count_parameters(self.stepper.modules)}"
-            )
-        )
+        n_params = count_parameters(self.stepper.modules)
+        logging.info(f"Number of trainable model parameters: {n_params}")
 
         self._inference_data = inference_data
         self._ema = build_ema(stepper.modules)
@@ -335,6 +329,7 @@ class Trainer:
     def train_one_epoch(self):
         """Train for one epoch and return logs from TrainAggregator."""
         wandb = WandB.get_instance()
+        names_to_log = ("batch_loss", "training_samples_per_second_on_rank_0")
         aggregator = self._aggregator_builder.get_train_aggregator()
         n_samples_seen_since_logging = 0
         self.stepper.set_train()
@@ -377,6 +372,8 @@ class Trainer:
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
                 wandb.log(metrics, step=self.num_batches_seen)
+                metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
+                logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
         self._model_epoch += 1
         aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
@@ -411,6 +408,7 @@ class Trainer:
     def validate_one_epoch(self):
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_validation_aggregator()
+        logging.info("Starting loop over validation data")
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             for batch in self.valid_data.loader:
                 stepped = self.stepper.train_on_batch(
@@ -421,19 +419,24 @@ class Trainer:
                 aggregator.record_batch(
                     batch=stepped,
                 )
+        logging.info("Starting flush of reduced diagnostics to disk")
         aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
+        logging.info("Getting validation aggregator logs")
         return aggregator.get_logs(label="val")
 
     def inference_one_epoch(self):
         self.stepper.set_eval()
         aggregator = self._aggregator_builder.get_inference_aggregator()
+        logging.info("Starting inline inference run")
         with torch.no_grad(), self._validation_context(), GlobalTimer():
             run_inference(
                 predict=self.stepper.predict_paired,
                 data=self._inference_data,
                 aggregator=aggregator,
             )
+        logging.info("Starting flush of reduced diagnostics to disk")
         aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
+        logging.info("Getting inline inference aggregator logs")
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
 

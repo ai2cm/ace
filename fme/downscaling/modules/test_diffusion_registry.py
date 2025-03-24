@@ -6,15 +6,13 @@ from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySe
 from fme.downscaling.modules.unets import NonDivisibleShapeError
 
 
-@pytest.mark.parametrize("use_topography", [True, False])
-def test_diffusion_unet_shapes(use_topography):
+def test_diffusion_unet_shapes():
     downscale_factor = 2
     coarse_shape = (8, 16)
     fine_shape = (
         coarse_shape[0] * downscale_factor,
         coarse_shape[1] * downscale_factor,
     )
-    fine_topography = torch.ones(*fine_shape)
 
     n_channels = 3
 
@@ -30,7 +28,6 @@ def test_diffusion_unet_shapes(use_topography):
             n_out_channels=n_channels,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if use_topography else None,
             sigma_data=1.0,
         )
         .to(get_device())
@@ -45,15 +42,13 @@ def test_diffusion_unet_shapes(use_topography):
     assert (batch_size, n_channels, *fine_shape) == outputs.shape
 
 
-@pytest.mark.parametrize("use_topography", [True, False])
-def test_diffusion_invalid_shapes(use_topography):
+def test_diffusion_invalid_shapes():
     downscale_factor = 2
     coarse_shape = (9, 18)
     fine_shape = (
         coarse_shape[0] * downscale_factor,
         coarse_shape[1] * downscale_factor,
     )
-    fine_topography = torch.ones(*fine_shape)
     n_channels = 3
 
     unet = (
@@ -68,7 +63,6 @@ def test_diffusion_invalid_shapes(use_topography):
             n_out_channels=n_channels,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if use_topography else None,
             sigma_data=1.0,
         )
         .to(get_device())

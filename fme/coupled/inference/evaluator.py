@@ -12,8 +12,9 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
+from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import DepthCoordinate, SerializableVerticalCoordinate
+from fme.core.coordinates import DepthCoordinate
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -40,7 +41,7 @@ class StandaloneComponentConfig:
     """
     Configuration specifying the path to one of the components (ocean or
     atmosphere) within a CoupledStepper. Intended for inference with separate
-    pretrained SingleModuleStepper training checkpoints.
+    pretrained Stepper training checkpoints.
 
     """
 
@@ -51,7 +52,7 @@ class StandaloneComponentConfig:
 @dataclasses.dataclass
 class StandaloneComponentCheckpointsConfig:
     """
-    Configuration for creating a CoupledStepper from two separate SingleModuleStepper
+    Configuration for creating a CoupledStepper from two separate Stepper
     checkpoints, for standalone inference.
 
     Parameters:
@@ -85,8 +86,8 @@ class StandaloneComponentCheckpointsConfig:
         ocean_ckpt = torch.load(
             self.ocean.path, map_location=fme.get_device(), weights_only=False
         )
-        ocean_vertical_coord = SerializableVerticalCoordinate.from_state(
-            ocean_ckpt["stepper"]["vertical_coordinate"]
+        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
+            ocean_ckpt["stepper"]
         )
         if isinstance(ocean_vertical_coord, DepthCoordinate):
             return ocean_vertical_coord.get_mask_level(0)
@@ -174,7 +175,7 @@ class InferenceEvaluatorConfig:
         experiment_dir: Directory to save results to.
         n_coupled_steps: Number of steps to run the model forward for.
         checkpoint_path: Path to a CoupledStepper training checkpoint to load, or a
-            mapping to two separate SingleModuleStepper training checkpoints.
+            mapping to two separate Stepper training checkpoints.
         logging: configuration for logging.
         loader: Configuration for data to be used as initial conditions, forcing, and
             target in inference.

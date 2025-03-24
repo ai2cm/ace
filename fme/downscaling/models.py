@@ -47,6 +47,15 @@ class PairedNormalizationConfig:
             fine=self.fine.build(out_names),
         )
 
+    def load(self):
+        """
+        Load the normalization configuration from the netCDF files.
+
+        Updates the configuration so it no longer requires external files.
+        """
+        self.fine.load()
+        self.coarse.load()
+
 
 @dataclasses.dataclass
 class DownscalingModelConfig:
@@ -55,23 +64,19 @@ class DownscalingModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
-    use_fine_topography: bool
 
     def build(
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.fine, reduction="mean")
+        loss = self.loss.build(reduction="mean")
         module = self.module.build(
             n_in_channels=len(self.in_names),
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
         )
         return Model(
             module,
@@ -85,6 +90,8 @@ class DownscalingModelConfig:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        # Update normalization configuration so it no longer requires external files.
+        self.normalization.load()
         return dataclasses.asdict(self)
 
     @classmethod
@@ -97,7 +104,6 @@ class DownscalingModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -194,15 +200,11 @@ class Model:
     def from_state(
         cls,
         state: Mapping[str, Any],
-        area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "Model":
         config = DownscalingModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
-            area_weights,
-            fine_topography,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model
@@ -221,7 +223,6 @@ class DiffusionModelConfig:
         in_names: The input variable names for the diffusion model.
         out_names: The output variable names for the diffusion model.
         normalization: The normalization configurations for the diffusion model.
-        use_fine_topography: Indicates whether to use the fine topography.
         p_mean: The mean of noise distribution used during training.
         p_std: The std of the noise distribution used during training.
         sigma_min: Min noise level for generation.
@@ -235,7 +236,6 @@ class DiffusionModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
-    use_fine_topography: bool
     p_mean: float
     p_std: float
     sigma_min: float
@@ -248,11 +248,9 @@ class DiffusionModelConfig:
         self,
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
-        area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(area_weights.fine, "none")
+        loss = self.loss.build("none")
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
         # https://en.wikipedia.org/wiki/Standard_score
@@ -263,7 +261,6 @@ class DiffusionModelConfig:
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
-            fine_topography=fine_topography if self.use_fine_topography else None,
             sigma_data=sigma_data,
         )
         return DiffusionModel(
@@ -277,6 +274,8 @@ class DiffusionModelConfig:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        # Update normalization configuration so it no longer requires external files.
+        self.normalization.load()
         return dataclasses.asdict(self)
 
     @classmethod
@@ -289,7 +288,6 @@ class DiffusionModelConfig:
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
-            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -486,15 +484,11 @@ class DiffusionModel:
     def from_state(
         cls,
         state: Mapping[str, Any],
-        area_weights: FineResCoarseResPair[torch.Tensor],
-        fine_topography: torch.Tensor,
     ) -> "DiffusionModel":
         config = DiffusionModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
             state["downscale_factor"],
-            area_weights,
-            fine_topography,
         )
         model.module.load_state_dict(state["module"], strict=True)
         return model

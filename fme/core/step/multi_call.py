@@ -1,10 +1,12 @@
 import dataclasses
-from typing import Any, Dict, List, Optional, TypeVar
+from copy import copy
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
-from fme.core.multi_call import MultiCallConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
 from fme.core.step.step import (
@@ -14,6 +16,39 @@ from fme.core.step.step import (
     StepSelector,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
+
+
+def replace_multi_call(
+    selector: StepSelector, multi_call: Optional[MultiCallConfig]
+) -> StepSelector:
+    """
+    Replace the multi-call configuration in a StepSelector.
+
+    A value of `None` for `multi_call` will remove the multi-call configuration.
+
+    If the selected type supports it, the multi-call configuration will be
+    updated in place. Otherwise, it will be wrapped in the multi_call step
+    configuration with the given multi_call config or None.
+    """
+    if selector.type == "multi_call":
+        wrapped_selector_dict: Dict[str, Any] = selector.config["wrapped_step"]
+        include_multi_call_in_loss = selector.config.get(
+            "include_multi_call_in_loss", True
+        )
+    else:
+        wrapped_selector_dict = dataclasses.asdict(selector)
+        include_multi_call_in_loss = True
+    if multi_call is None:
+        include_multi_call_in_loss = False
+    new_selector = StepSelector(
+        type="multi_call",
+        config={
+            "wrapped_step": wrapped_selector_dict,
+            "config": dataclasses.asdict(multi_call) if multi_call else None,
+            "include_multi_call_in_loss": include_multi_call_in_loss,
+        },
+    )
+    return new_selector
 
 
 @StepSelector.register("multi_call")
@@ -30,19 +65,148 @@ class MultiCallStepConfig(StepConfigABC):
     """
 
     wrapped_step: StepSelector
-    config: MultiCallConfig
+    config: Optional[MultiCallConfig] = None
     include_multi_call_in_loss: bool = True
+
+    def __post_init__(self):
+        if self.config is not None:
+            self.config.validate(
+                self.wrapped_step.input_names, self.wrapped_step.output_names
+            )
+        if self.config is None and self.include_multi_call_in_loss:
+            raise ValueError("include_multi_call_in_loss is True, but config is None")
 
     def get_step(
         self,
         dataset_info: DatasetInfo,
     ) -> "MultiCallStep":
         wrapped = self.wrapped_step.get_step(dataset_info)
+        if self.config is not None:
+            self.config.validate(wrapped.input_names, wrapped.output_names)
         return MultiCallStep(
             wrapped_step=wrapped,
-            config=self.config,
-            include_multi_call_in_loss=self.include_multi_call_in_loss,
+            config=self,
         )
+
+    def build(
+        self,
+        step_method: StepMethod,
+    ) -> "Optional[MultiCall]":
+        if self.config is None:
+            return None
+        else:
+            return self.config.build(step_method)
+
+    def extend_normalizer_with_multi_call_outputs(
+        self, normalizer: StandardNormalizer
+    ) -> StandardNormalizer:
+        """
+        Extend the normalizer by setting multi-call output names to use the same
+        normalization as their base counterparts.
+        """
+        if self.config is None:
+            return normalizer
+        else:
+            return _extend_normalizer_with_multi_call_outputs(self.config, normalizer)
+
+    @property
+    def multi_call_output_names(self) -> List[str]:
+        if self.config is None:
+            return []
+        else:
+            return self.config.output_names
+
+    def get_loss_normalizer(
+        self,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
+    ) -> StandardNormalizer:
+        """
+        Get the loss normalizer for the multi-call step.
+
+        Normalizer will use statistics from multi-call variables in the stats
+        dataset, meaning the normalization for multi-call output versions will be
+        different from the normalization for the base variables.
+
+        Args:
+            extra_names: Names of additional variables to include in the
+                loss normalizer.
+            extra_residual_scaled_names: extra_names which use residual scale factors,
+                if enabled.
+        """
+        if self.config is not None:
+            if extra_names is None:
+                extra_names = []
+            else:
+                extra_names = list(extra_names)  # avoid mutating input
+            if extra_residual_scaled_names is None:
+                extra_residual_scaled_names = []
+            else:
+                extra_residual_scaled_names = list(extra_residual_scaled_names)
+            for output_name in self.config.output_names:
+                for name in self.config.get_multi_called_names(output_name):
+                    extra_names.append(name)
+                    if output_name in self.wrapped_step.input_names:
+                        extra_residual_scaled_names.append(name)
+        return self.wrapped_step.get_loss_normalizer(
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
+        )
+
+    @property
+    def _multi_call_outputs(self) -> List[str]:
+        if self.config is None:
+            return []
+        return self.config.names
+
+    @property
+    def input_names(self) -> List[str]:
+        return self.wrapped_step.input_names
+
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self.wrapped_step.get_next_step_forcing_names()
+
+    @property
+    def output_names(self) -> List[str]:
+        return self.wrapped_step.output_names + self._multi_call_outputs
+
+    @property
+    def loss_names(self) -> List[str]:
+        if self.include_multi_call_in_loss:
+            return self.wrapped_step.loss_names + self._multi_call_outputs
+        else:
+            return self.wrapped_step.loss_names
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.wrapped_step.replace_ocean(ocean)
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.wrapped_step.get_ocean()
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self.wrapped_step.n_ic_timesteps
+
+
+def _extend_normalizer_with_multi_call_outputs(
+    config: MultiCallConfig, normalizer: StandardNormalizer
+) -> StandardNormalizer:
+    means = copy(normalizer.means)
+    stds = copy(normalizer.stds)
+    for name in config.output_names:
+        if name not in means or name not in stds:
+            raise ValueError(
+                f"Normalizer does not contain {name} present in multi-call output names"
+            )
+        for multi_call_name in config.get_multi_called_names(name):
+            means[multi_call_name] = means[name]
+            stds[multi_call_name] = stds[name]
+    return StandardNormalizer(
+        means=means,
+        stds=stds,
+        fill_nans_on_normalize=normalizer.fill_nans_on_normalize,
+        fill_nans_on_denormalize=normalizer.fill_nans_on_denormalize,
+    )
 
 
 class MultiCallStep(StepABC):
@@ -58,74 +222,35 @@ class MultiCallStep(StepABC):
     def __init__(
         self,
         wrapped_step: StepABC,
-        config: MultiCallConfig,
-        include_multi_call_in_loss: bool = True,
+        config: MultiCallStepConfig,
     ):
         """
         Args:
             wrapped_step: The step to wrap.
-            config: The multi-call configuration.
-            include_multi_call_in_loss: Whether to include multi-call diagnostics in the
-                loss.
+            config: The multi-call step configuration.
         """
         self._wrapped_step = wrapped_step
         self._config = config
-        self._config.validate(
-            self._wrapped_step.input_names, self._wrapped_step.output_names
-        )
         self._multi_call = config.build(self._wrapped_step.step)
-        residual_scaled_names = []
-        for prog_name in set(self._wrapped_step.prognostic_names).intersection(
-            config.output_names
-        ):
-            residual_scaled_names.extend(config.get_multi_called_names(prog_name))
-        self._multi_call_residual_scaled_names = residual_scaled_names
-        self._include_multi_call_in_loss = include_multi_call_in_loss
+        self._include_multi_call_in_loss = config.include_multi_call_in_loss
+
+    @property
+    def config(self) -> MultiCallStepConfig:
+        return self._config
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return self._wrapped_step.modules
 
     @property
-    def prognostic_names(self) -> List[str]:
-        return self._wrapped_step.prognostic_names
-
-    @property
-    def residual_scaled_names(self) -> List[str]:
-        return (
-            self._wrapped_step.prognostic_names + self._multi_call_residual_scaled_names
-        )
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._wrapped_step.forcing_names
-
-    @property
-    def diagnostic_names(self) -> List[str]:
-        return self._wrapped_step.diagnostic_names + self._multi_call.names
-
-    @property
-    def output_names(self) -> List[str]:
-        return self._wrapped_step.output_names + self._multi_call.names
-
-    @property
-    def loss_names(self) -> List[str]:
-        if self._include_multi_call_in_loss:
-            return self._wrapped_step.loss_names + self._multi_call.names
-        else:
-            return self._wrapped_step.loss_names
-
-    @property
     def normalizer(self) -> StandardNormalizer:
-        return self._wrapped_step.normalizer
+        return self._config.extend_normalizer_with_multi_call_outputs(
+            self._wrapped_step.normalizer
+        )
 
     @property
     def next_step_input_names(self) -> List[str]:
         return self._wrapped_step.next_step_input_names
-
-    @property
-    def next_step_forcing_names(self) -> List[str]:
-        return self._wrapped_step.next_step_forcing_names
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
@@ -135,15 +260,8 @@ class MultiCallStep(StepABC):
     def ocean_fraction_name(self) -> Optional[str]:
         return self._wrapped_step.ocean_fraction_name
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
-        self._wrapped_step.replace_ocean(ocean)
-
     def validate_inference_data(self, data: InferenceDataProtocol):
         self._wrapped_step.validate_inference_data(data)
-
-    @property
-    def n_ic_timesteps(self) -> int:
-        return self._wrapped_step.n_ic_timesteps
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
@@ -152,16 +270,16 @@ class MultiCallStep(StepABC):
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         state = self._wrapped_step.step(
             input,
             next_step_input_data,
-            use_activation_checkpointing,
+            wrapper=wrapper,
         )
         if self._multi_call is not None:
             multi_called_outputs = self._multi_call.step(
-                input, next_step_input_data, use_activation_checkpointing
+                input, next_step_input_data, wrapper=wrapper
             )
             state = {**multi_called_outputs, **state}
         return state
