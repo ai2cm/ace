@@ -104,6 +104,9 @@ class MockStepConfig(StepConfigABC):
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         raise NotImplementedError()
 
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return None
+
     def get_loss_normalizer(
         self,
         extra_diagnostic_names: Optional[List[str]] = None,

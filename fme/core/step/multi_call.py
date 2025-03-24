@@ -166,6 +166,9 @@ class MultiCallStepConfig(StepConfigABC):
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         self.wrapped_step.replace_ocean(ocean)
 
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.wrapped_step.get_ocean()
+
     @property
     def n_ic_timesteps(self) -> int:
         return self.wrapped_step.n_ic_timesteps

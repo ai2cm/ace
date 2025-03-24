@@ -219,6 +219,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         self.ocean = ocean
 
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.ocean
+
 
 class SeparateRadiationStep(StepABC):
     """
