@@ -152,13 +152,13 @@ class CoupledStepperConfig:
 
         # calculate forcing sets
         self._ocean_forcing_exogenous_names = list(
-            set(self.ocean.stepper.forcing_names).difference(
-                self.atmosphere.stepper.out_names
+            set(self.ocean.stepper.input_only_names).difference(
+                self.atmosphere.stepper.output_names
             )
         )
         self._atmosphere_forcing_exogenous_names = list(
-            set(self.atmosphere.stepper.forcing_names).difference(
-                self.ocean.stepper.out_names
+            set(self.atmosphere.stepper.input_only_names).difference(
+                self.ocean.stepper.output_names
             )
         )
         self._shared_forcing_exogenous_names = list(
@@ -167,8 +167,8 @@ class CoupledStepperConfig:
             )
         )
         self._atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.forcing_names).intersection(
-                self.atmosphere.stepper.out_names
+            set(self.ocean.stepper.input_only_names).intersection(
+                self.atmosphere.stepper.output_names
             )
         )
         extra_forcings_names = [self.sst_name]
@@ -180,15 +180,15 @@ class CoupledStepperConfig:
             )
 
         self._ocean_to_atmosphere_forcing_names = list(
-            set(self.atmosphere.stepper.forcing_names)
-            .intersection(self.ocean.stepper.out_names)
+            set(self.atmosphere.stepper.input_only_names)
+            .intersection(self.ocean.stepper.output_names)
             .union(extra_forcings_names)
         )
 
         # calculate names for each component's data requirements
         self._all_atmosphere_names = list(
             set(self.atmosphere.stepper.all_names).difference(
-                self.ocean.stepper.out_names
+                self.ocean.stepper.output_names
             )
         )
         self._all_ocean_names = list(
@@ -279,8 +279,8 @@ class CoupledStepperConfig:
             raise ValueError("Ocean timedelta must be a multiple of the atmosphere's.")
 
         # check for overlapping output names
-        duplicate_outputs = set(self.ocean.stepper.out_names).intersection(
-            self.atmosphere.stepper.out_names
+        duplicate_outputs = set(self.ocean.stepper.output_names).intersection(
+            self.atmosphere.stepper.output_names
         )
         if len(duplicate_outputs) > 0:
             raise ValueError(
@@ -290,8 +290,8 @@ class CoupledStepperConfig:
 
         # ocean diagnostics cannot be used as atmosphere inputs
         ocean_diags_as_atmos_forcings = list(
-            set(self.atmosphere.stepper.forcing_names)
-            .intersection(self.ocean.stepper.out_names)
+            set(self.atmosphere.stepper.input_only_names)
+            .intersection(self.ocean.stepper.output_names)
             .difference(self.ocean.stepper.in_names)
         )
         if len(ocean_diags_as_atmos_forcings) > 0:
@@ -304,8 +304,8 @@ class CoupledStepperConfig:
         # all ocean inputs that are atmosphere outputs must be "next step"
         # forcings according to the ocean stepper config
         atmosphere_to_ocean_forcing_names = list(
-            set(self.ocean.stepper.forcing_names).intersection(
-                self.atmosphere.stepper.out_names
+            set(self.ocean.stepper.input_only_names).intersection(
+                self.atmosphere.stepper.output_names
             )
         )
         missing_next_step_forcings = list(
@@ -321,7 +321,7 @@ class CoupledStepperConfig:
             )
 
         # sst_name must be present in the ocean's output names
-        if self.sst_name not in self.ocean.stepper.out_names:
+        if self.sst_name not in self.ocean.stepper.output_names:
             raise ValueError(
                 f"The variable {self.sst_name} is not in the ocean's output "
                 "names but is required for coupling with the atmosphere."
@@ -333,7 +333,7 @@ class CoupledStepperConfig:
                 self.ocean.stepper.prognostic_names,
             )
             self.ocean_fraction_prediction.validate_atmosphere_forcing_names(
-                self.atmosphere.stepper.forcing_names
+                self.atmosphere.stepper.input_only_names
             )
 
     def _get_ocean_data_requirements(self, n_forward_steps: int) -> DataRequirements:

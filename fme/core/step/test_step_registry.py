@@ -45,10 +45,6 @@ class MockStep(StepABC):
     def next_step_input_names(self):
         raise NotImplementedError()
 
-    @property
-    def next_step_forcing_names(self):
-        raise NotImplementedError()
-
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
@@ -75,16 +71,15 @@ class MockStepConfig(StepConfigABC):
         return MockStep(self, dataset_info)
 
     @property
-    def prognostic_names(self) -> List[str]:
-        return list(set(self.out_names).intersection(self.in_names))
-
-    @property
     def diagnostic_names(self) -> List[str]:
         return list(set(self.out_names).difference(self.in_names))
 
+    def get_next_step_forcing_names(self) -> List[str]:
+        return []
+
     @property
-    def forcing_names(self) -> List[str]:
-        return list(set(self.in_names).difference(self.out_names))
+    def input_names(self) -> List[str]:
+        return self.in_names
 
     @property
     def output_names(self) -> List[str]:
@@ -109,8 +104,8 @@ class MockStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ):
         raise NotImplementedError()
 
