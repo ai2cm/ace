@@ -1,7 +1,17 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, Generator, Iterable, List, Literal, Optional, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+)
 
 import dacite
 import numpy as np
@@ -39,6 +49,7 @@ from fme.coupled.data_loading.batch_data import (
 )
 from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
+from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -60,6 +71,9 @@ class ComponentConfig:
 
     timedelta: str
     stepper: SingleModuleStepperConfig
+    loss_contributions: LossContributionsConfig = dataclasses.field(
+        default_factory=lambda: LossContributionsConfig()
+    )
 
 
 @dataclasses.dataclass
@@ -431,6 +445,25 @@ class CoupledStepperConfig:
             sst_mask=sst_mask,
         )
 
+    def get_ocean_loss(
+        self,
+        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        time_dim: int,
+    ) -> StepLossABC:
+        return self.ocean.loss_contributions.build(loss_obj, time_dim)
+
+    def get_atmosphere_loss(
+        self,
+        loss_obj: Callable[[TensorMapping, TensorMapping], torch.Tensor],
+        time_dim: int,
+    ) -> StepLossABC:
+        return self.atmosphere.loss_contributions.build(loss_obj, time_dim)
+
+    def get_loss(
+        self, ocean_loss: StepLossABC, atmosphere_loss: StepLossABC
+    ) -> "CoupledStepperTrainLoss":
+        return CoupledStepperTrainLoss(ocean_loss, atmosphere_loss)
+
     def get_state(self):
         return dataclasses.asdict(self)
 
@@ -545,11 +578,28 @@ class CoupledTrainOutput(TrainOutputABC):
         }
 
 
-@dataclasses.dataclass
-class ComponentStepPrediction:
-    realm: Literal["ocean", "atmosphere"]
-    data: TensorDict
-    step: int
+class ComponentStepPrediction(StepPredictionABC):
+    def __init__(
+        self,
+        realm: Literal["ocean", "atmosphere"],
+        data: TensorDict,
+        step: int,
+    ):
+        self._realm: Literal["ocean", "atmosphere"] = realm
+        self._data = data
+        self._step = step
+
+    @property
+    def realm(self) -> Literal["ocean", "atmosphere"]:
+        return self._realm
+
+    @property
+    def data(self) -> TensorDict:
+        return self._data
+
+    @property
+    def step(self) -> int:
+        return self._step
 
     def detach(self, optimizer: OptimizationABC) -> "ComponentStepPrediction":
         """Detach the data tensor map from the computation graph."""
@@ -558,6 +608,28 @@ class ComponentStepPrediction:
             data=optimizer.detach_if_using_gradient_accumulation(self.data),
             step=self.step,
         )
+
+
+class CoupledStepperTrainLoss:
+    def __init__(
+        self,
+        ocean_loss: StepLossABC,
+        atmosphere_loss: StepLossABC,
+    ):
+        self._loss_objs = {
+            "ocean": ocean_loss,
+            "atmosphere": atmosphere_loss,
+        }
+
+    def __call__(
+        self,
+        prediction: ComponentStepPrediction,
+        target_data: TensorMapping,
+    ) -> Optional[torch.Tensor]:
+        loss_obj = self._loss_objs[prediction.realm]
+        if loss_obj.step_is_optimized(prediction.step):
+            return loss_obj(prediction, target_data)
+        return None
 
 
 class CoupledStepper(
@@ -599,6 +671,16 @@ class CoupledStepper(
         self._sst_mask = sst_mask
         if self._sst_mask is not None:
             self._sst_mask = self._sst_mask.to(get_device())
+
+        ocean_loss = self._config.get_ocean_loss(
+            self.ocean.loss_obj,
+            ocean.TIME_DIM,
+        )
+        atmos_loss = self._config.get_atmosphere_loss(
+            self.atmosphere.loss_obj,
+            atmosphere.TIME_DIM,
+        )
+        self._loss = self._config.get_loss(ocean_loss, atmos_loss)
 
         _: PredictFunction[  # for type checking
             CoupledPrognosticState,
@@ -1051,12 +1133,19 @@ class CoupledStepper(
                         k: v.select(self.ocean.TIME_DIM, gen_step.step)
                         for k, v in ocean_forward_data.data.items()
                     }
-                    step_loss = self.ocean.loss_obj(
-                        gen_step.data,
-                        target_step,
-                    )
-                    label = f"loss/ocean_step_{gen_step.step}"
-                    metrics.add_metric(label, step_loss.detach(), "ocean")
+                else:
+                    assert gen_step.realm == "atmosphere"
+                    target_step = {
+                        k: v.select(self.atmosphere.TIME_DIM, gen_step.step)
+                        for k, v in atmos_forward_data.data.items()
+                    }
+                step_loss = self._loss(
+                    gen_step,
+                    target_step,
+                )
+                if step_loss is not None:
+                    label = f"loss/{gen_step.realm}_step_{gen_step.step}"
+                    metrics.add_metric(label, step_loss.detach(), gen_step.realm)
                     optimization.accumulate_loss(step_loss)
                 gen_step = gen_step.detach(optimization)
                 output_list.append(gen_step)
@@ -1065,7 +1154,6 @@ class CoupledStepper(
         optimization.step_weights()
 
         gen_data = self._process_prediction_generator_list(output_list, data)
-
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
             gen_data=dict(gen_data.ocean_data.data),
