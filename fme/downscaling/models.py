@@ -47,6 +47,15 @@ class PairedNormalizationConfig:
             fine=self.fine.build(out_names),
         )
 
+    def load(self):
+        """
+        Load the normalization configuration from the netCDF files.
+
+        Updates the configuration so it no longer requires external files.
+        """
+        self.fine.load()
+        self.coarse.load()
+
 
 @dataclasses.dataclass
 class DownscalingModelConfig:
@@ -81,6 +90,8 @@ class DownscalingModelConfig:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        # Update normalization configuration so it no longer requires external files.
+        self.normalization.load()
         return dataclasses.asdict(self)
 
     @classmethod
@@ -183,10 +194,6 @@ class Model:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
-            "normalization": {
-                "coarse": self.normalizer.coarse.get_state(),
-                "fine": self.normalizer.fine.get_state(),
-            },
         }
 
     @classmethod
@@ -194,8 +201,6 @@ class Model:
         cls,
         state: Mapping[str, Any],
     ) -> "Model":
-        # Use serialized normalization data for loaded models
-        state["config"]["normalization"] = state["normalization"]
         config = DownscalingModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],
@@ -269,6 +274,8 @@ class DiffusionModelConfig:
         )
 
     def get_state(self) -> Mapping[str, Any]:
+        # Update normalization configuration so it no longer requires external files.
+        self.normalization.load()
         return dataclasses.asdict(self)
 
     @classmethod
@@ -471,10 +478,6 @@ class DiffusionModel:
             "module": self.module.state_dict(),
             "coarse_shape": self.coarse_shape,
             "downscale_factor": self.downscale_factor,
-            "normalization": {
-                "coarse": self.normalizer.coarse.get_state(),
-                "fine": self.normalizer.fine.get_state(),
-            },
         }
 
     @classmethod
@@ -482,8 +485,6 @@ class DiffusionModel:
         cls,
         state: Mapping[str, Any],
     ) -> "DiffusionModel":
-        # Use serialized normalization data for loaded models
-        state["config"]["normalization"] = state["normalization"]
         config = DiffusionModelConfig.from_state(state["config"])
         model = config.build(
             state["coarse_shape"],

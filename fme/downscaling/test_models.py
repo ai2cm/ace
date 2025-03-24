@@ -1,10 +1,12 @@
+import os
 from typing import Tuple
 
 import pytest
 import torch
+import xarray as xr
 
 from fme.core.loss import LossConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
@@ -238,9 +240,21 @@ def test_normalizer_serialization(tmp_path):
     coarse_shape = (8, 16)
     downscale_factor = 2
     module = LinearDownscaling(factor=2, fine_img_shape=fine_shape)
+
+    means = xr.Dataset({"x": 0.0})
+    stds = xr.Dataset({"x": 1.0})
+    means.to_netcdf(tmp_path / "means.nc")
+    stds.to_netcdf(tmp_path / "stds.nc")
+
     normalizer = PairedNormalizationConfig(
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
-        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(
+            global_means_path=tmp_path / "means.nc",
+            global_stds_path=tmp_path / "stds.nc",
+        ),
+        NormalizationConfig(
+            global_means_path=tmp_path / "means.nc",
+            global_stds_path=tmp_path / "stds.nc",
+        ),
     )
     model = DownscalingModelConfig(
         ModuleRegistrySelector("prebuilt", {"module": module}),
@@ -249,23 +263,17 @@ def test_normalizer_serialization(tmp_path):
         ["x"],
         normalizer,
     ).build(coarse_shape, downscale_factor)
-
-    # change model normalizer to check that new values are serialized and loaded
-    model.normalizer = FineResCoarseResPair(
-        fine=StandardNormalizer(
-            means={"x": torch.tensor(1.0)}, stds={"x": torch.tensor(2.0)}
-        ),
-        coarse=StandardNormalizer(
-            means={"x": torch.tensor(3.0)}, stds={"x": torch.tensor(4.0)}
-        ),
-    )
-
     torch.save(model.get_state(), tmp_path / "test.ckpt")
+
+    # normalization should be loaded into model config when get_state called,
+    # delete netcdfs to check that data is dumped and loaded with checkpoint
+    os.remove(tmp_path / "means.nc")
+    os.remove(tmp_path / "stds.nc")
 
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
     )
-    assert model_from_disk.normalizer.fine.means == {"x": 1.0}
-    assert model_from_disk.normalizer.fine.stds == {"x": 2.0}
-    assert model_from_disk.normalizer.coarse.means == {"x": 3.0}
-    assert model_from_disk.normalizer.coarse.stds == {"x": 4.0}
+    assert model_from_disk.normalizer.fine.means == {"x": 0}
+    assert model_from_disk.normalizer.fine.stds == {"x": 1}
+    assert model_from_disk.normalizer.coarse.means == {"x": 0}
+    assert model_from_disk.normalizer.coarse.stds == {"x": 1}
