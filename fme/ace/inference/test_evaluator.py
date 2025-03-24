@@ -2,7 +2,9 @@ import dataclasses
 import datetime
 import os
 import pathlib
+import tempfile
 from typing import List, Optional
+from unittest.mock import patch
 
 import dacite
 import numpy as np
@@ -64,28 +66,45 @@ def save_plus_one_stepper(
         all_names = list(set(in_names).union(out_names))
     else:
         all_names = list(set(in_names).union(out_names)) + multi_call.names
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={name: mean for name in all_names},
-            stds={name: std for name in all_names},
-        ),
-        ocean=ocean,
-        multi_call=multi_call,
-    )
-    area = torch.ones(data_shape[-2:], device=get_device())
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
-    )
-    stepper = config.get_stepper(
-        img_shape=(data_shape[-2], data_shape[-1]),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=timestep,
-    )
-    torch.save({"stepper": stepper.get_state()}, path)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        mean_filename = pathlib.Path(temp_dir) / "means.nc"
+        std_filename = pathlib.Path(temp_dir) / "stds.nc"
+        xr.Dataset(
+            {
+                name: xr.DataArray(
+                    mean,
+                )
+                for name in all_names
+            }
+        ).to_netcdf(mean_filename)
+        xr.Dataset({name: xr.DataArray(std) for name in all_names}).to_netcdf(
+            std_filename
+        )
+        config = SingleModuleStepperConfig(
+            builder=ModuleSelector(type="prebuilt", config={"module": PlusOne()}),
+            in_names=in_names,
+            out_names=out_names,
+            normalization=NormalizationConfig(
+                global_means_path=str(mean_filename),
+                global_stds_path=str(std_filename),
+            ),
+            ocean=ocean,
+            multi_call=multi_call,
+        )
+        area = torch.ones(data_shape[-2:], device=get_device())
+        vertical_coordinate = HybridSigmaPressureCoordinate(
+            ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
+        )
+        stepper = config.get_stepper(
+            img_shape=(data_shape[-2], data_shape[-1]),
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        )
+        with patch("fme.ace.stepper.SingleModuleStepperConfig.load"):
+            torch.save({"stepper": stepper.get_state()}, path)
+        mean_filename.unlink()
+        std_filename.unlink()
 
 
 def validate_stepper_ocean(
@@ -149,7 +168,6 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
         horizontal=horizontal,
         nz_interface=2,
     )
-    std = 1.0
     if not stepper_path.exists():
         # this helps us to re-generate data if the stepper changes
         # to re-generate, just delete the data and run the test (it will fail)
@@ -158,7 +176,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
             in_names,
             out_names,
             mean=0.0,
-            std=std,
+            std=1.0,
             data_shape=dim_sizes.shape_nd,
         )
         assert False, "stepper_test_data did not exist, it has been created"
