@@ -117,8 +117,8 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
         """
         Get the loss normalizer for the multi-call step.
@@ -128,14 +128,28 @@ class MultiCallStepConfig(StepConfigABC):
         different from the normalization for the base variables.
 
         Args:
-            extra_diagnostic_names: Names of diagnostics to include in the loss
-                normalizer. These will generally use full-field scale factors.
-            extra_prognostic_names: Names of prognostics to include in the loss
-                normalizer. These may use residual scale factors.
+            extra_names: Names of additional variables to include in the
+                loss normalizer.
+            extra_residual_scaled_names: extra_names which use residual scale factors,
+                if enabled.
         """
+        if self.config is not None:
+            if extra_names is None:
+                extra_names = []
+            else:
+                extra_names = list(extra_names)  # avoid mutating input
+            if extra_residual_scaled_names is None:
+                extra_residual_scaled_names = []
+            else:
+                extra_residual_scaled_names = list(extra_residual_scaled_names)
+            for output_name in self.config.output_names:
+                for name in self.config.get_multi_called_names(output_name):
+                    extra_names.append(name)
+                    if output_name in self.wrapped_step.input_names:
+                        extra_residual_scaled_names.append(name)
         return self.wrapped_step.get_loss_normalizer(
-            extra_diagnostic_names=extra_diagnostic_names,
-            extra_prognostic_names=extra_prognostic_names,
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
     @property
@@ -145,12 +159,11 @@ class MultiCallStepConfig(StepConfigABC):
         return self.config.names
 
     @property
-    def forcing_names(self) -> List[str]:
-        return self.wrapped_step.forcing_names
+    def input_names(self) -> List[str]:
+        return self.wrapped_step.input_names
 
-    @property
-    def prognostic_names(self) -> List[str]:
-        return self.wrapped_step.prognostic_names
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self.wrapped_step.get_next_step_forcing_names()
 
     @property
     def output_names(self) -> List[str]:
@@ -237,10 +250,6 @@ class MultiCallStep(StepABC):
     @property
     def next_step_input_names(self) -> List[str]:
         return self._wrapped_step.next_step_input_names
-
-    @property
-    def next_step_forcing_names(self) -> List[str]:
-        return self._wrapped_step.next_step_forcing_names
 
     @property
     def surface_temperature_name(self) -> Optional[str]:

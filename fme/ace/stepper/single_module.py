@@ -165,9 +165,9 @@ class SingleModuleStepperConfig:
         self, n_forward_steps: int
     ) -> DataRequirements:
         if self.ocean is None:
-            names = self.forcing_names
+            names = self.input_only_names
         else:
-            names = list(set(self.forcing_names).union(self.ocean.forcing_names))
+            names = list(set(self.input_only_names).union(self.ocean.forcing_names))
 
         return DataRequirements(
             names=names,
@@ -227,6 +227,14 @@ class SingleModuleStepperConfig:
         )
 
     @property
+    def input_names(self) -> List[str]:
+        return self.in_names
+
+    @property
+    def output_names(self) -> List[str]:
+        return self.out_names
+
+    @property
     def all_names(self):
         """Names of all variables required, including auxiliary ones."""
         extra_names = []
@@ -246,7 +254,7 @@ class SingleModuleStepperConfig:
         return list(set(self.in_names).union(self.out_names).union(extra_names))
 
     @property
-    def forcing_names(self) -> List[str]:
+    def input_only_names(self) -> List[str]:
         """Names of variables which are inputs only."""
         return list(set(self.in_names) - set(self.out_names))
 
@@ -875,6 +883,12 @@ class Stepper(
             ic_dict, forcing_dict, n_forward_steps, optimizer
         )
 
+    @property
+    def _input_only_names(self) -> List[str]:
+        return list(
+            set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
+        )
+
     def _predict_generator(
         self,
         ic_dict: TensorMapping,
@@ -890,7 +904,7 @@ class Stepper(
                     if k not in self._step_obj.next_step_forcing_names
                     else forcing_dict[k][:, step + 1]
                 )
-                for k in self._step_obj.forcing_names
+                for k in self._input_only_names
             }
             next_step_input_dict = {
                 k: forcing_dict[k][:, step + 1]
@@ -938,7 +952,7 @@ class Stepper(
             which can be used as a new initial condition.
         """
         timer = GlobalTimer.get_instance()
-        forcing_names = set(self._step_obj.forcing_names).union(
+        forcing_names = set(self._input_only_names).union(
             self._step_obj.next_step_input_names
         )
         with timer.context("forward_prediction"):
