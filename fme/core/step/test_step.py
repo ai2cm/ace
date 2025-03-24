@@ -1,5 +1,7 @@
 import dataclasses
 import datetime
+import unittest
+import unittest.mock
 from typing import List, Tuple
 
 import dacite
@@ -242,3 +244,25 @@ def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
         dacite.from_dict(config.__class__, data, config=dacite.Config(strict=True))
     assert "next_step_forcing_name" in str(err.value)
     assert name in str(err.value)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_step_applies_wrapper(config: StepSelector):
+    torch.manual_seed(0)
+    img_shape = (5, 5)
+    n_samples = 5
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    multi_calls = 1
+    if isinstance(config._step_config_instance, MultiCallStepConfig):
+        if config._step_config_instance.config is not None:
+            multi_calls += len(config._step_config_instance.config.forcing_multipliers)
+
+    wrapper = unittest.mock.MagicMock(side_effect=lambda x: x)
+    step.step(input_data, next_step_input_data, wrapper=wrapper)
+    assert wrapper.call_count == multi_calls * len(step.modules)
+    for module in step.modules:
+        wrapper.assert_any_call(module)

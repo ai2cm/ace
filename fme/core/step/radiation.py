@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -14,7 +14,7 @@ from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
-from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
+from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.step import (
@@ -49,8 +49,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
             the output timestep.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
-        activation_checkpointing: Configuration for activation checkpointing to trade
-            increased computation for lowered memory during training.
     """
 
     builder: ModuleSelector
@@ -65,9 +63,6 @@ class SeparateRadiationStepConfig(StepConfigABC):
     ocean: Optional[OceanConfig] = None
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
-    )
-    activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
-        default_factory=lambda: ActivationCheckpointingConfig()
     )
 
     def __post_init__(self):
@@ -281,7 +276,6 @@ class SeparateRadiationStep(StepABC):
         self.radiation_module = dist.wrap_module(self.radiation_module)
         self._timestep = timestep
         self._corrector = corrector
-        self._activation_checkpointing = config.activation_checkpointing
 
     @property
     def config(self) -> SeparateRadiationStepConfig:
@@ -316,7 +310,7 @@ class SeparateRadiationStep(StepABC):
         Returns:
             A list of modules being trained.
         """
-        return nn.ModuleList([self.module])
+        return nn.ModuleList([self.module, self.radiation_module])
 
     def validate_inference_data(self, data: InferenceDataProtocol):
         if self._timestep != data.timestep:
@@ -329,7 +323,7 @@ class SeparateRadiationStep(StepABC):
         self,
         input: TensorMapping,
         next_step_forcing_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -341,10 +335,7 @@ class SeparateRadiationStep(StepABC):
             next_step_forcing_data: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon]. This must contain the necessary forcing
                 data at the output timestep for the ocean model and corrector.
-            use_activation_checkpointing: If True, wrap the module call with
-                torch.utils.checkpoint.checkpoint, reducing memory consumption
-                in exchange for increased computation. This is only relevant during
-                training and otherwise has no effect.
+            wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
@@ -353,30 +344,14 @@ class SeparateRadiationStep(StepABC):
         radiation_input_tensor = self.radiation_in_packer.pack(
             input_norm, axis=self.CHANNEL_DIM
         )
-        if use_activation_checkpointing:
-            radiation_output_tensor = torch.utils.checkpoint.checkpoint(
-                self.radiation_module,
-                radiation_input_tensor,
-                use_reentrant=False,
-                **self._activation_checkpointing.kwargs,
-            )
-        else:
-            radiation_output_tensor = self.radiation_module(radiation_input_tensor)
+        radiation_output_tensor = wrapper(self.radiation_module)(radiation_input_tensor)
         radiation_output_norm = self.radiation_out_packer.unpack(
             radiation_output_tensor, axis=self.CHANNEL_DIM
         )
         input_tensor = self.in_packer.pack(
             {**input_norm, **radiation_output_norm}, axis=self.CHANNEL_DIM
         )
-        if use_activation_checkpointing:
-            output_tensor = torch.utils.checkpoint.checkpoint(
-                self.module,
-                input_tensor,
-                use_reentrant=False,
-                **self._activation_checkpointing.kwargs,
-            )
-        else:
-            output_tensor = self.module(input_tensor)
+        output_tensor = wrapper(self.module)(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})
         if self._corrector is not None:
