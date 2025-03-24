@@ -87,10 +87,10 @@ class SeparateRadiationStepConfig(StepConfigABC):
                     )
             seen_names[name] = label
         for name in self.next_step_forcing_names:
-            if name not in self.forcing_names:
+            if name not in self._forcing_names:
                 raise ValueError(
                     "next_step_forcing_name not in forcing_names: "
-                    f"'{name}' not in {self.forcing_names}"
+                    f"'{name}' not in {self._forcing_names}"
                 )
 
     @property
@@ -156,15 +156,13 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return list(all_names)
 
     @property
-    def prognostic_names(self) -> List[str]:
-        """Names of variables which both inputs and outputs."""
-        return self.main_prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
+    def _forcing_names(self) -> List[str]:
         return list(
             set(self.shared_forcing_names).union(self.radiation_only_forcing_names)
         )
+
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self.next_step_forcing_names
 
     @property
     def diagnostic_names(self) -> List[str]:
@@ -198,11 +196,15 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     @property
     def input_names(self) -> List[str]:
-        return (
+        ml_in_names = (
             self.main_prognostic_names
             + self.shared_forcing_names
             + self.radiation_only_forcing_names
         )
+        if self.ocean is None:
+            return ml_in_names
+        else:
+            return list(set(ml_in_names).union(self.ocean.forcing_names))
 
     @property
     def output_names(self) -> List[str]:
@@ -299,13 +301,10 @@ class SeparateRadiationStep(StepABC):
 
     @property
     def next_step_input_names(self) -> List[str]:
+        input_only_names = list(set(self.input_names) - set(self.output_names))
         if self.ocean is None:
-            return list(self.forcing_names)
-        return list(set(self.forcing_names).union(self.ocean.forcing_names))
-
-    @property
-    def next_step_forcing_names(self) -> List[str]:
-        return self._config.next_step_forcing_names
+            return input_only_names
+        return list(set(input_only_names).union(self.ocean.forcing_names))
 
     @property
     def normalizer(self) -> StandardNormalizer:
