@@ -25,7 +25,6 @@ from fme.ace.inference.evaluator import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
-from fme.ace.stepper.single_module import SingleModuleStep
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
@@ -36,7 +35,7 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCall, MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.ocean import Ocean, OceanConfig
+from fme.core.ocean import OceanConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -92,20 +91,17 @@ def save_plus_one_stepper(
 def validate_stepper_ocean(
     stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
 ):
-    assert isinstance(stepper._step_obj, SingleModuleStep)
-    assert stepper._step_obj._config.ocean == expected_ocean_config
+    ocean = stepper._step_obj.config.get_ocean()
+    assert ocean == expected_ocean_config
     if expected_ocean_config is not None:
-        assert isinstance(stepper._step_obj.ocean, Ocean)
+        assert isinstance(ocean, OceanConfig)
         assert (
-            stepper._step_obj.ocean.surface_temperature_name
+            ocean.surface_temperature_name
             == expected_ocean_config.surface_temperature_name
         )
-        assert (
-            stepper._step_obj.ocean.ocean_fraction_name
-            == expected_ocean_config.ocean_fraction_name
-        )
+        assert ocean.ocean_fraction_name == expected_ocean_config.ocean_fraction_name
     else:
-        assert stepper._step_obj.ocean is None
+        assert ocean is None
 
 
 def validate_stepper_multi_call(
