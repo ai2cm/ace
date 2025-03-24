@@ -114,6 +114,5 @@ def test_stepper_gradient_accumulation_integration():
         optimization=optim,
     )
 
-    # no gradients for atmos steps
-    assert atmos_module.mock_caller.call_count == 0
+    assert atmos_module.mock_caller.call_count == 4
     assert ocean_module.mock_caller.call_count == 2
