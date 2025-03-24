@@ -34,14 +34,14 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
-from fme.core.multi_call import MultiCallConfig
+from fme.core.multi_call import MultiCall, MultiCallConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
     StandardNormalizer,
 )
 from fme.core.ocean import OceanConfig
-from fme.core.optimization import ActivationCheckpointingConfig, NullOptimization
+from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import InferenceDataProtocol, StepABC
@@ -73,8 +73,6 @@ class SingleModuleStepperConfig:
         multi_call: The configuration of multi-called diagnostics.
         include_multi_call_in_loss: Whether to include multi-call diagnostics in the
             loss. The same loss configuration as specified in 'loss' is used.
-        activation_checkpointing: Configuration for activation checkpointing to trade
-            increased computation for lowered memory during training.
         crps_training: Whether to use CRPS training for stochastic models.
         residual_prediction: Whether to have ML module predict tendencies for
             prognostic variables.
@@ -99,9 +97,6 @@ class SingleModuleStepperConfig:
     residual_normalization: Optional[NormalizationConfig] = None
     multi_call: Optional[MultiCallConfig] = None
     include_multi_call_in_loss: bool = False
-    activation_checkpointing: ActivationCheckpointingConfig = dataclasses.field(
-        default_factory=lambda: ActivationCheckpointingConfig()
-    )
     crps_training: bool = False
     residual_prediction: bool = False
 
@@ -338,6 +333,8 @@ class SingleModuleStepperConfig:
                     "interpolate": state_copy["prescriber"]["interpolate"],
                 }
             del state_copy["prescriber"]
+        if "activation_checkpointing" in state_copy:
+            del state_copy["activation_checkpointing"]
         return state_copy
 
     def to_single_module_step_config(
@@ -369,7 +366,6 @@ class SingleModuleStepperConfig:
             ocean=self.ocean,
             corrector=self.corrector,
             next_step_forcing_names=self.next_step_forcing_names,
-            activation_checkpointing=self.activation_checkpointing,
             crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
@@ -705,7 +701,7 @@ class Stepper(
         )
 
         if config.multi_call is not None:
-            self._multi_call = config.multi_call.build(self.step)
+            self._multi_call: Optional[MultiCall] = config.multi_call.build(self.step)
         else:
             self._multi_call = None
 
@@ -738,8 +734,6 @@ class Stepper(
         self._multi_call_loss_obj: Optional[
             Callable[[TensorMapping, TensorMapping], torch.Tensor]
         ] = None
-
-        self._activation_checkpointing = config.activation_checkpointing
 
         _1: PredictFunction[  # for type checking
             PrognosticState,
@@ -854,7 +848,7 @@ class Stepper(
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -866,17 +860,12 @@ class Stepper(
             next_step_input_data: Mapping from variable name to tensor of shape
                 [n_batch, n_lat, n_lon] containing denormalized data from
                 the output timestep.
-            use_activation_checkpointing: If True, wrap the module call with
-                torch.utils.checkpoint.checkpoint, reducing memory consumption
-                in exchange for increased computation. This is only relevant during
-                training and otherwise has no effect.
+            wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
-        return self._step_obj.step(
-            input, next_step_input_data, use_activation_checkpointing
-        )
+        return self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
 
     def get_prediction_generator(
         self,
@@ -937,17 +926,20 @@ class Stepper(
                 for k in self._step_obj.next_step_input_names
             }
             input_data = {**state, **ml_input_forcing}
-            use_activation_checkpointing = (
-                step >= self._activation_checkpointing.after_n_forward_steps
-            )
+
+            def checkpoint(module):
+                return optimizer.checkpoint(module, step=step)
+
             state = self.step(
                 input_data,
                 next_step_input_dict,
-                use_activation_checkpointing,
+                wrapper=checkpoint,
             )
             if self._multi_call is not None:
                 multi_called_outputs = self._multi_call.step(
-                    input_data, next_step_input_dict, use_activation_checkpointing
+                    input_data,
+                    next_step_input_dict,
+                    wrapper=checkpoint,
                 )
                 state = {**multi_called_outputs, **state}
             yield state

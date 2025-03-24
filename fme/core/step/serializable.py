@@ -1,6 +1,7 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.normalizer import StandardNormalizer
@@ -74,7 +75,7 @@ class SerializableStep:
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        use_activation_checkpointing: bool = False,
+        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
     ) -> TensorDict:
         """
         Step the model forward one timestep given input data.
@@ -88,17 +89,12 @@ class SerializableStep:
                 [n_batch, n_lat, n_lon]. This must contain the necessary input
                 data at the output timestep, such as might be needed to prescribe
                 sea surface temperature or use a corrector.
-            use_activation_checkpointing: If True, wrap module calls with
-                torch.utils.checkpoint.checkpoint, reducing memory consumption
-                in exchange for increased computation. This is only relevant during
-                training and otherwise has no effect.
+            wrapper: Wrapper to apply over each nn.Module before calling.
 
         Returns:
             The denormalized output data at the next time step.
         """
-        return self._instance.step(
-            input, next_step_input_data, use_activation_checkpointing
-        )
+        return self._instance.step(input, next_step_input_data, wrapper=wrapper)
 
     def to_state(self) -> Dict[str, Any]:
         """
