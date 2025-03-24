@@ -36,7 +36,7 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
 
     @torch.no_grad()
     def record_batch(self, batch: CoupledTrainOutput):
-        self._loss += batch.metrics["loss"]
+        self._loss += batch.total_metrics["loss"]
         self._n_batches += 1
 
     @torch.no_grad()
@@ -114,9 +114,9 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self,
         batch: CoupledTrainOutput,
     ):
-        self._loss += batch.metrics["loss"]
-        self._aggregators["ocean"].record_batch(batch.ocean_data)
-        self._aggregators["atmosphere"].record_batch(batch.atmosphere_data)
+        self._loss += batch.total_metrics["loss"]
+        self._aggregators["ocean"].record_batch(batch.ocean)
+        self._aggregators["atmosphere"].record_batch(batch.atmosphere)
         self._n_batches += 1
 
     @torch.no_grad()
