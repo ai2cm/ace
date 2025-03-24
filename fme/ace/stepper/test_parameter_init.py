@@ -348,6 +348,7 @@ def test_parameter_init_with_regularizer(tmpdir):
     the distance between the weights and the original state for
     weights initialized from that state.
     """
+    torch.manual_seed(0)
     device = get_device()
     saved_module = ComplexModule(10, 20).to(device)
     weights_path = str(tmpdir / "weights.ckpt")

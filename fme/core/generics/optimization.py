@@ -56,6 +56,18 @@ class OptimizationABC(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def checkpoint(self, module: nn.Module, step: int) -> nn.Module:
+        """
+        Applies activation checkpointing to the module if configured to do so,
+        otherwise returns the module unchanged.
+
+        Args:
+            module: The module to checkpoint.
+            step: The current step number.
+        """
+        ...
+
+    @abc.abstractmethod
     def get_accumulated_loss(self) -> torch.Tensor:
         """
         Get the accumulated loss.
