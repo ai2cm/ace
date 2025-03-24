@@ -953,7 +953,7 @@ def test_train_on_batch_loss():
         data=coupled_data.data,
         optimization=NullOptimization(),
     )
-    loss = output.metrics["loss"]
+    loss = output.total_metrics["loss"]
     pred = {}
     target = {}
     for i, name in enumerate(ocean_out_names):
@@ -996,7 +996,7 @@ def test_train_on_batch_with_derived_variables():
     )
     expected_atmos_derived = ["surface_pressure_due_to_dry_air", "total_water_path"]
     for name in expected_atmos_derived:
-        assert name in output.atmosphere_data.gen_data
+        assert name in output.atmosphere.gen_data
 
 
 def test_reloaded_stepper_gives_same_prediction():
@@ -1069,50 +1069,29 @@ def test_reloaded_stepper_gives_same_prediction():
         optimization=NullOptimization(),
     )
     torch.testing.assert_close(
-        first_result.metrics["loss"], second_result.metrics["loss"]
+        first_result.total_metrics["loss"], second_result.total_metrics["loss"]
     )
-    torch.testing.assert_close(
-        first_result.metrics["loss/ocean"], second_result.metrics["loss/ocean"]
-    )
-    torch.testing.assert_close(
-        first_result.metrics["loss/ocean_step_0"],
-        second_result.metrics["loss/ocean_step_0"],
-    )
-    torch.testing.assert_close(
-        first_result.metrics["loss/ocean_step_1"],
-        second_result.metrics["loss/ocean_step_1"],
-    )
-    torch.testing.assert_close(
-        first_result.ocean_data.gen_data["o"], second_result.ocean_data.gen_data["o"]
-    )
-    torch.testing.assert_close(
-        first_result.ocean_data.gen_data["o_sfc"],
-        second_result.ocean_data.gen_data["o_sfc"],
-    )
-    torch.testing.assert_close(
-        first_result.atmosphere_data.gen_data["a"],
-        second_result.atmosphere_data.gen_data["a"],
-    )
-    torch.testing.assert_close(
-        first_result.atmosphere_data.gen_data["a_sfc"],
-        second_result.atmosphere_data.gen_data["a_sfc"],
-    )
-    torch.testing.assert_close(
-        first_result.ocean_data.target_data["o"],
-        second_result.ocean_data.target_data["o"],
-    )
-    torch.testing.assert_close(
-        first_result.ocean_data.target_data["o_sfc"],
-        second_result.ocean_data.target_data["o_sfc"],
-    )
-    torch.testing.assert_close(
-        first_result.atmosphere_data.target_data["a"],
-        second_result.atmosphere_data.target_data["a"],
-    )
-    torch.testing.assert_close(
-        first_result.atmosphere_data.target_data["a_sfc"],
-        second_result.atmosphere_data.target_data["a_sfc"],
-    )
+    for metric in ["loss/ocean", "loss/ocean_step_0", "loss/ocean_step_1"]:
+        torch.testing.assert_close(
+            first_result.ocean.metrics[metric], first_result.ocean.metrics[metric]
+        )
+    for name in ["o", "o_sfc"]:
+        torch.testing.assert_close(
+            first_result.ocean.gen_data[name], first_result.ocean.gen_data[name]
+        )
+        torch.testing.assert_close(
+            first_result.ocean.target_data[name],
+            second_result.ocean.target_data[name],
+        )
+    for name in ["a", "a_sfc"]:
+        torch.testing.assert_close(
+            first_result.atmosphere.gen_data[name],
+            second_result.atmosphere.gen_data[name],
+        )
+        torch.testing.assert_close(
+            first_result.atmosphere.target_data[name],
+            second_result.atmosphere.target_data[name],
+        )
 
 
 def test_set_train_eval():
