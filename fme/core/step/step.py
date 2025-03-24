@@ -46,17 +46,8 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def prognostic_names(self) -> List[str]:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def forcing_names(self) -> List[str]:
-        pass
-
-    @property
     def input_names(self) -> List[str]:
-        return list(set(self.prognostic_names).union(self.forcing_names))
+        pass
 
     @property
     @abc.abstractmethod
@@ -67,6 +58,11 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
+    @final
+    def prognostic_names(self) -> List[str]:
+        return list(set(self.input_names).intersection(self.output_names))
+
+    @property
     @abc.abstractmethod
     def loss_names(self) -> List[str]:
         """
@@ -75,17 +71,21 @@ class StepConfigABC(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def get_next_step_forcing_names(self) -> List[str]:
+        pass
+
+    @abc.abstractmethod
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
         """
         Args:
-            extra_diagnostic_names: Names of diagnostics to include in the loss
-                normalizer. These will generally use full-field scale factors.
-            extra_prognostic_names: Names of prognostics to include in the loss
-                normalizer. These may use residual scale factors.
+            extra_names: Names of additional variables to include in the
+                loss normalizer.
+            extra_residual_scaled_names: extra_names which use residual scale factors,
+                if enabled.
 
         Returns:
             The loss normalizer.
@@ -143,13 +143,8 @@ class StepSelector(StepConfigABC):
         """This class method is used to expose all available types of Steps."""
         return set(cls(type="", config={}).registry._types.keys())
 
-    @property
-    def prognostic_names(self) -> List[str]:
-        return self._step_config_instance.prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._step_config_instance.forcing_names
+    def get_next_step_forcing_names(self) -> List[str]:
+        return self._step_config_instance.get_next_step_forcing_names()
 
     @property
     def input_names(self) -> List[str]:
@@ -171,11 +166,12 @@ class StepSelector(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
         return self._step_config_instance.get_loss_normalizer(
-            extra_diagnostic_names, extra_prognostic_names
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
     def replace_ocean(self, ocean: Optional[OceanConfig]):
@@ -239,11 +235,6 @@ class StepABC(abc.ABC):
 
     @property
     @final
-    def forcing_names(self) -> List[str]:
-        return self.config.forcing_names
-
-    @property
-    @final
     def loss_names(self) -> List[str]:
         return self.config.loss_names
 
@@ -266,10 +257,10 @@ class StepABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
+    @final
     def next_step_forcing_names(self) -> List[str]:
         """Names of input variables which come from the output timestep."""
-        pass
+        return self.config.get_next_step_forcing_names()
 
     @property
     @abc.abstractmethod

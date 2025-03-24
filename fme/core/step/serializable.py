@@ -23,14 +23,6 @@ class SerializableStep:
         return self._instance.modules
 
     @property
-    def prognostic_names(self) -> List[str]:
-        return self._instance.prognostic_names
-
-    @property
-    def forcing_names(self) -> List[str]:
-        return self._instance.forcing_names
-
-    @property
     def input_names(self) -> List[str]:
         return self._instance.input_names
 
