@@ -285,9 +285,7 @@ class MultiCallStep(StepABC):
         return state
 
     def get_state(self) -> Dict[str, Any]:
-        return {
-            "wrapped_step": self._wrapped_step.get_state(),
-        }
+        return self._wrapped_step.get_state()
 
     def load_state(self, state: Dict[str, Any]):
-        self._wrapped_step.load_state(state["wrapped_step"])
+        self._wrapped_step.load_state(state)

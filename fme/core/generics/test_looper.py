@@ -49,7 +49,7 @@ def get_data(
 
 
 def get_scalar_data(names, value):
-    return {n: np.array([value], dtype=np.float32) for n in names}
+    return {n: value for n in names}
 
 
 class MockLoader(torch.utils.data.DataLoader):
