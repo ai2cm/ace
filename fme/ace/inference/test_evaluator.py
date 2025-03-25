@@ -4,7 +4,6 @@ import os
 import pathlib
 import tempfile
 from typing import List, Optional
-from unittest.mock import patch
 
 import dacite
 import numpy as np
@@ -35,9 +34,11 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.multi_call import MultiCall, MultiCallConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
+from fme.core.step.multi_call import MultiCallStep
+from fme.core.step.single_module import SingleModuleStep
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -101,8 +102,7 @@ def save_plus_one_stepper(
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
-        with patch("fme.ace.stepper.SingleModuleStepperConfig.load"):
-            torch.save({"stepper": stepper.get_state()}, path)
+        torch.save({"stepper": stepper.get_state()}, path)
         mean_filename.unlink()
         std_filename.unlink()
 
@@ -126,31 +126,9 @@ def validate_stepper_ocean(
 def validate_stepper_multi_call(
     stepper: Stepper, expected_multi_call_config: Optional[MultiCallConfig]
 ):
-    assert stepper._config.multi_call == expected_multi_call_config
-    if expected_multi_call_config is not None:
-        assert isinstance(stepper._multi_call, MultiCall)
-        assert (
-            stepper._multi_call.forcing_name == expected_multi_call_config.forcing_name
-        )
-        assert (
-            stepper._multi_call.forcing_multipliers
-            == expected_multi_call_config.forcing_multipliers
-        )
-        assert (
-            stepper._multi_call.output_names == expected_multi_call_config.output_names
-        )
-        expected_all_names = set(
-            expected_multi_call_config.names
-            + stepper._config.in_names
-            + stepper.out_names
-        )
-        assert set(stepper._config.all_names) == expected_all_names
-        expected_diagnostic_names = set(
-            expected_multi_call_config.names + expected_multi_call_config.output_names
-        )
-        assert set(stepper._config.diagnostic_names) == expected_diagnostic_names
-    else:
-        assert stepper._multi_call is None
+    assert isinstance(stepper._step_obj, MultiCallStep)
+    assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
+    assert stepper._step_obj._config.config == expected_multi_call_config
 
 
 def test_inference_backwards_compatibility(tmp_path: pathlib.Path):

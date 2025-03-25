@@ -128,7 +128,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
 
 
 def get_scalar_data(names, value):
-    return {n: np.array([value], dtype=np.float32) for n in names}
+    return {n: value for n in names}
 
 
 @pytest.mark.parametrize(
@@ -331,8 +331,8 @@ def test_train_on_batch_with_prescribed_ocean():
     data.data["mask"][:] = 0
     data.data["mask"][:, :, :, 0] = 1
     stds = {
-        "a": np.array([2.0], dtype=np.float32),
-        "b": np.array([3.0], dtype=np.float32),
+        "a": 2.0,
+        "b": 3.0,
     }
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
@@ -599,7 +599,7 @@ class Multiply(torch.nn.Module):
 @pytest.mark.parametrize(
     "global_only, terms_to_modify, force_positive",
     [
-        (True, "none", False),
+        (True, None, False),
         (True, "precipitation", False),
         (True, "evaporation", False),
         (False, "advection_and_precipitation", False),
@@ -705,7 +705,7 @@ def test_stepper_corrector(
             budget_residual, weights=area_weights, dim=[-2, -1]
         )
     budget_residual = budget_residual.cpu().numpy()
-    if terms_to_modify != "none":
+    if terms_to_modify is not None:
         if global_only:
             mean_axis: Tuple[int, ...] = (0,)
         else:
@@ -794,8 +794,8 @@ def _get_stepper(
         in_names=in_names,
         out_names=out_names,
         normalization=NormalizationConfig(
-            means={n: np.array([norm_mean], dtype=np.float32) for n in all_names},
-            stds={n: np.array([1.0], dtype=np.float32) for n in all_names},
+            means={n: norm_mean for n in all_names},
+            stds={n: 1.0 for n in all_names},
         ),
         ocean=ocean_config,
         **kwargs,
@@ -1215,8 +1215,8 @@ def get_regression_stepper_and_data():
         in_names=in_names,
         out_names=out_names,
         normalization=NormalizationConfig(
-            means={n: np.array([0.1], dtype=np.float32) for n in all_names},
-            stds={n: np.array([1.1], dtype=np.float32) for n in all_names},
+            means={n: 0.1 for n in all_names},
+            stds={n: 1.1 for n in all_names},
         ),
         ocean=None,
     )

@@ -34,7 +34,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
-from fme.core.multi_call import MultiCall, MultiCallConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
@@ -43,8 +43,9 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step.multi_call import MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import InferenceDataProtocol, StepABC
+from fme.core.step.step import InferenceDataProtocol, StepABC, StepSelector
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -190,23 +191,21 @@ class SingleModuleStepperConfig:
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
+        init_weights: bool = True,
     ):
+        """
+        Args:
+            img_shape: Shape of domain as (n_lat, n_lon).
+            gridded_operations: Gridded operations to use.
+            vertical_coordinate: Vertical coordinate to use.
+            timestep: Timestep of the model.
+            init_weights: Whether to initialize the weights. Should pass False if
+                the weights are about to be overwritten by a checkpoint.
+        """
         logging.info("Initializing stepper from provided config")
         vertical_coordinate = vertical_coordinate.to(get_device())
         derive_func = vertical_coordinate.build_derive_function(timestep)
-
-        normalizer = self.normalization.build(self.normalize_names)
-        combined_normalization_config = NetworkAndLossNormalizationConfig(
-            network=self.normalization,
-            loss=self.loss_normalization,
-            residual=self.residual_normalization,
-        )
-        loss_normalizer = combined_normalization_config.get_loss_normalizer(
-            self.normalize_names, residual_scaled_names=self.prognostic_names
-        )
-        step_config = self.to_single_module_step_config(
-            normalizer=normalizer, loss_normalizer=loss_normalizer
-        )
+        step_config = self.to_step_config()
         dataset_info = DatasetInfo(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
@@ -224,6 +223,7 @@ class SingleModuleStepperConfig:
             post_process_func=post_process_func,
             area_weighted_mean=gridded_operations.area_weighted_mean,
             derive_func=derive_func,
+            init_weights=init_weights,
         )
 
     @classmethod
@@ -337,7 +337,31 @@ class SingleModuleStepperConfig:
             del state_copy["activation_checkpointing"]
         return state_copy
 
-    def to_single_module_step_config(
+    def to_step_config(
+        self,
+        normalizer: Optional[StandardNormalizer] = None,
+        loss_normalizer: Optional[StandardNormalizer] = None,
+    ) -> StepSelector:
+        return StepSelector(
+            type="multi_call",
+            config=dataclasses.asdict(
+                MultiCallStepConfig(
+                    wrapped_step=StepSelector(
+                        type="single_module",
+                        config=dataclasses.asdict(
+                            self._to_single_module_step_config(
+                                normalizer=normalizer,
+                                loss_normalizer=loss_normalizer,
+                            )
+                        ),
+                    ),
+                    config=self.multi_call,
+                    include_multi_call_in_loss=self.include_multi_call_in_loss,
+                )
+            ),
+        )
+
+    def _to_single_module_step_config(
         self,
         normalizer: Optional[StandardNormalizer] = None,
         loss_normalizer: Optional[StandardNormalizer] = None,
@@ -369,6 +393,12 @@ class SingleModuleStepperConfig:
             crps_training=self.crps_training,
             residual_prediction=self.residual_prediction,
         )
+
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        self.multi_call = multi_call
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.ocean = ocean
 
 
 def _load_weights(path: str) -> List[Mapping[str, Any]]:
@@ -700,41 +730,6 @@ class Stepper(
             step.modules, init_weights=init_weights, load_weights=_load_weights
         )
 
-        if config.multi_call is not None:
-            self._multi_call: Optional[MultiCall] = config.multi_call.build(self.step)
-        else:
-            self._multi_call = None
-
-        def get_multi_call_loss_obj():
-            zero_loss = torch.tensor(0.0, device=get_device())
-            if self._multi_call is None:
-                return lambda x, y: zero_loss
-            if config.include_multi_call_in_loss:
-                extra_names = []
-                extra_residual_scaled_names = []
-                if config.multi_call is not None:
-                    for name in config.multi_call.names:
-                        extra_names.append(name)
-                        if name in step.input_names:  # we know it is output
-                            extra_residual_scaled_names.append(name)
-                loss_normalizer = step.get_loss_normalizer(
-                    extra_names=extra_names,
-                    extra_residual_scaled_names=extra_residual_scaled_names,
-                )
-                return config.loss.build(
-                    area_weighted_mean,
-                    out_names=self._multi_call.names,
-                    channel_dim=self.CHANNEL_DIM,
-                    normalizer=loss_normalizer,
-                )
-            else:
-                return lambda x, y: zero_loss
-
-        self._get_multi_call_loss_obj = get_multi_call_loss_obj
-        self._multi_call_loss_obj: Optional[
-            Callable[[TensorMapping, TensorMapping], torch.Tensor]
-        ] = None
-
         _1: PredictFunction[  # for type checking
             PrognosticState,
             BatchData,
@@ -754,14 +749,6 @@ class Stepper(
         if self._loss_obj is None:
             self._loss_obj = self._get_loss_obj()
         return self._loss_obj
-
-    @property
-    def multi_call_loss_obj(
-        self,
-    ) -> Callable[[TensorMapping, TensorMapping], torch.Tensor]:
-        if self._multi_call_loss_obj is None:
-            self._multi_call_loss_obj = self._get_multi_call_loss_obj()
-        return self._multi_call_loss_obj
 
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
@@ -787,6 +774,26 @@ class Stepper(
         """
         return self.loss_obj.effective_loss_scaling
 
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        """
+        Replace the MultiCall object with a new one. Note this is only
+        meant to be used at inference time and may result in the loss
+        function being unusable.
+
+        Args:
+            multi_call: The new multi_call configuration or None.
+        """
+        self._config.replace_multi_call(multi_call)
+        new_stepper: "Stepper" = self._config.get_stepper(
+            img_shape=self._dataset_info.img_shape,
+            gridded_operations=self._dataset_info.gridded_operations,
+            vertical_coordinate=self._dataset_info.vertical_coordinate,
+            timestep=self._dataset_info.timestep,
+            init_weights=False,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
+
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         """
         Replace the ocean model with a new one.
@@ -794,27 +801,16 @@ class Stepper(
         Args:
             ocean: The new ocean model configuration or None.
         """
-        step_config = self._step_obj.config
-        step_config.replace_ocean(ocean)
-        new_step_obj = step_config.get_step(self._dataset_info)
-        new_step_obj.load_state(self._step_obj.get_state())
-        self._step_obj = new_step_obj
-
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
-        """
-        Replace the MultiCall object with a new one. Note this is only
-        meant to be used at inference time and does not affect the loss
-        function.
-
-        Args:
-            multi_call: The new multi_call configuration or None.
-        """
-        self._config.multi_call = multi_call
-        if multi_call is None:
-            self._multi_call = None
-        else:
-            multi_call.validate(self._step_obj.input_names, self._step_obj.output_names)
-            self._multi_call = multi_call.build(self.step)
+        self._config.replace_ocean(ocean)
+        new_stepper: "Stepper" = self._config.get_stepper(
+            img_shape=self._dataset_info.img_shape,
+            gridded_operations=self._dataset_info.gridded_operations,
+            vertical_coordinate=self._dataset_info.vertical_coordinate,
+            timestep=self._dataset_info.timestep,
+            init_weights=False,
+        )
+        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        self._step_obj = new_stepper._step_obj
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -935,13 +931,6 @@ class Stepper(
                 next_step_input_dict,
                 wrapper=checkpoint,
             )
-            if self._multi_call is not None:
-                multi_called_outputs = self._multi_call.step(
-                    input_data,
-                    next_step_input_dict,
-                    wrapper=checkpoint,
-                )
-                state = {**multi_called_outputs, **state}
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
@@ -1191,16 +1180,6 @@ class Stepper(
                 step_loss = self.loss_obj(gen_step, target_step)
             metrics[f"loss_step_{step}"] = step_loss.detach()
 
-            if self._multi_call is not None:
-                if use_crps:
-                    mc_loss = crps_loss(
-                        gen_step, target_step, names=self._multi_call.names
-                    )
-                else:
-                    mc_loss = self.multi_call_loss_obj(gen_step, target_step)
-                step_loss = step_loss + mc_loss
-                metrics[f"loss_multi_call_step_{step}"] = mc_loss.detach()
-
             optimization.accumulate_loss(step_loss)
         return output_list
 
@@ -1295,7 +1274,7 @@ class Stepper(
             loss_normalizer = normalizer
         else:
             loss_normalizer = StandardNormalizer.from_state(loss_normalizer_config)
-        step_config = config.to_single_module_step_config(
+        step_config = config.to_step_config(
             normalizer=normalizer, loss_normalizer=loss_normalizer
         )
         dataset_info = DatasetInfo(
@@ -1383,13 +1362,13 @@ def load_stepper_config(
         logging.info(
             "Overriding training ocean configuration with a new ocean configuration."
         )
-        config.ocean = override_config.ocean
+        config.replace_ocean(override_config.ocean)
     if override_config.multi_call != "keep":
         logging.info(
             "Overriding training multi_call configuration with a new "
             "multi_call configuration."
         )
-        config.multi_call = override_config.multi_call
+        config.replace_multi_call(override_config.multi_call)
     return config
 
 
