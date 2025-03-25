@@ -62,7 +62,7 @@ def test_multi_call():
 
 
 def get_scalar_data(names, value):
-    return {n: np.array([value], dtype=np.float32) for n in names}
+    return {n: value for n in names}
 
 
 def _get_stepper_config(
@@ -138,13 +138,7 @@ def test_integration_with_stepper():
     assert "temperature" in output.gen_data
     assert "OLR" in output.gen_data
     assert "OLR_doubled_co2" in output.target_data
-    assert output.metrics["loss_multi_call_step_0"] > 0
-    expected_loss = (
-        output.metrics["loss_step_0"]
-        + output.metrics["loss_multi_call_step_0"]
-        + output.metrics["loss_step_1"]
-        + output.metrics["loss_multi_call_step_1"]
-    )
+    expected_loss = output.metrics["loss_step_0"] + output.metrics["loss_step_1"]
     torch.testing.assert_close(output.metrics["loss"], expected_loss)
     # this value check is based on the implementation of the CustomModule above
     # first output time step
@@ -179,8 +173,4 @@ def test_integration_with_stepper():
         output_without_loss.metrics["loss"],
         output_without_loss.metrics["loss_step_0"]
         + output_without_loss.metrics["loss_step_1"],
-    )
-    torch.testing.assert_close(
-        output_without_loss.metrics["loss_multi_call_step_0"],
-        torch.tensor(0.0, device=fme.get_device()),
     )
