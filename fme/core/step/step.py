@@ -203,15 +203,9 @@ class StepABC(abc.ABC):
         extra_names: Optional[List[str]] = None,
         extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
-        if extra_names is None:
-            extra_names = []
-        if extra_residual_scaled_names is None:
-            extra_residual_scaled_names = []
-        extra_diagnostic_names = list(
-            set(extra_names).difference(extra_residual_scaled_names)
-        )
         return self.config.get_loss_normalizer(
-            extra_diagnostic_names, extra_residual_scaled_names
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
     @property
