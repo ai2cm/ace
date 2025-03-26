@@ -17,6 +17,7 @@ import yaml
 
 from fme.core.optimization import NullOptimization
 from fme.core.testing.wandb import mock_wandb
+from fme.downscaling.datasets import batch_data_to_paired_batch_data
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -327,8 +328,8 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    batch.fine = {k: v for (k, v) in batch.fine.items()}
-    batch.coarse = {k: v for (k, v) in batch.coarse.items()}
+    # TODO: Remove use when dataset PR is complete
+    batch = batch_data_to_paired_batch_data(batch)
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
     assert torch.any(outputs1.prediction["x"] != outputs2.prediction["x"])

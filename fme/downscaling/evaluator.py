@@ -16,7 +16,12 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import DataLoaderConfig, GriddedData
+from fme.downscaling.datasets import (
+    BatchData,
+    DataLoaderConfig,
+    GriddedData,
+    batch_data_to_paired_batch_data,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -27,7 +32,6 @@ from fme.downscaling.models import (
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
-from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 class Evaluator:
@@ -53,19 +57,23 @@ class Evaluator:
             self.model.downscale_factor,
         )
 
+        batch: BatchData
         for batch_idx, batch in enumerate(self.data.loader):
             logging.info(f"Processing batch {batch_idx} of {len(self.data.loader)}")
-            inputs = FineResCoarseResPair(batch.fine, batch.coarse)
+            # TODO: Remove use with dataset update PR
+            inputs = batch_data_to_paired_batch_data(
+                batch, self.data.normalized_fine_topography
+            )
             with torch.no_grad():
                 logging.info("Generating predictions")
                 outputs = self.model.generate_on_batch(inputs, n_samples=self.n_samples)
                 logging.info("Recording diagnostics to aggregator")
+                # TODO: topography handling will move into batch recording
                 aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse,
+                    coarse=inputs.coarse.data,
                     area_weights=self.data.area_weights.fine.to(get_device()),
                 )
-                # TODO: write generated outputs to disk
 
         logs = aggregator.get_wandb()
         wandb = WandB.get_instance()
@@ -216,6 +224,13 @@ class EvaluatorConfig:
             train=False, requirements=self.model.data_requirements
         )
         model = self.model.build()
+        # TODO: Remove check once dataset update is complete
+        if model.config.use_fine_topography:
+            if self.data.random_subsetting_enabled:
+                raise ValueError(
+                    "Random dataset subsetting is not supported with a model that"
+                    " requires fine topography."
+                )
         return Evaluator(
             data=dataset,
             model=model,
