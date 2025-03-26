@@ -1,6 +1,8 @@
+import dataclasses
 import pathlib
 import tempfile
 
+import dacite
 import pytest
 import torch
 
@@ -10,6 +12,7 @@ from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
     StandardNormalizer,
+    _combine_normalizers,
 )
 
 
@@ -227,6 +230,56 @@ def test_combined_normalization_cannot_set_both_loss_and_residual():
             loss=network_config,
             residual=network_config,
         )
+
+
+def test_normalization_config_with_means_and_stds_round_trip():
+    config = NormalizationConfig(
+        means={"a": 1.0, "b": 2.0},
+        stds={"a": 1.0, "b": 2.0},
+    )
+    round_tripped = dacite.from_dict(
+        NormalizationConfig,
+        data=dataclasses.asdict(config),
+        config=dacite.Config(
+            strict=True,
+        ),
+    )
+    assert config == round_tripped
+
+
+def test__combine_normalizers():
+    vars = ["prog_0", "prog_1", "diag_0"]
+    full_field_normalizer = StandardNormalizer(
+        means={var: torch.rand(3) for var in vars},
+        stds={var: torch.rand(3) for var in vars},
+        fill_nans_on_normalize=True,
+        fill_nans_on_denormalize=True,
+    )
+    residual_normalizer = StandardNormalizer(
+        means={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
+        stds={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
+    )
+    combined_normalizer = _combine_normalizers(
+        override_normalizer=residual_normalizer,
+        base_normalizer=full_field_normalizer,
+    )
+    assert combined_normalizer.fill_nans_on_normalize
+    assert combined_normalizer.fill_nans_on_denormalize
+    for var in combined_normalizer.means:
+        if "prog" in var:
+            assert torch.allclose(
+                combined_normalizer.means[var], residual_normalizer.means[var]
+            )
+            assert torch.allclose(
+                combined_normalizer.stds[var], residual_normalizer.stds[var]
+            )
+        else:
+            assert torch.allclose(
+                combined_normalizer.means[var], full_field_normalizer.means[var]
+            )
+            assert torch.allclose(
+                combined_normalizer.stds[var], full_field_normalizer.stds[var]
+            )
 
 
 def test_build_from_files():

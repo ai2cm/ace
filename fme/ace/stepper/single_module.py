@@ -2,7 +2,6 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from copy import copy
 from typing import (
     Any,
     Callable,
@@ -174,6 +173,7 @@ class SingleModuleStepperConfig:
         return n_forward_steps + self.n_ic_timesteps
 
     def get_state(self):
+        self.load()
         return dataclasses.asdict(self)
 
     def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
@@ -192,7 +192,7 @@ class SingleModuleStepperConfig:
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
         init_weights: bool = True,
-    ):
+    ) -> "Stepper":
         """
         Args:
             img_shape: Shape of domain as (n_lat, n_lon).
@@ -459,27 +459,8 @@ class ExistingStepperConfig:
         vertical_coordinate,
         timestep,
     ):
-        del img_shape  # unused
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return Stepper.from_state(self._load_checkpoint()["stepper"])
-
-
-def _combine_normalizers(
-    residual_normalizer: StandardNormalizer,
-    model_normalizer: StandardNormalizer,
-) -> StandardNormalizer:
-    # Combine residual and model normalizers by overwriting the model normalizer
-    # values that are present in residual normalizer. The residual normalizer
-    # is assumed to have a subset of prognostic keys only.
-    means, stds = copy(model_normalizer.means), copy(model_normalizer.stds)
-    means.update(residual_normalizer.means)
-    stds.update(residual_normalizer.stds)
-    return StandardNormalizer(
-        means=means,
-        stds=stds,
-        fill_nans_on_normalize=model_normalizer.fill_nans_on_normalize,
-        fill_nans_on_denormalize=model_normalizer.fill_nans_on_denormalize,
-    )
 
 
 def _prepend_timesteps(
@@ -669,7 +650,7 @@ class Stepper(
         BatchData,
         PairedData,
         TrainOutput,
-    ],
+    ]
 ):
     """
     Stepper class for a single pytorch module.
@@ -692,30 +673,20 @@ class Stepper(
         Args:
             config: The configuration.
             step: The step object.
-            dataset_info: The dataset info, used for serialization.
+            dataset_info: Information about dataset used for training.
             post_process_func: Function to post-process the output of the step function.
             area_weighted_mean: Function to compute the area weighted mean of a tensor.
             derive_func: Function to compute derived variables.
             init_weights: Whether to initialize the weights of the module.
         """
+        self._config = config
         self._step_obj = step
         self._derive_func = derive_func
         self._post_process_func = post_process_func
-        self._config = config
         self._no_optimization = NullOptimization()
 
         def get_loss_obj():
-            extra_names = []
-            extra_residual_scaled_names = []
-            if config.multi_call is not None:
-                for name in config.multi_call.names:
-                    extra_names.append(name)
-                    if name in step.input_names:  # we know it is output
-                        extra_residual_scaled_names.append(name)
-            loss_normalizer = step.get_loss_normalizer(
-                extra_names=extra_names,
-                extra_residual_scaled_names=extra_residual_scaled_names,
-            )
+            loss_normalizer = step.get_loss_normalizer()
             return config.loss.build(
                 area_weighted_mean,
                 out_names=config.loss_names,
@@ -909,7 +880,7 @@ class Stepper(
     ) -> Generator[TensorDict, None, None]:
         state = {k: ic_dict[k].squeeze(self.TIME_DIM) for k in ic_dict}
         for step in range(n_forward_steps):
-            ml_input_forcing = {
+            input_forcing = {
                 k: (
                     forcing_dict[k][:, step]
                     if k not in self._step_obj.next_step_forcing_names
@@ -921,7 +892,7 @@ class Stepper(
                 k: forcing_dict[k][:, step + 1]
                 for k in self._step_obj.next_step_input_names
             }
-            input_data = {**state, **ml_input_forcing}
+            input_data = {**state, **input_forcing}
 
             def checkpoint(module):
                 return optimizer.checkpoint(module, step=step)
@@ -1179,7 +1150,6 @@ class Stepper(
             else:
                 step_loss = self.loss_obj(gen_step, target_step)
             metrics[f"loss_step_{step}"] = step_loss.detach()
-
             optimization.accumulate_loss(step_loss)
         return output_list
 
