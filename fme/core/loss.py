@@ -326,7 +326,6 @@ class WeightedMappingLossConfig:
             relative to the main loss
         weights: A dictionary of variable names with individual
             weights to apply to their normalized losses
-
     """
 
     type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "MSE"
