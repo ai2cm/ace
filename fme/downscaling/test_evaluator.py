@@ -61,6 +61,7 @@ def get_trainer_model_config(model_type: str):
             ModuleRegistrySelector(
                 "prebuilt",
                 {"module": LinearDownscaling(2, fine_img_shape=(16, 16), n_channels=2)},
+                expects_interpolated_input=False,
             ),
             loss=LossConfig("NaN"),
             in_names=["x", "y"],
@@ -85,6 +86,7 @@ def get_trainer_model_config(model_type: str):
                         n_channels=2,
                     )
                 },
+                expects_interpolated_input=False,
             ),
             loss=LossConfig("NaN"),
             in_names=["x", "y"],

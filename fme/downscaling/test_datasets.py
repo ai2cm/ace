@@ -15,8 +15,10 @@ from fme.downscaling.datasets import (
     ClosedInterval,
     DataLoaderConfig,
     HorizontalSubsetDataset,
+    PairedBatchData,
     PairedDataset,
     _spatial_subset,
+    batch_data_to_paired_batch_data,
 )
 from fme.downscaling.requirements import DataRequirements
 
@@ -254,3 +256,34 @@ def test_spatial_subset():
     assert coarse_batch["i_lon"].min() == fine_batch["i_lon"].min()
     assert coarse_batch["i_lat"].max() == torch.floor(fine_batch["i_lat"].max())
     assert coarse_batch["i_lon"].max() == torch.floor(fine_batch["i_lon"].max())
+
+
+# TODO: remove this test when the function is removed
+def test_batch_data_to_paired_batch_data():
+    batch_data = BatchData(
+        fine=random_named_tensor(["x", "y"], (2, 8, 16)),
+        coarse=random_named_tensor(["x", "y"], (2, 4, 8)),
+        times=torch.tensor([0.0, 1.0]),
+    )
+
+    paired_batch_data = batch_data_to_paired_batch_data(batch_data)
+    assert isinstance(paired_batch_data, PairedBatchData)
+    assert torch.equal(paired_batch_data.fine.data["x"], batch_data.fine["x"])
+    assert torch.equal(paired_batch_data.coarse.data["y"], batch_data.coarse["y"])
+
+    topography = torch.rand(8, 16)
+    paired_batch_data = batch_data_to_paired_batch_data(
+        batch_data, fine_topography=topography
+    )
+    assert paired_batch_data.fine.topography is not None
+    assert paired_batch_data.fine.topography.shape == (2, 8, 16)
+    assert torch.equal(paired_batch_data.fine.topography[-1], topography)
+
+    # test 2D topography input requirement
+    with pytest.raises(ValueError):
+        batch_data_to_paired_batch_data(
+            batch_data,
+            fine_topography=torch.rand(
+                4,
+            ),
+        )

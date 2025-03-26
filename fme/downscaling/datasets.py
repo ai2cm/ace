@@ -16,7 +16,7 @@ from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import Dataset, VariableMetadata
 from fme.core.dataset.getters import get_dataset
 from fme.core.dataset.xarray import DatasetProperties
-from fme.core.device import using_gpu
+from fme.core.device import get_device, move_tensordict_to_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.requirements import DataRequirements
@@ -27,7 +27,7 @@ def squeeze_time_dim(x: TensorMapping) -> TensorMapping:
     return {k: v.squeeze(dim=-3) for k, v in x.items()}  # (b, t=1, h, w) -> (b, h, w)
 
 
-def get_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
+def get_normalized_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
     """
     Load the topography data from the specified path and return the normalized
     height of the topography values.
@@ -40,7 +40,7 @@ def get_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
         The normalized height of the topography of shape (latitude, longitude).
     """
     topography_name = "HGTsfc"
-    dataset = get_dataset(configs, [topography_name], n_timesteps=1)
+    dataset, _ = get_dataset(configs, [topography_name], n_timesteps=1)
     example, _ = dataset[0]
     topography = example[topography_name]
     topography = topography.squeeze()
@@ -340,8 +340,66 @@ class HorizontalSubsetDataset(Dataset):
 
 
 @dataclasses.dataclass
+class SingleResBatchData:
+    """
+    A temporary container for topography data until dataset changes are merged.
+    """
+
+    data: TensorMapping
+    topography: Optional[torch.Tensor] = None
+
+    def to_device(self) -> "SingleResBatchData":
+        return SingleResBatchData(
+            data=move_tensordict_to_device(self.data),
+            topography=self.topography.to(get_device())
+            if self.topography is not None
+            else None,
+        )
+
+
+@dataclasses.dataclass
+class PairedBatchData:
+    """
+    A temporary container for paired fine/coarse data until dataset changes are merged.
+    """
+
+    fine: SingleResBatchData
+    coarse: SingleResBatchData
+
+    def to_device(self) -> "PairedBatchData":
+        return PairedBatchData(
+            fine=self.fine.to_device(),
+            coarse=self.coarse.to_device(),
+        )
+
+
+# TODO: Remove with dataset update PR
+def batch_data_to_paired_batch_data(
+    batch: BatchData,
+    fine_topography: Optional[torch.Tensor] = None,
+) -> PairedBatchData:
+    """
+    Convert a BatchData object to a PairedBatchData object. This is a another temporary
+    code to facilitate the transition to the new dataset in a follow-on PR.
+    """
+    batch_size = next(iter(batch.fine.values())).shape[0]
+    if fine_topography is not None:
+        if fine_topography.dim() != 2:
+            raise ValueError(
+                "Expected fine_topography to have 2 dimensions, "
+                f"got {fine_topography.dim()}"
+            )
+        fine_topography = fine_topography.expand(batch_size, -1, -1)
+    return PairedBatchData(
+        fine=SingleResBatchData(batch.fine, fine_topography),
+        coarse=SingleResBatchData(batch.coarse),
+    )
+
+
+@dataclasses.dataclass
 class GriddedData:
     loader: torch.utils.data.DataLoader
+    normalized_fine_topography: Optional[torch.Tensor]
     area_weights: FineResCoarseResPair[torch.Tensor]
     horizontal_coordinates: FineResCoarseResPair[HorizontalCoordinates]
     img_shape: FineResCoarseResPair[Tuple[int, int]]
@@ -384,6 +442,10 @@ class DataLoaderConfig:
             )
 
         return dataset
+
+    @property
+    def random_subsetting_enabled(self) -> bool:
+        return self.coarse_lat_extent is not None or self.coarse_lon_extent is not None
 
     def build(
         self,
@@ -471,6 +533,10 @@ class DataLoaderConfig:
             fine=dataset_fine_subset.horizontal_coordinates,
             coarse=dataset_coarse_subset.horizontal_coordinates,
         )
+        if requirements.use_fine_topography:
+            fine_topography = get_normalized_topography(self.fine)
+        else:
+            fine_topography = None
 
         example_fine, example_coarse, _ = dataset[0]
         fine_shape = next(iter(example_fine.values())).shape[-2:]
@@ -501,9 +567,10 @@ class DataLoaderConfig:
         }
 
         return GriddedData(
-            dataloader,
-            area_weights,
-            horizontal_coordinates,
-            img_shape,
-            variable_metadata,
+            loader=dataloader,
+            normalized_fine_topography=fine_topography,
+            area_weights=area_weights,
+            horizontal_coordinates=horizontal_coordinates,
+            img_shape=img_shape,
+            variable_metadata=variable_metadata,
         )

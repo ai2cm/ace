@@ -11,23 +11,26 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.device import get_device, move_tensordict_to_device
+from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
+from fme.downscaling.datasets import (
+    BatchData,
+    DataLoaderConfig,
+    GriddedData,
+    batch_data_to_paired_batch_data,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
 )
-from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -137,16 +140,16 @@ class Trainer:
         batch: BatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
-            inputs = FineResCoarseResPair[TensorMapping](
-                move_tensordict_to_device(batch.fine),
-                move_tensordict_to_device(batch.coarse),
+            # TODO: Remove with dataset update
+            inputs = batch_data_to_paired_batch_data(
+                batch, self.train_data.normalized_fine_topography
             )
             outputs = self.model.train_on_batch(inputs, self.optimization)
             self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse,
+                    coarse=inputs.coarse.data,
                     area_weights=self.train_data.area_weights.fine.to(get_device()),
                 )
                 wandb.log(
@@ -204,17 +207,16 @@ class Trainer:
             )
             batch: BatchData
             for batch in self.validation_data.loader:
-                fine, coarse = (
-                    move_tensordict_to_device(batch.fine),
-                    move_tensordict_to_device(batch.coarse),
+                # TODO: Remove with dataset update
+                inputs = batch_data_to_paired_batch_data(
+                    batch, self.validation_data.normalized_fine_topography
                 )
-                inputs = FineResCoarseResPair[TensorMapping](fine, coarse)
 
                 outputs = self.model.train_on_batch(inputs, self.null_optimization)
                 area_weights = self.validation_data.area_weights.fine.to(get_device())
                 validation_aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse,
+                    coarse=batch.coarse,
                     area_weights=area_weights,
                 )
                 generated_outputs = self.model.generate_on_batch(
@@ -222,7 +224,7 @@ class Trainer:
                 )
                 generation_aggregator.record_batch(
                     outputs=generated_outputs,
-                    coarse=inputs.coarse,
+                    coarse=inputs.coarse.data,
                     area_weights=area_weights,
                 )
 
@@ -313,6 +315,18 @@ class TrainerConfig:
     generate_n_samples: int = 1
     segment_epochs: Optional[int] = None
     validate_interval: int = 1
+
+    # TODO: Remove check once dataset update PR is complete
+    def __post_init__(self):
+        if self.model.use_fine_topography:
+            if (
+                self.train_data.random_subsetting_enabled
+                or self.validation_data.random_subsetting_enabled
+            ):
+                raise ValueError(
+                    "Fine topography cannot currently be used with random subsetting"
+                    " enabled during training or validation."
+                )
 
     @property
     def checkpoint_dir(self) -> str:

@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from typing import Any, List, Mapping, Tuple, Union
+from typing import Any, List, Mapping, Optional, Tuple, Union
 
 import dacite
 import torch
@@ -12,6 +12,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.downscaling.datasets import PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -64,6 +65,15 @@ class DownscalingModelConfig:
     in_names: List[str]
     out_names: List[str]
     normalization: PairedNormalizationConfig
+    use_fine_topography: bool = False
+
+    def __post_init__(self):
+        self._interpolate_input = self.module.expects_interpolated_input
+        if self.use_fine_topography and not self._interpolate_input:
+            raise ValueError(
+                "Fine topography can only be used when predicting on interpolated"
+                " coarse input"
+            )
 
     def build(
         self,
@@ -72,8 +82,13 @@ class DownscalingModelConfig:
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
         loss = self.loss.build(reduction="mean")
+        n_in_channels = len(self.in_names)
+
+        if self.use_fine_topography:
+            n_in_channels += 1
+
         module = self.module.build(
-            n_in_channels=len(self.in_names),
+            n_in_channels=n_in_channels,
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
@@ -82,8 +97,6 @@ class DownscalingModelConfig:
             module,
             normalizer,
             loss,
-            self.in_names,
-            self.out_names,
             coarse_shape,
             downscale_factor,
             self,
@@ -100,10 +113,12 @@ class DownscalingModelConfig:
 
     @property
     def data_requirements(self) -> DataRequirements:
+        # Requires output names in coarse for aggregators checking relative measures
         return DataRequirements(
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
+            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -113,8 +128,6 @@ class Model:
         module: torch.nn.Module,
         normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
-        in_names: List[str],
-        out_names: List[str],
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
         config: DownscalingModelConfig,
@@ -125,10 +138,11 @@ class Model:
         self.module = dist.wrap_module(module.to(get_device()))
         self.normalizer = normalizer
         self.loss = loss
-        self.in_packer = Packer(in_names)
-        self.out_packer = Packer(out_names)
+        self.in_packer = Packer(config.in_names)
+        self.out_packer = Packer(config.out_names)
         self.config = config
         self.null_optimization = NullOptimization()
+        self._channel_axis = -3
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -140,7 +154,7 @@ class Model:
 
     def train_on_batch(
         self,
-        batch: FineResCoarseResPair[TensorMapping],
+        batch: PairedBatchData,
         optimization: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         result = self._run_on_batch(batch, optimization)
@@ -150,7 +164,7 @@ class Model:
 
     def generate_on_batch(
         self,
-        batch: FineResCoarseResPair[TensorMapping],
+        batch: PairedBatchData,
         n_samples: int = 1,
     ) -> ModelOutputs:
         if n_samples != 1:
@@ -162,27 +176,40 @@ class Model:
 
     def _run_on_batch(
         self,
-        batch: FineResCoarseResPair[TensorMapping],
+        batch: PairedBatchData,
         optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
-        channel_axis = -3
-        coarse, fine = (
-            _tensor_mapping_to_device(batch.coarse, get_device()),
-            _tensor_mapping_to_device(batch.fine, get_device()),
+        coarse, fine = batch.coarse.data, batch.fine.data
+
+        coarse_inputs = filter_tensor_mapping(coarse, self.in_packer.names)
+        coarse_norm = self.in_packer.pack(
+            self.normalizer.coarse.normalize(coarse_inputs), axis=self._channel_axis
         )
-        inputs_norm = self.in_packer.pack(
-            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
-        )
+        interpolated = interpolate(coarse_norm, self.downscale_factor)
+
+        if self.config.use_fine_topography:
+            if batch.fine.topography is None:
+                raise ValueError(
+                    "Topography must be provided for each batch when use of fine "
+                    "topography is enabled."
+                )
+
+            # Join the normalized topography to the input (see dataset for details)
+            topo = batch.fine.topography.unsqueeze(self._channel_axis)
+            coarse_norm = torch.concat([interpolated, topo], axis=self._channel_axis)
+        elif self.config._interpolate_input:
+            coarse_norm = interpolated
+
         targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
-        predicted_norm = self.module(inputs_norm)
+        predicted_norm = self.module(coarse_norm)
         loss = self.loss(predicted_norm, targets_norm)
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
-        target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        target = filter_tensor_mapping(fine, set(self.out_packer.names))
         prediction = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(predicted_norm, axis=channel_axis)
+            self.out_packer.unpack(predicted_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
             prediction=prediction, target=target, loss=loss, latent_steps=[]
@@ -228,7 +255,8 @@ class DiffusionModelConfig:
         sigma_min: Min noise level for generation.
         sigma_max: Max noise level for generation.
         churn: The amount of stochasticity during generation.
-        num_diffusion_generation_steps: Number of diffusion generation steps.
+        num_diffusion_generation_steps: Number of diffusion generation steps
+        use_fine_topography: Whether to use fine topography in the model.
     """
 
     module: DiffusionModuleRegistrySelector
@@ -243,6 +271,15 @@ class DiffusionModelConfig:
     churn: float
     num_diffusion_generation_steps: int
     predict_residual: bool
+    use_fine_topography: bool = False
+
+    def __post_init__(self):
+        self._interpolate_input = self.module.expects_interpolated_input
+        if self.use_fine_topography and not self._interpolate_input:
+            raise ValueError(
+                "Fine topography can only be used when predicting on interpolated"
+                " coarse input"
+            )
 
     def build(
         self,
@@ -256,8 +293,14 @@ class DiffusionModelConfig:
         # https://en.wikipedia.org/wiki/Standard_score
         sigma_data = 1.0
 
+        n_in_channels = len(self.in_names)
+        # fine topography is already normalized and at fine scale, so needs
+        # some special handling for now
+        if self.use_fine_topography:
+            n_in_channels += 1
+
         module = self.module.build(
-            n_in_channels=len(self.in_names),
+            n_in_channels=n_in_channels,
             n_out_channels=len(self.out_names),
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
@@ -284,10 +327,12 @@ class DiffusionModelConfig:
 
     @property
     def data_requirements(self) -> DataRequirements:
+        # Requires output names in coarse for aggregators checking relative measures
         return DataRequirements(
             fine_names=self.out_names,
             coarse_names=list(set(self.in_names).union(self.out_names)),
             n_timesteps=1,
+            use_fine_topography=self.use_fine_topography,
         )
 
 
@@ -346,28 +391,45 @@ class DiffusionModel:
         self.in_packer = Packer(config.in_names)
         self.out_packer = Packer(config.out_names)
         self.config = config
+        self._channel_axis = -3
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
 
+    def _get_input_from_coarse(
+        self, coarse: TensorMapping, topography: Optional[torch.Tensor]
+    ) -> TensorMapping:
+        inputs = filter_tensor_mapping(coarse, self.in_packer.names)
+        normalized = self.in_packer.pack(
+            self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
+        )
+        interpolated = interpolate(normalized, self.downscale_factor)
+
+        if self.config.use_fine_topography:
+            if topography is None:
+                raise ValueError(
+                    "Topography must be provided for each batch when use of fine "
+                    "topography is enabled."
+                )
+            # Join the normalized topography to the input (see dataset for details)
+            topo = topography.unsqueeze(self._channel_axis)
+            interpolated = torch.concat([interpolated, topo], axis=self._channel_axis)
+
+        if self.config._interpolate_input:
+            return interpolated
+        return normalized
+
     def train_on_batch(
         self,
-        batch: FineResCoarseResPair[TensorMapping],
+        batch: PairedBatchData,
         optimizer: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
-        channel_axis = -3
-        coarse, fine = (
-            _tensor_mapping_to_device(batch.coarse, get_device()),
-            _tensor_mapping_to_device(batch.fine, get_device()),
-        )
-        coarse_input = {k: v for k, v in coarse.items() if k in self.in_packer.names}
-        coarse_norm = self.in_packer.pack(
-            self.normalizer.coarse.normalize(coarse_input), axis=channel_axis
-        )
+        coarse, fine = batch.coarse.data, batch.fine.data
+        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
         targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
 
         rnd_normal = torch.randn(
@@ -386,14 +448,14 @@ class DiffusionModel:
                     self.normalizer.coarse.normalize(
                         {k: coarse[k] for k in self.out_packer.names}
                     ),
-                    axis=channel_axis,
+                    axis=self._channel_axis,
                 ),
                 self.downscale_factor,
             )
             targets_norm = targets_norm - base_prediction
             latents = latents - base_prediction
 
-        denoised_norm = self.module(latents, coarse_norm, sigma)
+        denoised_norm = self.module(latents, inputs_, sigma)
         loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
@@ -401,10 +463,10 @@ class DiffusionModel:
         if self.config.predict_residual:
             denoised_norm = denoised_norm + base_prediction
 
-        target = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        target = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         denoised_norm = denoised_norm.unsqueeze(1)
         denoised = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(denoised_norm, axis=channel_axis)
+            self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
         return ModelOutputs(
             prediction=denoised, target=target, loss=loss, latent_steps=[]
@@ -413,24 +475,18 @@ class DiffusionModel:
     @torch.no_grad()
     def generate_on_batch(
         self,
-        batch: FineResCoarseResPair[TensorMapping],
+        batch: PairedBatchData,
         n_samples: int = 1,
     ) -> ModelOutputs:
-        channel_axis = -3
-        coarse, fine = (
-            _tensor_mapping_to_device(batch.coarse, get_device()),
-            _tensor_mapping_to_device(batch.fine, get_device()),
-        )
+        coarse, fine = batch.coarse.data, batch.fine.data
+        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
 
-        coarse_norm = self.in_packer.pack(
-            self.normalizer.coarse.normalize(dict(coarse)), axis=channel_axis
-        )
         targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=channel_axis
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
 
         n_batch = targets_norm.shape[0]
-        coarse_norm = _repeat_batch_by_samples(coarse_norm, n_samples)
+        inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
         targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
         latents = torch.randn_like(targets_norm)
 
@@ -438,7 +494,7 @@ class DiffusionModel:
         samples_norm, latent_steps = edm_sampler(
             self.module,
             latents,
-            coarse_norm,
+            inputs_,
             S_churn=self.config.churn,
             sigma_min=self.config.sigma_min,
             sigma_max=self.config.sigma_max,
@@ -452,7 +508,7 @@ class DiffusionModel:
                     self.normalizer.coarse.normalize(
                         {k: coarse[k] for k in self.out_packer.names}
                     ),
-                    axis=channel_axis,
+                    axis=self._channel_axis,
                 ),
                 self.downscale_factor,
             )
@@ -464,9 +520,9 @@ class DiffusionModel:
             samples_norm, n_batch, n_samples
         )
         samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm_reshaped, axis=channel_axis)
+            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
         )
-        targets = filter_tensor_mapping(batch.fine, set(self.out_packer.names))
+        targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
 
         return ModelOutputs(
             prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
