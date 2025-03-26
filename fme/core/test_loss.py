@@ -3,7 +3,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
     GlobalMeanLoss,
@@ -194,7 +194,8 @@ def test_WeightedMappingLossConfig_no_weights():
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
-    area_weighted_mean = LatLonOperations(area).area_weighted_mean
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+    area_weighted_mean = gridded_operations.area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
     loss = loss_config.build(reduction="mean", area_weighted_mean=area_weighted_mean)
     normalizer = StandardNormalizer(
@@ -202,7 +203,7 @@ def test_WeightedMappingLossConfig_no_weights():
         stds={name: torch.as_tensor(1.0) for name in out_names},
     )
     mapping_loss = mapping_loss_config.build(
-        area_weighted_mean,
+        gridded_operations,
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
@@ -228,8 +229,11 @@ def test_WeightedMappingLossConfig_weights():
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
     )
+
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+
     mapping_loss = mapping_loss_config.build(
-        LatLonOperations(area).area_weighted_mean,
+        gridded_operations,
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,

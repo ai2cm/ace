@@ -221,7 +221,6 @@ class SingleModuleStepperConfig:
             step=step,
             dataset_info=dataset_info,
             post_process_func=post_process_func,
-            area_weighted_mean=gridded_operations.area_weighted_mean,
             derive_func=derive_func,
             init_weights=init_weights,
         )
@@ -665,7 +664,6 @@ class Stepper(
         step: StepABC,
         dataset_info: DatasetInfo,
         post_process_func: Callable[[TensorMapping], TensorDict],
-        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         init_weights: bool = True,
     ):
@@ -675,7 +673,6 @@ class Stepper(
             step: The step object.
             dataset_info: Information about dataset used for training.
             post_process_func: Function to post-process the output of the step function.
-            area_weighted_mean: Function to compute the area weighted mean of a tensor.
             derive_func: Function to compute derived variables.
             init_weights: Whether to initialize the weights of the module.
         """
@@ -688,7 +685,7 @@ class Stepper(
         def get_loss_obj():
             loss_normalizer = step.get_loss_normalizer()
             return config.loss.build(
-                area_weighted_mean,
+                dataset_info.gridded_operations,
                 out_names=config.loss_names,
                 channel_dim=self.CHANNEL_DIM,
                 normalizer=loss_normalizer,
@@ -1230,8 +1227,6 @@ class Stepper(
                 state["gridded_operations"]
             )
 
-        area_weighted_mean = gridded_operations.area_weighted_mean
-
         normalizer = StandardNormalizer.from_state(
             state.get("normalizer", state.get("normalization", None))
         )
@@ -1262,7 +1257,6 @@ class Stepper(
             config=config,
             step=step,
             dataset_info=dataset_info,
-            area_weighted_mean=area_weighted_mean,
             post_process_func=post_process_func,
             derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
