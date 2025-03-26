@@ -28,7 +28,6 @@ from fme.ace.stepper.single_module import (
     Stepper,
     StepperOverrideConfig,
     TrainOutput,
-    _combine_normalizers,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
@@ -48,7 +47,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.multi_call import MultiCallConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
+from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig, SlabOceanConfig
 from fme.core.optimization import (
     CheckpointConfig,
@@ -58,7 +57,6 @@ from fme.core.optimization import (
 )
 from fme.core.registry.module import ModuleSelector
 from fme.core.testing.regression import validate_tensor_dict
-from fme.core.typing_ import TensorDict
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -442,7 +440,7 @@ class ReturnZerosModule(torch.nn.Module):
 
 
 def _setup_and_train_on_batch(
-    data: TensorDict,
+    data: BatchData,
     in_names,
     out_names,
     ocean_config: Optional[OceanConfig],
@@ -1011,41 +1009,6 @@ def test_prepend_initial_condition():
     for v in ["a", "b"]:
         assert torch.allclose(prepended.gen_data[v][:, :1], ic_data[v])
         assert torch.allclose(prepended.target_data[v][:, :1], ic_data[v])
-
-
-def test__combine_normalizers():
-    vars = ["prog_0", "prog_1", "diag_0"]
-    full_field_normalizer = StandardNormalizer(
-        means={var: torch.rand(3) for var in vars},
-        stds={var: torch.rand(3) for var in vars},
-        fill_nans_on_normalize=True,
-        fill_nans_on_denormalize=True,
-    )
-    residual_normalizer = StandardNormalizer(
-        means={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
-        stds={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
-    )
-    combined_normalizer = _combine_normalizers(
-        residual_normalizer=residual_normalizer,
-        model_normalizer=full_field_normalizer,
-    )
-    assert combined_normalizer.fill_nans_on_normalize
-    assert combined_normalizer.fill_nans_on_denormalize
-    for var in combined_normalizer.means:
-        if "prog" in var:
-            assert torch.allclose(
-                combined_normalizer.means[var], residual_normalizer.means[var]
-            )
-            assert torch.allclose(
-                combined_normalizer.stds[var], residual_normalizer.stds[var]
-            )
-        else:
-            assert torch.allclose(
-                combined_normalizer.means[var], full_field_normalizer.means[var]
-            )
-            assert torch.allclose(
-                combined_normalizer.stds[var], full_field_normalizer.stds[var]
-            )
 
 
 def test_stepper_from_state_using_resnorm_has_correct_normalizer():

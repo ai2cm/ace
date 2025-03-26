@@ -129,16 +129,6 @@ class StepSelector(StepConfigABC):
     ) -> "StepABC":
         return self._step_config_instance.get_step(dataset_info)
 
-    def get_state(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "config": self.config,
-        }
-
-    @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "StepSelector":
-        return cls(type=state["type"], config=state["config"])
-
     @classmethod
     def get_available_types(cls) -> Set[str]:
         """This class method is used to expose all available types of Steps."""

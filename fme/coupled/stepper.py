@@ -66,7 +66,7 @@ class ComponentConfig:
         timedelta: An ISO 8601 Duration string specifying the size of this component's
             stepper step.
         stepper: The single module stepper configuration for this component.
-
+        loss_contributions: The loss contributions configuration for this component.
     """
 
     timedelta: str
@@ -306,7 +306,7 @@ class CoupledStepperConfig:
         ocean_diags_as_atmos_forcings = list(
             set(self.atmosphere.stepper.input_only_names)
             .intersection(self.ocean.stepper.output_names)
-            .difference(self.ocean.stepper.in_names)
+            .difference(self.ocean.stepper.input_names)
         )
         if len(ocean_diags_as_atmos_forcings) > 0:
             raise ValueError(
