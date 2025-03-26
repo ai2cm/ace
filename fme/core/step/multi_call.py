@@ -109,13 +109,6 @@ class MultiCallStepConfig(StepConfigABC):
         else:
             return _extend_normalizer_with_multi_call_outputs(self.config, normalizer)
 
-    @property
-    def multi_call_output_names(self) -> List[str]:
-        if self.config is None:
-            return []
-        else:
-            return self.config.output_names
-
     def get_loss_normalizer(
         self,
         extra_names: Optional[List[str]] = None,
@@ -285,7 +278,21 @@ class MultiCallStep(StepABC):
         return state
 
     def get_state(self) -> Dict[str, Any]:
+        """
+        Get the ML model state of the multi-call step.
+
+        Returns:
+            The ML model state of the multi-call step.
+        """
         return self._wrapped_step.get_state()
 
     def load_state(self, state: Dict[str, Any]):
+        """
+        Load the ML model state of the multi-call step.
+
+        Does not load the multi-call configuration.
+
+        Args:
+            state: The ML model state of the multi-call step.
+        """
         self._wrapped_step.load_state(state)

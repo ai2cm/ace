@@ -16,9 +16,8 @@ from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig
-from fme.core.step.serializable import SerializableStep
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import StepSelector
+from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
@@ -174,7 +173,7 @@ def get_tensor_dict(
     return data_dict
 
 
-def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> SerializableStep:
+def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> StepABC:
     device = fme.get_device()
     area = torch.ones(img_shape, device=device)
     vertical_coordinate = HybridSigmaPressureCoordinate(
@@ -186,26 +185,7 @@ def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> Serializable
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    return SerializableStep(selector, dataset_info)
-
-
-@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
-def test_reloaded_step_gives_same_prediction(config: StepSelector):
-    torch.manual_seed(0)
-    img_shape = (5, 5)
-    n_samples = 5
-    step = get_step(config, img_shape)
-    new_step = SerializableStep.from_state(step.to_state())
-    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
-    next_step_input_data = get_tensor_dict(
-        step.next_step_input_names, img_shape, n_samples
-    )
-    first_result = step.step(input_data, next_step_input_data)
-    second_result = new_step.step(input_data, next_step_input_data)
-    assert set(first_result.keys()) == set(step.output_names)
-    assert set(second_result.keys()) == set(step.output_names)
-    for k in first_result:
-        torch.testing.assert_close(first_result[k], second_result[k])
+    return selector.get_step(dataset_info)
 
 
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
