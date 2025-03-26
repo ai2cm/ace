@@ -20,8 +20,10 @@ def test_UNetDiffusionModule_forward_pass():
     )
 
     batch_size = 1
-    coarse = torch.randn(batch_size, n_channels, *coarse_shape)
+    conditioning = torch.randn(batch_size, n_channels, *fine_shape)
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise = torch.randn(batch_size, 1, 1, 1)
 
-    assert (batch_size, n_channels, *fine_shape) == module(latent, coarse, noise).shape
+    assert (batch_size, n_channels, *fine_shape) == module(
+        latent, conditioning, noise
+    ).shape

@@ -34,10 +34,11 @@ def test_diffusion_unet_shapes():
     )
 
     batch_size = 2
-    coarse = torch.randn(batch_size, n_channels, *coarse_shape)
+    # models expect interpolated data, so use fine_shape for inputs
+    input = torch.randn(batch_size, n_channels, *fine_shape)
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise_level = torch.randn(batch_size, 1, 1, 1)
-    outputs = unet(latent, coarse, noise_level)
+    outputs = unet(latent, input, noise_level)
 
     assert (batch_size, n_channels, *fine_shape) == outputs.shape
 
@@ -69,8 +70,9 @@ def test_diffusion_invalid_shapes():
     )
 
     batch_size = 2
-    coarse = torch.randn(batch_size, n_channels, *coarse_shape)
+    # models expect interpolated data, so use fine_shape for inputs
+    input = torch.randn(batch_size, n_channels, *fine_shape)
     latent = torch.randn(batch_size, n_channels, *fine_shape)
     noise_level = torch.randn(batch_size, 1, 1, 1)
     with pytest.raises(NonDivisibleShapeError):
-        unet(latent, coarse, noise_level)
+        unet(latent, input, noise_level)
