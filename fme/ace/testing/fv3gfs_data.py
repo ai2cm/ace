@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import Any, List, Optional, Sequence, Tuple
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 import cftime
 import numpy as np
@@ -281,7 +281,7 @@ def get_nd_dataset(
 
 
 def get_scalar_dataset(
-    variable_names: Sequence[str],
+    variable_names: Iterable[str],
     fill_value: Optional[float] = None,
 ):
     data_vars = {}

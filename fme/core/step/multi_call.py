@@ -176,9 +176,15 @@ class MultiCallStepConfig(StepConfigABC):
     def get_ocean(self) -> Optional[OceanConfig]:
         return self.wrapped_step.get_ocean()
 
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        self.config = multi_call
+
     @property
     def n_ic_timesteps(self) -> int:
         return self.wrapped_step.n_ic_timesteps
+
+    def load(self):
+        self.wrapped_step.load()
 
 
 def _extend_normalizer_with_multi_call_outputs(
@@ -284,7 +290,9 @@ class MultiCallStep(StepABC):
         Returns:
             The ML model state of the multi-call step.
         """
-        return self._wrapped_step.get_state()
+        return {
+            "wrapped_step": self._wrapped_step.get_state(),
+        }
 
     def load_state(self, state: Dict[str, Any]):
         """
@@ -295,4 +303,4 @@ class MultiCallStep(StepABC):
         Args:
             state: The ML model state of the multi-call step.
         """
-        self._wrapped_step.load_state(state)
+        self._wrapped_step.load_state(state["wrapped_step"])

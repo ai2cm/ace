@@ -12,6 +12,7 @@ from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
+from fme.ace.stepper.single_module import StepperConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -105,7 +106,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig]
+    stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig, StepperConfig]
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int

@@ -219,6 +219,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_ocean(self) -> Optional[OceanConfig]:
         return self.ocean
 
+    def load(self):
+        self.normalization.load()
+
 
 class SeparateRadiationStep(StepABC):
     """

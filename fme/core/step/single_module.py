@@ -42,7 +42,6 @@ class SingleModuleStepConfig(StepConfigABC):
         in_names: Names of input variables.
         out_names: Names of output variables.
         normalization: The normalization configuration.
-        parameter_init: The parameter initialization configuration.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
@@ -169,6 +168,9 @@ class SingleModuleStepConfig(StepConfigABC):
             normalizer=normalizer,
             timestep=dataset_info.timestep,
         )
+
+    def load(self):
+        self.normalization.load()
 
 
 class SingleModuleStep(StepABC):

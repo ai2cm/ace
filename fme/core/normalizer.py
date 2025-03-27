@@ -328,3 +328,10 @@ class NetworkAndLossNormalizationConfig:
             )
         else:
             return self.network.build(names=names)
+
+    def load(self):
+        self.network.load()
+        if self.loss is not None:
+            self.loss.load()
+        if self.residual is not None:
+            self.residual.load()

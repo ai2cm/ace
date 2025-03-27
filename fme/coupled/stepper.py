@@ -11,6 +11,7 @@ from typing import (
     Literal,
     Optional,
     Tuple,
+    Union,
 )
 
 import dacite
@@ -22,13 +23,16 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import DataRequirements
 from fme.ace.stepper import (
-    SingleModuleStepperConfig,
     Stepper,
     TrainOutput,
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
-from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
+from fme.ace.stepper.single_module import (
+    SingleModuleStepperConfig,
+    StepperConfig,
+    get_serialized_stepper_vertical_coordinate,
+)
 from fme.core.coordinates import (
     DepthCoordinate,
     OptionalDepthCoordinate,
@@ -70,7 +74,7 @@ class ComponentConfig:
     """
 
     timedelta: str
-    stepper: SingleModuleStepperConfig
+    stepper: Union[StepperConfig, SingleModuleStepperConfig]
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
@@ -153,10 +157,11 @@ class CoupledStepperConfig:
     def __post_init__(self):
         self._validate_component_configs()
 
+        atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
         # this was already checked in _validate_component_configs, so an
         # assertion will do fine here to appease mypy
-        assert self.atmosphere.stepper.ocean is not None
-        self._atmosphere_ocean_config = self.atmosphere.stepper.ocean
+        assert atmosphere_ocean_config is not None
+        self._atmosphere_ocean_config = atmosphere_ocean_config
 
         # set timesteps
         self._ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
@@ -272,12 +277,13 @@ class CoupledStepperConfig:
 
     def _validate_component_configs(self):
         # validate atmosphere's OceanConfig
-        if self.atmosphere.stepper.ocean is None:
+        atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
+        if atmosphere_ocean_config is None:
             raise ValueError(
                 "The atmosphere stepper 'ocean' config is missing but must be set for "
                 "coupled emulation."
             )
-        if self.atmosphere.stepper.ocean.slab is not None:
+        if atmosphere_ocean_config.slab is not None:
             raise ValueError(
                 "The atmosphere stepper 'ocean' config cannot use 'slab' for "
                 "coupled emulation."
