@@ -16,6 +16,7 @@ from typing import (
 )
 
 import dacite
+import dacite.exceptions
 import torch
 import xarray as xr
 from torch import nn
@@ -42,7 +43,7 @@ from fme.core.normalizer import (
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.multi_call import MultiCallStepConfig
+from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import InferenceDataProtocol, StepABC, StepSelector
 from fme.core.timing import GlobalTimer
@@ -159,13 +160,8 @@ class SingleModuleStepperConfig:
     def get_forcing_window_data_requirements(
         self, n_forward_steps: int
     ) -> DataRequirements:
-        if self.ocean is None:
-            names = self.input_only_names
-        else:
-            names = list(set(self.input_only_names).union(self.ocean.forcing_names))
-
         return DataRequirements(
-            names=names,
+            names=self.input_only_names,
             n_timesteps=self._window_steps_required(n_forward_steps),
         )
 
@@ -202,28 +198,29 @@ class SingleModuleStepperConfig:
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
-        logging.info("Initializing stepper from provided config")
-        vertical_coordinate = vertical_coordinate.to(get_device())
-        derive_func = vertical_coordinate.build_derive_function(timestep)
-        step_config = self.to_step_config()
-        dataset_info = DatasetInfo(
+        logging.info("Initializing stepper from provided legacy config")
+        normalizer = self.normalization.build(self.normalize_names)
+        combined_normalization_config = NetworkAndLossNormalizationConfig(
+            network=self.normalization,
+            loss=self.loss_normalization,
+            residual=self.residual_normalization,
+        )
+        loss_normalizer = combined_normalization_config.get_loss_normalizer(
+            self.normalize_names, residual_scaled_names=self.prognostic_names
+        )
+        new_config = self.to_stepper_config(
+            normalizer=normalizer, loss_normalizer=loss_normalizer
+        )
+        return new_config.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
-        )
-        step = step_config.get_step(
-            dataset_info=dataset_info,
-        )
-        post_process_func = vertical_coordinate.build_post_process_function()
-        return Stepper(
-            config=self,
-            step=step,
-            dataset_info=dataset_info,
-            post_process_func=post_process_func,
-            derive_func=derive_func,
             init_weights=init_weights,
         )
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.ocean
 
     @classmethod
     def from_state(cls, state) -> "SingleModuleStepperConfig":
@@ -262,7 +259,7 @@ class SingleModuleStepperConfig:
     @property
     def input_only_names(self) -> List[str]:
         """Names of variables which are inputs only."""
-        return list(set(self.in_names) - set(self.out_names))
+        return list(set(self.all_names) - set(self.out_names))
 
     @property
     def prognostic_names(self) -> List[str]:
@@ -336,7 +333,35 @@ class SingleModuleStepperConfig:
             del state_copy["activation_checkpointing"]
         return state_copy
 
-    def to_step_config(
+    def to_stepper_config(
+        self,
+        normalizer: StandardNormalizer,
+        loss_normalizer: StandardNormalizer,
+    ) -> "StepperConfig":
+        """
+        Convert the current config to a stepper config.
+
+        Overwriting normalization configuration is needed to avoid
+        a checkpoint trying to load normalization data from netCDF files
+        which are no longer present when running inference.
+
+        Args:
+            normalizer: overwrite the normalization config
+                with data from this normalizer
+            loss_normalizer: overwrite the loss normalization config
+                with data from this normalizer
+
+        Returns:
+            A stepper config.
+        """
+        return StepperConfig(
+            step=self._to_step_config(normalizer, loss_normalizer),
+            loss=self.loss,
+            crps_training=self.crps_training,
+            parameter_init=self.parameter_init,
+        )
+
+    def _to_step_config(
         self,
         normalizer: Optional[StandardNormalizer] = None,
         loss_normalizer: Optional[StandardNormalizer] = None,
@@ -422,8 +447,8 @@ class ExistingStepperConfig:
     checkpoint_path: str
 
     def __post_init__(self):
-        self._stepper_config = SingleModuleStepperConfig.from_state(
-            self._load_checkpoint()["stepper"]["config"]
+        self._stepper_config = StepperConfig.from_stepper_state(
+            self._load_checkpoint()["stepper"]
         )
 
     def _load_checkpoint(self) -> Mapping[str, Any]:
@@ -642,6 +667,204 @@ def process_prediction_generator_list(
     )
 
 
+@dataclasses.dataclass
+class StepperConfig:
+    """
+    Configuration for a stepper.
+
+    Parameters:
+        step: The step configuration.
+        loss: The loss configuration.
+        crps_training: Whether to use CRPS training for stochastic models.
+        parameter_init: The parameter initialization configuration.
+    """
+
+    step: StepSelector
+    loss: WeightedMappingLossConfig = dataclasses.field(
+        default_factory=lambda: WeightedMappingLossConfig()
+    )
+    crps_training: bool = False
+    parameter_init: ParameterInitializationConfig = dataclasses.field(
+        default_factory=lambda: ParameterInitializationConfig()
+    )
+
+    @property
+    def n_ic_timesteps(self) -> int:
+        return self.step.n_ic_timesteps
+
+    def get_evaluation_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
+        return DataRequirements(
+            names=self.all_names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
+
+    def get_prognostic_state_data_requirements(self) -> PrognosticStateDataRequirements:
+        return PrognosticStateDataRequirements(
+            names=self.prognostic_names,
+            n_timesteps=self.n_ic_timesteps,
+        )
+
+    @property
+    def input_only_names(self) -> List[str]:
+        return list(set(self.input_names) - set(self.output_names))
+
+    def get_forcing_window_data_requirements(
+        self, n_forward_steps: int
+    ) -> DataRequirements:
+        return DataRequirements(
+            names=self.input_only_names,
+            n_timesteps=self._window_steps_required(n_forward_steps),
+        )
+
+    def _window_steps_required(self, n_forward_steps: int) -> int:
+        return n_forward_steps + self.n_ic_timesteps
+
+    def as_loaded_dict(self):
+        self.step.load()
+        return dataclasses.asdict(self)
+
+    def get_stepper(
+        self,
+        img_shape: Tuple[int, int],
+        gridded_operations: GriddedOperations,
+        vertical_coordinate: VerticalCoordinate,
+        timestep: datetime.timedelta,
+        init_weights: bool = True,
+    ):
+        """
+        Args:
+            img_shape: Shape of domain as (n_lat, n_lon).
+            gridded_operations: Gridded operations to use.
+            vertical_coordinate: Vertical coordinate to use.
+            timestep: Timestep of the model.
+            init_weights: Whether to initialize the weights. Should pass False if
+                the weights are about to be overwritten by a checkpoint.
+        """
+        dataset_info = DatasetInfo(
+            img_shape=img_shape,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        )
+        logging.info("Initializing stepper from provided config")
+        step = self.step.get_step(dataset_info)
+        derive_func = dataset_info.vertical_coordinate.build_derive_function(
+            dataset_info.timestep
+        )
+        post_process_func = (
+            dataset_info.vertical_coordinate.build_post_process_function()
+        )
+        return Stepper(
+            config=self,
+            step=step,
+            dataset_info=dataset_info,
+            post_process_func=post_process_func,
+            derive_func=derive_func,
+            init_weights=init_weights,
+        )
+
+    @classmethod
+    def from_stepper_state(cls, state) -> "StepperConfig":
+        """
+        Initialize a StepperConfig from a stepper state.
+
+        This is required for backwards compatibility with older steppers,
+        whose configuration did not provide normalization constants, but rather
+        pointed to files on disk. Newer stepper configurations load these
+        constants into the configuration before checkpoints are saved.
+
+        Args:
+            state: The state of the stepper.
+
+        Returns:
+            The stepper config.
+        """
+        try:
+            legacy_config = SingleModuleStepperConfig.from_state(state["config"])
+            normalizer = StandardNormalizer.from_state(
+                state.get("normalizer", state.get("normalization"))
+            )
+            if normalizer is None:
+                raise KeyError(
+                    "No normalization found in state, available keys: "
+                    + ", ".join(state.keys())
+                )
+            loss_normalizer_config = state.get(
+                "loss_normalizer", state.get("loss_normalization")
+            )
+            if loss_normalizer_config is None:
+                loss_normalizer = normalizer
+            else:
+                loss_normalizer = StandardNormalizer.from_state(loss_normalizer_config)
+            return legacy_config.to_stepper_config(
+                normalizer=normalizer, loss_normalizer=loss_normalizer
+            )
+        except (dacite.exceptions.DaciteError, KeyError):
+            state = cls.remove_deprecated_keys(state["config"])
+            return dacite.from_dict(
+                data_class=cls, data=state, config=dacite.Config(strict=True)
+            )
+
+    @property
+    def loss_names(self):
+        """Names of variables to include in loss."""
+        return self.step.loss_names
+
+    @property
+    def input_names(self) -> List[str]:
+        """Names of variables which are required as inputs."""
+        return self.step.input_names
+
+    @property
+    def all_names(self) -> List[str]:
+        """Names of all variables."""
+        return list(set(self.input_names + self.output_names))
+
+    @property
+    def next_step_forcing_names(self) -> List[str]:
+        """
+        Names of variables which are given as inputs but taken from the output timestep.
+
+        An example might be solar insolation taken during the output window period.
+        """
+        return self.step.get_next_step_forcing_names()
+
+    @property
+    def prognostic_names(self) -> List[str]:
+        """Names of variables which both inputs and outputs."""
+        return self.step.prognostic_names
+
+    @property
+    def output_names(self) -> List[str]:
+        """Names of variables which are outputs only."""
+        return self.step.output_names
+
+    @classmethod
+    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+        state_copy = state.copy()
+        return state_copy
+
+    def replace_ocean(self, ocean: Optional[OceanConfig]):
+        self.step.replace_ocean(ocean)
+
+    def get_ocean(self) -> Optional[OceanConfig]:
+        return self.step.get_ocean()
+
+    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+        self.step = replace_multi_call(self.step, multi_call)
+
+    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+        """
+        If the model is being initialized from another model's weights for fine-tuning,
+        returns those weights. Otherwise, returns None.
+
+        The list mirrors the order of `modules` in the `Stepper` class.
+        """
+        return self.parameter_init.get_base_weights(_load_weights)
+
+
 class Stepper(
     TrainStepperABC[
         PrognosticState,
@@ -652,7 +875,7 @@ class Stepper(
     ]
 ):
     """
-    Stepper class for a single pytorch module.
+    Stepper class for selectable step configurations.
     """
 
     TIME_DIM = 1
@@ -660,7 +883,7 @@ class Stepper(
 
     def __init__(
         self,
-        config: SingleModuleStepperConfig,
+        config: StepperConfig,
         step: StepABC,
         dataset_info: DatasetInfo,
         post_process_func: Callable[[TensorMapping], TensorDict],
@@ -674,10 +897,12 @@ class Stepper(
             dataset_info: Information about dataset used for training.
             post_process_func: Function to post-process the output of the step function.
             derive_func: Function to compute derived variables.
-            init_weights: Whether to initialize the weights of the module.
+            init_weights: Whether to initialize the weights. Should pass False if
+                the weights are about to be overwritten by a checkpoint.
         """
         self._config = config
         self._step_obj = step
+        self._dataset_info = dataset_info
         self._derive_func = derive_func
         self._post_process_func = post_process_func
         self._no_optimization = NullOptimization()
@@ -717,6 +942,10 @@ class Stepper(
         if self._loss_obj is None:
             self._loss_obj = self._get_loss_obj()
         return self._loss_obj
+
+    @property
+    def config(self) -> StepperConfig:
+        return self._config
 
     @property
     def derive_func(self) -> Callable[[TensorMapping, TensorMapping], TensorDict]:
@@ -1155,18 +1384,10 @@ class Stepper(
         Returns:
             The state of the stepper.
         """
-        step_config = self._step_obj.get_state()
-        assert "loss_normalizer" not in step_config
-        self._config.load()
         return {
-            "config": self._config.get_state(),
-            "normalization": self.normalizer.get_state(),
-            "loss_normalizer": self.loss_obj.get_normalizer_state(),
-            "vertical_coordinate": self._dataset_info.vertical_coordinate.as_dict(),
-            "gridded_operations": self._dataset_info.gridded_operations.to_state(),
-            "img_shape": self._dataset_info.img_shape,
-            "encoded_timestep": encode_timestep(self._dataset_info.timestep),
-            **step_config,
+            "config": self._config.as_loaded_dict(),
+            "dataset_info": self._dataset_info.to_state(),
+            "step": self._step_obj.get_state(),
         }
 
     def load_state(self, state: Dict[str, Any]) -> None:
@@ -1176,7 +1397,7 @@ class Stepper(
         Args:
             state: The state to load.
         """
-        self._step_obj.load_state(state)
+        self._step_obj.load_state(state["step"])
 
     @classmethod
     def from_state(cls, state) -> "Stepper":
@@ -1189,77 +1410,59 @@ class Stepper(
         Returns:
             The stepper.
         """
-        config_data = {**state["config"]}  # make a copy to avoid mutating input
+        try:
+            legacy_config = SingleModuleStepperConfig.from_state(state["config"])
+            encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
+            timestep = decode_timestep(encoded_timestep)
+            if "sigma_coordinates" in state:
+                # for backwards compatibility with old checkpoints
+                state["vertical_coordinate"] = state["sigma_coordinates"]
+            vertical_coordinate = dacite.from_dict(
+                data_class=SerializableVerticalCoordinate,
+                data={"vertical_coordinate": state["vertical_coordinate"]},
+                config=dacite.Config(strict=True),
+            ).vertical_coordinate
 
-        # for backwards compatibility with previous steppers created w/o
-        # loss_normalization or residual_normalization
-        loss_normalizer_state = state.get(
-            "loss_normalizer", state.get("normalizer", None)
-        )
-        if loss_normalizer_state is None:
-            raise ValueError(
-                f"No loss normalizer state found, keys include {state.keys()}"
+            if "area" in state:
+                # backwards-compatibility, these older checkpoints are always lat-lon
+                gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+            else:
+                gridded_operations = GriddedOperations.from_state(
+                    state["gridded_operations"]
+                )
+            normalizer = StandardNormalizer.from_state(
+                state.get("normalizer", state.get("normalization"))
             )
-        config_data["loss_normalization"] = loss_normalizer_state
-
-        # Overwrite the residual_normalization key if it exists, since the combined
-        # loss scalings are saved in initial training as the loss_normalization
-        config_data["residual_normalization"] = None
-        config = SingleModuleStepperConfig.from_state(config_data)
-
-        encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
-        timestep = decode_timestep(encoded_timestep)
-        if "sigma_coordinates" in state:
-            state["vertical_coordinate"] = state["sigma_coordinates"]
-        vertical_coordinate = dacite.from_dict(
-            data_class=SerializableVerticalCoordinate,
-            data={"vertical_coordinate": state["vertical_coordinate"]},
-            config=dacite.Config(strict=True),
-        ).vertical_coordinate
-        derive_func = vertical_coordinate.build_derive_function(timestep)
-        post_process_func = vertical_coordinate.build_post_process_function()
-
-        if "area" in state:
-            # backwards-compatibility, these older checkpoints are always lat-lon
-            gridded_operations: GriddedOperations = LatLonOperations(state["area"])
-        else:
-            gridded_operations = GriddedOperations.from_state(
-                state["gridded_operations"]
+            if normalizer is None:
+                raise ValueError(
+                    f"No normalizer state found, keys include {state.keys()}"
+                )
+            loss_normalizer = StandardNormalizer.from_state(
+                state.get("loss_normalizer", state.get("loss_normalization"))
             )
-
-        normalizer = StandardNormalizer.from_state(
-            state.get("normalizer", state.get("normalization", None))
-        )
-        if normalizer is None:
-            raise KeyError(f"No normalizer found in state, keys include {state.keys()}")
-        loss_normalizer_config = state.get(
-            "loss_normalizer", state.get("loss_normalization")
-        )
-        if loss_normalizer_config is None:
-            loss_normalizer = normalizer
-        else:
-            loss_normalizer = StandardNormalizer.from_state(loss_normalizer_config)
-        step_config = config.to_step_config(
-            normalizer=normalizer, loss_normalizer=loss_normalizer
-        )
-        dataset_info = DatasetInfo(
-            img_shape=state["img_shape"],
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
-        step = step_config.get_step(
-            dataset_info=dataset_info,
-        )
-        step_state = {"module": state["module"]}
-        step.load_state(step_state)
-        stepper = cls(
-            config=config,
-            step=step,
-            dataset_info=dataset_info,
-            post_process_func=post_process_func,
-            derive_func=derive_func,
-            # don't need to initialize weights, we're about to load_state
+            if loss_normalizer is None:
+                loss_normalizer = normalizer
+            config = legacy_config.to_stepper_config(
+                normalizer=normalizer, loss_normalizer=loss_normalizer
+            )
+            dataset_info = DatasetInfo(
+                img_shape=state["img_shape"],
+                timestep=timestep,
+                vertical_coordinate=vertical_coordinate,
+                gridded_operations=gridded_operations,
+            )
+            state["step"] = {
+                # SingleModuleStep inside MultiCallStep
+                "wrapped_step": {"module": state["module"]}
+            }
+        except dacite.exceptions.DaciteError:
+            config = StepperConfig.from_stepper_state(state)
+            dataset_info = DatasetInfo.from_state(state["dataset_info"])
+        stepper = config.get_stepper(
+            img_shape=dataset_info.img_shape,
+            gridded_operations=dataset_info.gridded_operations,
+            vertical_coordinate=dataset_info.vertical_coordinate,
+            timestep=dataset_info.timestep,
             init_weights=False,
         )
         stepper.load_state(state)
@@ -1269,15 +1472,21 @@ class Stepper(
 def get_serialized_stepper_vertical_coordinate(
     state: Dict[str, Any],
 ) -> VerticalCoordinate:
-    if "sigma_coordinates" in state:
-        data = state["sigma_coordinates"]
+    if "vertical_coordinate" in state:
+        return dacite.from_dict(
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["vertical_coordinate"]},
+            config=dacite.Config(strict=True),
+        ).vertical_coordinate
+    elif "sigma_coordinates" in state:
+        return dacite.from_dict(
+            data_class=SerializableVerticalCoordinate,
+            data={"vertical_coordinate": state["sigma_coordinates"]},
+            config=dacite.Config(strict=True),
+        ).vertical_coordinate
     else:
-        data = state["vertical_coordinate"]
-    return dacite.from_dict(
-        data_class=SerializableVerticalCoordinate,
-        data={"vertical_coordinate": data},
-        config=dacite.Config(strict=True),
-    ).vertical_coordinate.to(get_device())
+        dataset_info = DatasetInfo.from_state(state["dataset_info"])
+        return dataset_info.vertical_coordinate
 
 
 @dataclasses.dataclass
@@ -1303,7 +1512,7 @@ class StepperOverrideConfig:
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
     override_config: Optional[StepperOverrideConfig] = None,
-) -> SingleModuleStepperConfig:
+) -> StepperConfig:
     """Load a stepper configuration, optionally overriding certain aspects.
 
     Args:
@@ -1320,7 +1529,8 @@ def load_stepper_config(
     checkpoint = torch.load(
         checkpoint_path, map_location=get_device(), weights_only=False
     )
-    config = SingleModuleStepperConfig.from_state(checkpoint["stepper"]["config"])
+
+    config = StepperConfig.from_stepper_state(checkpoint["stepper"])
 
     if override_config.ocean != "keep":
         logging.info(
