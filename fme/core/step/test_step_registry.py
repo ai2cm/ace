@@ -93,9 +93,6 @@ class MockStepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         raise NotImplementedError()
 
-    def get_base_weights(self):
-        raise NotImplementedError()
-
     def replace_ocean(self, ocean: Optional[OceanConfig]):
         raise NotImplementedError()
 
@@ -108,6 +105,9 @@ class MockStepConfig(StepConfigABC):
         extra_residual_scaled_names: Optional[List[str]] = None,
     ):
         raise NotImplementedError()
+
+    def load(self):
+        pass
 
 
 def test_register():

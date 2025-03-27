@@ -100,6 +100,13 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> Optional[OceanConfig]:
         pass
 
+    @abc.abstractmethod
+    def load(self):
+        """
+        Update configuration in-place so it does not depend on external files.
+        """
+        pass
+
 
 T = TypeVar("T", bound=StepConfigABC)
 
@@ -171,6 +178,10 @@ class StepSelector(StepConfigABC):
 
     def get_ocean(self) -> Optional[OceanConfig]:
         return self._step_config_instance.get_ocean()
+
+    def load(self):
+        self._step_config_instance.load()
+        self.config = dataclasses.asdict(self._step_config_instance)
 
 
 class InferenceDataProtocol(Protocol):
