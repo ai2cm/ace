@@ -116,18 +116,16 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
-        if extra_diagnostic_names is None:
-            extra_diagnostic_names = []
-        if extra_prognostic_names is None:
-            extra_prognostic_names = []
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=(
-                self._normalize_names + extra_diagnostic_names + extra_prognostic_names
-            ),
-            residual_scaled_names=self.prognostic_names + extra_prognostic_names,
+            names=self._normalize_names + extra_names,
+            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
         )
 
     @classmethod
