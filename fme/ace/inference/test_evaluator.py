@@ -3,7 +3,7 @@ import datetime
 import os
 import pathlib
 import tempfile
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 import dacite
 import numpy as np
@@ -26,6 +26,7 @@ from fme.ace.inference.evaluator import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
@@ -36,9 +37,9 @@ from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.ocean import OceanConfig
-from fme.core.step.multi_call import MultiCallStep
-from fme.core.step.single_module import SingleModuleStep
+from fme.core.ocean import Ocean, OceanConfig
+from fme.core.step.multi_call import MultiCallStep, MultiCallStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -58,15 +59,18 @@ def save_plus_one_stepper(
     mean: float,
     std: float,
     data_shape: List[int],
+    normalization_names: Optional[Iterable[str]] = None,
     timestep: datetime.timedelta = TIMESTEP,
     nz_interface: int = 7,
     ocean=None,
-    multi_call=None,
+    multi_call: Optional[MultiCallConfig] = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
     else:
         all_names = list(set(in_names).union(out_names)) + multi_call.names
+    if normalization_names is None:
+        normalization_names = all_names
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -75,10 +79,10 @@ def save_plus_one_stepper(
                 name: xr.DataArray(
                     mean,
                 )
-                for name in all_names
+                for name in normalization_names
             }
         ).to_netcdf(mean_filename)
-        xr.Dataset({name: xr.DataArray(std) for name in all_names}).to_netcdf(
+        xr.Dataset({name: xr.DataArray(std) for name in normalization_names}).to_netcdf(
             std_filename
         )
         config = SingleModuleStepperConfig(
@@ -110,17 +114,21 @@ def save_plus_one_stepper(
 def validate_stepper_ocean(
     stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
 ):
-    ocean = stepper._step_obj.config.get_ocean()
-    assert ocean == expected_ocean_config
+    assert isinstance(stepper._step_obj, MultiCallStep)
+    assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
+    assert stepper._step_obj._wrapped_step._config.ocean == expected_ocean_config
     if expected_ocean_config is not None:
-        assert isinstance(ocean, OceanConfig)
+        assert isinstance(stepper._step_obj._wrapped_step.ocean, Ocean)
         assert (
-            ocean.surface_temperature_name
+            stepper._step_obj._wrapped_step.ocean.surface_temperature_name
             == expected_ocean_config.surface_temperature_name
         )
-        assert ocean.ocean_fraction_name == expected_ocean_config.ocean_fraction_name
+        assert (
+            stepper._step_obj._wrapped_step.ocean.ocean_fraction_name
+            == expected_ocean_config.ocean_fraction_name
+        )
     else:
-        assert ocean is None
+        assert stepper._step_obj._wrapped_step.ocean is None
 
 
 def validate_stepper_multi_call(
@@ -865,8 +873,30 @@ def test_inference_override(tmp_path: pathlib.Path):
     validate_stepper_multi_call(stepper, multi_call_override)
 
     stepper_config = config.load_stepper_config()
-    assert stepper_config.ocean == ocean_override
-    assert stepper_config.multi_call == multi_call_override
+    validate_stepper_config(
+        stepper_config,
+        expected_ocean_config=ocean_override,
+        expected_multi_call_config=multi_call_override,
+    )
+
+
+def validate_stepper_config(
+    stepper_config: StepperConfig,
+    expected_ocean_config: Optional[OceanConfig],
+    expected_multi_call_config: Optional[MultiCallConfig],
+):
+    assert isinstance(stepper_config.step._step_config_instance, MultiCallStepConfig)
+    assert isinstance(
+        stepper_config.step._step_config_instance.wrapped_step._step_config_instance,
+        SingleModuleStepConfig,
+    )
+    assert (
+        stepper_config.step._step_config_instance.wrapped_step._step_config_instance.ocean
+        == expected_ocean_config
+    )
+    assert (
+        stepper_config.step._step_config_instance.config == expected_multi_call_config
+    )
 
 
 def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):

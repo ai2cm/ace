@@ -22,12 +22,12 @@ from fme.ace.data_loading.inference import (
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.stepper import (
-    SingleModuleStepperConfig,
     Stepper,
     StepperOverrideConfig,
     load_stepper,
     load_stepper_config,
 )
+from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
@@ -183,7 +183,7 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper(self.checkpoint_path, self.stepper_override)
 
-    def load_stepper_config(self) -> SingleModuleStepperConfig:
+    def load_stepper_config(self) -> StepperConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
