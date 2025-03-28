@@ -297,11 +297,12 @@ class InferenceEvaluatorAggregator(
                     n_timesteps=n_timesteps,
                     variable_metadata=variable_metadata,
                 )
-            self._aggregators["spherical_power_spectrum"] = (
+            self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
-                    horizontal_coordinates.area_weights.shape[-2],
-                    horizontal_coordinates.area_weights.shape[-1],
-                    horizontal_coordinates.grid,
+                    nlat=horizontal_coordinates.area_weights.shape[-2],
+                    nlon=horizontal_coordinates.area_weights.shape[-1],
+                    grid=horizontal_coordinates.grid,
+                    report_plot=True,
                 )
             )
             if log_video:
