@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Dict, Mapping, Optional, Protocol
 
 import numpy as np
@@ -31,6 +32,38 @@ class _Aggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
+@dataclasses.dataclass
+class OneStepAggregatorConfig:
+    """
+    Configuration for the validation OneStepAggregator.
+
+    Arguments:
+        log_snapshots: Whether to log snapshot images during.
+        log_mean_maps: Whether to log mean map images during.
+    """
+
+    log_snapshots: bool = True
+    log_mean_maps: bool = True
+
+    def build(
+        self,
+        horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        loss_scaling: Optional[TensorMapping] = None,
+    ):
+        return OneStepAggregator(
+            horizontal_coordinates=horizontal_coordinates,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            variable_metadata=variable_metadata,
+            loss_scaling=loss_scaling,
+            log_snapshots=self.log_snapshots,
+            log_mean_maps=self.log_mean_maps,
+        )
+
+
 class OneStepAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
@@ -46,6 +79,8 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
+        log_snapshots: bool = True,
+        log_mean_maps: bool = True,
     ):
         """
         Args:
@@ -55,6 +90,8 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
+            log_snapshots: Whether to include snapshots in diagnostics.
+            log_mean_maps: Whether to include mean maps in diagnostics.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
@@ -64,12 +101,14 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         aggregators: Dict[str, _Aggregator] = {
             "mean": MeanAggregator(horizontal_coordinates.gridded_operations)
         }
-        aggregators["snapshot"] = SnapshotAggregator(
-            horizontal_coordinates.dims, variable_metadata
-        )
-        aggregators["mean_map"] = MapAggregator(
-            horizontal_coordinates.dims, variable_metadata
-        )
+        if log_snapshots:
+            aggregators["snapshot"] = SnapshotAggregator(
+                horizontal_coordinates.dims, variable_metadata
+            )
+        if log_mean_maps:
+            aggregators["mean_map"] = MapAggregator(
+                horizontal_coordinates.dims, variable_metadata
+            )
         self._aggregators = aggregators
         self._loss_scaling = loss_scaling or {}
 
