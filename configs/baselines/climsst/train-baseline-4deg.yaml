@@ -72,18 +72,6 @@ optimization:
   kwargs:
     weight_decay: 0.01
 stepper:
-  builder:
-    type: NoiseConditionedSFNO
-    config:
-      embed_dim: 384
-      noise_embed_dim: 0
-      filter_type: linear
-      use_mlp: true
-      num_layers: 8
-      operator_type: dhconv
-      separable: false
-      spectral_layers: 3
-      spectral_transform: sht
   loss:
     type: MSE
     weights:
@@ -101,118 +89,134 @@ stepper:
       DSWRFsfc: 2
       USWRFtoa: 2
       tendency_of_total_water_path_due_to_advection: 0.5
-  normalization:
-    global_means_path: /statsdata/centering.nc
-    global_stds_path: /statsdata/scaling-full-field.nc
-  residual_normalization:
-    global_means_path: /statsdata/centering.nc
-    global_stds_path: /statsdata/scaling-residual.nc
-  ocean:
-    surface_temperature_name: surface_temperature
-    ocean_fraction_name: ocean_fraction
-  corrector:
-    conserve_dry_air: true
-    moisture_budget_correction: advection_and_precipitation
-    force_positive_names:
-    - specific_total_water_0
-    - specific_total_water_1
-    - specific_total_water_2
-    - specific_total_water_3
-    - specific_total_water_4
-    - specific_total_water_5
-    - specific_total_water_6
-    - specific_total_water_7
-    - PRATEsfc
-    - ULWRFsfc
-    - ULWRFtoa
-    - DLWRFsfc
-    - DSWRFsfc
-    - USWRFsfc
-    - USWRFtoa
-  next_step_forcing_names:
-  - DSWRFtoa
-  in_names:
-  - land_fraction
-  - ocean_fraction
-  - sea_ice_fraction
-  - DSWRFtoa
-  - HGTsfc
-  - PRESsfc
-  - surface_temperature
-  - air_temperature_0
-  - air_temperature_1
-  - air_temperature_2
-  - air_temperature_3
-  - air_temperature_4
-  - air_temperature_5
-  - air_temperature_6
-  - air_temperature_7
-  - specific_total_water_0
-  - specific_total_water_1
-  - specific_total_water_2
-  - specific_total_water_3
-  - specific_total_water_4
-  - specific_total_water_5
-  - specific_total_water_6
-  - specific_total_water_7
-  - eastward_wind_0
-  - eastward_wind_1
-  - eastward_wind_2
-  - eastward_wind_3
-  - eastward_wind_4
-  - eastward_wind_5
-  - eastward_wind_6
-  - eastward_wind_7
-  - northward_wind_0
-  - northward_wind_1
-  - northward_wind_2
-  - northward_wind_3
-  - northward_wind_4
-  - northward_wind_5
-  - northward_wind_6
-  - northward_wind_7
-  out_names:
-  - PRESsfc
-  - surface_temperature
-  - air_temperature_0
-  - air_temperature_1
-  - air_temperature_2
-  - air_temperature_3
-  - air_temperature_4
-  - air_temperature_5
-  - air_temperature_6
-  - air_temperature_7
-  - specific_total_water_0
-  - specific_total_water_1
-  - specific_total_water_2
-  - specific_total_water_3
-  - specific_total_water_4
-  - specific_total_water_5
-  - specific_total_water_6
-  - specific_total_water_7
-  - eastward_wind_0
-  - eastward_wind_1
-  - eastward_wind_2
-  - eastward_wind_3
-  - eastward_wind_4
-  - eastward_wind_5
-  - eastward_wind_6
-  - eastward_wind_7
-  - northward_wind_0
-  - northward_wind_1
-  - northward_wind_2
-  - northward_wind_3
-  - northward_wind_4
-  - northward_wind_5
-  - northward_wind_6
-  - northward_wind_7
-  - LHTFLsfc
-  - SHTFLsfc
-  - PRATEsfc
-  - ULWRFsfc
-  - ULWRFtoa
-  - DLWRFsfc
-  - DSWRFsfc
-  - USWRFsfc
-  - USWRFtoa
-  - tendency_of_total_water_path_due_to_advection
+  step:
+    type: single_module
+    config:
+      builder:
+        type: NoiseConditionedSFNO
+        config:
+          embed_dim: 384
+          noise_embed_dim: 0
+          filter_type: linear
+          use_mlp: true
+          num_layers: 8
+          operator_type: dhconv
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+        residual:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
+      ocean:
+        surface_temperature_name: surface_temperature
+        ocean_fraction_name: ocean_fraction
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - PRATEsfc
+        - ULWRFsfc
+        - ULWRFtoa
+        - DLWRFsfc
+        - DSWRFsfc
+        - USWRFsfc
+        - USWRFtoa
+      next_step_forcing_names:
+      - DSWRFtoa
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+      - DSWRFtoa
+      - HGTsfc
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      out_names:
+      - PRESsfc
+      - surface_temperature
+      - air_temperature_0
+      - air_temperature_1
+      - air_temperature_2
+      - air_temperature_3
+      - air_temperature_4
+      - air_temperature_5
+      - air_temperature_6
+      - air_temperature_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - eastward_wind_0
+      - eastward_wind_1
+      - eastward_wind_2
+      - eastward_wind_3
+      - eastward_wind_4
+      - eastward_wind_5
+      - eastward_wind_6
+      - eastward_wind_7
+      - northward_wind_0
+      - northward_wind_1
+      - northward_wind_2
+      - northward_wind_3
+      - northward_wind_4
+      - northward_wind_5
+      - northward_wind_6
+      - northward_wind_7
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      - ULWRFsfc
+      - ULWRFtoa
+      - DLWRFsfc
+      - DSWRFsfc
+      - USWRFsfc
+      - USWRFtoa
+      - tendency_of_total_water_path_due_to_advection
