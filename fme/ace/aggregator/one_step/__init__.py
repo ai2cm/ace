@@ -1,1 +1,1 @@
-from .main import OneStepAggregator
+from .main import OneStepAggregator, OneStepAggregatorConfig

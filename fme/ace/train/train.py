@@ -60,7 +60,11 @@ import xarray as xr
 
 import fme
 import fme.core.logging_utils as logging_utils
-from fme.ace.aggregator import OneStepAggregator, TrainAggregator
+from fme.ace.aggregator import (
+    OneStepAggregator,
+    OneStepAggregatorConfig,
+    TrainAggregator,
+)
 from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator,
     InferenceEvaluatorAggregatorConfig,
@@ -123,6 +127,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         channel_mean_names=stepper.loss_names,
         normalize=stepper.normalizer.normalize,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
+        validation_config=config.validation_aggregator,
     )
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
@@ -158,6 +163,9 @@ class AggregatorBuilder(
         loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
         channel_mean_names: Optional[Sequence[str]] = None,
         save_per_epoch_diagnostics: bool = False,
+        validation_config: OneStepAggregatorConfig = dataclasses.field(
+            default_factory=lambda: OneStepAggregatorConfig(),
+        ),
     ):
         self.inference_config = inference_config
         self.gridded_operations = gridded_operations
@@ -172,12 +180,13 @@ class AggregatorBuilder(
         self.normalize = normalize
         self.output_dir = output_dir
         self.save_per_epoch_diagnostics = save_per_epoch_diagnostics
+        self.validation_config = validation_config
 
     def get_train_aggregator(self) -> TrainAggregator:
         return TrainAggregator()
 
     def get_validation_aggregator(self) -> OneStepAggregator:
-        return OneStepAggregator(
+        return self.validation_config.build(
             horizontal_coordinates=self.horizontal_coordinates,
             variable_metadata=self.variable_metadata,
             loss_scaling=self.loss_scaling,

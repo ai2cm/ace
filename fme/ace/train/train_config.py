@@ -5,7 +5,10 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 
-from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator import (
+    InferenceEvaluatorAggregatorConfig,
+    OneStepAggregatorConfig,
+)
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -102,6 +105,7 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
+        validation_aggregator: Configuration for the validation aggregator.
     """
 
     train_loader: DataLoaderConfig
@@ -124,6 +128,9 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     save_per_epoch_diagnostics: bool = False
+    validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
+        default_factory=lambda: OneStepAggregatorConfig()
+    )
 
     @property
     def inference_n_forward_steps(self) -> int:
