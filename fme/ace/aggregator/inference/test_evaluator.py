@@ -81,7 +81,11 @@ def test_logs_labels_exist():
         "mean_step_20/weighted_rmse/a",
         "mean_step_20/weighted_bias/a",
         "mean_step_20/weighted_grad_mag_percent_diff/a",
-        "spherical_power_spectrum/a",
+        "power_spectrum/a",
+        "power_spectrum/negative_norm_bias/a",
+        "power_spectrum/positive_norm_bias/a",
+        "power_spectrum/mean_abs_norm_bias/a",
+        "power_spectrum/smallest_scale_norm_bias/a",
         "time_mean/rmse/a",
         "time_mean/bias/a",
         "time_mean/bias_map/a",
@@ -93,11 +97,7 @@ def test_logs_labels_exist():
         "zonal_mean/gen/a",
         "video/a",
     ]
-    for key in expected_keys:
-        assert key in summary_logs, key
-    assert len(summary_logs) == len(expected_keys), set(summary_logs).difference(
-        expected_keys
-    )
+    assert set(summary_logs.keys()) == set(expected_keys)
 
 
 def test_inference_logs_labels_exist():
