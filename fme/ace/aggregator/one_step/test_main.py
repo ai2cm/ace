@@ -32,13 +32,22 @@ def test_labels_exist():
         ),
     )
     logs = agg.get_logs(label="test")
-    assert "test/mean/loss" in logs
-    assert "test/mean/weighted_rmse/a" in logs
-    assert "test/mean/weighted_bias/a" in logs
-    assert "test/mean/weighted_grad_mag_percent_diff/a" in logs
-    assert "test/snapshot/image-full-field/a" in logs
-    assert "test/snapshot/image-residual/a" in logs
-    assert "test/snapshot/image-error/a" in logs
+    expected_keys = [
+        "test/mean/loss",
+        "test/mean/weighted_rmse/a",
+        "test/mean/weighted_bias/a",
+        "test/mean/weighted_grad_mag_percent_diff/a",
+        "test/snapshot/image-full-field/a",
+        "test/snapshot/image-residual/a",
+        "test/snapshot/image-error/a",
+        "test/mean_map/image-full-field/a",
+        "test/mean_map/image-error/a",
+        "test/power_spectrum/positive_norm_bias/a",
+        "test/power_spectrum/negative_norm_bias/a",
+        "test/power_spectrum/mean_abs_norm_bias/a",
+        "test/power_spectrum/smallest_scale_norm_bias/a",
+    ]
+    assert set(logs.keys()) == set(expected_keys)
 
 
 def test_aggregator_raises_on_no_data():
