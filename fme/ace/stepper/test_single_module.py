@@ -1234,7 +1234,9 @@ def test_load_stepper_and_load_stepper_config(
     validate_stepper_multi_call(stepper, expected_multi_call_config)
 
 
-def get_regression_stepper_and_data():
+def get_regression_stepper_and_data(
+    crps_training: bool = False,
+) -> Tuple[Stepper, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_forward_steps = 2
@@ -1275,6 +1277,7 @@ def get_regression_stepper_and_data():
             ),
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
+        crps_training=crps_training,
     )
 
     stepper = config.get_stepper(
@@ -1294,10 +1297,23 @@ def get_regression_stepper_and_data():
     return stepper, data
 
 
-@pytest.mark.parametrize("use_optimization", [True, False])
-def test_stepper_train_on_batch_regression(use_optimization: bool):
+@pytest.mark.parametrize(
+    "use_optimization",
+    [
+        pytest.param(True, id="optimization"),
+        pytest.param(False, id="no_optimization"),
+    ],
+)
+@pytest.mark.parametrize(
+    "crps_training",
+    [
+        pytest.param(True, id="crps_training"),
+        pytest.param(False, id="no_crps_training"),
+    ],
+)
+def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training: bool):
     torch.manual_seed(0)
-    stepper, data = get_regression_stepper_and_data()
+    stepper, data = get_regression_stepper_and_data(crps_training=crps_training)
     if use_optimization:
         optimization_config = OptimizationConfig(
             optimizer_type="Adam",
@@ -1311,10 +1327,14 @@ def test_stepper_train_on_batch_regression(use_optimization: bool):
     result1 = stepper.train_on_batch(data, optimization)
     result2 = stepper.train_on_batch(data, optimization)
     output_dict = get_train_outputs_tensor_dict(result1, result2)
+    filename = f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
+    if crps_training:
+        filename = filename.replace(".pt", "-crps.pt")
     validate_tensor_dict(
         output_dict,
         os.path.join(
-            DIR, f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
+            DIR,
+            filename,
         ),
     )
 
