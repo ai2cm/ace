@@ -15,6 +15,7 @@ from fme.core.typing_ import TensorMapping
 from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
+from .spectrum import SpectrumAggregator
 
 
 class _Aggregator(Protocol):
@@ -98,18 +99,24 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
         self._coords = horizontal_coordinates.coords
-        aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(horizontal_coordinates.gridded_operations)
+        self._aggregators: Dict[str, _Aggregator] = {
+            "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
         }
+        if horizontal_coordinates.area_weights is not None:
+            self._aggregators["power_spectrum"] = SpectrumAggregator(
+                nlat=horizontal_coordinates.area_weights.shape[-2],
+                nlon=horizontal_coordinates.area_weights.shape[-1],
+                grid=horizontal_coordinates.grid,
+            )
         if log_snapshots:
-            aggregators["snapshot"] = SnapshotAggregator(
+            self._aggregators["snapshot"] = SnapshotAggregator(
                 horizontal_coordinates.dims, variable_metadata
             )
         if log_mean_maps:
-            aggregators["mean_map"] = MapAggregator(
+            self._aggregators["mean_map"] = MapAggregator(
                 horizontal_coordinates.dims, variable_metadata
             )
-        self._aggregators = aggregators
+
         self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()
