@@ -916,6 +916,8 @@ class Stepper(
                 normalizer=loss_normalizer,
             )
 
+        self._loss_normalizer: Optional[StandardNormalizer] = None
+
         self._get_loss_obj = get_loss_obj
         self._loss_obj: Optional[WeightedMappingLoss] = None
 
@@ -936,6 +938,13 @@ class Stepper(
         ] = self.predict_paired
 
         self._dataset_info = dataset_info
+
+    @property
+    def _loaded_loss_normalizer(self) -> StandardNormalizer:
+        if self._loss_normalizer is None:
+            loss_normalizer = self._step_obj.get_loss_normalizer()
+            self._loss_normalizer = loss_normalizer
+        return self._loss_normalizer
 
     @property
     def loss_obj(self) -> WeightedMappingLoss:
@@ -1371,7 +1380,9 @@ class Stepper(
 
             if use_crps:
                 step_loss: torch.Tensor = crps_loss(
-                    gen_step, target_step, names=self.out_names
+                    self._loaded_loss_normalizer.normalize(gen_step),
+                    self._loaded_loss_normalizer.normalize(target_step),
+                    names=self.out_names,
                 )
             else:
                 step_loss = self.loss_obj(gen_step, target_step)
