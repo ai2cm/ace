@@ -120,9 +120,7 @@ class StandardNameMapping(StandardDimMapping):
             self.water_species
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim]
-            + self.land_names_to_vertically_coarsen_by_height_weighting
-            + self.land_names_to_vertically_coarsen_by_sum
-            + [self.vertical_dim_land]
+            + self.vertically_resolved_names_land
         )
         for name in [
             self.precipitable_water_path,
@@ -132,6 +130,8 @@ class StandardNameMapping(StandardDimMapping):
         ]:
             if name.lower() != "none":
                 self.dropped_variables.append(name)
+        if self.vertically_resolved_names_land:
+            self.dropped_variables.append(self.vertical_dim_land)
 
     @property
     def water_species(self) -> List[str]:
