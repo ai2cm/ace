@@ -852,8 +852,30 @@ class StepperConfig:
     def get_ocean(self) -> Optional[OceanConfig]:
         return self.step.get_ocean()
 
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
-        self.step = replace_multi_call(self.step, multi_call)
+    def replace_multi_call(
+        self, multi_call: Optional[MultiCallConfig], state: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Replace the multi-call configuration of self.step and ensure the
+        associated state can be loaded as a multi-call step.
+
+        A value of `None` for `multi_call` will remove the multi-call configuration.
+
+        If the selected type supports it, the multi-call configuration will be
+        updated in place. Otherwise, it will be wrapped in the multi_call step
+        configuration with the given multi_call config or None.
+
+        Note this updates self.step in place, but returns a new state dictionary.
+
+        Args:
+            multi_call: MultiCallConfig for the resulting self.step.
+            state: state dictionary associated with the loaded step.
+
+        Returns:
+            The state dictionary updated to ensure consistency with that of a
+            serialized multi-call step.
+        """
+        self.step, new_state = replace_multi_call(self.step, multi_call, state)
+        return new_state
 
     def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
         """
@@ -989,7 +1011,8 @@ class Stepper(
         Args:
             multi_call: The new multi_call configuration or None.
         """
-        self._config.replace_multi_call(multi_call)
+        state = self._step_obj.get_state()
+        new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: "Stepper" = self._config.get_stepper(
             img_shape=self._dataset_info.img_shape,
             gridded_operations=self._dataset_info.gridded_operations,
@@ -997,7 +1020,7 @@ class Stepper(
             timestep=self._dataset_info.timestep,
             init_weights=False,
         )
-        new_stepper._step_obj.load_state(self._step_obj.get_state())
+        new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
 
     def replace_ocean(self, ocean: Optional[OceanConfig]):
@@ -1534,27 +1557,8 @@ def load_stepper_config(
         The configuration of the stepper serialized in the checkpoint, with
         appropriate options overridden.
     """
-    if override_config is None:
-        override_config = StepperOverrideConfig()
-
-    checkpoint = torch.load(
-        checkpoint_path, map_location=get_device(), weights_only=False
-    )
-
-    config = StepperConfig.from_stepper_state(checkpoint["stepper"])
-
-    if override_config.ocean != "keep":
-        logging.info(
-            "Overriding training ocean configuration with a new ocean configuration."
-        )
-        config.replace_ocean(override_config.ocean)
-    if override_config.multi_call != "keep":
-        logging.info(
-            "Overriding training multi_call configuration with a new "
-            "multi_call configuration."
-        )
-        config.replace_multi_call(override_config.multi_call)
-    return config
+    stepper = load_stepper(checkpoint_path, override_config)
+    return stepper._config
 
 
 def load_stepper(

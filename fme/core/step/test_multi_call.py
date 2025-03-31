@@ -68,7 +68,8 @@ def test_replace_multi_call_adds_wrapper():
         forcing_multipliers={"_doubled_a": 2},
         output_names=["c"],
     )
-    new_selector = replace_multi_call(selector, multi_call)
+    state = {"foo": "bar"}
+    new_selector, new_state = replace_multi_call(selector, multi_call, state)
     assert new_selector.type == "multi_call"
     assert new_selector.config["wrapped_step"] == dataclasses.asdict(selector)
     assert new_selector.config["config"] == dataclasses.asdict(multi_call)
@@ -77,6 +78,7 @@ def test_replace_multi_call_adds_wrapper():
     assert new_step_config.wrapped_step == selector
     assert new_step_config.config == multi_call
     assert new_step_config.include_multi_call_in_loss
+    assert new_state["wrapped_step"] == state
 
 
 def test_replace_multi_call_updates_wrapper():
@@ -100,7 +102,8 @@ def test_replace_multi_call_updates_wrapper():
         forcing_multipliers={"_doubled_b": 2},
         output_names=["d"],
     )
-    new_selector = replace_multi_call(selector, new_multi_call)
+    state = {"wrapped_step": {"foo": "bar"}}
+    new_selector, new_state = replace_multi_call(selector, new_multi_call, state)
     assert new_selector.type == "multi_call"
     assert new_selector.config["wrapped_step"] == dataclasses.asdict(mock_selector)
     assert new_selector.config["config"] == dataclasses.asdict(new_multi_call)
@@ -110,6 +113,7 @@ def test_replace_multi_call_updates_wrapper():
     assert new_step_config.wrapped_step.type == "mock"
     assert new_step_config.wrapped_step == mock_selector
     assert new_step_config.config == new_multi_call
+    assert new_state == state
 
 
 def test_replace_multi_call_updates_wrapper_with_none():
@@ -128,7 +132,8 @@ def test_replace_multi_call_updates_wrapper_with_none():
             "config": dataclasses.asdict(multi_call),
         },
     )
-    new_selector = replace_multi_call(selector, None)
+    state = {"wrapped_step": {"foo": "bar"}}
+    new_selector, new_state = replace_multi_call(selector, None, state)
     assert new_selector.type == "multi_call"
     assert new_selector.config["wrapped_step"] == dataclasses.asdict(mock_selector)
     assert new_selector.config["config"] is None
@@ -137,6 +142,7 @@ def test_replace_multi_call_updates_wrapper_with_none():
     assert new_step_config.wrapped_step.type == "mock"
     assert new_step_config.wrapped_step == mock_selector
     assert new_step_config.config is None
+    assert new_state == state
 
 
 def test_extend_normalizer_with_multi_call_outputs():
