@@ -1,6 +1,6 @@
 import dataclasses
 from copy import copy
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import torch
 from torch import nn
@@ -19,25 +19,41 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def replace_multi_call(
-    selector: StepSelector, multi_call: Optional[MultiCallConfig]
-) -> StepSelector:
+    selector: StepSelector, multi_call: Optional[MultiCallConfig], state: Dict[str, Any]
+) -> Tuple[StepSelector, Dict[str, Any]]:
     """
-    Replace the multi-call configuration in a StepSelector.
+    Replace the multi-call configuration in a StepSelector and ensure the
+    associated state can be loaded as a multi-call step.
 
     A value of `None` for `multi_call` will remove the multi-call configuration.
 
     If the selected type supports it, the multi-call configuration will be
     updated in place. Otherwise, it will be wrapped in the multi_call step
     configuration with the given multi_call config or None.
+
+    Args:
+        selector: StepSelector to replace the multi-call configuration of. If
+            the StepSelector does not have "multi_call" type, then the step
+            will be wrapped in a "multi_call" type StepSelector.
+        multi_call: MultiCallConfig for returned StepSelector.
+        state: state dictionary associated with the loaded step.
+
+    Returns:
+        A StepSelector with the specified MultiCallConfig and the state
+        dictionary updated to ensure consistency with that of a serialized
+        multi-call step.
     """
+    state_copy = state.copy()
     if selector.type == "multi_call":
         wrapped_selector_dict: Dict[str, Any] = selector.config["wrapped_step"]
         include_multi_call_in_loss = selector.config.get(
             "include_multi_call_in_loss", True
         )
+        new_state = state_copy
     else:
         wrapped_selector_dict = dataclasses.asdict(selector)
         include_multi_call_in_loss = True
+        new_state = {"wrapped_step": state_copy}
     if multi_call is None:
         include_multi_call_in_loss = False
     new_selector = StepSelector(
@@ -48,7 +64,7 @@ def replace_multi_call(
             "include_multi_call_in_loss": include_multi_call_in_loss,
         },
     )
-    return new_selector
+    return new_selector, new_state
 
 
 @StepSelector.register("multi_call")
