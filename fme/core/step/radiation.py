@@ -49,6 +49,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
             the output timestep.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
+        detach_radiation: Whether to detach the output of the radiation model before
+            passing it to the main model. The radiation outputs returned by
+            .step() will not be detached.
     """
 
     builder: ModuleSelector
@@ -64,6 +67,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
+    detach_radiation: bool = False
 
     def __post_init__(self):
         seen_names: Dict[str, str] = {}
@@ -349,9 +353,14 @@ class SeparateRadiationStep(StepABC):
         radiation_output_norm = self.radiation_out_packer.unpack(
             radiation_output_tensor, axis=self.CHANNEL_DIM
         )
-        input_tensor = self.in_packer.pack(
-            {**input_norm, **radiation_output_norm}, axis=self.CHANNEL_DIM
-        )
+        if self._config.detach_radiation:
+            main_input_data = {
+                **input_norm,
+                **{k: v.detach() for k, v in radiation_output_norm.items()},
+            }
+        else:
+            main_input_data = {**input_norm, **radiation_output_norm}
+        input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
         output_tensor = wrapper(self.module)(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})
