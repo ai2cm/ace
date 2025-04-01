@@ -26,12 +26,14 @@ from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core import metrics
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import ComparedDynamicHistograms
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.wandb import WandB
+from fme.downscaling.datasets_new import PairedBatchData
 from fme.downscaling.metrics_and_maths import (
     compute_crps,
     compute_mae_error,
     compute_zonal_power_spectrum,
+    filter_tensor_mapping,
     interpolate,
     map_tensor_mapping,
 )
@@ -445,56 +447,98 @@ class _DynamicMetricComparisonAggregator(Protocol):
     def get_wandb(self) -> Mapping[str, Any]: ...
 
 
-def _fold_sample_dim(
-    truth: TensorMapping,
-    pred: TensorMapping,
-    coarse: TensorMapping,
-) -> Tuple[TensorMapping, TensorMapping, TensorMapping]:
+def _check_all_datasets_compatible_sample_dim(
+    tensor_datasets: List[TensorMapping], sample_dim: int = 1
+) -> int:
     """
-    Takes truth and coarse data with only a [batch, ...] dimension and predictions
-    with [batch, samples, ...] dimensions, and returns dictionaries
-    which each have a combined [batch * samples, ...] dimension.
+    Check that all fields in all datasets have a sample dimension of either 1 or the
+    same number of samples.
+
+    Returns:
+        The number of samples in the sample dimension of the datasets with > 1 samples.
+    """
+    sample_length = 1
+    for i, data in enumerate(tensor_datasets):
+        for key, value in data.items():
+            if len(value.shape) != 4:
+                raise ValueError(
+                    f"expected data item {i} to have a sample dimension, "
+                    f"has shape {value.shape} for key {key}"
+                )
+
+            current_nsample = value.shape[sample_dim]
+            if current_nsample > 1:
+                if sample_length == 1:
+                    sample_length = current_nsample
+                elif current_nsample != sample_length:
+                    raise ValueError(
+                        "Expected all data items to have 1 or same number of samples, "
+                        f"but found {current_nsample} for item{i}, key {key}"
+                        f"that conflicts with previous sample length {sample_length}."
+                    )
+
+    return sample_length
+
+
+def _fold_sample_dim(
+    tensor_datasets: List[TensorMapping], sample_dim: int = 1
+) -> List[TensorDict]:
+    """
+    Takes data with a [batch, sample, y, x] dimension and returns a list of
+    dictionaries with a [batch, y, x] dimension.
 
     This is used to pass data to aggregators written to expect a single
     batch dimension, or which don't care whether two values come
     from the same input or not.
 
     Args:
-        truth: Dictionary of truth data, with only a batch dimension
-        pred: Dictionary of prediction data, with a batch and sample dimension
-        coarse: Dictionary of coarse data, with only a batch dimension
+        tensor_datasets: List of tensor mappings with values of shape
+            [batch, sample, ...].
+        sample_dim: The dimension number of the sample dimension.
 
     Returns:
-        Tuple of dictionaries with the same keys as the input dictionaries
-        but each with a combined [batch * samples, ...] dimension.
+        List of dictionaries with values of shape [batch, ...].
     """
-    return_truth = {}
-    return_pred = {}
-    return_coarse = {}
-    for key, pred_value in pred.items():
-        samples = pred_value.shape[1]
-        if len(pred_value.shape) != len(truth[key].shape) + 1:
-            raise ValueError(
-                "expected pred to have a sample dimension, "
-                f"has shape {pred_value.shape} "
-                f"with truth shape {truth[key].shape}"
-            )
-        return_truth[key] = (
-            truth[key]
-            .unsqueeze(1)
-            .repeat_interleave(samples, dim=1)
-            .reshape(truth[key].shape[0] * samples, *truth[key].shape[1:])
-        )
-        return_coarse[key] = (
-            coarse[key]
-            .unsqueeze(1)
-            .repeat_interleave(samples, dim=1)
-            .reshape(coarse[key].shape[0] * samples, *coarse[key].shape[1:])
-        )
-        return_pred[key] = pred_value.reshape(
-            pred_value.shape[0] * samples, *pred_value.shape[2:]
-        )
-    return return_truth, return_pred, return_coarse
+    n_samples = _check_all_datasets_compatible_sample_dim(
+        tensor_datasets, sample_dim=sample_dim
+    )
+    batch_size = None
+
+    new_datasets = []
+    for dataset in tensor_datasets:
+        new_dataset = {}
+        for key, field in dataset.items():
+            batch_size = field.shape[0]
+            if field.shape[sample_dim] == 1:
+                field = field.repeat_interleave(n_samples, dim=sample_dim)
+            folded = field.reshape(batch_size * n_samples, *field.shape[-2:])
+            new_dataset[key] = folded
+        new_datasets.append(new_dataset)
+
+    return new_datasets
+
+
+def _check_batch_dims_for_recording(
+    outputs: ModelOutputs, coarse: TensorMapping, num_dims: int
+) -> None:
+    fields = {
+        "target": outputs.target,
+        "prediction": outputs.prediction,
+        "coarse": coarse,
+    }
+
+    expected_dims = {
+        3: "[batch, height, width]",
+        4: "[batch, sample, height, width]",
+    }
+
+    for batch_member, data in fields.items():
+        for variable, tensor in data.items():
+            if len(tensor.shape) != num_dims:
+                raise ValueError(
+                    f"{batch_member} {variable} has shape {tensor.shape}, "
+                    f"expected {expected_dims[num_dims]}"
+                )
 
 
 class Aggregator:
@@ -564,12 +608,16 @@ class Aggregator:
         self._latent_step_aggregator = LatentStepAggregator()
         self.loss = Mean(torch.mean)
 
+    def _record_probabilistic(self, outputs):
+        for agg in self._probabilistic_comparisons.values():
+            agg.record_batch(outputs.target, outputs.prediction)
+
     @torch.no_grad()
     def record_batch(
         self,
         outputs: ModelOutputs,
-        coarse: TensorMapping,
-        area_weights: torch.Tensor,
+        coarse: TensorDict,
+        batch: PairedBatchData,
     ) -> None:
         """
         Records a batch of target and prediction tensors for metric computation.
@@ -577,17 +625,31 @@ class Aggregator:
         Args:
             outputs: the model predictions and target data.
             coarse: the coarse data used as input for downscaling.
-            area_weights: the area weights for the data.
+            batch: Paried batch data with spatial information
         """
-        for _, prob_comparison_aggregator in self._probabilistic_comparisons.items():
-            prob_comparison_aggregator.record_batch(outputs.target, outputs.prediction)
+        # TODO: Temporary fix, don't compute probabilistic metrics and fold
+        # when no sample dim; will be updated with Aggregator PR that separates
+        # training/validation from generation aggregator
+        if len(next(iter(outputs.prediction.values())).shape) == 4:
+            _check_batch_dims_for_recording(outputs, coarse, 4)
+            self._record_probabilistic(outputs)
 
-        folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
-            outputs.target, outputs.prediction, coarse
-        )
+            folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
+                [outputs.target, outputs.prediction, coarse],
+            )
+            n_samples = next(iter(outputs.prediction.values())).shape[1]
+            folded_batch = batch.expand_and_fold(n_samples, 1, "folded_samples")
+        else:
+            _check_batch_dims_for_recording(outputs, coarse, 3)
+            folded_target = outputs.target
+            folded_prediction = outputs.prediction
+            folded_coarse = coarse
+            folded_batch = batch
+
         for _, comparison_aggregator in self._comparisons.items():
             comparison_aggregator.record_batch(folded_target, folded_prediction)
 
+        folded_coarse = filter_tensor_mapping(folded_coarse, folded_target.keys())
         for _, coarse_comparison_aggregator in self._coarse_comparisons.items():
             coarse_comparison_aggregator.record_batch(
                 folded_target, folded_prediction, folded_coarse
@@ -597,6 +659,7 @@ class Aggregator:
             area_weighted_metric,
             area_weighted_aggregator,
         ) in self._area_weighted.items():
+            area_weights = folded_batch.fine.latlon_coordinates.area_weights
             dynamic = partial(area_weighted_metric, weights=area_weights)
             area_weighted_aggregator.record_batch(
                 folded_target, folded_prediction, dynamic_metric=dynamic

@@ -4,7 +4,7 @@ from typing import Callable, Collection, Tuple
 
 import torch
 
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from . import piq
 
@@ -45,7 +45,7 @@ def map_tensor_mapping(
     return ret
 
 
-def filter_tensor_mapping(x: TensorMapping, keys: Collection[str]) -> TensorMapping:
+def filter_tensor_mapping(x: TensorMapping, keys: Collection[str]) -> TensorDict:
     """
     Filters a tensor mapping based on a set of keys.
 
@@ -119,9 +119,7 @@ def compute_crps(
     .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
     """  # noqa: E501
     sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
-    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
-        axis=sample_dim
-    )
+    truth_mae = torch.abs(target - prediction).mean(axis=sample_dim)
     return truth_mae - 0.5 * sample_mae_estimate
 
 

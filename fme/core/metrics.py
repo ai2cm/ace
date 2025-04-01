@@ -15,17 +15,20 @@ def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
     """Computes area weights given the latitudes of a regular lat-lon grid.
 
     Args:
-        lats: tensor of shape (num_lat,) with the latitudes of the cell centers.
+        lats: tensor of shape (..., num_lat,) with the latitudes of
+            the cell centers.
         num_lon: Number of longitude points.
-        device: Device to place the tensor on.
 
     Returns:
         a torch.tensor of shape (num_lat, num_lon).
     """
     if isinstance(lats, np.ndarray):
         lats = torch.from_numpy(lats)
-    weights = torch.cos(torch.deg2rad(lats)).repeat(num_lon, 1).t()
-    weights /= weights.sum()
+    expand_shape = [-1 for _ in range(lats.dim())]
+    weights = (
+        torch.cos(torch.deg2rad(lats)).unsqueeze(-1).expand(expand_shape + [num_lon])
+    )
+    weights = weights / weights.sum(dim=(-1, -2), keepdim=True)
     return weights
 
 

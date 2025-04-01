@@ -8,20 +8,13 @@ import torch
 import yaml
 
 import fme.core.logging_utils as logging_utils
-from fme.core.coordinates import LatLonCoordinates
-from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import (
-    BatchData,
-    DataLoaderConfig,
-    GriddedData,
-    batch_data_to_paired_batch_data,
-)
+from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -48,31 +41,24 @@ class Evaluator:
         self.n_samples = n_samples
 
     def run(self):
-        if not isinstance(self.data.horizontal_coordinates.fine, LatLonCoordinates):
-            raise NotImplementedError(
-                "Only lat-lon coordinates are supported for evaluation"
-            )
         aggregator = Aggregator(
-            self.data.horizontal_coordinates.fine.dims,
+            self.data.dims,
             self.model.downscale_factor,
         )
 
-        batch: BatchData
+        batch: PairedBatchData
         for batch_idx, batch in enumerate(self.data.loader):
             logging.info(f"Processing batch {batch_idx} of {len(self.data.loader)}")
-            # TODO: Remove use with dataset update PR
-            inputs = batch_data_to_paired_batch_data(
-                batch, self.data.normalized_fine_topography
-            )
             with torch.no_grad():
                 logging.info("Generating predictions")
-                outputs = self.model.generate_on_batch(inputs, n_samples=self.n_samples)
+                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
                 logging.info("Recording diagnostics to aggregator")
-                # TODO: topography handling will move into batch recording
+                # Add sample dimension to coarse values for generation comparison
+                coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
                 aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse.data,
-                    area_weights=self.data.area_weights.fine.to(get_device()),
+                    coarse=coarse,
+                    batch=batch,
                 )
 
         logs = aggregator.get_wandb()
@@ -224,13 +210,6 @@ class EvaluatorConfig:
             train=False, requirements=self.model.data_requirements
         )
         model = self.model.build()
-        # TODO: Remove check once dataset update is complete
-        if model.config.use_fine_topography:
-            if self.data.random_subsetting_enabled:
-                raise ValueError(
-                    "Random dataset subsetting is not supported with a model that"
-                    " requires fine topography."
-                )
         return Evaluator(
             data=dataset,
             model=model,

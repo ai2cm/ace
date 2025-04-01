@@ -52,13 +52,14 @@ def test_crps():
         CRPSExperiment("deterministic", truth_amount, random_amount * 1e-5),
     ]
     torch.manual_seed(0)
-    x_predictable = torch.rand(n_batch, nx, ny)
-    x = truth_amount * x_predictable + random_amount * torch.rand(n_batch, nx, ny)
+    x_predictable = torch.rand(n_batch, 1, nx, ny)
+    x = truth_amount * x_predictable + random_amount * torch.rand(n_batch, 1, nx, ny)
     crps_values = {}
     for experiment in experiments:
-        x_sample = experiment.truth_amount * x_predictable.unsqueeze(
-            1
-        ) + experiment.random_amount * torch.rand(n_batch, n_sample, nx, ny)
+        x_sample = (
+            experiment.truth_amount * x_predictable
+            + experiment.random_amount * torch.rand(n_batch, n_sample, nx, ny)
+        )
         crps_values[experiment.name] = compute_crps(x, x_sample).mean()
     assert crps_values["perfect"] < crps_values["extra_variance"]
     assert crps_values["perfect"] < crps_values["less_variance"]

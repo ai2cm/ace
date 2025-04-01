@@ -1,5 +1,6 @@
 import pytest
 import torch
+import xarray as xr
 
 from fme.core import metrics
 from fme.core.dataset.data_typing import VariableMetadata
@@ -12,6 +13,13 @@ from fme.downscaling.aggregators import (
     MeanComparison,
     MeanMapAggregator,
     SnapshotAggregator,
+    _check_all_datasets_compatible_sample_dim,
+    _check_batch_dims_for_recording,
+)
+from fme.downscaling.datasets_new import (
+    BatchData,
+    BatchedLatLonCoordinates,
+    PairedBatchData,
 )
 from fme.downscaling.models import ModelOutputs
 
@@ -170,24 +178,54 @@ def test_map_aggregator(n_steps: int):
     ],
 )
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
+@pytest.mark.parametrize("do_ensemble", [False, True])
 def test_performance_metrics(
-    prefix, expected_prefix, n_latent_steps, percentiles=[99.999]
+    prefix, expected_prefix, n_latent_steps, do_ensemble, percentiles=[99.999]
 ):
     downscale_factor = 2
+    n_batch = 2
+    n_pred_ens = 2
+    latent_batch = n_batch if do_ensemble else n_batch * n_pred_ens
     n_lat, n_lon = 16, 32
-    shape = (2, n_lat, n_lon)
+    coarse_n_lat = n_lat // downscale_factor
+    coarse_n_lon = n_lon // downscale_factor
+    fine_shape = (n_batch, n_lat, n_lon)
+    coarse_shape = (n_batch, coarse_n_lat, coarse_n_lon)
     n_bins = 300
-    target = {"x": torch.zeros(*shape)}
-    prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
-    coarse = {
-        "x": torch.ones(
-            *shape[:-2], shape[-2] // downscale_factor, shape[-1] // downscale_factor
-        )
-    }
+    prediction = {"x": torch.ones(*fine_shape)}
+    target = {"x": torch.ones(*fine_shape)}
+    coarse = {"x": torch.ones(*coarse_shape)}
+    fine_coordinates = BatchedLatLonCoordinates(
+        lat=torch.randn(n_batch, n_lat),
+        lon=torch.randn(n_batch, n_lon),
+        dims=["batch", "lat", "lon"],
+    )
+    coarse_coordinates = BatchedLatLonCoordinates(
+        lat=torch.randn(n_batch, coarse_n_lat),
+        lon=torch.randn(n_batch, coarse_n_lon),
+        dims=["batch", "lat", "lon"],
+    )
+    time = xr.DataArray(torch.zeros(n_batch), dims=["batch"])
+    batch = PairedBatchData(
+        fine=BatchData(target, time, fine_coordinates),
+        coarse=BatchData(coarse, time, coarse_coordinates),
+    )
+
+    # TODO: this special handling should get less intense with the aggregator
+    #       refactor
+    if do_ensemble:
+        prediction = {
+            k: v.unsqueeze(1).repeat_interleave(n_pred_ens, dim=1)
+            for k, v in prediction.items()
+        }
+        target = {k: v.unsqueeze(1) for k, v in target.items()}
+        coarse = {k: v.unsqueeze(1) for k, v in coarse.items()}
 
     # latent steps should include an output channel dimension since latent
     # contains stacked outputs, first dim is interleaved batch/samples
-    latent_steps = [torch.zeros(*shape).unsqueeze(dim=1) for _ in range(n_latent_steps)]
+    latent_steps = [
+        torch.zeros(latent_batch, 1, n_lat, n_lon) for _ in range(n_latent_steps)
+    ]
 
     with mock_wandb():
         aggregator = Aggregator(
@@ -196,7 +234,6 @@ def test_performance_metrics(
             n_histogram_bins=n_bins,
             percentiles=percentiles,
         )
-        area_weights = torch.randn(n_lat, n_lon)
         aggregator.record_batch(
             outputs=ModelOutputs(
                 prediction=prediction,
@@ -205,7 +242,7 @@ def test_performance_metrics(
                 loss=torch.tensor(0.0),
             ),
             coarse=coarse,
-            area_weights=area_weights,
+            batch=batch,
         )
         wandb_metrics = aggregator.get_wandb(prefix=prefix)
 
@@ -251,3 +288,75 @@ def test_performance_metrics(
 
     # in wandb target and prediction histograms are plotted on the same figure
     assert len(wandb_metrics) + 1 == num_metrics
+
+
+@pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])
+def test_check_batch_dims_valid_cases(valid_shape):
+    outputs = ModelOutputs(
+        target={"x": torch.zeros(*valid_shape)},
+        prediction={"x": torch.zeros(*valid_shape)},
+        latent_steps=[],
+        loss=torch.tensor(0.0),
+    )
+    coarse = {"x": torch.zeros(*valid_shape)}
+    _check_batch_dims_for_recording(outputs, coarse, len(valid_shape))
+
+
+@pytest.mark.parametrize(
+    "outputs, coarse",
+    [
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 3, 4, 8)},
+                prediction={"x": torch.zeros(2, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 4, 8)},
+            id="invalid_target_dims",
+        ),
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 4, 8)},
+                prediction={"x": torch.zeros(2, 3, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 4, 8)},
+            id="invalid_prediction_dims",
+        ),
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 4, 8)},
+                prediction={"x": torch.zeros(2, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 3, 4, 8)},
+            id="invalid_coarse_dims",
+        ),
+    ],
+)
+def test_check_batch_dims_for_recording_invalid_cases(outputs, coarse):
+    with pytest.raises(ValueError):
+        _check_batch_dims_for_recording(outputs, coarse, 3)
+
+
+def test_check_all_datasets_compatible_sample_dim():
+    prediction = {"x": torch.zeros(4, 2, 8, 16)}
+    target = {"x": torch.zeros(4, 1, 8, 16)}
+
+    # Invalid case with 3 samples (incompatible with tensor1)
+    invalid_samples = {"x": torch.zeros(4, 3, 8, 16)}
+
+    # invalid case with only 3 dimensions
+    invalid_dims = {"x": torch.zeros(4, 8, 16)}
+
+    n_samples = _check_all_datasets_compatible_sample_dim([prediction, target])
+    assert n_samples == 2
+
+    with pytest.raises(ValueError):
+        _check_all_datasets_compatible_sample_dim([prediction, target, invalid_samples])
+
+    with pytest.raises(ValueError):
+        _check_all_datasets_compatible_sample_dim([prediction, invalid_dims])
