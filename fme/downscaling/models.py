@@ -12,7 +12,7 @@ from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict, TensorMapping
-from fme.downscaling.datasets import PairedBatchData
+from fme.downscaling.datasets_new import PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
@@ -24,7 +24,7 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 @dataclasses.dataclass
 class ModelOutputs:
     prediction: TensorDict
-    target: TensorMapping
+    target: TensorDict
     loss: torch.Tensor
     latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
 
@@ -157,10 +157,7 @@ class Model:
         batch: PairedBatchData,
         optimization: Union[Optimization, NullOptimization],
     ) -> ModelOutputs:
-        result = self._run_on_batch(batch, optimization)
-        for k, v in result.prediction.items():
-            result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
-        return result
+        return self._run_on_batch(batch, optimization)
 
     def generate_on_batch(
         self,
@@ -172,6 +169,8 @@ class Model:
         result = self._run_on_batch(batch, self.null_optimization)
         for k, v in result.prediction.items():
             result.prediction[k] = v.unsqueeze(1)  # insert sample dimension
+        for k, v in result.target.items():
+            result.target[k] = v.unsqueeze(1)
         return result
 
     def _run_on_batch(
@@ -464,7 +463,6 @@ class DiffusionModel:
             denoised_norm = denoised_norm + base_prediction
 
         target = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
-        denoised_norm = denoised_norm.unsqueeze(1)
         denoised = self.normalizer.fine.denormalize(
             self.out_packer.unpack(denoised_norm, axis=self._channel_axis)
         )
@@ -523,6 +521,7 @@ class DiffusionModel:
             self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
         )
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
+        targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
         return ModelOutputs(
             prediction=samples, target=targets, loss=loss, latent_steps=latent_steps

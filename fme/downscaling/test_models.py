@@ -1,14 +1,15 @@
 import os
 from typing import Tuple, Type, Union
+from unittest.mock import MagicMock
 
 import pytest
 import torch
 import xarray as xr
 
+from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.downscaling.datasets import PairedBatchData, SingleResBatchData
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -19,6 +20,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 class LinearDownscaling(torch.nn.Module):
@@ -57,6 +59,21 @@ class DummyModule(torch.nn.Module):
         return x
 
 
+# returns paired batch data mock
+def get_mock_batch(shape):
+    batch = MagicMock()
+    batch.data = {"x": torch.ones(*shape, device=get_device())}
+
+    return batch
+
+
+def get_mock_paired_batch(coarse_shape, fine_shape):
+    coarse = get_mock_batch(coarse_shape)
+    fine = get_mock_batch(fine_shape)
+
+    return FineResCoarseResPair(fine=fine, coarse=coarse)
+
+
 @pytest.mark.parametrize("use_opt", [True, False])
 def test_train_and_generate(use_opt):
     fine_shape = (8, 16)
@@ -88,10 +105,9 @@ def test_train_and_generate(use_opt):
         coarse_shape,
         upscaling_factor,
     )
-    batch = PairedBatchData(
-        fine=SingleResBatchData({"x": torch.ones(batch_size, *fine_shape)}),
-        coarse=SingleResBatchData({"x": torch.ones(batch_size, *coarse_shape)}),
-    ).to_device()
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
     if use_opt:
         optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
         outputs = model.train_on_batch(batch, optimization)
@@ -100,7 +116,7 @@ def test_train_and_generate(use_opt):
 
     assert outputs.prediction.keys() == outputs.target.keys()
     for k in outputs.prediction:
-        assert outputs.prediction[k].shape == outputs.target[k].unsqueeze(1).shape
+        assert outputs.prediction[k].shape == outputs.target[k].shape
 
 
 @pytest.mark.parametrize(
@@ -160,10 +176,9 @@ def test_serialization(tmp_path):
     ).build(coarse_shape, downscale_factor)
 
     batch_size = 3
-    batch = PairedBatchData(
-        fine=SingleResBatchData({"x": torch.ones(batch_size, *fine_shape)}),
-        coarse=SingleResBatchData({"x": torch.ones(batch_size, *coarse_shape)}),
-    ).to_device()
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
     expected = model.generate_on_batch(batch).prediction["x"]
 
     model_from_state = Model.from_state(
@@ -215,13 +230,13 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
 
     batch_size = 2
     if use_fine_topography:
-        topography = torch.ones(batch_size, *fine_shape)
+        topography = torch.ones(batch_size, *fine_shape, device=get_device())
     else:
         topography = None
-    batch = PairedBatchData(
-        fine=SingleResBatchData({"x": torch.ones(batch_size, *fine_shape)}, topography),
-        coarse=SingleResBatchData({"x": torch.ones(batch_size, *coarse_shape)}),
-    ).to_device()
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
+    batch.fine.topography = topography
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
     train_outputs = model.train_on_batch(batch, optimization)
     assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
@@ -233,8 +248,7 @@ def test_diffusion_model_train_and_generate(predict_residual, use_fine_topograph
 
     for generated_output in generated_outputs:
         assert (
-            generated_output.prediction["x"].shape
-            == generated_output.target["x"].unsqueeze(1).shape
+            generated_output.prediction["x"].shape == generated_output.target["x"].shape
         )
 
     assert torch.all(
@@ -369,10 +383,9 @@ def test_model_error_cases(model_config):
         coarse_shape,
         upscaling_factor,
     )
-    batch = PairedBatchData(
-        fine=SingleResBatchData({"x": torch.ones(batch_size, *fine_shape)}),
-        coarse=SingleResBatchData({"x": torch.ones(batch_size, *coarse_shape)}),
-    ).to_device()
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
 
     # missing fine topography when model requires it
     batch.fine.topography = None
