@@ -17,7 +17,6 @@ import yaml
 
 from fme.core.optimization import NullOptimization
 from fme.core.testing.wandb import mock_wandb
-from fme.downscaling.datasets import batch_data_to_paired_batch_data
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
 
@@ -155,8 +154,8 @@ def _create_config_dict(
     config["validation_data"]["coarse"] = [
         {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
     ]
-    config["train_data"]["coarse_lat_extent"] = 4
-    config["train_data"]["coarse_lon_extent"] = 4
+    config["train_data"]["coarse_random_lat_cells"] = 4
+    config["train_data"]["coarse_random_lon_cells"] = 4
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -328,17 +327,15 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    # TODO: Remove use when dataset PR is complete
-    batch = batch_data_to_paired_batch_data(batch)
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert torch.any(outputs1.prediction["x"] != outputs2.prediction["x"])
+    assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
     trainer.valid_one_epoch()
     assert not trainer.model.module.training
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert torch.all(outputs1.prediction["x"] == outputs2.prediction["x"])
+    assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 
 def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
