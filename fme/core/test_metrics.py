@@ -49,6 +49,21 @@ def test_spherical_area_weights(num_lat, num_lon, expected):
     assert torch.all(torch.isclose(result, expected))
 
 
+def test_spherical_area_weights_batch_dim():
+    """Tests the spherical area weights with a batch dimension."""
+    num_lat, num_lon = 2, 4
+    batch_size = 3
+    lats = _get_lats(num_lat).unsqueeze(0).expand(batch_size, num_lat)
+    result = fme.spherical_area_weights(lats, num_lon)
+    expected = (
+        fme.spherical_area_weights(lats[0], num_lon)
+        .unsqueeze(0)
+        .expand(batch_size, -1, -1)
+    )
+    assert result.shape == (batch_size, num_lat, num_lon)
+    assert torch.equal(result, expected)
+
+
 @pytest.mark.parametrize(*test_cases)
 def test_weighted_mean(variable, time, lats, n_lon):
     """Tests the weighted mean for a few simple test cases."""
