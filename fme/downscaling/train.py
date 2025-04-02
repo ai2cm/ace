@@ -18,7 +18,7 @@ from fme.core.ema import EMAConfig, EMATracker
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import Aggregator
+from fme.downscaling.aggregators import Aggregator, GenerationAggregator
 from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
 from fme.downscaling.models import (
     DiffusionModel,
@@ -190,7 +190,7 @@ class Trainer:
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
-            generation_aggregator = Aggregator(
+            generation_aggregator = GenerationAggregator(
                 self.dims,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,

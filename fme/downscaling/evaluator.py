@@ -9,11 +9,12 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.dicts import to_flat_dict
+from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import Aggregator
+from fme.downscaling.aggregators import GenerationAggregator
 from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
 from fme.downscaling.models import (
     DiffusionModel,
@@ -25,51 +26,6 @@ from fme.downscaling.models import (
 from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
-
-
-class Evaluator:
-    def __init__(
-        self,
-        data: GriddedData,
-        model: Union[Model, DiffusionModel],
-        experiment_dir: str,
-        n_samples: int,
-    ) -> None:
-        self.data = data
-        self.model = model
-        self.experiment_dir = experiment_dir
-        self.n_samples = n_samples
-
-    def run(self):
-        aggregator = Aggregator(
-            self.data.dims,
-            self.model.downscale_factor,
-        )
-
-        batch: PairedBatchData
-        for batch_idx, batch in enumerate(self.data.loader):
-            logging.info(f"Processing batch {batch_idx} of {len(self.data.loader)}")
-            with torch.no_grad():
-                logging.info("Generating predictions")
-                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
-                logging.info("Recording diagnostics to aggregator")
-                # Add sample dimension to coarse values for generation comparison
-                coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
-                aggregator.record_batch(
-                    outputs=outputs,
-                    coarse=coarse,
-                    batch=batch,
-                )
-
-        logs = aggregator.get_wandb()
-        wandb = WandB.get_instance()
-        wandb.log(logs, step=0)
-
-        datasets = aggregator.get_datasets()
-        for ds_name in datasets:
-            datasets[ds_name].to_netcdf(
-                f"{self.experiment_dir}/{ds_name}_diagnostics.nc"
-            )
 
 
 @dataclasses.dataclass
@@ -115,33 +71,6 @@ class InterpolateModelConfig:
         )
 
 
-def clean_checkpoint_dict(checkpoint: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Handle the breaking rename change from high to fine and low to coarse in
-    the checkpoint dict. This should be deleted in the future.
-    Today is 2024-04-12.
-    """
-    if "highres" in checkpoint["model"]["config"]["normalization"]:
-        config = dict(checkpoint["model"]["config"])
-        config["normalization"] = {
-            "fine": {
-                "global_means_path": "/fine_statsdata/centering.nc",
-                "global_stds_path": "/fine_statsdata/scaling-full-field.nc",
-                "means": {},
-                "stds": {},
-            },
-            "coarse": {
-                "global_means_path": "/coarse_statsdata/centering.nc",
-                "global_stds_path": "/coarse_statsdata/scaling-full-field.nc",
-                "means": {},
-                "stds": {},
-            },
-        }
-        checkpoint["model"]["config"] = config
-        checkpoint["model"]["coarse_shape"] = checkpoint["model"]["lowres_shape"]
-        del checkpoint["model"]["lowres_shape"]
-    return checkpoint
-
-
 @dataclasses.dataclass
 class _CheckpointModelConfigSelector:
     wrapper: Union[DownscalingModelConfig, DiffusionModelConfig]
@@ -160,9 +89,9 @@ class CheckpointModelConfig:
     checkpoint: str
 
     def __post_init__(self) -> None:
-        checkpoint_dict = torch.load(self.checkpoint, weights_only=False)
-        checkpoint_dict = clean_checkpoint_dict(checkpoint_dict)
-        self.checkpoint_dict: Mapping[str, Any] = checkpoint_dict
+        self.checkpoint_dict: Mapping[str, Any] = torch.load(
+            self.checkpoint, weights_only=False
+        )
 
     def build(
         self,
@@ -187,13 +116,53 @@ class CheckpointModelConfig:
         )
 
 
+class Evaluator:
+    def __init__(
+        self,
+        data: GriddedData,
+        experiment_dir: str,
+        n_samples: int,
+        model: Union[Model, DiffusionModel],
+    ) -> None:
+        self.data = data
+        self.model = model
+        self.experiment_dir = experiment_dir
+        self.n_samples = n_samples
+        self.dist = Distributed.get_instance()
+
+    def run(self):
+        aggregator = GenerationAggregator(
+            self.data.dims,
+            self.model.downscale_factor,
+        )
+
+        batch: PairedBatchData
+        for batch_idx, batch in enumerate(self.data.loader):
+            logging.info(f"Processing batch {batch_idx} of {len(self.data.loader)}")
+            with torch.no_grad():
+                logging.info("Generating predictions")
+                outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
+                logging.info("Recording diagnostics to aggregator")
+                # Add sample dimension to coarse values for generation comparison
+                coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
+                aggregator.record_batch(
+                    outputs=outputs,
+                    coarse=coarse,
+                    batch=batch,
+                )
+
+        logs = aggregator.get_wandb()
+        wandb = WandB.get_instance()
+        wandb.log(logs, step=0)
+
+
 @dataclasses.dataclass
 class EvaluatorConfig:
-    model: Union[InterpolateModelConfig, CheckpointModelConfig]
+    model: CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
-    n_samples: int = 1
+    n_samples: int = 4
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -209,12 +178,13 @@ class EvaluatorConfig:
         dataset = self.data.build(
             train=False, requirements=self.model.data_requirements
         )
+
         model = self.model.build()
         return Evaluator(
             data=dataset,
-            model=model,
             experiment_dir=self.experiment_dir,
             n_samples=self.n_samples,
+            model=model,
         )
 
 
@@ -231,7 +201,7 @@ def main(config_path: str):
     evaluator_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
-    evaluator_config.configure_wandb(notes=beaker_url)
+    evaluator_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
     evaluator = evaluator_config.build()
