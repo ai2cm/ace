@@ -484,6 +484,7 @@ class DiffusionModel:
         )
 
         n_batch = targets_norm.shape[0]
+        # expand samples and fold to [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
         targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
         latents = torch.randn_like(targets_norm)
