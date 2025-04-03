@@ -144,14 +144,16 @@ def test_integration_with_stepper():
     # first output time step
     co2 = data.data["CO2"][0, 0].cpu().numpy()  # assuming constant in time
     for t in range(3):
-        output_temperature = output.gen_data["temperature"][0, t].cpu().numpy()
+        output_temperature = output.gen_data["temperature"][0, 0, t].cpu().numpy()
         np.testing.assert_allclose(output_temperature, co2 + t)
         if t > 0:
             # only check diagnostic OLR for the output time steps, not initial condition
-            input_temperature = output.gen_data["temperature"][0, t - 1].cpu().numpy()
-            olr = output.gen_data["OLR"][0, t].cpu().numpy()
+            input_temperature = (
+                output.gen_data["temperature"][0, 0, t - 1].cpu().numpy()
+            )
+            olr = output.gen_data["OLR"][0, 0, t].cpu().numpy()
             np.testing.assert_allclose(olr, input_temperature * co2)
-            olr_doubled = output.gen_data["OLR_doubled_co2"][0, t].cpu().numpy()
+            olr_doubled = output.gen_data["OLR_doubled_co2"][0, 0, t].cpu().numpy()
             # note for the double-called case, it should use the temperature from the
             # non-doubled CO2 case
             np.testing.assert_allclose(olr_doubled, input_temperature * 2 * co2)

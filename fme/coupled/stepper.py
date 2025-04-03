@@ -44,6 +44,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization
+from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
@@ -1020,13 +1021,11 @@ class CoupledStepper(
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "atmosphere"],
-            time_dim=self.atmosphere.TIME_DIM,
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
-            time_dim=self.ocean.TIME_DIM,
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
         )
@@ -1162,16 +1161,16 @@ class CoupledStepper(
         gen_data = self._process_prediction_generator_list(output_list, data)
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
-            gen_data=dict(gen_data.ocean_data.data),
-            target_data=dict(ocean_forward_data.data),
+            gen_data=add_ensemble_dim(dict(gen_data.ocean_data.data)),
+            target_data=add_ensemble_dim(dict(ocean_forward_data.data)),
             time=gen_data.ocean_data.time,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
             metrics=metrics.get_atmosphere_metrics(),
-            gen_data=dict(gen_data.atmosphere_data.data),
-            target_data=dict(atmos_forward_data.data),
+            gen_data=add_ensemble_dim(dict(gen_data.atmosphere_data.data)),
+            target_data=add_ensemble_dim(dict(atmos_forward_data.data)),
             time=gen_data.atmosphere_data.time,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,
