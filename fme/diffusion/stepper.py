@@ -32,6 +32,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.weight_ops import strip_leading_module
@@ -715,8 +716,8 @@ class DiffusionStepper(
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=dict(gen_data),
-            target_data=dict(target_data),
+            gen_data=add_ensemble_dim(gen_data),
+            target_data=add_ensemble_dim(target_data),
             time=output.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,

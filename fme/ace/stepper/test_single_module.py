@@ -32,8 +32,6 @@ from fme.ace.stepper.single_module import (
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
-    repeat_interleave_batch_dim,
-    reshape_with_sample_dim,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
@@ -59,6 +57,7 @@ from fme.core.optimization import (
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.testing.regression import validate_tensor_dict
+from fme.core.typing_ import EnsembleTensorDict
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -248,30 +247,30 @@ def test_train_on_batch_addition_series():
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
 
     for i in range(n_steps - 1):
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["b"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.gen_data["a"][:, i] + 1, stepped.gen_data["a"][:, i + 1]
+            stepped.gen_data["a"][:, :, i] + 1, stepped.gen_data["a"][:, :, i + 1]
         )
         assert torch.allclose(
-            stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
+            stepped.gen_data["b"][:, :, i] + 1, stepped.gen_data["b"][:, :, i + 1]
         )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["a"],
-        data_with_ic.data["a"],
+        data_with_ic.data["a"][:, None],
     )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["b"],
-        data_with_ic.data["b"],
+        data_with_ic.data["b"][:, None],
     )
 
 
@@ -317,7 +316,7 @@ def test_train_on_batch_crps_loss():
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
 
 
 def test_train_on_batch_with_prescribed_ocean():
@@ -368,19 +367,19 @@ def test_train_on_batch_with_prescribed_ocean():
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         # "b" should be increasing by 1 where the mask says don't prescribe
         # note the 1: selection for the last dimension in following two assertions
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 1:] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1, :, 1:],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 1:] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1, :, 1:],
         )
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 0],
-            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, i, :, 0],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 0],
+            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, :, i, :, 0],
         )
 
 
@@ -588,7 +587,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     aggregator = OneStepAggregator(lat_lon_coordinates, save_diagnostics=False)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
-    assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
+    assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
     aggregator.record_batch(stepped)
     logs = aggregator.get_logs("one_step")
@@ -792,7 +791,7 @@ def test_stepper_corrector(
     # check that positive forcing is enforced
     if force_positive:
         for name in force_positive_names:
-            assert stepped.gen_data[name][:, 1:].min() >= 0.0
+            assert stepped.gen_data[name][:, :, 1:].min() >= 0.0
 
 
 def _get_stepper(
@@ -1039,22 +1038,25 @@ def test_next_step_forcing_names():
 
 def test_prepend_initial_condition():
     nt = 3
-    x = torch.rand(3, nt, 5).to(DEVICE)
+    batch_size = 3
+    n_ensemble = 2
+    x = torch.rand(3, n_ensemble, nt, 5).to(DEVICE)
 
     def normalize(x):
         result = {k: (v - 1) / 2 for k, v in x.items()}
         return result
 
     stepped = TrainOutput(
-        gen_data={"a": x, "b": x + 1},
-        target_data={"a": x + 2, "b": x + 3},
-        time=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
+        gen_data=EnsembleTensorDict({"a": x, "b": x + 1}),
+        target_data=EnsembleTensorDict({"a": x[:, :1] + 2, "b": x[:, :1] + 3}),
+        time=xr.DataArray(np.zeros((batch_size, nt)), dims=["sample", "time"]),
         metrics={"loss": torch.tensor(0.0)},
         normalize=normalize,
     )
     ic_data = {
-        "a": torch.rand(3, 1, 5).to(DEVICE),
-        "b": torch.rand(3, 1, 5).to(DEVICE),
+        # no sample dim in initial condition
+        "a": torch.rand(batch_size, 1, 5).to(DEVICE),
+        "b": torch.rand(batch_size, 1, 5).to(DEVICE),
     }
     ic = BatchData.new_on_device(
         data=ic_data,
@@ -1065,8 +1067,10 @@ def test_prepend_initial_condition():
     )
     prepended = stepped.prepend_initial_condition(ic)
     for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, :1], ic_data[v])
-        assert torch.allclose(prepended.target_data[v][:, :1], ic_data[v])
+        assert torch.allclose(prepended.gen_data[v][:, :, :1], ic_data[v][:, None, ...])
+        assert torch.allclose(
+            prepended.target_data[v][:, :, :1], ic_data[v][:, None, ...]
+        )
 
 
 def test_stepper_from_state_using_resnorm_has_correct_normalizer():
@@ -1131,26 +1135,6 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
-
-
-@pytest.mark.parametrize("repeats", [1, 3])
-def test_sample_dim_operations_give_correct_data_order(repeats: int):
-    n_samples = 3
-    data = {
-        "a": torch.arange(n_samples)
-        .reshape(n_samples, 1, 1)
-        .broadcast_to(n_samples, 5, 5),
-        "b": torch.arange(n_samples)
-        .reshape(n_samples, 1, 1)
-        .broadcast_to(n_samples, 5, 5),
-    }
-    intermediate = repeat_interleave_batch_dim(data, repeats)
-    for k in data:
-        assert intermediate[k].shape == (n_samples * repeats, 5, 5)
-    result = reshape_with_sample_dim(intermediate, repeats)
-    for k in data:
-        assert result[k].shape == (n_samples, repeats, 5, 5)
-        assert torch.allclose(result[k], data[k][:, None, :, :])
 
 
 @pytest.mark.parametrize(
@@ -1393,9 +1377,10 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
     for k, v in data.metrics.items():
         return_dict[f"metrics.{k}"] = v
     for k, v in data.gen_data.items():
-        return_dict[f"gen_data.{k}"] = v
+        return_dict[f"gen_data.{k}"] = v[:, 0, ...]
     for k, v in data.target_data.items():
-        return_dict[f"target_data.{k}"] = v
+        assert v.shape[1] == 1
+        return_dict[f"target_data.{k}"] = v[:, 0, ...]
     return return_dict
 
 

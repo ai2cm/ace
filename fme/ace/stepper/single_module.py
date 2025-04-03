@@ -13,6 +13,7 @@ from typing import (
     Optional,
     Tuple,
     Union,
+    cast,
 )
 
 import dacite
@@ -46,8 +47,15 @@ from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import InferenceDataProtocol, StepABC, StepSelector
+from fme.core.tensors import (
+    add_ensemble_dim,
+    fold_ensemble_dim,
+    fold_sized_ensemble_dim,
+    repeat_interleave_batch_dim,
+    unfold_ensemble_dim,
+)
 from fme.core.timing import GlobalTimer
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -488,27 +496,60 @@ class ExistingStepperConfig:
 
 
 def _prepend_timesteps(
-    data: TensorMapping, timesteps: TensorMapping, time_dim: int = 1
-) -> TensorDict:
-    return {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
+    data: EnsembleTensorDict, timesteps: TensorMapping, time_dim: int = 2
+) -> EnsembleTensorDict:
+    for v in data.values():
+        n_ensemble = v.shape[1]
+        break
+    else:
+        return data  # data is length zero
+    timesteps = add_ensemble_dim(timesteps, repeats=n_ensemble)
+    return EnsembleTensorDict(
+        {k: torch.cat([timesteps[k], v], dim=time_dim) for k, v in data.items()}
+    )
 
 
 @dataclasses.dataclass
 class TrainOutput(TrainOutputABC):
     metrics: TensorDict
-    gen_data: TensorDict
-    target_data: TensorDict
+    gen_data: EnsembleTensorDict
+    target_data: EnsembleTensorDict
     time: xr.DataArray
     normalize: Callable[[TensorDict], TensorDict]
     derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] = (
         lambda x, _: dict(x)
     )
 
+    def __post_init__(self):
+        for v in self.target_data.values():
+            if v.shape[1] != 1:
+                raise ValueError(
+                    f"target_data can only have one ensemble member, got {v.shape[1]}"
+                )
+
+    def ensemble_derive_func(
+        self, data: EnsembleTensorDict, forcing_data: TensorMapping
+    ) -> EnsembleTensorDict:
+        flattened_data, n_ensemble = fold_ensemble_dim(data)
+        if n_ensemble > 1:
+            ensemble_forcing_data = add_ensemble_dim(forcing_data, repeats=n_ensemble)
+            flattened_forcing_data = fold_sized_ensemble_dim(
+                ensemble_forcing_data, n_ensemble
+            )
+        else:
+            flattened_forcing_data = dict(forcing_data)
+        derived_data = self.derive_func(flattened_data, flattened_forcing_data)
+        return unfold_ensemble_dim(derived_data, n_ensemble)
+
     def remove_initial_condition(self, n_ic_timesteps: int) -> "TrainOutput":
         return TrainOutput(
             metrics=self.metrics,
-            gen_data={k: v[:, n_ic_timesteps:] for k, v in self.gen_data.items()},
-            target_data={k: v[:, n_ic_timesteps:] for k, v in self.target_data.items()},
+            gen_data=EnsembleTensorDict(
+                {k: v[:, :, n_ic_timesteps:] for k, v in self.gen_data.items()}
+            ),
+            target_data=EnsembleTensorDict(
+                {k: v[:, :, n_ic_timesteps:] for k, v in self.target_data.items()}
+            ),
             time=self.time[:, n_ic_timesteps:],
             normalize=self.normalize,
             derive_func=self.derive_func,
@@ -518,8 +559,8 @@ class TrainOutput(TrainOutputABC):
         """Creates new dictionaries for the data but with the same tensors."""
         return TrainOutput(
             metrics=self.metrics,
-            gen_data={k: v for k, v in self.gen_data.items()},
-            target_data={k: v for k, v in self.target_data.items()},
+            gen_data=EnsembleTensorDict({k: v for k, v in self.gen_data.items()}),
+            target_data=EnsembleTensorDict({k: v for k, v in self.target_data.items()}),
             time=self.time,
             normalize=self.normalize,
             derive_func=self.derive_func,
@@ -554,8 +595,12 @@ class TrainOutput(TrainOutputABC):
     def compute_derived_variables(
         self,
     ) -> "TrainOutput":
-        gen_data = self.derive_func(self.gen_data, self.target_data)
-        target_data = self.derive_func(self.target_data, self.target_data)
+        gen_data = self.ensemble_derive_func(
+            self.gen_data, fold_sized_ensemble_dim(self.target_data, 1)
+        )
+        target_data = self.ensemble_derive_func(
+            self.target_data, fold_sized_ensemble_dim(self.target_data, 1)
+        )
         return TrainOutput(
             metrics=self.metrics,
             gen_data=gen_data,
@@ -579,7 +624,7 @@ def crps_loss(
 
     Args:
         gen_norm_step: The generated normalized step with each variable having
-            shape [n_batch, 2, ...] where the 2 represents the two samples.
+            shape [n_batch, 2, ...] where the 2 represents the two ensemble members.
         target_norm_step: The target normalized step with each variable having
             shape [n_batch, ...].
         names: The names of the variables to compute the loss for.
@@ -605,41 +650,30 @@ def _crps_loss_single(
 
     Args:
         gen_norm_step: The generated normalized step, of shape
-            [n_batch, 2, ...] where the 2 represents the two samples.
+            [n_batch, 2, ...] where the 2 represents the two ensemble members.
         target_norm_step: The target normalized step, of shape
-            [n_batch, ...].
+            [n_batch, 1, ...].
 
     Returns:
         The CRPS loss.
     """
     if gen_norm_step.shape[1] != 2:
         raise NotImplementedError(
-            "CRPS loss is written here specifically for 2 samples, "
-            f"got {gen_norm_step.shape[1]} samples"
+            "CRPS loss is written here specifically for 2 ensemble members, "
+            f"got {gen_norm_step.shape[1]} ensemble members"
         )
     # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
-    # below we compute the first term as the average of two samples
+    # below we compute the first term as the average of two ensemble members
     # meaning the 0.5 factor can be pulled out
     # we are using "almost fair" CRPS from https://arxiv.org/html/2412.15832v1
     # with a value of alpha = 0.95 as used in the paper
     alpha = 0.95
     epsilon = (1 - alpha) / 2
-    target_term = torch.abs(gen_norm_step - target_norm_step[:, None, ...]).mean(axis=1)
+    target_term = torch.abs(gen_norm_step - target_norm_step).mean(axis=1)
     internal_term = -0.5 * torch.abs(
         gen_norm_step[:, 0, ...] - gen_norm_step[:, 1, ...]
     )
     return (target_term + (1 - epsilon) * internal_term).mean()
-
-
-def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict:
-    return {k: v.repeat_interleave(repeats, dim=0) for k, v in data.items()}
-
-
-def reshape_with_sample_dim(data: TensorMapping, repeats: int) -> TensorDict:
-    return {
-        k: v.reshape(v.shape[0] // repeats, repeats, *v.shape[1:])
-        for k, v in data.items()
-    }
 
 
 def stack_list_of_tensor_dicts(
@@ -653,13 +687,23 @@ def stack_list_of_tensor_dicts(
     return stack_dict
 
 
+def process_ensemble_prediction_generator_list(
+    output_list: List[EnsembleTensorDict],
+) -> EnsembleTensorDict:
+    output_timeseries = stack_list_of_tensor_dicts(
+        cast(List[TensorDict], output_list), time_dim=2
+    )
+    return EnsembleTensorDict(
+        {k: v for k, v in output_timeseries.items()},
+    )
+
+
 def process_prediction_generator_list(
     output_list: List[TensorDict],
-    time_dim: int,
     time: xr.DataArray,
     horizontal_dims: Optional[List[str]] = None,
 ) -> BatchData:
-    output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim)
+    output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
     return BatchData.new_on_device(
         data=output_timeseries,
         time=time,
@@ -1163,6 +1207,11 @@ class Stepper(
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
+    def _post_process(self, data: EnsembleTensorDict) -> EnsembleTensorDict:
+        reshaped, n_ensemble = fold_ensemble_dim(data)
+        processed = self._post_process_func(reshaped)
+        return unfold_ensemble_dim(processed, n_ensemble)
+
     def predict(
         self,
         initial_condition: PrognosticState,
@@ -1209,7 +1258,6 @@ class Stepper(
             )
         data = process_prediction_generator_list(
             output_list,
-            time_dim=self.TIME_DIM,
             time=forcing_data.time[:, self.n_ic_timesteps :],
             horizontal_dims=forcing_data.horizontal_dims,
         )
@@ -1334,17 +1382,13 @@ class Stepper(
             optimization.accumulate_loss(regularizer_loss)
         metrics["loss"] = optimization.get_accumulated_loss().detach()
         optimization.step_weights()
-        gen_data = process_prediction_generator_list(
-            output_list,
-            time_dim=self.TIME_DIM,
-            time=data.time[:, self.n_ic_timesteps :],
-            horizontal_dims=data.horizontal_dims,
-        ).data
+
+        gen_data = process_ensemble_prediction_generator_list(output_list)
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=self._post_process_func(gen_data),
-            target_data=self._post_process_func(target_data.data),
+            gen_data=self._post_process(gen_data),
+            target_data=add_ensemble_dim(self._post_process_func(target_data.data)),
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
@@ -1365,41 +1409,37 @@ class Stepper(
         optimization: OptimizationABC,
         metrics: Dict[str, float],
         use_crps: bool = False,
-    ):
+    ) -> List[EnsembleTensorDict]:
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
         if use_crps:
-            n_samples = 2  # must be 2 for CRPS loss calculation
-            input_sample_data: TensorMapping = repeat_interleave_batch_dim(
-                input_data.as_batch_data().data, repeats=n_samples
+            n_ensemble = 2  # must be 2 for CRPS loss calculation
+            input_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
+                input_data.as_batch_data().data, repeats=n_ensemble
             )
-            forcing_sample_data: TensorMapping = repeat_interleave_batch_dim(
-                data.data, repeats=n_samples
+            forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
+                data.data, repeats=n_ensemble
             )
         else:
-            input_sample_data = input_data.as_batch_data().data
-            forcing_sample_data = data.data
+            n_ensemble = 1
+            input_ensemble_data = input_data.as_batch_data().data
+            forcing_ensemble_data = data.data
         output_generator = self._predict_generator(
-            input_sample_data,
-            forcing_sample_data,
+            input_ensemble_data,
+            forcing_ensemble_data,
             n_forward_steps,
             optimization,
         )
-        output_list = []
+        output_list: List[EnsembleTensorDict] = []
         for step, gen_step in enumerate(output_generator):
-            if use_crps:
-                gen_step = reshape_with_sample_dim(gen_step, repeats=n_samples)
-                output_list.append(
-                    {k: v.select(1, index=0) for k, v in gen_step.items()}
-                )
-            else:
-                output_list.append(gen_step)
+            gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
+            output_list.append(gen_step)
             # Note: here we examine the loss for a single timestep,
             # not a single model call (which may contain multiple timesteps).
-            target_step = {
-                k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()
-            }
+            target_step = add_ensemble_dim(
+                {k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()}
+            )
 
             if use_crps:
                 step_loss: torch.Tensor = crps_loss(

@@ -10,6 +10,7 @@ from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
+from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
 
 from .map import MapAggregator
@@ -129,13 +130,15 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
 
-        gen_data_norm = batch.normalize(batch.gen_data)
-        target_data_norm = batch.normalize(batch.target_data)
+        gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
+        target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
+        target_data_norm = batch.normalize(target_data)
+        gen_data_norm = batch.normalize(gen_data)
         for agg in self._aggregators.values():
             agg.record_batch(
                 loss=batch.metrics.get("loss", np.nan),
-                target_data=batch.target_data,
-                gen_data=batch.gen_data,
+                target_data=target_data,
+                gen_data=gen_data,
                 target_data_norm=target_data_norm,
                 gen_data_norm=gen_data_norm,
             )
