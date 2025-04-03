@@ -1,10 +1,18 @@
 import dataclasses
-from typing import Dict, Mapping, Optional
+from typing import Dict, Mapping, NewType, Optional
 
 import torch
 
 TensorMapping = Mapping[str, torch.Tensor]
 TensorDict = Dict[str, torch.Tensor]
+EnsembleTensorDict = NewType("EnsembleTensorDict", TensorDict)
+EnsembleTensorDict.__doc__ = """
+A dictionary of tensors with an explicit ensemble (sample) dimension, where
+ensemble members represent multiple predictions for the same initial condition.
+
+The ensemble dimension is the second dimension of the tensors,
+while the batch dimension is the first.
+"""
 
 
 @dataclasses.dataclass

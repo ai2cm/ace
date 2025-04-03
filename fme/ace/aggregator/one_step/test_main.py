@@ -7,10 +7,12 @@ from fme.ace.aggregator.one_step import OneStepAggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import LatLonCoordinates
 from fme.core.device import get_device
+from fme.core.typing_ import EnsembleTensorDict
 
 
 def test_labels_exist():
-    n_sample = 10
+    batch_size = 10
+    n_ensemble = 2
     n_time = 3
     nx, ny = 2, 2
     loss = 1.0
@@ -20,14 +22,18 @@ def test_labels_exist():
     agg = OneStepAggregator(
         lat_lon_coordinates.to(device=get_device()), save_diagnostics=False
     )
-    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())},
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=get_device())},
+    )
     agg.record_batch(
         batch=TrainOutput(
             metrics={"loss": loss},
             target_data=target_data,
             gen_data=gen_data,
-            time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+            time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
             normalize=lambda x: x,
         ),
     )
@@ -66,8 +72,8 @@ def test_aggregator_raises_on_no_data():
         agg.record_batch(
             batch=TrainOutput(
                 metrics={"loss": 1.0},
-                target_data={},
-                gen_data={},
+                target_data=EnsembleTensorDict({}),
+                gen_data=EnsembleTensorDict({}),
                 time=xr.DataArray(np.zeros((0, 0)), dims=["sample", "time"]),
                 normalize=lambda x: x,
             ),
@@ -112,14 +118,18 @@ def test__get_loss_scaled_mse_components():
     "epoch", [pytest.param(None, id="no epoch"), pytest.param(2, id="epoch 2")]
 )
 def test_flush_diagnostics(tmpdir, epoch):
-    nx, ny, n_sample, n_time = 2, 2, 10, 3
+    nx, ny, batch_size, n_ensemble, n_time = 2, 2, 10, 4, 3
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     agg = OneStepAggregator(
         lat_lon_coordinates.to(device=get_device()), output_dir=(tmpdir / "val")
     )
-    target_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    gen_data = {"a": torch.randn(n_sample, n_time, nx, ny, device=get_device())}
-    time = xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"])
+    target_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, 1, n_time, nx, ny, device=get_device())}
+    )
+    gen_data = EnsembleTensorDict(
+        {"a": torch.randn(batch_size, n_ensemble, n_time, nx, ny, device=get_device())}
+    )
+    time = xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"])
     agg.record_batch(
         batch=TrainOutput(
             metrics={"loss": 1.0},
