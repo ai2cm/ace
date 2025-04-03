@@ -41,7 +41,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.step.multi_call import MultiCallStep, MultiCallStepConfig
 from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.testing import mock_wandb
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
 TIMESTEP = datetime.timedelta(hours=6)
@@ -646,7 +646,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
 @pytest.mark.parametrize("has_required_fields", [True, False])
 def test_compute_derived_quantities(has_required_fields):
     """Checks that tensors are added to the data dictionary appropriately."""
-    n_sample, n_time, nx, ny, nz = 2, 3, 4, 5, 6
+    batch_size, n_ensemble, n_time, nx, ny, nz = 2, 3, 4, 5, 6, 7
 
     def _make_data():
         vars = ["a"]
@@ -656,7 +656,9 @@ def test_compute_derived_quantities(has_required_fields):
             ] + ["PRESsfc"]
             vars += additional_fields
         return {
-            var: torch.randn(n_sample, n_time, nx, ny, device=get_device())
+            var: torch.randn(
+                batch_size, n_ensemble, n_time, nx, ny, device=get_device()
+            )
             for var in vars
         }
 
@@ -675,12 +677,13 @@ def test_compute_derived_quantities(has_required_fields):
         return updated
 
     metrics = {"loss": 42.0}
-    fake_data = {k: _make_data() for k in ("gen_data", "target_data")}
+    gen_data = _make_data()
+    target_data = {k: v[:, :1] for k, v in _make_data().items()}
     stepped = TrainOutput(
         metrics,
-        fake_data["gen_data"],
-        fake_data["target_data"],
-        time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        EnsembleTensorDict(gen_data),
+        EnsembleTensorDict(target_data),
+        time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )
@@ -698,14 +701,16 @@ def test_compute_derived_quantities(has_required_fields):
 
     if has_required_fields:
         assert existence_check
-        fields = (
+        for f in (
             derived_stepped.gen_data[dry_air_name],
-            derived_stepped.target_data[dry_air_name],
             derived_stepped.gen_data["a"],
+        ):
+            assert f.shape == (batch_size, n_ensemble, n_time, nx, ny)
+        for f in (
+            derived_stepped.target_data[dry_air_name],
             derived_stepped.target_data["a"],
-        )
-        for f in fields:
-            assert f.shape == (n_sample, n_time, nx, ny)
+        ):
+            assert f.shape == (batch_size, 1, n_time, nx, ny)
     else:
         assert not existence_check
 
