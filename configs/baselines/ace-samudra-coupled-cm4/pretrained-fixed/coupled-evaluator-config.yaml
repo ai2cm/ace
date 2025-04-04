@@ -1,6 +1,6 @@
-experiment_dir: /output
+experiment_dir: /results
 n_coupled_steps: 2920
-coupled_steps_in_memory: 8
+coupled_steps_in_memory: 16
 checkpoint_path:
   ocean:
     timedelta: 5D

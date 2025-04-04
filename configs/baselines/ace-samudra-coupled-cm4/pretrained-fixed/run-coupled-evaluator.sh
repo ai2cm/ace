@@ -2,11 +2,11 @@
 
 set -e
 
-JOB_NAME="ptd_fixed-sea_ice_thickness--ocean-emulator-m06kds16--evaluator"  # recommnended but not required to change this
-JOB_GROUP="ptd_fixed-sea_ice_thickness--ocean-emulator-m06kds16"
+JOB_NAME="ptd_fixed--predicted_sea_ice-ocean-emulator-d3712r9i--evaluator"  # recommnended but not required to change this
+JOB_GROUP="ptd_fixed--predicted_sea_ice-ocean-emulator-d3712r9i"
 
 EXISTING_RESULTS_ATMOS_DATASET="01JE8017VZVRBGCEK5S3DA5G08"  # this contains the atmosphere checkpoint to use for inference
-EXISTING_RESULTS_OCEAN_DATASET="01JP6NRAXYZRVXHRPYBCSDEM2V"  # this contains the ocean checkpoint to use for inference
+EXISTING_RESULTS_OCEAN_DATASET="01JPTT4F1ZNAT68WT5VXR6X536"  # this contains the ocean checkpoint to use for inference
 
 CONFIG_FILENAME="coupled-evaluator-config.yaml"
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the repository
@@ -23,7 +23,7 @@ cd $REPO_ROOT  # so config path is valid no matter where we are running this scr
 cd $REPO_ROOT && gantry run \
     --name $JOB_NAME \
     --description 'Run ACE coupled evaluator' \
-    --beaker-image oliverwm/fme-deps-only-5493f777 \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority high \
     --cluster ai2/jupiter-cirrascale-2 \
