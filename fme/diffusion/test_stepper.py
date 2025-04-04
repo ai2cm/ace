@@ -24,7 +24,6 @@ from fme.diffusion.loss import WeightedMappingLossConfig
 from fme.diffusion.stepper import (
     DiffusionStepper,
     DiffusionStepperConfig,
-    TrainOutput,
     _combine_normalizers,
 )
 
@@ -185,30 +184,30 @@ def test_train_on_batch_addition_series():
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
 
     for i in range(n_steps - 1):
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["b"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.gen_data["a"][:, i] + 1, stepped.gen_data["a"][:, i + 1]
+            stepped.gen_data["a"][:, :, i] + 1, stepped.gen_data["a"][:, :, i + 1]
         )
         assert torch.allclose(
-            stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
+            stepped.gen_data["b"][:, :, i] + 1, stepped.gen_data["b"][:, :, i + 1]
         )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["a"],
-        data_with_ic.data["a"],
+        data_with_ic.data["a"][:, None],
     )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["b"],
-        data_with_ic.data["b"],
+        data_with_ic.data["b"][:, None],
     )
 
 
@@ -249,19 +248,19 @@ def test_train_on_batch_with_prescribed_ocean():
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         # "b" should be increasing by 1 where the mask says don't prescribe
         # note the 1: selection for the last dimension in following two assertions
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 1:] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1, :, 1:],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 1:] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1, :, 1:],
         )
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 0],
-            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, i, :, 0],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 0],
+            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, :, i, :, 0],
         )
 
 
@@ -417,7 +416,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     aggregator = OneStepAggregator(lat_lon_coordinates, save_diagnostics=False)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
-    assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
+    assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
     aggregator.record_batch(stepped)
     logs = aggregator.get_logs("one_step")
@@ -676,38 +675,6 @@ def test_next_step_forcing_names():
     torch.testing.assert_close(
         stepper.module.module.last_input[:, 2, :], forcing_data.data["c"][:, 1]
     )
-
-
-def test_prepend_initial_condition():
-    nt = 3
-    x = torch.rand(3, nt, 5).to(DEVICE)
-
-    def normalize(x):
-        result = {k: (v - 1) / 2 for k, v in x.items()}
-        return result
-
-    stepped = TrainOutput(
-        gen_data={"a": x, "b": x + 1},
-        target_data={"a": x + 2, "b": x + 3},
-        time=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
-        metrics={"loss": torch.tensor(0.0)},
-        normalize=normalize,
-    )
-    ic_data = {
-        "a": torch.rand(3, 1, 5).to(DEVICE),
-        "b": torch.rand(3, 1, 5).to(DEVICE),
-    }
-    ic = BatchData.new_on_device(
-        data=ic_data,
-        time=xr.DataArray(np.zeros((3, 1)), dims=["sample", "time"]),
-    ).get_start(
-        prognostic_names=["a", "b"],
-        n_ic_timesteps=1,
-    )
-    prepended = stepped.prepend_initial_condition(ic)
-    for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, :1], ic_data[v])
-        assert torch.allclose(prepended.target_data[v][:, :1], ic_data[v])
 
 
 def test__combine_normalizers():

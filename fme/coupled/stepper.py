@@ -11,6 +11,7 @@ from typing import (
     Literal,
     Optional,
     Tuple,
+    Union,
 )
 
 import dacite
@@ -22,13 +23,16 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import DataRequirements
 from fme.ace.stepper import (
-    SingleModuleStepperConfig,
     Stepper,
     TrainOutput,
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
-from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
+from fme.ace.stepper.single_module import (
+    SingleModuleStepperConfig,
+    StepperConfig,
+    get_serialized_stepper_vertical_coordinate,
+)
 from fme.core.coordinates import (
     DepthCoordinate,
     OptionalDepthCoordinate,
@@ -40,6 +44,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization
+from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
@@ -66,11 +71,11 @@ class ComponentConfig:
         timedelta: An ISO 8601 Duration string specifying the size of this component's
             stepper step.
         stepper: The single module stepper configuration for this component.
-
+        loss_contributions: The loss contributions configuration for this component.
     """
 
     timedelta: str
-    stepper: SingleModuleStepperConfig
+    stepper: Union[StepperConfig, SingleModuleStepperConfig]
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
@@ -153,10 +158,11 @@ class CoupledStepperConfig:
     def __post_init__(self):
         self._validate_component_configs()
 
+        atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
         # this was already checked in _validate_component_configs, so an
         # assertion will do fine here to appease mypy
-        assert self.atmosphere.stepper.ocean is not None
-        self._atmosphere_ocean_config = self.atmosphere.stepper.ocean
+        assert atmosphere_ocean_config is not None
+        self._atmosphere_ocean_config = atmosphere_ocean_config
 
         # set timesteps
         self._ocean_timestep = pd.Timedelta(self.ocean.timedelta).to_pytimedelta()
@@ -272,12 +278,13 @@ class CoupledStepperConfig:
 
     def _validate_component_configs(self):
         # validate atmosphere's OceanConfig
-        if self.atmosphere.stepper.ocean is None:
+        atmosphere_ocean_config = self.atmosphere.stepper.get_ocean()
+        if atmosphere_ocean_config is None:
             raise ValueError(
                 "The atmosphere stepper 'ocean' config is missing but must be set for "
                 "coupled emulation."
             )
-        if self.atmosphere.stepper.ocean.slab is not None:
+        if atmosphere_ocean_config.slab is not None:
             raise ValueError(
                 "The atmosphere stepper 'ocean' config cannot use 'slab' for "
                 "coupled emulation."
@@ -306,7 +313,7 @@ class CoupledStepperConfig:
         ocean_diags_as_atmos_forcings = list(
             set(self.atmosphere.stepper.input_only_names)
             .intersection(self.ocean.stepper.output_names)
-            .difference(self.ocean.stepper.in_names)
+            .difference(self.ocean.stepper.input_names)
         )
         if len(ocean_diags_as_atmos_forcings) > 0:
             raise ValueError(
@@ -1014,13 +1021,11 @@ class CoupledStepper(
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "atmosphere"],
-            time_dim=self.atmosphere.TIME_DIM,
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
         )
         ocean_data = process_prediction_generator_list(
             [x.data for x in output_list if x.realm == "ocean"],
-            time_dim=self.ocean.TIME_DIM,
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
         )
@@ -1156,16 +1161,16 @@ class CoupledStepper(
         gen_data = self._process_prediction_generator_list(output_list, data)
         ocean_stepped = TrainOutput(
             metrics=metrics.get_ocean_metrics(),
-            gen_data=dict(gen_data.ocean_data.data),
-            target_data=dict(ocean_forward_data.data),
+            gen_data=add_ensemble_dim(dict(gen_data.ocean_data.data)),
+            target_data=add_ensemble_dim(dict(ocean_forward_data.data)),
             time=gen_data.ocean_data.time,
             normalize=self.ocean.normalizer.normalize,
             derive_func=self.ocean.derive_func,
         )
         atmos_stepped = TrainOutput(
             metrics=metrics.get_atmosphere_metrics(),
-            gen_data=dict(gen_data.atmosphere_data.data),
-            target_data=dict(atmos_forward_data.data),
+            gen_data=add_ensemble_dim(dict(gen_data.atmosphere_data.data)),
+            target_data=add_ensemble_dim(dict(atmos_forward_data.data)),
             time=gen_data.atmosphere_data.time,
             normalize=self.atmosphere.normalizer.normalize,
             derive_func=self.atmosphere.derive_func,

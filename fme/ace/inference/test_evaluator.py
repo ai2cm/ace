@@ -3,8 +3,7 @@ import datetime
 import os
 import pathlib
 import tempfile
-from typing import List, Optional
-from unittest.mock import patch
+from typing import Iterable, List, Optional
 
 import dacite
 import numpy as np
@@ -27,6 +26,7 @@ from fme.ace.inference.evaluator import (
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
@@ -35,11 +35,13 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.multi_call import MultiCall, MultiCallConfig
+from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
-from fme.core.ocean import OceanConfig
+from fme.core.ocean import Ocean, OceanConfig
+from fme.core.step.multi_call import MultiCallStep, MultiCallStepConfig
+from fme.core.step.single_module import SingleModuleStep, SingleModuleStepConfig
 from fme.core.testing import mock_wandb
-from fme.core.typing_ import TensorDict, TensorMapping
+from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DIR = pathlib.Path(__file__).parent
 TIMESTEP = datetime.timedelta(hours=6)
@@ -57,15 +59,18 @@ def save_plus_one_stepper(
     mean: float,
     std: float,
     data_shape: List[int],
+    normalization_names: Optional[Iterable[str]] = None,
     timestep: datetime.timedelta = TIMESTEP,
     nz_interface: int = 7,
     ocean=None,
-    multi_call=None,
+    multi_call: Optional[MultiCallConfig] = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
     else:
         all_names = list(set(in_names).union(out_names)) + multi_call.names
+    if normalization_names is None:
+        normalization_names = all_names
     with tempfile.TemporaryDirectory() as temp_dir:
         mean_filename = pathlib.Path(temp_dir) / "means.nc"
         std_filename = pathlib.Path(temp_dir) / "stds.nc"
@@ -74,10 +79,10 @@ def save_plus_one_stepper(
                 name: xr.DataArray(
                     mean,
                 )
-                for name in all_names
+                for name in normalization_names
             }
         ).to_netcdf(mean_filename)
-        xr.Dataset({name: xr.DataArray(std) for name in all_names}).to_netcdf(
+        xr.Dataset({name: xr.DataArray(std) for name in normalization_names}).to_netcdf(
             std_filename
         )
         config = SingleModuleStepperConfig(
@@ -101,8 +106,7 @@ def save_plus_one_stepper(
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         )
-        with patch("fme.ace.stepper.SingleModuleStepperConfig.load"):
-            torch.save({"stepper": stepper.get_state()}, path)
+        torch.save({"stepper": stepper.get_state()}, path)
         mean_filename.unlink()
         std_filename.unlink()
 
@@ -110,47 +114,29 @@ def save_plus_one_stepper(
 def validate_stepper_ocean(
     stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
 ):
-    ocean = stepper._step_obj.config.get_ocean()
-    assert ocean == expected_ocean_config
+    assert isinstance(stepper._step_obj, MultiCallStep)
+    assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
+    assert stepper._step_obj._wrapped_step._config.ocean == expected_ocean_config
     if expected_ocean_config is not None:
-        assert isinstance(ocean, OceanConfig)
+        assert isinstance(stepper._step_obj._wrapped_step.ocean, Ocean)
         assert (
-            ocean.surface_temperature_name
+            stepper._step_obj._wrapped_step.ocean.surface_temperature_name
             == expected_ocean_config.surface_temperature_name
         )
-        assert ocean.ocean_fraction_name == expected_ocean_config.ocean_fraction_name
+        assert (
+            stepper._step_obj._wrapped_step.ocean.ocean_fraction_name
+            == expected_ocean_config.ocean_fraction_name
+        )
     else:
-        assert ocean is None
+        assert stepper._step_obj._wrapped_step.ocean is None
 
 
 def validate_stepper_multi_call(
     stepper: Stepper, expected_multi_call_config: Optional[MultiCallConfig]
 ):
-    assert stepper._config.multi_call == expected_multi_call_config
-    if expected_multi_call_config is not None:
-        assert isinstance(stepper._multi_call, MultiCall)
-        assert (
-            stepper._multi_call.forcing_name == expected_multi_call_config.forcing_name
-        )
-        assert (
-            stepper._multi_call.forcing_multipliers
-            == expected_multi_call_config.forcing_multipliers
-        )
-        assert (
-            stepper._multi_call.output_names == expected_multi_call_config.output_names
-        )
-        expected_all_names = set(
-            expected_multi_call_config.names
-            + stepper._config.in_names
-            + stepper.out_names
-        )
-        assert set(stepper._config.all_names) == expected_all_names
-        expected_diagnostic_names = set(
-            expected_multi_call_config.names + expected_multi_call_config.output_names
-        )
-        assert set(stepper._config.diagnostic_names) == expected_diagnostic_names
-    else:
-        assert stepper._multi_call is None
+    assert isinstance(stepper._step_obj, MultiCallStep)
+    assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
+    assert stepper._step_obj._config.config == expected_multi_call_config
 
 
 def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
@@ -660,7 +646,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
 @pytest.mark.parametrize("has_required_fields", [True, False])
 def test_compute_derived_quantities(has_required_fields):
     """Checks that tensors are added to the data dictionary appropriately."""
-    n_sample, n_time, nx, ny, nz = 2, 3, 4, 5, 6
+    batch_size, n_ensemble, n_time, nx, ny, nz = 2, 3, 4, 5, 6, 7
 
     def _make_data():
         vars = ["a"]
@@ -670,7 +656,9 @@ def test_compute_derived_quantities(has_required_fields):
             ] + ["PRESsfc"]
             vars += additional_fields
         return {
-            var: torch.randn(n_sample, n_time, nx, ny, device=get_device())
+            var: torch.randn(
+                batch_size, n_ensemble, n_time, nx, ny, device=get_device()
+            )
             for var in vars
         }
 
@@ -689,12 +677,13 @@ def test_compute_derived_quantities(has_required_fields):
         return updated
 
     metrics = {"loss": 42.0}
-    fake_data = {k: _make_data() for k in ("gen_data", "target_data")}
+    gen_data = _make_data()
+    target_data = {k: v[:, :1] for k, v in _make_data().items()}
     stepped = TrainOutput(
         metrics,
-        fake_data["gen_data"],
-        fake_data["target_data"],
-        time=xr.DataArray(np.zeros((n_sample, n_time)), dims=["sample", "time"]),
+        EnsembleTensorDict(gen_data),
+        EnsembleTensorDict(target_data),
+        time=xr.DataArray(np.zeros((batch_size, n_time)), dims=["sample", "time"]),
         normalize=lambda x: x,
         derive_func=derive_func,
     )
@@ -712,14 +701,16 @@ def test_compute_derived_quantities(has_required_fields):
 
     if has_required_fields:
         assert existence_check
-        fields = (
+        for f in (
             derived_stepped.gen_data[dry_air_name],
-            derived_stepped.target_data[dry_air_name],
             derived_stepped.gen_data["a"],
+        ):
+            assert f.shape == (batch_size, n_ensemble, n_time, nx, ny)
+        for f in (
+            derived_stepped.target_data[dry_air_name],
             derived_stepped.target_data["a"],
-        )
-        for f in fields:
-            assert f.shape == (n_sample, n_time, nx, ny)
+        ):
+            assert f.shape == (batch_size, 1, n_time, nx, ny)
     else:
         assert not existence_check
 
@@ -887,8 +878,30 @@ def test_inference_override(tmp_path: pathlib.Path):
     validate_stepper_multi_call(stepper, multi_call_override)
 
     stepper_config = config.load_stepper_config()
-    assert stepper_config.ocean == ocean_override
-    assert stepper_config.multi_call == multi_call_override
+    validate_stepper_config(
+        stepper_config,
+        expected_ocean_config=ocean_override,
+        expected_multi_call_config=multi_call_override,
+    )
+
+
+def validate_stepper_config(
+    stepper_config: StepperConfig,
+    expected_ocean_config: Optional[OceanConfig],
+    expected_multi_call_config: Optional[MultiCallConfig],
+):
+    assert isinstance(stepper_config.step._step_config_instance, MultiCallStepConfig)
+    assert isinstance(
+        stepper_config.step._step_config_instance.wrapped_step._step_config_instance,
+        SingleModuleStepConfig,
+    )
+    assert (
+        stepper_config.step._step_config_instance.wrapped_step._step_config_instance.ocean
+        == expected_ocean_config
+    )
+    assert (
+        stepper_config.step._step_config_instance.config == expected_multi_call_config
+    )
 
 
 def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):

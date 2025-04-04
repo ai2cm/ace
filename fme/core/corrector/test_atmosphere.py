@@ -1,6 +1,8 @@
+import dataclasses
 import datetime
 from typing import Callable, Optional, Tuple
 
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -23,6 +25,16 @@ from .atmosphere import (
 from .utils import force_positive
 
 TIMESTEP = datetime.timedelta(hours=6)
+
+
+def test_config_dataclass_round_trip():
+    config = AtmosphereCorrectorConfig()
+    new_config = dacite.from_dict(
+        data_class=AtmosphereCorrectorConfig,
+        data=dataclasses.asdict(config),
+        config=dacite.Config(strict=True),
+    )
+    assert config == new_config
 
 
 def compute_dry_air_absolute_differences(

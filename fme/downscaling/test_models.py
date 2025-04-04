@@ -1,14 +1,15 @@
 import os
-from typing import Tuple
+from typing import Tuple, Type, Union
+from unittest.mock import MagicMock
 
 import pytest
 import torch
 import xarray as xr
 
+from fme.core.device import get_device
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
-from fme.core.typing_ import TensorMapping
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -50,6 +51,29 @@ class LinearDownscaling(torch.nn.Module):
         return x
 
 
+class DummyModule(torch.nn.Module):
+    def __init__(self):
+        super(DummyModule, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
+# returns paired batch data mock
+def get_mock_batch(shape):
+    batch = MagicMock()
+    batch.data = {"x": torch.ones(*shape, device=get_device())}
+
+    return batch
+
+
+def get_mock_paired_batch(coarse_shape, fine_shape):
+    coarse = get_mock_batch(coarse_shape)
+    fine = get_mock_batch(fine_shape)
+
+    return FineResCoarseResPair(fine=fine, coarse=coarse)
+
+
 @pytest.mark.parametrize("use_opt", [True, False])
 def test_train_and_generate(use_opt):
     fine_shape = (8, 16)
@@ -69,6 +93,7 @@ def test_train_and_generate(use_opt):
                 fine_img_shape=fine_shape,
             )
         },
+        expects_interpolated_input=False,
     )
     model = DownscalingModelConfig(
         module_selector,
@@ -80,9 +105,8 @@ def test_train_and_generate(use_opt):
         coarse_shape,
         upscaling_factor,
     )
-    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
-        fine={"x": torch.ones(batch_size, *fine_shape)},
-        coarse={"x": torch.ones(batch_size, *coarse_shape)},
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
     if use_opt:
         optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
@@ -92,7 +116,7 @@ def test_train_and_generate(use_opt):
 
     assert outputs.prediction.keys() == outputs.target.keys()
     for k in outputs.prediction:
-        assert outputs.prediction[k].shape == outputs.target[k].unsqueeze(1).shape
+        assert outputs.prediction[k].shape == outputs.target[k].shape
 
 
 @pytest.mark.parametrize(
@@ -116,7 +140,11 @@ def test_build_downscaling_model_config_runs(in_names, out_names):
     img_shape, downscale_factor = (4, 8), 4
     loss = LossConfig(type="L1")
     model_config = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": LinearDownscaling(4, (4, 8))}),
+        ModuleRegistrySelector(
+            "prebuilt",
+            {"module": LinearDownscaling(4, (4, 8))},
+            expects_interpolated_input=False,
+        ),
         loss,
         ["x"],
         ["x"],
@@ -138,7 +166,9 @@ def test_serialization(tmp_path):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
     model = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": module}),
+        ModuleRegistrySelector(
+            "prebuilt", {"module": module}, expects_interpolated_input=False
+        ),
         LossConfig(type="MSE"),
         ["x"],
         ["x"],
@@ -146,9 +176,8 @@ def test_serialization(tmp_path):
     ).build(coarse_shape, downscale_factor)
 
     batch_size = 3
-    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
-        fine={"x": torch.ones(batch_size, *fine_shape)},
-        coarse={"x": torch.ones(batch_size, *coarse_shape)},
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
     expected = model.generate_on_batch(batch).prediction["x"]
 
@@ -171,7 +200,8 @@ def test_serialization(tmp_path):
 
 
 @pytest.mark.parametrize("predict_residual", [True, False])
-def test_diffusion_model_train_and_generate(predict_residual):
+@pytest.mark.parametrize("use_fine_topography", [True, False])
+def test_diffusion_model_train_and_generate(predict_residual, use_fine_topography):
     fine_shape = (16, 32)
     coarse_shape = (8, 16)
     downscale_factor = 2
@@ -195,16 +225,21 @@ def test_diffusion_model_train_and_generate(predict_residual):
         churn=0.5,
         num_diffusion_generation_steps=3,
         predict_residual=predict_residual,
+        use_fine_topography=use_fine_topography,
     ).build(coarse_shape, downscale_factor)
 
     batch_size = 2
-    batch: FineResCoarseResPair[TensorMapping] = FineResCoarseResPair(
-        {"x": torch.ones(batch_size, *fine_shape)},
-        {"x": torch.ones(batch_size, *coarse_shape)},
+    if use_fine_topography:
+        topography = torch.ones(batch_size, *fine_shape, device=get_device())
+    else:
+        topography = None
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
     )
+    batch.fine.topography = topography
     optimization = OptimizationConfig().build(modules=[model.module], max_epochs=2)
     train_outputs = model.train_on_batch(batch, optimization)
-    assert torch.allclose(train_outputs.target["x"], batch.fine["x"])
+    assert torch.allclose(train_outputs.target["x"], batch.fine.data["x"])
 
     n_generated_samples = 2
     generated_outputs = [
@@ -213,8 +248,7 @@ def test_diffusion_model_train_and_generate(predict_residual):
 
     for generated_output in generated_outputs:
         assert (
-            generated_output.prediction["x"].shape
-            == generated_output.target["x"].unsqueeze(1).shape
+            generated_output.prediction["x"].shape == generated_output.target["x"].shape
         )
 
     assert torch.all(
@@ -257,7 +291,9 @@ def test_normalizer_serialization(tmp_path):
         ),
     )
     model = DownscalingModelConfig(
-        ModuleRegistrySelector("prebuilt", {"module": module}),
+        ModuleRegistrySelector(
+            "prebuilt", {"module": module}, expects_interpolated_input=False
+        ),
         LossConfig(type="MSE"),
         ["x"],
         ["x"],
@@ -273,7 +309,85 @@ def test_normalizer_serialization(tmp_path):
     model_from_disk = Model.from_state(
         torch.load(tmp_path / "test.ckpt", weights_only=False),
     )
+
     assert model_from_disk.normalizer.fine.means == {"x": 0}
     assert model_from_disk.normalizer.fine.stds == {"x": 1}
     assert model_from_disk.normalizer.coarse.means == {"x": 0}
     assert model_from_disk.normalizer.coarse.stds == {"x": 1}
+
+
+# TODO: it's a pain to write for Downscaling and Diffusion models
+#       should find a way to consolidate
+@pytest.mark.parametrize("model_config", ["deterministic", "diffusion"])
+def test_model_error_cases(model_config):
+    fine_shape = (8, 16)
+    coarse_shape = (4, 8)
+    upscaling_factor = 2
+    batch_size = 3
+    normalization_config = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+
+    model_class: Union[Type[DownscalingModelConfig], Type[DiffusionModelConfig]]
+    selector: Union[Type[ModuleRegistrySelector], Type[DiffusionModuleRegistrySelector]]
+    if model_config == "deterministic":
+        model_class = DownscalingModelConfig
+        selector = ModuleRegistrySelector
+        extra_kwargs = {}
+    else:
+        model_class = DiffusionModelConfig
+        selector = DiffusionModuleRegistrySelector
+        extra_kwargs = {
+            "p_mean": -1.0,
+            "p_std": 1.0,
+            "sigma_min": 0.1,
+            "sigma_max": 1.0,
+            "churn": 0.5,
+            "num_diffusion_generation_steps": 3,
+            "predict_residual": True,
+        }
+
+    # Incompatible on init check
+    invalid_selector = selector(
+        "prebuilt",
+        {"module": None},
+        expects_interpolated_input=False,
+    )
+    with pytest.raises(ValueError):
+        model_class(  # type: ignore
+            invalid_selector,  # type: ignore
+            LossConfig(type="MSE"),
+            ["x"],
+            ["x"],
+            normalization_config,
+            use_fine_topography=True,
+            **extra_kwargs,  # type: ignore
+        )
+
+    # Compatible init, but no topography provided during prediction
+    module_selector = selector(
+        "prebuilt",
+        {"module": DummyModule()},
+        expects_interpolated_input=True,
+    )
+    model = model_class(  # type: ignore
+        module_selector,  # type: ignore
+        LossConfig(type="MSE"),
+        ["x"],
+        ["x"],
+        normalization_config,
+        use_fine_topography=True,
+        **extra_kwargs,  # type: ignore
+    ).build(
+        coarse_shape,
+        upscaling_factor,
+    )
+    batch = get_mock_paired_batch(
+        [batch_size, *coarse_shape], [batch_size, *fine_shape]
+    )
+
+    # missing fine topography when model requires it
+    batch.fine.topography = None
+    with pytest.raises(ValueError):
+        model.generate_on_batch(batch)

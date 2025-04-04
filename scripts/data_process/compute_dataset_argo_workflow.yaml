@@ -95,10 +95,10 @@ spec:
         resources:
           limits:
             cpu: "30000m"
-            memory: "200Gi"
+            memory: "230Gi"
           requests:
             cpu: "30000m"
-            memory: "200Gi"
+            memory: "230Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |
@@ -173,10 +173,10 @@ spec:
         resources:
           limits:
             cpu: "30000m"
-            memory: "200Gi"
+            memory: "230Gi"
           requests:
             cpu: "30000m"
-            memory: "200Gi"
+            memory: "230Gi"
         command: ["bash", "-c", "-e"]
         args:
           - |

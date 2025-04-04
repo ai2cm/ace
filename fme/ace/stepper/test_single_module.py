@@ -4,7 +4,7 @@ import os
 import pathlib
 from collections import namedtuple
 from typing import Dict, Iterable, List, Literal, Mapping, Optional, Tuple, Union
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import cftime
 import numpy as np
@@ -18,22 +18,20 @@ from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.inference.test_evaluator import (
     save_plus_one_stepper,
+    validate_stepper_config,
     validate_stepper_multi_call,
     validate_stepper_ocean,
 )
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
-    SingleModuleStepperConfig,
     Stepper,
+    StepperConfig,
     StepperOverrideConfig,
     TrainOutput,
-    _combine_normalizers,
     get_serialized_stepper_vertical_coordinate,
     load_stepper,
     load_stepper_config,
-    repeat_interleave_batch_dim,
-    reshape_with_sample_dim,
 )
 from fme.ace.testing import DimSizes
 from fme.core import AtmosphereData, metrics
@@ -48,8 +46,8 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.multi_call import MultiCallConfig
-from fme.core.normalizer import NormalizationConfig, StandardNormalizer
-from fme.core.ocean import OceanConfig, SlabOceanConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.optimization import (
     CheckpointConfig,
     NullOptimization,
@@ -57,8 +55,9 @@ from fme.core.optimization import (
     OptimizationConfig,
 )
 from fme.core.registry.module import ModuleSelector
+from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.testing.regression import validate_tensor_dict
-from fme.core.typing_ import TensorDict
+from fme.core.typing_ import EnsembleTensorDict
 
 DIR = os.path.abspath(os.path.dirname(__file__))
 
@@ -128,50 +127,7 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
 
 
 def get_scalar_data(names, value):
-    return {n: np.array([value], dtype=np.float32) for n in names}
-
-
-@pytest.mark.parametrize(
-    "in_names,out_names,ocean_config,expected_all_names",
-    [
-        (["a"], ["b"], None, ["a", "b"]),
-        (["a"], ["a", "b"], None, ["a", "b"]),
-        (["a", "b"], ["b"], None, ["a", "b"]),
-        (["a", "b"], ["a", "b"], None, ["a", "b"]),
-        (
-            ["a", "b"],
-            ["a", "b"],
-            OceanConfig("a", "mask"),
-            ["a", "b", "mask"],
-        ),
-        (
-            ["a", "b"],
-            ["a", "b"],
-            OceanConfig("a", "b"),
-            ["a", "b"],
-        ),
-        (
-            ["a", "b"],
-            ["a", "b"],
-            OceanConfig("a", "of", False, SlabOceanConfig("c", "d")),
-            ["a", "b", "of", "c", "d"],
-        ),
-    ],
-)
-def test_stepper_config_all_names_property(
-    in_names, out_names, ocean_config, expected_all_names
-):
-    config = SingleModuleStepperConfig(
-        builder=MagicMock(),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=MagicMock(),
-        ocean=ocean_config,
-    )
-    # check there are no duplications
-    assert len(config.all_names) == len(set(config.all_names))
-    # check the right items are in there using sets to ignore order
-    assert set(config.all_names) == set(expected_all_names)
+    return {n: float(value) for n in names}
 
 
 def test_train_on_batch_normalizer_changes_only_norm_data():
@@ -186,12 +142,27 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 1.0),
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": torch.nn.Identity()}),
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        normalization=normalization_config,
-        loss=WeightedMappingLossConfig(type="MSE"),
+
+    def get_stepper_config(normalization_config: NetworkAndLossNormalizationConfig):
+        return StepperConfig(
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        builder=ModuleSelector(
+                            type="prebuilt", config={"module": torch.nn.Identity()}
+                        ),
+                        in_names=["a", "b"],
+                        out_names=["a", "b"],
+                        normalization=normalization_config,
+                    )
+                ),
+            ),
+            loss=WeightedMappingLossConfig(type="MSE"),
+        )
+
+    config = get_stepper_config(
+        NetworkAndLossNormalizationConfig(network=normalization_config)
     )
     stepper = config.get_stepper(
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
@@ -200,11 +171,17 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     assert torch.allclose(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
     )  # as std=1, mean=0, no change
-    normalization_config.stds = get_scalar_data(["a", "b"], 2.0)
-    config.normalization = normalization_config
-    config.loss_normalization = NormalizationConfig(
-        means=get_scalar_data(["a", "b"], 0.0),
-        stds=get_scalar_data(["a", "b"], 3.0),
+    config = get_stepper_config(
+        NetworkAndLossNormalizationConfig(
+            network=NormalizationConfig(
+                means=get_scalar_data(["a", "b"], 0.0),
+                stds=get_scalar_data(["a", "b"], 2.0),
+            ),
+            loss=NormalizationConfig(
+                means=get_scalar_data(["a", "b"], 0.0),
+                stds=get_scalar_data(["a", "b"], 3.0),
+            ),
+        )
     )
     stepper = config.get_stepper(
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
@@ -244,13 +221,24 @@ def test_train_on_batch_addition_series():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        normalization=NormalizationConfig(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=get_scalar_data(["a", "b"], 1.0),
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
@@ -259,30 +247,30 @@ def test_train_on_batch_addition_series():
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 1, n_steps + 1, 5, 5)
 
     for i in range(n_steps - 1):
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.normalize(stepped.gen_data)["b"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1],
         )
         assert torch.allclose(
-            stepped.gen_data["a"][:, i] + 1, stepped.gen_data["a"][:, i + 1]
+            stepped.gen_data["a"][:, :, i] + 1, stepped.gen_data["a"][:, :, i + 1]
         )
         assert torch.allclose(
-            stepped.gen_data["b"][:, i] + 1, stepped.gen_data["b"][:, i + 1]
+            stepped.gen_data["b"][:, :, i] + 1, stepped.gen_data["b"][:, :, i + 1]
         )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["a"],
-        data_with_ic.data["a"],
+        data_with_ic.data["a"][:, None],
     )
     assert torch.allclose(
         stepped.normalize(stepped.target_data)["b"],
-        data_with_ic.data["b"],
+        data_with_ic.data["b"][:, None],
     )
 
 
@@ -300,13 +288,25 @@ def test_train_on_batch_crps_loss():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        normalization=NormalizationConfig(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=get_scalar_data(["a", "b"], 1.0),
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
         crps_training=True,
@@ -316,7 +316,7 @@ def test_train_on_batch_crps_loss():
     )
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
-    assert stepped.gen_data["a"].shape == (5, n_steps + 1, 5, 5)
+    assert stepped.gen_data["a"].shape == (5, 2, n_steps + 1, 5, 5)
 
 
 def test_train_on_batch_with_prescribed_ocean():
@@ -331,23 +331,34 @@ def test_train_on_batch_with_prescribed_ocean():
     data.data["mask"][:] = 0
     data.data["mask"][:, :, :, 0] = 1
     stds = {
-        "a": np.array([2.0], dtype=np.float32),
-        "b": np.array([3.0], dtype=np.float32),
+        "a": 2.0,
+        "b": 3.0,
     }
     area = torch.ones((5, 5), device=DEVICE)
     gridded_operations = LatLonOperations(area)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": AddOne()}),
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        normalization=NormalizationConfig(
-            means=get_scalar_data(["a", "b"], 0.0),
-            stds=stds,
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": AddOne()}
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=stds,
+                        ),
+                    ),
+                    ocean=OceanConfig("b", "mask"),
+                )
+            ),
         ),
-        ocean=OceanConfig("b", "mask"),
     )
     stepper = config.get_stepper(
         area.shape, gridded_operations, vertical_coordinate, TIMESTEP
@@ -356,34 +367,46 @@ def test_train_on_batch_with_prescribed_ocean():
     for i in range(n_steps - 1):
         # "a" should be increasing by 1 according to AddOne
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["a"][:, i] + 1,
-            stepped.normalize(stepped.gen_data)["a"][:, i + 1],
+            stepped.normalize(stepped.gen_data)["a"][:, :, i] + 1,
+            stepped.normalize(stepped.gen_data)["a"][:, :, i + 1],
         )
         # "b" should be increasing by 1 where the mask says don't prescribe
         # note the 1: selection for the last dimension in following two assertions
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 1:] + 1,
-            stepped.normalize(stepped.gen_data)["b"][:, i + 1, :, 1:],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 1:] + 1,
+            stepped.normalize(stepped.gen_data)["b"][:, :, i + 1, :, 1:],
         )
         # now check that the 0th index in last dimension has been overwritten
         torch.testing.assert_close(
-            stepped.normalize(stepped.gen_data)["b"][:, i, :, 0],
-            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, i, :, 0],
+            stepped.normalize(stepped.gen_data)["b"][:, :, i, :, 0],
+            stepped.normalize({"b": stepped.target_data["b"]})["b"][:, :, i, :, 0],
         )
 
 
 def test_reloaded_stepper_gives_same_prediction():
     torch.manual_seed(0)
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"scale_factor": 1},
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(["a", "b"], 0.0),
+                            stds=get_scalar_data(["a", "b"], 1.0),
+                        ),
+                    ),
+                )
+            ),
         ),
-        in_names=["a", "b"],
-        out_names=["a", "b"],
-        normalization=NormalizationConfig(
-            means={"a": 0.0, "b": 0.0},
-            stds={"a": 1.0, "b": 1.0},
-        ),
+        loss=WeightedMappingLossConfig(type="MSE"),
     )
     shapes = {
         "a": (1, 2, 5, 5),
@@ -442,7 +465,7 @@ class ReturnZerosModule(torch.nn.Module):
 
 
 def _setup_and_train_on_batch(
-    data: TensorDict,
+    data: BatchData,
     in_names,
     out_names,
     ocean_config: Optional[OceanConfig],
@@ -461,17 +484,29 @@ def _setup_and_train_on_batch(
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config={"module": module}),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means=get_scalar_data(set(in_names + out_names), 0.0),
-            stds=get_scalar_data(set(in_names + out_names), 1.0),
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), 0.0),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    ocean=ocean_config,
+                    **stepper_config_kwargs,
+                )
+            ),
         ),
-        ocean=ocean_config,
-        **stepper_config_kwargs,
+        loss=WeightedMappingLossConfig(type="MSE"),
     )
+
     stepper = config.get_stepper(
         area.shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
@@ -552,7 +587,7 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     aggregator = OneStepAggregator(lat_lon_coordinates, save_diagnostics=False)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
-    assert stepped.gen_data["a"].shape[1] == n_forward_steps + 1
+    assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1
 
     aggregator.record_batch(stepped)
     logs = aggregator.get_logs("one_step")
@@ -599,7 +634,7 @@ class Multiply(torch.nn.Module):
 @pytest.mark.parametrize(
     "global_only, terms_to_modify, force_positive",
     [
-        (True, "none", False),
+        (True, None, False),
         (True, "precipitation", False),
         (True, "evaporation", False),
         (False, "advection_and_precipitation", False),
@@ -652,21 +687,31 @@ def test_stepper_corrector(
     )
     assert (mean_advection.abs() > 0.0).all()
 
-    stepper_config = SingleModuleStepperConfig(
-        builder=ModuleSelector(
-            type="prebuilt",
-            config={
-                "module": Multiply(1.5).to(device),
-            },
+    stepper_config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt",
+                        config={
+                            "module": Multiply(1.5).to(device),
+                        },
+                    ),
+                    in_names=list(data.keys()),
+                    out_names=list(data.keys()),
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={key: 0.0 for key in data.keys()},
+                            stds={key: 1.0 for key in data.keys()},
+                        ),
+                    ),
+                    corrector=corrector_config,
+                )
+            ),
         ),
-        in_names=list(data.keys()),
-        out_names=list(data.keys()),
-        normalization=NormalizationConfig(
-            means={key: 0.0 for key in data.keys()},
-            stds={key: 1.0 for key in data.keys()},
-        ),
-        corrector=corrector_config,
     )
+
     stepper = stepper_config.get_stepper(
         img_shape=data["PRESsfc"].shape[2:],
         gridded_operations=LatLonOperations(area_weights),
@@ -705,7 +750,7 @@ def test_stepper_corrector(
             budget_residual, weights=area_weights, dim=[-2, -1]
         )
     budget_residual = budget_residual.cpu().numpy()
-    if terms_to_modify != "none":
+    if terms_to_modify is not None:
         if global_only:
             mean_axis: Tuple[int, ...] = (0,)
         else:
@@ -746,7 +791,7 @@ def test_stepper_corrector(
     # check that positive forcing is enforced
     if force_positive:
         for name in force_positive_names:
-            assert stepped.gen_data[name][:, 1:].min() >= 0.0
+            assert stepped.gen_data[name][:, :, 1:].min() >= 0.0
 
 
 def _get_stepper(
@@ -784,21 +829,31 @@ def _get_stepper(
 
         module_config = {"module": RepeatChannel()}
 
-    all_names = list(set(in_names + out_names))
     area = torch.ones((5, 5))
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(type="prebuilt", config=module_config),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={n: np.array([norm_mean], dtype=np.float32) for n in all_names},
-            stds={n: np.array([1.0], dtype=np.float32) for n in all_names},
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config=module_config),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=get_scalar_data(set(in_names + out_names), norm_mean),
+                            stds=get_scalar_data(set(in_names + out_names), 1.0),
+                        ),
+                    ),
+                    ocean=ocean_config,
+                    **kwargs,
+                )
+            ),
         ),
-        ocean=ocean_config,
-        **kwargs,
+        loss=WeightedMappingLossConfig(type="MSE"),
     )
     return config.get_stepper(
         (5, 5), LatLonOperations(area), vertical_coordinate, TIMESTEP
@@ -983,22 +1038,25 @@ def test_next_step_forcing_names():
 
 def test_prepend_initial_condition():
     nt = 3
-    x = torch.rand(3, nt, 5).to(DEVICE)
+    batch_size = 3
+    n_ensemble = 2
+    x = torch.rand(3, n_ensemble, nt, 5).to(DEVICE)
 
     def normalize(x):
         result = {k: (v - 1) / 2 for k, v in x.items()}
         return result
 
     stepped = TrainOutput(
-        gen_data={"a": x, "b": x + 1},
-        target_data={"a": x + 2, "b": x + 3},
-        time=xr.DataArray(np.zeros((3, nt)), dims=["sample", "time"]),
+        gen_data=EnsembleTensorDict({"a": x, "b": x + 1}),
+        target_data=EnsembleTensorDict({"a": x[:, :1] + 2, "b": x[:, :1] + 3}),
+        time=xr.DataArray(np.zeros((batch_size, nt)), dims=["sample", "time"]),
         metrics={"loss": torch.tensor(0.0)},
         normalize=normalize,
     )
     ic_data = {
-        "a": torch.rand(3, 1, 5).to(DEVICE),
-        "b": torch.rand(3, 1, 5).to(DEVICE),
+        # no sample dim in initial condition
+        "a": torch.rand(batch_size, 1, 5).to(DEVICE),
+        "b": torch.rand(batch_size, 1, 5).to(DEVICE),
     }
     ic = BatchData.new_on_device(
         data=ic_data,
@@ -1009,43 +1067,10 @@ def test_prepend_initial_condition():
     )
     prepended = stepped.prepend_initial_condition(ic)
     for v in ["a", "b"]:
-        assert torch.allclose(prepended.gen_data[v][:, :1], ic_data[v])
-        assert torch.allclose(prepended.target_data[v][:, :1], ic_data[v])
-
-
-def test__combine_normalizers():
-    vars = ["prog_0", "prog_1", "diag_0"]
-    full_field_normalizer = StandardNormalizer(
-        means={var: torch.rand(3) for var in vars},
-        stds={var: torch.rand(3) for var in vars},
-        fill_nans_on_normalize=True,
-        fill_nans_on_denormalize=True,
-    )
-    residual_normalizer = StandardNormalizer(
-        means={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
-        stds={var: torch.rand(3) for var in ["prog_0", "prog_1"]},
-    )
-    combined_normalizer = _combine_normalizers(
-        residual_normalizer=residual_normalizer,
-        model_normalizer=full_field_normalizer,
-    )
-    assert combined_normalizer.fill_nans_on_normalize
-    assert combined_normalizer.fill_nans_on_denormalize
-    for var in combined_normalizer.means:
-        if "prog" in var:
-            assert torch.allclose(
-                combined_normalizer.means[var], residual_normalizer.means[var]
-            )
-            assert torch.allclose(
-                combined_normalizer.stds[var], residual_normalizer.stds[var]
-            )
-        else:
-            assert torch.allclose(
-                combined_normalizer.means[var], full_field_normalizer.means[var]
-            )
-            assert torch.allclose(
-                combined_normalizer.stds[var], full_field_normalizer.stds[var]
-            )
+        assert torch.allclose(prepended.gen_data[v][:, :, :1], ic_data[v][:, None, ...])
+        assert torch.allclose(
+            prepended.target_data[v][:, :, :1], ic_data[v][:, None, ...]
+        )
 
 
 def test_stepper_from_state_using_resnorm_has_correct_normalizer():
@@ -1059,16 +1084,28 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
     # should detect which prognostic variables to use from the set
     residual_means = {"a": 1.0, "b": 1.0, "diagnostic": 1.0}
     residual_stds = {"a": 2.0, "b": 2.0, "diagnostic": 2.0}
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
-        ),
-        in_names=["a", "b"],
-        out_names=["a", "b", "diagnostic"],
-        normalization=NormalizationConfig(means=full_field_means, stds=full_field_stds),
-        residual_normalization=NormalizationConfig(
-            means=residual_means, stds=residual_stds
-        ),
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config={"scale_factor": 1},
+                    ),
+                    in_names=["a", "b"],
+                    out_names=["a", "b", "diagnostic"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means=full_field_means, stds=full_field_stds
+                        ),
+                        residual=NormalizationConfig(
+                            means=residual_means, stds=residual_stds
+                        ),
+                    ),
+                )
+            ),
+        )
     )
     shapes = {
         "a": (1, 1, 5, 5),
@@ -1098,26 +1135,6 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
         }
         assert stepper.normalizer.means == full_field_means
         assert stepper.normalizer.stds == full_field_stds
-
-
-@pytest.mark.parametrize("repeats", [1, 3])
-def test_sample_dim_operations_give_correct_data_order(repeats: int):
-    n_samples = 3
-    data = {
-        "a": torch.arange(n_samples)
-        .reshape(n_samples, 1, 1)
-        .broadcast_to(n_samples, 5, 5),
-        "b": torch.arange(n_samples)
-        .reshape(n_samples, 1, 1)
-        .broadcast_to(n_samples, 5, 5),
-    }
-    intermediate = repeat_interleave_batch_dim(data, repeats)
-    for k in data:
-        assert intermediate[k].shape == (n_samples * repeats, 5, 5)
-    result = reshape_with_sample_dim(intermediate, repeats)
-    for k in data:
-        assert result[k].shape == (n_samples, repeats, 5, 5)
-        assert torch.allclose(result[k], data[k][:, None, :, :])
 
 
 @pytest.mark.parametrize(
@@ -1153,10 +1170,20 @@ def test_load_stepper_and_load_stepper_config(
         horizontal=horizontal,
         nz_interface=4,
     )
+    if serialized_multi_call_config is not None:
+        multi_call_names = serialized_multi_call_config.names
+    else:
+        multi_call_names = []
+    if (
+        overriding_multi_call_config is not None
+        and overriding_multi_call_config != "keep"
+    ):
+        multi_call_names += overriding_multi_call_config.names
     save_plus_one_stepper(
         stepper_path,
         in_names,
         out_names,
+        normalization_names=set(in_names + out_names + multi_call_names),
         mean=0.0,
         std=1.0,
         data_shape=dim_sizes.shape_nd,
@@ -1167,8 +1194,9 @@ def test_load_stepper_and_load_stepper_config(
     # First check that load_stepper_config and load_stepper functions load
     # the unmodified stepper when no StepperOverrideConfig is passed.
     stepper_config = load_stepper_config(stepper_path)
-    assert stepper_config.ocean == serialized_ocean_config
-    assert stepper_config.multi_call == serialized_multi_call_config
+    validate_stepper_config(
+        stepper_config, serialized_ocean_config, serialized_multi_call_config
+    )
 
     stepper = load_stepper(stepper_path)
     validate_stepper_ocean(stepper, serialized_ocean_config)
@@ -1181,15 +1209,18 @@ def test_load_stepper_and_load_stepper_config(
     )
 
     stepper_config = load_stepper_config(stepper_path, stepper_override)
-    assert stepper_config.ocean == expected_ocean_config
-    assert stepper_config.multi_call == expected_multi_call_config
+    validate_stepper_config(
+        stepper_config, expected_ocean_config, expected_multi_call_config
+    )
 
     stepper = load_stepper(stepper_path, stepper_override)
     validate_stepper_ocean(stepper, expected_ocean_config)
     validate_stepper_multi_call(stepper, expected_multi_call_config)
 
 
-def get_regression_stepper_and_data():
+def get_regression_stepper_and_data(
+    crps_training: bool = False,
+) -> Tuple[Stepper, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_forward_steps = 2
@@ -1202,24 +1233,37 @@ def get_regression_stepper_and_data():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    config = SingleModuleStepperConfig(
-        builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet",
+
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
             config=dataclasses.asdict(
-                SphericalFourierNeuralOperatorBuilder(
-                    embed_dim=16,
-                    num_layers=2,
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="SphericalFourierNeuralOperatorNet",
+                        config=dataclasses.asdict(
+                            SphericalFourierNeuralOperatorBuilder(
+                                embed_dim=16,
+                                num_layers=2,
+                            )
+                        ),
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={n: 0.1 for n in all_names},
+                            stds={n: 1.1 for n in all_names},
+                        ),
+                    ),
+                    ocean=None,
                 )
             ),
         ),
-        in_names=in_names,
-        out_names=out_names,
-        normalization=NormalizationConfig(
-            means={n: np.array([0.1], dtype=np.float32) for n in all_names},
-            stds={n: np.array([1.1], dtype=np.float32) for n in all_names},
-        ),
-        ocean=None,
+        loss=WeightedMappingLossConfig(type="MSE"),
+        crps_training=crps_training,
     )
+
     stepper = config.get_stepper(
         img_shape, LatLonOperations(area), vertical_coordinate, TIMESTEP
     )
@@ -1237,10 +1281,23 @@ def get_regression_stepper_and_data():
     return stepper, data
 
 
-@pytest.mark.parametrize("use_optimization", [True, False])
-def test_stepper_train_on_batch_regression(use_optimization: bool):
+@pytest.mark.parametrize(
+    "use_optimization",
+    [
+        pytest.param(True, id="optimization"),
+        pytest.param(False, id="no_optimization"),
+    ],
+)
+@pytest.mark.parametrize(
+    "crps_training",
+    [
+        pytest.param(True, id="crps_training"),
+        pytest.param(False, id="no_crps_training"),
+    ],
+)
+def test_stepper_train_on_batch_regression(use_optimization: bool, crps_training: bool):
     torch.manual_seed(0)
-    stepper, data = get_regression_stepper_and_data()
+    stepper, data = get_regression_stepper_and_data(crps_training=crps_training)
     if use_optimization:
         optimization_config = OptimizationConfig(
             optimizer_type="Adam",
@@ -1254,10 +1311,14 @@ def test_stepper_train_on_batch_regression(use_optimization: bool):
     result1 = stepper.train_on_batch(data, optimization)
     result2 = stepper.train_on_batch(data, optimization)
     output_dict = get_train_outputs_tensor_dict(result1, result2)
+    filename = f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
+    if crps_training:
+        filename = filename.replace(".pt", "-crps.pt")
     validate_tensor_dict(
         output_dict,
         os.path.join(
-            DIR, f"testdata/stepper_train_on_batch_regression-{use_optimization}.pt"
+            DIR,
+            filename,
         ),
     )
 
@@ -1316,9 +1377,10 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
     for k, v in data.metrics.items():
         return_dict[f"metrics.{k}"] = v
     for k, v in data.gen_data.items():
-        return_dict[f"gen_data.{k}"] = v
+        return_dict[f"gen_data.{k}"] = v[:, 0, ...]
     for k, v in data.target_data.items():
-        return_dict[f"target_data.{k}"] = v
+        assert v.shape[1] == 1
+        return_dict[f"target_data.{k}"] = v[:, 0, ...]
     return return_dict
 
 

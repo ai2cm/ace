@@ -69,6 +69,7 @@ def _get_test_yaml_files(
     use_healpix=False,
     crps_training=False,
     save_per_epoch_diagnostics=False,
+    log_validation_maps=False,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -222,7 +223,10 @@ logging:
   entity: ai2cm
 experiment_dir: {results_dir}
 save_per_epoch_diagnostics: {str(save_per_epoch_diagnostics).lower()}
-    """  # noqa: E501
+validation_aggregator:
+  log_snapshots: {str(log_validation_maps).lower()}
+  log_mean_maps: {str(log_validation_maps).lower()}
+"""  # noqa: E501
     inference_string = f"""
 experiment_dir: {results_dir}
 n_forward_steps: 6
@@ -287,6 +291,7 @@ def _setup(
     use_healpix=False,
     save_per_epoch_diagnostics=False,
     crps_training=False,
+    log_validation_maps=False,
 ):
     if not path.exists():
         path.mkdir()
@@ -372,21 +377,24 @@ def _setup(
         use_healpix=use_healpix,
         crps_training=crps_training,
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+        log_validation_maps=log_validation_maps,
     )
     return train_config_filename, inference_config_filename
 
 
 @pytest.mark.parametrize(
-    "nettype, crps_training",
+    "nettype, crps_training, log_validation_maps",
     [
-        ("SphericalFourierNeuralOperatorNet", False),
-        ("NoiseConditionedSFNO", True),
-        ("HEALPixRecUNet", False),
-        ("Samudra", False),
-        ("NoiseConditionedSFNO", False),
+        ("SphericalFourierNeuralOperatorNet", False, True),
+        ("NoiseConditionedSFNO", True, False),
+        ("HEALPixRecUNet", False, False),
+        ("Samudra", False, False),
+        ("NoiseConditionedSFNO", False, False),
     ],
 )
-def test_train_and_inference(tmp_path, nettype, crps_training, very_fast_only: bool):
+def test_train_and_inference(
+    tmp_path, nettype, crps_training, log_validation_maps: bool, very_fast_only: bool
+):
     """Ensure that ACE training and subsequent standalone inference run without errors.
 
     Args:
@@ -407,6 +415,7 @@ def test_train_and_inference(tmp_path, nettype, crps_training, very_fast_only: b
         use_healpix=(nettype == "HEALPixRecUNet"),
         crps_training=crps_training,
         save_per_epoch_diagnostics=True,
+        log_validation_maps=log_validation_maps,
     )
     # using pdb requires calling main functions directly
     with mock_wandb() as wandb:
@@ -421,11 +430,16 @@ def test_train_and_inference(tmp_path, nettype, crps_training, very_fast_only: b
 
     validation_output_dir = tmp_path / "results" / "output" / "val" / "epoch_0001"
     assert validation_output_dir.exists()
-    for diagnostic in ("mean", "snapshot", "mean_map"):
+    validation_diags = ["mean"]
+    validation_map_diags = ["snapshot", "mean_map"]
+    for diagnostic in validation_diags + validation_map_diags:
         diagnostic_output = validation_output_dir / f"{diagnostic}_diagnostics.nc"
-        assert diagnostic_output.exists()
-        ds = xr.open_dataset(diagnostic_output)
-        assert len(ds) > 0
+        if diagnostic in validation_map_diags and not log_validation_maps:
+            assert not diagnostic_output.exists()
+        else:
+            assert diagnostic_output.exists()
+            ds = xr.open_dataset(diagnostic_output)
+            assert len(ds) > 0
 
     inline_inference_output_dir = (
         tmp_path / "results" / "output" / "inference" / "epoch_0001"

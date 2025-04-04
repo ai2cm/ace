@@ -100,6 +100,13 @@ class StepConfigABC(abc.ABC):
     def get_ocean(self) -> Optional[OceanConfig]:
         pass
 
+    @abc.abstractmethod
+    def load(self):
+        """
+        Update configuration in-place so it does not depend on external files.
+        """
+        pass
+
 
 T = TypeVar("T", bound=StepConfigABC)
 
@@ -128,16 +135,6 @@ class StepSelector(StepConfigABC):
         dataset_info: DatasetInfo,
     ) -> "StepABC":
         return self._step_config_instance.get_step(dataset_info)
-
-    def get_state(self) -> Dict[str, Any]:
-        return {
-            "type": self.type,
-            "config": self.config,
-        }
-
-    @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "StepSelector":
-        return cls(type=state["type"], config=state["config"])
 
     @classmethod
     def get_available_types(cls) -> Set[str]:
@@ -182,6 +179,10 @@ class StepSelector(StepConfigABC):
     def get_ocean(self) -> Optional[OceanConfig]:
         return self._step_config_instance.get_ocean()
 
+    def load(self):
+        self._step_config_instance.load()
+        self.config = dataclasses.asdict(self._step_config_instance)
+
 
 class InferenceDataProtocol(Protocol):
     @property
@@ -203,15 +204,9 @@ class StepABC(abc.ABC):
         extra_names: Optional[List[str]] = None,
         extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
-        if extra_names is None:
-            extra_names = []
-        if extra_residual_scaled_names is None:
-            extra_residual_scaled_names = []
-        extra_diagnostic_names = list(
-            set(extra_names).difference(extra_residual_scaled_names)
-        )
         return self.config.get_loss_normalizer(
-            extra_diagnostic_names, extra_residual_scaled_names
+            extra_names=extra_names,
+            extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
     @property

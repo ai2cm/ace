@@ -5,6 +5,7 @@ import torch
 import torch.linalg
 
 from fme.core.device import get_device
+from fme.core.gridded_ops import GriddedOperations
 from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorMapping
@@ -326,7 +327,6 @@ class WeightedMappingLossConfig:
             relative to the main loss
         weights: A dictionary of variable names with individual
             weights to apply to their normalized losses
-
     """
 
     type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "MSE"
@@ -349,13 +349,13 @@ class WeightedMappingLossConfig:
 
     def build(
         self,
-        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
+        gridded_ops: GriddedOperations,
         out_names: List[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ) -> WeightedMappingLoss:
         loss = self.loss_config.build(
-            reduction="mean", area_weighted_mean=area_weighted_mean
+            reduction="mean", area_weighted_mean=gridded_ops.area_weighted_mean
         )
         return WeightedMappingLoss(
             loss=loss,

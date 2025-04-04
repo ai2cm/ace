@@ -4,7 +4,7 @@ from typing import Callable, Collection, Tuple
 
 import torch
 
-from fme.core.typing_ import TensorMapping
+from fme.core.typing_ import TensorDict, TensorMapping
 
 from . import piq
 
@@ -45,7 +45,7 @@ def map_tensor_mapping(
     return ret
 
 
-def filter_tensor_mapping(x: TensorMapping, keys: Collection[str]) -> TensorMapping:
+def filter_tensor_mapping(x: TensorMapping, keys: Collection[str]) -> TensorDict:
     """
     Filters a tensor mapping based on a set of keys.
 
@@ -88,7 +88,7 @@ def compute_crps(
     target: torch.Tensor,
     prediction: torch.Tensor,
     sample_dim: int = 1,
-):
+) -> torch.Tensor:
     """
     CRPS is defined for one-dimensional random variables as.
 
@@ -119,9 +119,7 @@ def compute_crps(
     .. [3] https://sites.stat.washington.edu/people/raftery/Research/PDF/Gneiting2007jasa.pdf
     """  # noqa: E501
     sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
-    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
-        axis=sample_dim
-    )
+    truth_mae: torch.tensor = torch.abs(target - prediction).mean(axis=sample_dim)
     return truth_mae - 0.5 * sample_mae_estimate
 
 
@@ -263,3 +261,22 @@ def interpolate(tensor: torch.Tensor, scale_factor: int) -> torch.Tensor:
         mode="bicubic",
         align_corners=True,
     )
+
+
+def compute_rank(
+    target: torch.Tensor, prediction: torch.Tensor, sample_dim: int = 1
+) -> torch.Tensor:
+    """
+    Compute the rank of the prediction ensemble against a target.  Expects
+    matching dimensions [batch, sample, lat, lon].
+
+    See "Interpretation of Rank Histograms for Verifying Ensemble Forecasts"
+    by Hamill (2001) for details and interpretation.
+    https://doi.org/10.1175/1520-0493(2001)129<0550:IORHFV>2.0.CO;2
+
+    Args:
+        target: The target tensor.
+        prediction: The prediction tensor.
+        sample_dim: The dimension of `prediction` corresponding to sample.
+    """
+    return prediction <= target.sum(dim=sample_dim)

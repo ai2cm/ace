@@ -224,7 +224,7 @@ def test_inference_logs_labels_exist(tmpdir):
         "mean_step_20/weighted_rmse/ocean_var",
         "mean_step_20/weighted_bias/ocean_var",
         "mean_step_20/weighted_grad_mag_percent_diff/ocean_var",
-        "spherical_power_spectrum/ocean_var",
+        "power_spectrum/ocean_var",
         "time_mean/rmse/ocean_var",
         "time_mean/bias/ocean_var",
         "time_mean/bias_map/ocean_var",
@@ -237,6 +237,10 @@ def test_inference_logs_labels_exist(tmpdir):
         "time_mean/ref_bias_map/ocean_var",
         "zonal_mean/error/ocean_var",
         "zonal_mean/gen/ocean_var",
+        "power_spectrum/positive_norm_bias/ocean_var",
+        "power_spectrum/negative_norm_bias/ocean_var",
+        "power_spectrum/mean_abs_norm_bias/ocean_var",
+        "power_spectrum/smallest_scale_norm_bias/ocean_var",
         "video/ocean_var",
         # atmosphere-specific keys
         "annual/atmos_var",
@@ -245,7 +249,7 @@ def test_inference_logs_labels_exist(tmpdir):
         "mean_step_20/weighted_rmse/atmos_var",
         "mean_step_20/weighted_bias/atmos_var",
         "mean_step_20/weighted_grad_mag_percent_diff/atmos_var",
-        "spherical_power_spectrum/atmos_var",
+        "power_spectrum/atmos_var",
         "time_mean/rmse/atmos_var",
         "time_mean/bias/atmos_var",
         "time_mean/bias_map/atmos_var",
@@ -258,17 +262,17 @@ def test_inference_logs_labels_exist(tmpdir):
         "time_mean/ref_bias_map/atmos_var",
         "zonal_mean/error/atmos_var",
         "zonal_mean/gen/atmos_var",
+        "power_spectrum/positive_norm_bias/atmos_var",
+        "power_spectrum/negative_norm_bias/atmos_var",
+        "power_spectrum/mean_abs_norm_bias/atmos_var",
+        "power_spectrum/smallest_scale_norm_bias/atmos_var",
         "video/atmos_var",
         # combined key
         "time_mean_norm/rmse/channel_mean",
     ]
 
     # Check that all expected keys exist in the logs and no extra keys are present
-    for key in expected_keys:
-        assert key in summary_logs, key
-    assert len(summary_logs) == len(
-        expected_keys
-    ), f"unexpected keys: {set(summary_logs).difference(expected_keys)}"
+    assert set(summary_logs) == set(expected_keys)
 
     agg.flush_diagnostics()
     ocean_directory = output_dir / "ocean"

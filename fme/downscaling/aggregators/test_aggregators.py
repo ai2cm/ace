@@ -1,19 +1,21 @@
 import pytest
 import torch
+import xarray as xr
 
-from fme.core import metrics
+from fme.core import get_device, metrics
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
-from fme.downscaling import metrics_and_maths
-from fme.downscaling.aggregators import (
-    Aggregator,
-    Mean,
-    MeanComparison,
-    MeanMapAggregator,
-    SnapshotAggregator,
+
+from .. import metrics_and_maths
+from ..datasets_new import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from ..models import ModelOutputs
+from .generation import GenerationAggregator
+from .main import Mean, MeanComparison, MeanMapAggregator, SnapshotAggregator
+from .shape_helpers import (
+    _check_all_datasets_compatible_sample_dim,
+    _check_batch_dims_for_recording,
 )
-from fme.downscaling.models import ModelOutputs
 
 
 def assert_tensor_mapping_all_close(x: TensorMapping, y: TensorMapping):
@@ -45,7 +47,7 @@ def test_mean_values(metric, input_, expected_outputs, n_batches):
     for _ in range(n_batches):
         aggregator.record_batch(input_)
     result = aggregator.get()
-    assert_tensor_mapping_all_close(result, {k: v for k, v in expected_outputs.items()})
+    assert_tensor_mapping_all_close(result, expected_outputs)
 
 
 @pytest.mark.parametrize(
@@ -131,7 +133,7 @@ def test_snapshot_runs():
         "y": torch.rand(batch_size, height, width),
     }
     snapshot.record_batch(target, prediction)
-    snapshot.get()
+    snapshot._get()
 
 
 @pytest.mark.parametrize("n_steps", (1, 2))
@@ -149,54 +151,68 @@ def test_map_aggregator(n_steps: int):
         }
         aggregator.record_batch(target, prediction)
 
-    values = aggregator.get()
+    _, maps = aggregator._get()
     for var_name in ("x", "y"):
-        assert values[f"full-field/{var_name}"].shape == (
+        assert maps[f"maps/full-field/{var_name}"].shape == (
             height,
             width * 2 + aggregator.gap_width,
         )
-        assert values[f"error/{var_name}"].shape == (height, width)
+        assert maps[f"maps/error/{var_name}"].shape == (height, width)
 
     aggregator.get_wandb()
-    ds = aggregator.get_dataset()
-    all(ds.coords["source"] == ["target", "prediction"])
 
 
-@pytest.mark.parametrize(
-    "prefix, expected_prefix",
-    [
-        pytest.param("", "", id="no_prefix"),
-        pytest.param("foo", "foo/", id="prefix=foo"),
-    ],
-)
 @pytest.mark.parametrize("n_latent_steps", [0, 2])
-def test_performance_metrics(
-    prefix, expected_prefix, n_latent_steps, percentiles=[99.999]
-):
+def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
     downscale_factor = 2
+    n_batch = 2
+    n_samples = 3
     n_lat, n_lon = 16, 32
-    shape = (2, n_lat, n_lon)
+    coarse_n_lat = n_lat // downscale_factor
+    coarse_n_lon = n_lon // downscale_factor
+    fine_shape = (n_batch, n_lat, n_lon)
+    coarse_shape = (n_batch, coarse_n_lat, coarse_n_lon)
     n_bins = 300
-    target = {"x": torch.zeros(*shape)}
-    prediction = {"x": torch.ones(*shape).unsqueeze(1).repeat_interleave(2, dim=1)}
-    coarse = {
-        "x": torch.ones(
-            *shape[:-2], shape[-2] // downscale_factor, shape[-1] // downscale_factor
-        )
-    }
-
+    prediction = {"x": torch.ones(*fine_shape, device=get_device())}
+    target = {"x": torch.ones(*fine_shape, device=get_device())}
+    coarse = {"x": torch.ones(*coarse_shape, device=get_device())}
+    fine_coordinates = BatchedLatLonCoordinates(
+        lat=torch.randn(n_batch, n_lat),
+        lon=torch.randn(n_batch, n_lon),
+        dims=["batch", "lat", "lon"],
+    ).to_device()
+    coarse_coordinates = BatchedLatLonCoordinates(
+        lat=torch.randn(n_batch, coarse_n_lat),
+        lon=torch.randn(n_batch, coarse_n_lon),
+        dims=["batch", "lat", "lon"],
+    ).to_device()
+    time = xr.DataArray(torch.zeros(n_batch), dims=["batch"])
+    batch = PairedBatchData(
+        fine=BatchData(target, time, fine_coordinates),
+        coarse=BatchData(coarse, time, coarse_coordinates),
+    )
     # latent steps should include an output channel dimension since latent
     # contains stacked outputs, first dim is interleaved batch/samples
-    latent_steps = [torch.zeros(*shape).unsqueeze(dim=1) for _ in range(n_latent_steps)]
+    latent_steps = [
+        torch.zeros(n_batch * n_samples, 1, n_lat, n_lon) for _ in range(n_latent_steps)
+    ]
+
+    # Add sample dimension to fields for aggregator
+    sample_dim = 1
+    prediction = {
+        k: v.unsqueeze(sample_dim).expand(-1, n_samples, -1, -1)
+        for k, v in prediction.items()
+    }
+    target = {k: v.unsqueeze(sample_dim) for k, v in target.items()}
+    coarse = {k: v.unsqueeze(sample_dim) for k, v in coarse.items()}
 
     with mock_wandb():
-        aggregator = Aggregator(
+        aggregator = GenerationAggregator(
             ["lat", "lon"],
             downscale_factor,
             n_histogram_bins=n_bins,
             percentiles=percentiles,
         )
-        area_weights = torch.randn(n_lat, n_lon)
         aggregator.record_batch(
             outputs=ModelOutputs(
                 prediction=prediction,
@@ -205,49 +221,78 @@ def test_performance_metrics(
                 loss=torch.tensor(0.0),
             ),
             coarse=coarse,
-            area_weights=area_weights,
+            batch=batch,
         )
-        wandb_metrics = aggregator.get_wandb(prefix=prefix)
+        aggregator.get_wandb(prefix="test")
 
-    assert f"{expected_prefix}loss" in wandb_metrics
-    num_metrics = 1
-    percentile_names = [
-        f"histogram/{data_type}/{p}th-percentile"
-        for p in percentiles
-        for data_type in ("target", "prediction")
-    ]
-    for metric_name in [
-        "rmse",
-        "weighted_rmse",
-        "relative_mse_bicubic",
-        "time_mean_map/error",
-        "time_mean_map/full-field",
-        "histogram/target",
-        "histogram/prediction",
-    ] + percentile_names:
-        num_metrics += 1
 
-        key = f"{expected_prefix}{metric_name}/x"
+@pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])
+def test_check_batch_dims_valid_cases(valid_shape):
+    outputs = ModelOutputs(
+        target={"x": torch.zeros(*valid_shape)},
+        prediction={"x": torch.zeros(*valid_shape)},
+        latent_steps=[],
+        loss=torch.tensor(0.0),
+    )
+    coarse = {"x": torch.zeros(*valid_shape)}
+    _check_batch_dims_for_recording(outputs, coarse, len(valid_shape))
 
-        if "histogram" in key and "percentile" not in key:
-            wandb_key = f"{expected_prefix}histogram/x"
-        else:
-            wandb_key = key
-        assert wandb_key in wandb_metrics
 
-    for metric_name in [
-        "snapshot/image-error",
-        "snapshot/image-full-field",
-    ]:
-        num_metrics += 1
+@pytest.mark.parametrize(
+    "outputs, coarse",
+    [
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 3, 4, 8)},
+                prediction={"x": torch.zeros(2, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 4, 8)},
+            id="invalid_target_dims",
+        ),
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 4, 8)},
+                prediction={"x": torch.zeros(2, 3, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 4, 8)},
+            id="invalid_prediction_dims",
+        ),
+        pytest.param(
+            ModelOutputs(
+                target={"x": torch.zeros(2, 4, 8)},
+                prediction={"x": torch.zeros(2, 4, 8)},
+                latent_steps=[],
+                loss=torch.tensor(0.0),
+            ),
+            {"x": torch.zeros(2, 3, 4, 8)},
+            id="invalid_coarse_dims",
+        ),
+    ],
+)
+def test_check_batch_dims_for_recording_invalid_cases(outputs, coarse):
+    with pytest.raises(ValueError):
+        _check_batch_dims_for_recording(outputs, coarse, 3)
 
-    if n_latent_steps > 0:
-        num_metrics += 1
 
-    for data_type in ["target", "prediction"]:
-        num_metrics += 1
-        key = f"{expected_prefix}spectrum/x_{data_type}"
-        assert key in wandb_metrics
+def test_check_all_datasets_compatible_sample_dim():
+    prediction = {"x": torch.zeros(4, 2, 8, 16)}
+    target = {"x": torch.zeros(4, 1, 8, 16)}
 
-    # in wandb target and prediction histograms are plotted on the same figure
-    assert len(wandb_metrics) + 1 == num_metrics
+    # Invalid case with 3 samples (incompatible with tensor1)
+    invalid_samples = {"x": torch.zeros(4, 3, 8, 16)}
+
+    # invalid case with only 3 dimensions
+    invalid_dims = {"x": torch.zeros(4, 8, 16)}
+
+    n_samples = _check_all_datasets_compatible_sample_dim([prediction, target])
+    assert n_samples == 2
+
+    with pytest.raises(ValueError):
+        _check_all_datasets_compatible_sample_dim([prediction, target, invalid_samples])
+
+    with pytest.raises(ValueError):
+        _check_all_datasets_compatible_sample_dim([prediction, invalid_dims])

@@ -12,7 +12,7 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
-from fme.downscaling.datasets import DataLoaderConfig
+from fme.downscaling.datasets_new import DataLoaderConfig
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,
@@ -61,6 +61,7 @@ def get_trainer_model_config(model_type: str):
             ModuleRegistrySelector(
                 "prebuilt",
                 {"module": LinearDownscaling(2, fine_img_shape=(16, 16), n_channels=2)},
+                expects_interpolated_input=False,
             ),
             loss=LossConfig("NaN"),
             in_names=["x", "y"],
@@ -85,6 +86,7 @@ def get_trainer_model_config(model_type: str):
                         n_channels=2,
                     )
                 },
+                expects_interpolated_input=False,
             ),
             loss=LossConfig("NaN"),
             in_names=["x", "y"],
@@ -102,7 +104,7 @@ def get_trainer_model_config(model_type: str):
             sigma_min=1,
             sigma_max=2,
             churn=1,
-            num_diffusion_generation_steps=1,
+            num_diffusion_generation_steps=2,
             predict_residual=True,
         )
     else:
@@ -112,17 +114,6 @@ def get_trainer_model_config(model_type: str):
 @pytest.mark.parametrize(
     "evaluator_model_config, model_type, num_samples",
     [
-        pytest.param(
-            {
-                "mode": "nearest",
-                "in_names": ["x", "y"],
-                "out_names": ["x", "y"],
-                "downscale_factor": 2,
-            },
-            "deterministic",
-            1,
-            id="interpolation",
-        ),
         pytest.param(
             {"checkpoint": "unused value"},
             "deterministic",
@@ -182,11 +173,8 @@ def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_sample
             yaml.dump(config, file)
 
     with unittest.mock.patch(
-        "fme.downscaling.aggregators.Aggregator.get_wandb"
-    ) as mock_get_wandb:
+        "fme.downscaling.aggregators.GenerationAggregator.get_wandb"
+    ) as mock_get_gen_agg_wandb:
         with mock_wandb():
             evaluator.main(str(evaluator_config_path))
-    mock_get_wandb.assert_called()
-
-    assert os.path.isfile(tmp_path / "output/histogram_diagnostics.nc")
-    assert os.path.isfile(tmp_path / "output/time_mean_map_diagnostics.nc")
+    mock_get_gen_agg_wandb.assert_called()

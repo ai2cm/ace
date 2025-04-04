@@ -39,12 +39,16 @@ def test_trainer(tmp_path):
 
     with unittest.mock.patch(
         "fme.downscaling.aggregators.Aggregator.get_wandb"
-    ) as mock_get_wandb:
-        with mock_wandb():
-            trainer.train_one_epoch()
-            trainer.valid_one_epoch()
+    ) as mock_agg_get_wandb:
+        with unittest.mock.patch(
+            "fme.downscaling.aggregators.GenerationAggregator.get_wandb"
+        ) as mock_gen_agg_get_wandb:
+            with mock_wandb():
+                trainer.train_one_epoch()
+                trainer.valid_one_epoch()
 
-    mock_get_wandb.assert_called()
+    mock_agg_get_wandb.assert_called()
+    mock_gen_agg_get_wandb.assert_called()
 
 
 def create_test_data_on_disk(
@@ -154,8 +158,8 @@ def _create_config_dict(
     config["validation_data"]["coarse"] = [
         {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
     ]
-    config["train_data"]["coarse_lat_extent"] = 4
-    config["train_data"]["coarse_lon_extent"] = 4
+    config["train_data"]["coarse_random_lat_cells"] = 4
+    config["train_data"]["coarse_random_lon_cells"] = 4
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
@@ -327,17 +331,15 @@ def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
     null_optimization = NullOptimization()
 
     batch = next(iter(trainer.train_data.loader))
-    batch.fine = {k: v for (k, v) in batch.fine.items()}
-    batch.coarse = {k: v for (k, v) in batch.coarse.items()}
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert torch.any(outputs1.prediction["x"] != outputs2.prediction["x"])
+    assert not torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
     trainer.valid_one_epoch()
     assert not trainer.model.module.training
     outputs1 = trainer.model.train_on_batch(batch, null_optimization)
     outputs2 = trainer.model.train_on_batch(batch, null_optimization)
-    assert torch.all(outputs1.prediction["x"] == outputs2.prediction["x"])
+    assert torch.equal(outputs1.prediction["x"], outputs2.prediction["x"])
 
 
 def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):

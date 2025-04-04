@@ -120,9 +120,7 @@ class StandardNameMapping(StandardDimMapping):
             self.water_species
             + self.vertically_resolved
             + [self.pressure_thickness, self.vertical_dim]
-            + self.land_names_to_vertically_coarsen_by_height_weighting
-            + self.land_names_to_vertically_coarsen_by_sum
-            + [self.vertical_dim_land]
+            + self.vertically_resolved_names_land
         )
         for name in [
             self.precipitable_water_path,
@@ -132,6 +130,8 @@ class StandardNameMapping(StandardDimMapping):
         ]:
             if name.lower() != "none":
                 self.dropped_variables.append(name)
+        if self.vertically_resolved_names_land:
+            self.dropped_variables.append(self.vertical_dim_land)
 
     @property
     def water_species(self) -> List[str]:
@@ -336,6 +336,7 @@ def get_coarse_ak_bk(
     interface_indices: Sequence[Tuple[int, int]],
     z_dim="xaxis_1",
     time_dim="Time",
+    dtype=np.float32,
 ) -> xr.Dataset:
     """Return dataset with scalar ak and bk coordinates that define coarse interfaces.
 
@@ -344,6 +345,7 @@ def get_coarse_ak_bk(
         interface_indices: list of tuples of indices of the interfaces in the vertical.
         z_dim: name of dimension along which ak and bk are defined.
         time_dim: name of time dimension.
+        dtype: data type (e.g., np.float32) for ak and bk
 
     Returns:
         xr.Dataset with ak and bk variables as scalars labeled as ak_0, bk_0, etc.
@@ -354,6 +356,9 @@ def get_coarse_ak_bk(
     """
     with fsspec.open(url) as f:
         vertical_coordinate = xr.open_dataset(f).load()
+
+    vertical_coordinate = vertical_coordinate.astype(dtype)
+
     # squeeze out the singleton time dimension
     vertical_coordinate = vertical_coordinate.squeeze()
     data = {}
@@ -443,6 +448,9 @@ def compute_pressure_thickness(
 
     with fsspec.open(vertical_coordinate_file) as f:
         vertical_coordinate = xr.open_dataset(f).load()
+
+    vertical_coordinate = vertical_coordinate.astype(ds[surface_pressure_name].dtype)
+
     # squeeze out the singleton time dimension
     vertical_coord = vertical_coordinate.squeeze(drop=True)
 
@@ -533,7 +541,9 @@ def compute_vertical_coarsening_land(
             if name in summed_variables:
                 coarsened_da = array_slice.sum(dim)
             else:
-                coarsened_da = weighted_mean(array_slice, height_thickness, dim)
+                coarsened_da = weighted_mean(
+                    array_slice, height_thickness.astype(array_slice.dtype), dim
+                )
 
             current_long_name = array_slice.long_name
             coarsened_da.attrs["long_name"] = current_long_name + f" level-{i}"
@@ -752,6 +762,7 @@ def construct_lazy_dataset(
     ak_bk_ds = get_coarse_ak_bk(
         config.reference_vertical_coordinate_file,
         config.vertical_coarsening_indices,
+        dtype=ds[standard_names.surface_pressure].dtype,
     )
     ds = xr.merge([ds, ak_bk_ds])
 

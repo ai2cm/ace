@@ -183,6 +183,7 @@ def test_interpolate(
 @pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
 def test_unets_output_shape(type_):
     coarse_shape = (8, 16)
+    fine_shape = (16, 32)
     downscale_factor = 2
     unet = (
         ModuleRegistrySelector(
@@ -199,9 +200,9 @@ def test_unets_output_shape(type_):
         )
         .to(get_device())
     )
-    inputs = torch.rand(2, 3, *coarse_shape).to(get_device())
+    inputs = torch.rand(2, 3, *fine_shape).to(get_device())
     outputs = unet(inputs)
-    assert outputs.shape == (2, 3, *[2 * s for s in coarse_shape])
+    assert outputs.shape == (2, 3, *fine_shape)
 
 
 @pytest.mark.parametrize(

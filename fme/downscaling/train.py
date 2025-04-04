@@ -11,23 +11,21 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
-from fme.core.device import get_device, move_tensordict_to_device
+from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
-from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import Aggregator
-from fme.downscaling.datasets import BatchData, DataLoaderConfig, GriddedData
+from fme.downscaling.aggregators import Aggregator, GenerationAggregator
+from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
     DownscalingModelConfig,
     Model,
 )
-from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -91,8 +89,7 @@ class Trainer:
         self.validation_data = validation_data
         self.ema = config.ema.build(self.model.modules)
         self.validate_using_ema = config.validate_using_ema
-        self.latitudes = self.train_data.horizontal_coordinates.fine.get_lat().cpu()
-        self.dims = self.train_data.horizontal_coordinates.fine.dims
+        self.dims = self.train_data.dims
         wandb = WandB.get_instance()
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
@@ -134,20 +131,16 @@ class Trainer:
             self.model.downscale_factor,
             include_positional_comparisons=include_positional_comparisons,
         )
-        batch: BatchData
+        batch: PairedBatchData
         wandb = WandB.get_instance()
         for batch in self.train_data.loader:
-            inputs = FineResCoarseResPair[TensorMapping](
-                move_tensordict_to_device(batch.fine),
-                move_tensordict_to_device(batch.coarse),
-            )
-            outputs = self.model.train_on_batch(inputs, self.optimization)
+            outputs = self.model.train_on_batch(batch, self.optimization)
             self.num_batches_seen += 1
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse,
-                    area_weights=self.train_data.area_weights.fine.to(get_device()),
+                    coarse=batch.coarse.data,
+                    batch=batch,
                 )
                 wandb.log(
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
@@ -197,33 +190,28 @@ class Trainer:
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
-            generation_aggregator = Aggregator(
+            generation_aggregator = GenerationAggregator(
                 self.dims,
                 self.model.downscale_factor,
                 include_positional_comparisons=include_positional_comparisons,
             )
-            batch: BatchData
+            batch: PairedBatchData
             for batch in self.validation_data.loader:
-                fine, coarse = (
-                    move_tensordict_to_device(batch.fine),
-                    move_tensordict_to_device(batch.coarse),
-                )
-                inputs = FineResCoarseResPair[TensorMapping](fine, coarse)
-
-                outputs = self.model.train_on_batch(inputs, self.null_optimization)
-                area_weights = self.validation_data.area_weights.fine.to(get_device())
+                outputs = self.model.train_on_batch(batch, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs=outputs,
-                    coarse=inputs.coarse,
-                    area_weights=area_weights,
+                    coarse=batch.coarse.data,
+                    batch=batch,
                 )
                 generated_outputs = self.model.generate_on_batch(
-                    inputs, n_samples=self.config.generate_n_samples
+                    batch, n_samples=self.config.generate_n_samples
                 )
+                # Add sample dimension to coarse values for generation comparison
+                coarse = {k: v.unsqueeze(1) for k, v in batch.coarse.data.items()}
                 generation_aggregator.record_batch(
                     outputs=generated_outputs,
-                    coarse=inputs.coarse,
-                    area_weights=area_weights,
+                    coarse=coarse,
+                    batch=batch,
                 )
 
         wandb = WandB.get_instance()
@@ -327,7 +315,7 @@ class TrainerConfig:
         )
 
         downscaling_model = self.model.build(
-            train_data.img_shape.coarse,
+            train_data.coarse_shape,
             train_data.downscale_factor,
         )
 
@@ -356,7 +344,10 @@ class TrainerConfig:
 
 
 def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
-    if config.coarse_lat_extent is not None or config.coarse_lon_extent is not None:
+    if (
+        config.coarse_random_lat_cells is not None
+        or config.coarse_random_lon_cells is not None
+    ):
         return False
     return True
 

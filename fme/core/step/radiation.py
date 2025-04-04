@@ -49,6 +49,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
             the output timestep.
         ocean: The ocean configuration.
         corrector: The corrector configuration.
+        detach_radiation: Whether to detach the output of the radiation model before
+            passing it to the main model. The radiation outputs returned by
+            .step() will not be detached.
     """
 
     builder: ModuleSelector
@@ -64,6 +67,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
+    detach_radiation: bool = False
 
     def __post_init__(self):
         seen_names: Dict[str, str] = {}
@@ -116,18 +120,16 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_diagnostic_names: Optional[List[str]] = None,
-        extra_prognostic_names: Optional[List[str]] = None,
+        extra_names: Optional[List[str]] = None,
+        extra_residual_scaled_names: Optional[List[str]] = None,
     ) -> StandardNormalizer:
-        if extra_diagnostic_names is None:
-            extra_diagnostic_names = []
-        if extra_prognostic_names is None:
-            extra_prognostic_names = []
+        if extra_names is None:
+            extra_names = []
+        if extra_residual_scaled_names is None:
+            extra_residual_scaled_names = []
         return self.normalization.get_loss_normalizer(
-            names=(
-                self._normalize_names + extra_diagnostic_names + extra_prognostic_names
-            ),
-            residual_scaled_names=self.prognostic_names + extra_prognostic_names,
+            names=self._normalize_names + extra_names,
+            residual_scaled_names=self.prognostic_names + extra_residual_scaled_names,
         )
 
     @classmethod
@@ -218,6 +220,9 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_ocean(self) -> Optional[OceanConfig]:
         return self.ocean
+
+    def load(self):
+        self.normalization.load()
 
 
 class SeparateRadiationStep(StepABC):
@@ -348,9 +353,14 @@ class SeparateRadiationStep(StepABC):
         radiation_output_norm = self.radiation_out_packer.unpack(
             radiation_output_tensor, axis=self.CHANNEL_DIM
         )
-        input_tensor = self.in_packer.pack(
-            {**input_norm, **radiation_output_norm}, axis=self.CHANNEL_DIM
-        )
+        if self._config.detach_radiation:
+            main_input_data = {
+                **input_norm,
+                **{k: v.detach() for k, v in radiation_output_norm.items()},
+            }
+        else:
+            main_input_data = {**input_norm, **radiation_output_norm}
+        input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
         output_tensor = wrapper(self.module)(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})

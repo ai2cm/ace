@@ -3,7 +3,7 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
+from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
     GlobalMeanLoss,
@@ -194,7 +194,8 @@ def test_WeightedMappingLossConfig_no_weights():
     out_names = [f"var_{i}" for i in range(n_channels)]
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
-    area_weighted_mean = LatLonOperations(area).area_weighted_mean
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+    area_weighted_mean = gridded_operations.area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
     loss = loss_config.build(reduction="mean", area_weighted_mean=area_weighted_mean)
     normalizer = StandardNormalizer(
@@ -202,7 +203,7 @@ def test_WeightedMappingLossConfig_no_weights():
         stds={name: torch.as_tensor(1.0) for name in out_names},
     )
     mapping_loss = mapping_loss_config.build(
-        area_weighted_mean,
+        gridded_operations,
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
@@ -228,8 +229,11 @@ def test_WeightedMappingLossConfig_weights():
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
     )
+
+    gridded_operations: GriddedOperations = LatLonOperations(area)
+
     mapping_loss = mapping_loss_config.build(
-        LatLonOperations(area).area_weighted_mean,
+        gridded_operations,
         out_names=out_names,
         channel_dim=channel_dim,
         normalizer=normalizer,
@@ -244,3 +248,40 @@ def test_WeightedMappingLossConfig_weights():
     y_mapping = {"var_0": y0, "var_1": y1}
 
     assert mapping_loss(x_mapping, y_mapping) == ((16 + 0.25) / 2.0)
+
+
+@pytest.mark.parametrize("mean", [0.0, 1.0])
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
+    loss = torch.nn.MSELoss()
+    n_channels = 5
+    n_ensemble = 3
+    packer = Packer([f"var_{i}" for i in range(n_channels)])
+    out_names = [f"var_{i}" for i in range(n_channels)]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(mean) for name in out_names},
+        stds={name: torch.as_tensor(scale) for name in out_names},
+    )
+    mapping_loss = WeightedMappingLoss(
+        loss,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = torch.randn(
+        15,
+        n_ensemble,
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    y = torch.randn(
+        15,
+        1,  # only 1 ensemble member for target
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    x_mapping = {name: x[:, :, i, :, :] for i, name in enumerate(packer.names)}
+    y_mapping = {name: y[:, :, i, :, :] for i, name in enumerate(packer.names)}
+    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)

@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Dict, Mapping, Optional, Protocol
 
 import numpy as np
@@ -9,11 +10,13 @@ from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
+from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
 
 from .map import MapAggregator
 from .reduced import MeanAggregator
 from .snapshot import SnapshotAggregator
+from .spectrum import SpectrumAggregator
 
 
 class _Aggregator(Protocol):
@@ -31,6 +34,38 @@ class _Aggregator(Protocol):
     def get_dataset(self) -> xr.Dataset: ...
 
 
+@dataclasses.dataclass
+class OneStepAggregatorConfig:
+    """
+    Configuration for the validation OneStepAggregator.
+
+    Arguments:
+        log_snapshots: Whether to log snapshot images during.
+        log_mean_maps: Whether to log mean map images during.
+    """
+
+    log_snapshots: bool = True
+    log_mean_maps: bool = True
+
+    def build(
+        self,
+        horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        loss_scaling: Optional[TensorMapping] = None,
+    ):
+        return OneStepAggregator(
+            horizontal_coordinates=horizontal_coordinates,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            variable_metadata=variable_metadata,
+            loss_scaling=loss_scaling,
+            log_snapshots=self.log_snapshots,
+            log_mean_maps=self.log_mean_maps,
+        )
+
+
 class OneStepAggregator(AggregatorABC[TrainOutput]):
     """
     Aggregates statistics for the first timestep.
@@ -46,6 +81,8 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         output_dir: Optional[str] = None,
         variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
         loss_scaling: Optional[TensorMapping] = None,
+        log_snapshots: bool = True,
+        log_mean_maps: bool = True,
     ):
         """
         Args:
@@ -55,22 +92,32 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
+            log_snapshots: Whether to include snapshots in diagnostics.
+            log_mean_maps: Whether to include mean maps in diagnostics.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics.")
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
         self._coords = horizontal_coordinates.coords
-        aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(horizontal_coordinates.gridded_operations)
+        self._aggregators: Dict[str, _Aggregator] = {
+            "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
         }
-        aggregators["snapshot"] = SnapshotAggregator(
-            horizontal_coordinates.dims, variable_metadata
-        )
-        aggregators["mean_map"] = MapAggregator(
-            horizontal_coordinates.dims, variable_metadata
-        )
-        self._aggregators = aggregators
+        if horizontal_coordinates.area_weights is not None:
+            self._aggregators["power_spectrum"] = SpectrumAggregator(
+                nlat=horizontal_coordinates.area_weights.shape[-2],
+                nlon=horizontal_coordinates.area_weights.shape[-1],
+                grid=horizontal_coordinates.grid,
+            )
+        if log_snapshots:
+            self._aggregators["snapshot"] = SnapshotAggregator(
+                horizontal_coordinates.dims, variable_metadata
+            )
+        if log_mean_maps:
+            self._aggregators["mean_map"] = MapAggregator(
+                horizontal_coordinates.dims, variable_metadata
+            )
+
         self._loss_scaling = loss_scaling or {}
 
     @torch.no_grad()
@@ -83,13 +130,15 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         if len(batch.gen_data) == 0:
             raise ValueError("No data in gen_data")
 
-        gen_data_norm = batch.normalize(batch.gen_data)
-        target_data_norm = batch.normalize(batch.target_data)
+        gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
+        target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
+        target_data_norm = batch.normalize(target_data)
+        gen_data_norm = batch.normalize(gen_data)
         for agg in self._aggregators.values():
             agg.record_batch(
                 loss=batch.metrics.get("loss", np.nan),
-                target_data=batch.target_data,
-                gen_data=batch.gen_data,
+                target_data=target_data,
+                gen_data=gen_data,
                 target_data_norm=target_data_norm,
                 gen_data_norm=gen_data_norm,
             )

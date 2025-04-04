@@ -62,7 +62,7 @@ def test_multi_call():
 
 
 def get_scalar_data(names, value):
-    return {n: np.array([value], dtype=np.float32) for n in names}
+    return {n: value for n in names}
 
 
 def _get_stepper_config(
@@ -138,26 +138,22 @@ def test_integration_with_stepper():
     assert "temperature" in output.gen_data
     assert "OLR" in output.gen_data
     assert "OLR_doubled_co2" in output.target_data
-    assert output.metrics["loss_multi_call_step_0"] > 0
-    expected_loss = (
-        output.metrics["loss_step_0"]
-        + output.metrics["loss_multi_call_step_0"]
-        + output.metrics["loss_step_1"]
-        + output.metrics["loss_multi_call_step_1"]
-    )
+    expected_loss = output.metrics["loss_step_0"] + output.metrics["loss_step_1"]
     torch.testing.assert_close(output.metrics["loss"], expected_loss)
     # this value check is based on the implementation of the CustomModule above
     # first output time step
     co2 = data.data["CO2"][0, 0].cpu().numpy()  # assuming constant in time
     for t in range(3):
-        output_temperature = output.gen_data["temperature"][0, t].cpu().numpy()
+        output_temperature = output.gen_data["temperature"][0, 0, t].cpu().numpy()
         np.testing.assert_allclose(output_temperature, co2 + t)
         if t > 0:
             # only check diagnostic OLR for the output time steps, not initial condition
-            input_temperature = output.gen_data["temperature"][0, t - 1].cpu().numpy()
-            olr = output.gen_data["OLR"][0, t].cpu().numpy()
+            input_temperature = (
+                output.gen_data["temperature"][0, 0, t - 1].cpu().numpy()
+            )
+            olr = output.gen_data["OLR"][0, 0, t].cpu().numpy()
             np.testing.assert_allclose(olr, input_temperature * co2)
-            olr_doubled = output.gen_data["OLR_doubled_co2"][0, t].cpu().numpy()
+            olr_doubled = output.gen_data["OLR_doubled_co2"][0, 0, t].cpu().numpy()
             # note for the double-called case, it should use the temperature from the
             # non-doubled CO2 case
             np.testing.assert_allclose(olr_doubled, input_temperature * 2 * co2)
@@ -179,8 +175,4 @@ def test_integration_with_stepper():
         output_without_loss.metrics["loss"],
         output_without_loss.metrics["loss_step_0"]
         + output_without_loss.metrics["loss_step_1"],
-    )
-    torch.testing.assert_close(
-        output_without_loss.metrics["loss_multi_call_step_0"],
-        torch.tensor(0.0, device=fme.get_device()),
     )
