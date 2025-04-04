@@ -21,7 +21,7 @@ run_training() {
   gantry run \
     --name "$job_name" \
     --description 'Run ACE training' \
-    --beaker-image annak/fme-deps-only-d51944c4 \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
