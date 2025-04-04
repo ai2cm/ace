@@ -20,7 +20,7 @@ gantry run \
     --name $JOB_NAME \
     --task-name $JOB_NAME \
     --description 'Run ACE evaluator for CM4 atmosphere data' \
-    --beaker-image annak/fme-deps-only-d51944c4 \
+    --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
