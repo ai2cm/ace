@@ -287,7 +287,7 @@ class GenerationAggregator:
         self._latent_step_aggregator.record_batch(outputs.latent_steps)
 
         sample_dim = 1
-        folded_prediction, folded_target, folded_coarse = _fold_sample_dim(
+        folded_target, folded_prediction, folded_coarse = _fold_sample_dim(
             [target, prediction, coarse], sample_dim=sample_dim
         )
         folded_outputs = ModelOutputs(
