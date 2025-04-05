@@ -1,5 +1,5 @@
 experiment_dir: /results
-n_coupled_steps: 2920
+n_coupled_steps: 2912
 coupled_steps_in_memory: 16
 checkpoint_path:
   ocean:
