@@ -304,6 +304,7 @@ def construct_lazy_dataset(
         interface_indices=config.vertical_coarsening_indices,
         dim=standard_names.vertical_dim,
         pressure_thickness_name=standard_names.pressure_thickness,
+        validate_indices=config.validate_vertical_coarsening_indices,
     )
     ds = compute_column_moisture_integral(
         ds,
