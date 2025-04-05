@@ -27,6 +27,7 @@ dataset_computation:
     - [2, 6]
     - [6, 10]
     - [10, 15]
+  validate_vertical_coarsening_indices_land: false  # land vertical coarsening indices intentionally do not span full depth
   renaming:
     specific_humidity_at_two_meters: Q2m
     air_temperature_at_two_meters: TMP2m
