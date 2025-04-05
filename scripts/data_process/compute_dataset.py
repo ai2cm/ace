@@ -16,11 +16,9 @@ from typing import Dict, List, Mapping, MutableMapping, Optional, Sequence, Tupl
 
 import click
 import dacite
-import distributed
 import fsspec
 import numpy as np
 import xarray as xr
-import xpartition  # noqa: F401
 import yaml
 
 try:
@@ -238,6 +236,9 @@ class DatasetComputationConfig:
             reference levels that go into each vertically coarsened layer.
         variable_sources: mapping of zarr store names, e.g. "full_state.zarr",
             to lists of variables to extract from each.
+        validate_vertical_coarsening_indices: (optional) whether to check that
+            vertical coarsening indices span the full atmosphere and do not
+            overlap (default True).
         n_split: number of steps to split the computation over across time.
         roundtrip_fraction_kept: (optional) fraction of spherical harmonics to
             keep in roundtrip transform. Must be between 0 and 1. If omitted,
@@ -257,6 +258,9 @@ class DatasetComputationConfig:
         vertical_coarsening_indices_land: (optional) list of tuples defining the ranges
             of reference levels that go into each vertically coarsened layer for the
             land model variables.
+        validate_vertical_coarsening_indices_land: (optional) whether to check that
+            land vertical coarsening indices span the full depth of the land model
+            and do not overlap (default True).
         reference_vertical_coordinate_file_land: (optional) path to netCDF file
             containing vertical coordinate definition for the land model of the
             reference simulation.
@@ -265,6 +269,7 @@ class DatasetComputationConfig:
     reference_vertical_coordinate_file: str
     vertical_coarsening_indices: Sequence[Tuple[int, int]]
     variable_sources: Mapping[str, Sequence[str]]
+    validate_vertical_coarsening_indices: bool = True
     n_split: int = 65
     renaming: Mapping[str, str] = dataclasses.field(default_factory=dict)
     roundtrip_fraction_kept: Optional[float] = None
@@ -279,6 +284,7 @@ class DatasetComputationConfig:
     )
     time_invariant_dir: Optional[str] = None
     vertical_coarsening_indices_land: Optional[Sequence[Tuple[int, int]]] = None
+    validate_vertical_coarsening_indices_land: bool = True
     reference_vertical_coordinate_file_land: Optional[str] = None
 
 
@@ -473,16 +479,62 @@ def compute_pressure_thickness(
     return ds.assign({output_name: thickness})
 
 
+def validate_vertical_coarsening_indices(
+    vertical_dim_size: int,
+    interface_indices: Sequence[Tuple[int, int]],
+    component: str,
+    control_flag: str,
+) -> None:
+    """Check that vertical coarsening indices span the full vertical dimension of
+    the model component and do not overlap.
+
+    Args:
+        vertical_dim_size: size of the vertical dimension in the input dataset.
+        interface_indices: provided vertical coarsening indices.
+        component: model component the vertical dimension corresponds to (only
+            relevant for providing a clearer error message).
+        control_flag: relevant control flag on DatasetComputationConfig to disable
+            this check if desired (only relevant for providing a clearer error
+            message).
+    """
+    expected_covered_indices = list(range(vertical_dim_size))
+    covered_indices = []
+    for start, end in interface_indices:
+        covered_indices.extend(list(range(start, end)))
+
+    if covered_indices != expected_covered_indices:
+        raise ValueError(
+            f"Provided {component} vertical coarsening indices {interface_indices!r} "
+            f"do not exactly span all {vertical_dim_size} vertical levels of the "
+            f"input dataset and/or consist of overlapping ranges of levels. If your "
+            f"intent is to use incomplete or overlapping levels, you may disable this "
+            f"check by setting {control_flag} in DatasetComputationConfig to False. "
+            f"If this is not your intent, double check that you are using the proper "
+            f"coarsening indices and, if relevant, the vertical coordinate reference "
+            f"file for this reference model component configuration."
+        )
+
+
 def compute_vertical_coarsening(
     ds: xr.Dataset,
     vertically_resolved_names: Sequence[str],
     interface_indices: Sequence[Tuple[int, int]],
     dim: str,
     pressure_thickness_name: str,
+    validate_indices: bool,
 ) -> xr.Dataset:
     """Compute vertical coarsening of 3D variables by mass-weighted mean. Outputs are
     saved as new variables in the dataset with the name '{name}_{i}' where i is the
     new coarse vertical level index."""
+
+    if validate_indices:
+        validate_vertical_coarsening_indices(
+            ds.sizes[dim],
+            interface_indices,
+            "atmosphere",
+            "validate_vertical_coarsening_indices",
+        )
+
     coarsened_arrays = {}
     for i, (start, end) in enumerate(interface_indices):
         pressure_thickness = ds[pressure_thickness_name].isel({dim: slice(start, end)})
@@ -503,6 +555,7 @@ def compute_vertical_coarsening_land(
     dim: str,
     height_thickness_name: str,
     summed_variables: Sequence[str],
+    validate_indices: bool,
 ) -> xr.Dataset:
     """Compute vertical coarsening of 3D land variables by height-weighted mean or
     unweighted sum. Outputs are saved as new variables in the dataset with the
@@ -525,6 +578,14 @@ def compute_vertical_coarsening_land(
 
     if not vertically_resolved_names:
         return ds
+
+    if validate_indices:
+        validate_vertical_coarsening_indices(
+            ds.sizes[dim],
+            interface_indices,
+            "land",
+            "validate_vertical_coarsening_indices_land",
+        )
 
     with fsspec.open(vertical_coordinate_file) as f:
         thickness = xr.open_dataset(f).load()
@@ -727,6 +788,7 @@ def construct_lazy_dataset(
         interface_indices=config.vertical_coarsening_indices,
         dim=standard_names.vertical_dim,
         pressure_thickness_name=standard_names.pressure_thickness,
+        validate_indices=config.validate_vertical_coarsening_indices,
     )
 
     if standard_names.vertically_resolved_names_land:
@@ -738,6 +800,7 @@ def construct_lazy_dataset(
             dim=standard_names.vertical_dim_land,
             height_thickness_name=standard_names.height_thickness,
             summed_variables=standard_names.land_names_to_vertically_coarsen_by_sum,
+            validate_indices=config.validate_vertical_coarsening_indices_land,
         )
 
     ds = compute_column_moisture_integral(
@@ -823,6 +886,11 @@ def main(
     subsample,
     check_conservation,
 ):
+    # Import distributed and xpartition here to allow testing functions in
+    # the fme environment.
+    import distributed
+    import xpartition  # noqa: F401
+
     logging.basicConfig(level=logging.INFO)
     distributed.Client(n_workers=16)
 
