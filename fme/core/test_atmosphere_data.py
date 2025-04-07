@@ -216,3 +216,12 @@ def test_frozen_precipitation_rate(fields, expected_sum):
 
     result = atmosphere_data.frozen_precipitation_rate
     torch.testing.assert_close(result, expected, check_dtype=False)
+
+
+def test_windspeed_at_10m():
+    shape = (2, 4)
+    data_dict = {"UGRD10m": torch.ones(shape), "VGRD10m": -2 * torch.ones(shape)}
+    atmosphere_data = AtmosphereData(data_dict)
+    expected = torch.sqrt(torch.full(shape, 5))
+    result = atmosphere_data.windspeed_at_10m
+    torch.testing.assert_close(result, expected)

@@ -113,8 +113,7 @@ def net_energy_flux_sfc_into_atmosphere(
     )
 )
 def net_energy_flux_into_atmospheric_column(
-    data: AtmosphereData,
-    timestep: datetime.timedelta,
+    data: AtmosphereData, timestep: datetime.timedelta
 ):
     return data.net_energy_flux_into_atmosphere
 
@@ -160,6 +159,11 @@ def implied_tendency_of_total_energy_ace2_path_due_to_advection(
     flux_through_vertical_boundaries = data.net_energy_flux_into_atmosphere
     implied_column_heating = column_energy_tendency - flux_through_vertical_boundaries
     return implied_column_heating
+
+
+@register(VariableMetadata("m/s", "Windspeed at 10m above surface"))
+def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
+    return data.windspeed_at_10m
 
 
 def _compute_derived_variable(
