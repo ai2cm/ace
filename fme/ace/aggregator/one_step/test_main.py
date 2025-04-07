@@ -52,6 +52,10 @@ def test_labels_exist():
         "test/power_spectrum/negative_norm_bias/a",
         "test/power_spectrum/mean_abs_norm_bias/a",
         "test/power_spectrum/smallest_scale_norm_bias/a",
+        "test/crps/a",
+        "test/crps/mean_map/a",
+        "test/ssr_bias/a",
+        "test/ssr_bias/mean_map/a",
     ]
     assert set(logs.keys()) == set(expected_keys)
 
@@ -82,43 +86,11 @@ def test_aggregator_raises_on_no_data():
         assert "No data" in str(excinfo.value)
 
 
-def test__get_loss_scaled_mse_components():
-    loss_scaling = {
-        "a": torch.tensor(1.0),
-        "b": torch.tensor(0.5),
-    }
-    nx, ny = 10, 10
-    lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
-    # keep area weights ones for simplicity
-    lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    agg = OneStepAggregator(
-        lat_lon_coordinates.to(device=get_device()),
-        loss_scaling=loss_scaling,
-        save_diagnostics=False,
-    )
-
-    logs = {
-        "test/mean/weighted_rmse/a": 1.0,
-        "test/mean/weighted_rmse/b": 4.0,
-        "test/mean/weighted_rmse/c": 0.0,
-    }
-    result = agg._get_loss_scaled_mse_components(logs, "test")
-    scaled_squared_errors_sum = (1.0 / 1.0) ** 2 + (4.0 / 0.5) ** 2
-    assert (
-        result["test/mean/mse_fractional_components/a"] == 1 / scaled_squared_errors_sum
-    )
-    assert (
-        result["test/mean/mse_fractional_components/b"]
-        == 64 / scaled_squared_errors_sum
-    )
-    assert "test/mean/mse_fractional_components/c" not in result
-
-
 @pytest.mark.parametrize(
     "epoch", [pytest.param(None, id="no epoch"), pytest.param(2, id="epoch 2")]
 )
 def test_flush_diagnostics(tmpdir, epoch):
-    nx, ny, batch_size, n_ensemble, n_time = 2, 2, 10, 4, 3
+    nx, ny, batch_size, n_ensemble, n_time = 3, 3, 10, 2, 3
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     agg = OneStepAggregator(
         lat_lon_coordinates.to(device=get_device()), output_dir=(tmpdir / "val")
