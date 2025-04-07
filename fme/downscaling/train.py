@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import warnings
 from typing import Optional, Union
 
 import dacite
@@ -215,15 +216,16 @@ class Trainer:
                 )
 
         wandb = WandB.get_instance()
-
         validation_metrics = validation_aggregator.get_wandb(prefix="validation")
         generation_metrics = generation_aggregator.get_wandb(prefix="generation")
+
         wandb.log(
             {**generation_metrics, **validation_metrics},
             self.num_batches_seen,
         )
+        channel_mean_crps = _get_crps(generation_metrics)
 
-        return validation_metrics["validation/loss"]
+        return channel_mean_crps
 
     @property
     def resuming(self) -> bool:
@@ -341,6 +343,21 @@ class TrainerConfig:
         self.logging.configure_wandb(
             config=config, env_vars=env_vars, resumable=resumable, **kwargs
         )
+
+
+def _get_crps(metrics, prefix="generation/metrics/crps"):
+    channel_crps = [v for k, v in metrics.items() if k.startswith(prefix)]
+
+    if len(channel_crps) != 1:
+        warnings.warn(
+            "CRPS metric used for checkpoint selection is computed on "
+            "denormalized outputs. If multiple outputs are present, "
+            "the mean CRPS will not be evenly weighted across outputs."
+        )
+    if len(channel_crps) == 0:
+        return float("inf")
+    else:
+        return sum(channel_crps) / len(channel_crps)
 
 
 def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
