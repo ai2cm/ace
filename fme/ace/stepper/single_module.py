@@ -30,6 +30,7 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.ensemble import get_crps
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -633,47 +634,13 @@ def crps_loss(
         The CRPS loss for the given variables.
     """
     total = torch.tensor(0.0, device=get_device())
-    for name in names:
-        total += _crps_loss_single(
-            gen_norm_step[name],
-            target_norm_step[name],
-        )
-    return total / len(names)
-
-
-def _crps_loss_single(
-    gen_norm_step: torch.Tensor,
-    target_norm_step: torch.Tensor,
-) -> torch.Tensor:
-    """
-    Compute the CRPS loss for a single variable at a single timestep.
-
-    Args:
-        gen_norm_step: The generated normalized step, of shape
-            [n_batch, 2, ...] where the 2 represents the two ensemble members.
-        target_norm_step: The target normalized step, of shape
-            [n_batch, 1, ...].
-
-    Returns:
-        The CRPS loss.
-    """
-    if gen_norm_step.shape[1] != 2:
-        raise NotImplementedError(
-            "CRPS loss is written here specifically for 2 ensemble members, "
-            f"got {gen_norm_step.shape[1]} ensemble members"
-        )
-    # CRPS is `E[|X - y|] - 1/2 E[|X - X'|]`
-    # below we compute the first term as the average of two ensemble members
-    # meaning the 0.5 factor can be pulled out
     # we are using "almost fair" CRPS from https://arxiv.org/html/2412.15832v1
     # with a value of alpha = 0.95 as used in the paper
-    alpha = 0.95
-    epsilon = (1 - alpha) / 2
-    target_term = torch.abs(gen_norm_step - target_norm_step).mean(axis=1)
-    internal_term = -0.5 * torch.abs(
-        gen_norm_step[:, 0, ...] - gen_norm_step[:, 1, ...]
-    )
-    return (target_term + (1 - epsilon) * internal_term).mean()
+    for name in names:
+        total += get_crps(
+            gen_norm_step[name], target_norm_step[name], alpha=0.95
+        ).mean()
+    return total / len(names)
 
 
 def stack_list_of_tensor_dicts(
