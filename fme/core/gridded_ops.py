@@ -118,7 +118,7 @@ class LatLonOperations(GriddedOperations):
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
     ) -> torch.Tensor:
-        if data.device.type == "cpu":
+        if data.device == torch.device("cpu"):
             area_weights = self._cpu_area
         else:
             area_weights = self._device_area
@@ -131,7 +131,7 @@ class LatLonOperations(GriddedOperations):
     ) -> torch.Tensor:
         if regional_weights.device.type != data.device.type:
             regional_weights = regional_weights.to(data.device)
-        if data.device.type == "cpu":
+        if data.device == torch.device("cpu"):
             regional_area_weights = regional_weights * self._cpu_area
         else:
             regional_area_weights = regional_weights * self._device_area
@@ -145,7 +145,7 @@ class LatLonOperations(GriddedOperations):
     def area_weighted_gradient_magnitude_percent_diff(
         self, truth: torch.Tensor, predicted: torch.Tensor
     ):
-        if predicted.device.type == "cpu":
+        if predicted.device == torch.device("cpu"):
             area_weights = self._cpu_area
         else:
             area_weights = self._device_area
