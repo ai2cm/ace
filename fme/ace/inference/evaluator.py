@@ -188,7 +188,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     logging.info(f"Current device is {fme.get_device()}")
 
     stepper_config = config.load_stepper_config()
-    logging.info("Loading inference data")
+    logging.info("Initializing data loader")
     window_requirements = stepper_config.get_evaluation_window_data_requirements(
         n_forward_steps=config.forward_steps_in_memory
     )
