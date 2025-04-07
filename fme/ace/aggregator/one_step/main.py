@@ -1,69 +1,19 @@
 import dataclasses
-from typing import Dict, Mapping, Optional, Protocol
+from typing import Mapping, Optional
 
-import numpy as np
 import torch
-import xarray as xr
 
+from fme.ace.aggregator.one_step.deterministic import (
+    DeterministicTrainOutput,
+    OneStepDeterministicAggregator,
+)
+from fme.ace.aggregator.one_step.ensemble import get_one_step_ensemble_aggregator
 from fme.ace.stepper import TrainOutput
 from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
-
-from .map import MapAggregator
-from .reduced import MeanAggregator
-from .snapshot import SnapshotAggregator
-from .spectrum import SpectrumAggregator
-
-
-class _Aggregator(Protocol):
-    def get_logs(self, label: str) -> TensorMapping: ...
-
-    def record_batch(
-        self,
-        loss: float,
-        target_data: TensorMapping,
-        gen_data: TensorMapping,
-        target_data_norm: TensorMapping,
-        gen_data_norm: TensorMapping,
-    ) -> None: ...
-
-    def get_dataset(self) -> xr.Dataset: ...
-
-
-@dataclasses.dataclass
-class OneStepAggregatorConfig:
-    """
-    Configuration for the validation OneStepAggregator.
-
-    Arguments:
-        log_snapshots: Whether to log snapshot images during.
-        log_mean_maps: Whether to log mean map images during.
-    """
-
-    log_snapshots: bool = True
-    log_mean_maps: bool = True
-
-    def build(
-        self,
-        horizontal_coordinates: HorizontalCoordinates,
-        save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        loss_scaling: Optional[TensorMapping] = None,
-    ):
-        return OneStepAggregator(
-            horizontal_coordinates=horizontal_coordinates,
-            save_diagnostics=save_diagnostics,
-            output_dir=output_dir,
-            variable_metadata=variable_metadata,
-            loss_scaling=loss_scaling,
-            log_snapshots=self.log_snapshots,
-            log_mean_maps=self.log_mean_maps,
-        )
 
 
 class OneStepAggregator(AggregatorABC[TrainOutput]):
@@ -95,53 +45,45 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
         """
-        if save_diagnostics and output_dir is None:
-            raise ValueError("Output directory must be set to save diagnostics.")
-        self._output_dir = output_dir
-        self._save_diagnostics = save_diagnostics
-        self._coords = horizontal_coordinates.coords
-        self._aggregators: Dict[str, _Aggregator] = {
-            "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
-        }
-        if horizontal_coordinates.area_weights is not None:
-            self._aggregators["power_spectrum"] = SpectrumAggregator(
-                nlat=horizontal_coordinates.area_weights.shape[-2],
-                nlon=horizontal_coordinates.area_weights.shape[-1],
-                grid=horizontal_coordinates.grid,
-            )
-        if log_snapshots:
-            self._aggregators["snapshot"] = SnapshotAggregator(
-                horizontal_coordinates.dims, variable_metadata
-            )
-        if log_mean_maps:
-            self._aggregators["mean_map"] = MapAggregator(
-                horizontal_coordinates.dims, variable_metadata
-            )
-
-        self._loss_scaling = loss_scaling or {}
+        self._deterministic_aggregator = OneStepDeterministicAggregator(
+            horizontal_coordinates=horizontal_coordinates,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            variable_metadata=variable_metadata,
+            loss_scaling=loss_scaling,
+            log_snapshots=log_snapshots,
+            log_mean_maps=log_mean_maps,
+        )
+        self._ensemble_aggregator = get_one_step_ensemble_aggregator(
+            gridded_operations=horizontal_coordinates.gridded_operations,
+            log_mean_maps=log_mean_maps,
+            target_time=1,
+            metadata=variable_metadata,
+        )
+        self._ensemble_recorded = False
 
     @torch.no_grad()
     def record_batch(
         self,
         batch: TrainOutput,
     ):
-        if len(batch.target_data) == 0:
-            raise ValueError("No data in target_data")
-        if len(batch.gen_data) == 0:
-            raise ValueError("No data in gen_data")
-
-        gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
-        target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
-        target_data_norm = batch.normalize(target_data)
-        gen_data_norm = batch.normalize(gen_data)
-        for agg in self._aggregators.values():
-            agg.record_batch(
-                loss=batch.metrics.get("loss", np.nan),
-                target_data=target_data,
-                gen_data=gen_data,
-                target_data_norm=target_data_norm,
-                gen_data_norm=gen_data_norm,
+        folded_gen_data, n_ensemble = fold_ensemble_dim(batch.gen_data)
+        folded_target_data = fold_sized_ensemble_dim(batch.target_data, n_ensemble)
+        self._deterministic_aggregator.record_batch(
+            DeterministicTrainOutput(
+                metrics=batch.metrics,
+                gen_data=folded_gen_data,
+                target_data=folded_target_data,
+                normalize=batch.normalize,
             )
+        )
+        if n_ensemble > 1:
+            self._ensemble_aggregator.record_batch(
+                target_data=batch.target_data,
+                gen_data=batch.gen_data,
+                i_time_start=0,
+            )
+            self._ensemble_recorded = True
 
     @torch.no_grad()
     def get_logs(self, label: str):
@@ -151,50 +93,51 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         Args:
             label: Label to prepend to all log keys.
         """
-        logs = {}
-        for agg_label in self._aggregators:
-            for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
-                logs[f"{label}/{k}"] = v
-        logs.update(
-            self._get_loss_scaled_mse_components(
-                validation_metrics=logs,
-                label=label,
-            )
-        )
-        return logs
-
-    def _get_loss_scaled_mse_components(
-        self,
-        validation_metrics: Mapping[str, float],
-        label: str,
-    ):
-        scaled_squared_errors = {}
-
-        for var in self._loss_scaling:
-            rmse_key = f"{label}/mean/weighted_rmse/{var}"
-            if rmse_key in validation_metrics:
-                scaled_squared_errors[var] = (
-                    validation_metrics[rmse_key] / self._loss_scaling[var].item()
-                ) ** 2
-        scaled_squared_errors_sum = sum(scaled_squared_errors.values())
-        fractional_contribs = {
-            f"{label}/mean/mse_fractional_components/{k}": v / scaled_squared_errors_sum
-            for k, v in scaled_squared_errors.items()
-        }
-        return fractional_contribs
+        deterministic_logs = self._deterministic_aggregator.get_logs(label)
+        if self._ensemble_recorded:
+            stochastic_logs = self._ensemble_aggregator.get_logs(label)
+            if len(set(deterministic_logs.keys()) & set(stochastic_logs.keys())) > 0:
+                raise ValueError(
+                    "Stochastic and deterministic logs have overlapping keys, "
+                    f"stochastic logs: {stochastic_logs}, "
+                    f"deterministic logs: {deterministic_logs}"
+                )
+            return {**deterministic_logs, **stochastic_logs}
+        else:
+            return deterministic_logs
 
     @torch.no_grad()
     def flush_diagnostics(self, subdir: Optional[str] = None):
-        if self._save_diagnostics:
-            reduced_diagnostics = get_reduced_diagnostics(
-                sub_aggregators=self._aggregators,
-                coords=self._coords,
-            )
-            if self._output_dir is not None:
-                write_reduced_diagnostics(
-                    reduced_diagnostics,
-                    self._output_dir,
-                    subdir=subdir,
-                )
-            else:
-                raise ValueError("Output directory is not set.")
+        self._deterministic_aggregator.flush_diagnostics(subdir)
+
+
+@dataclasses.dataclass
+class OneStepAggregatorConfig:
+    """
+    Configuration for the validation OneStepAggregator.
+
+    Arguments:
+        log_snapshots: Whether to log snapshot images.
+        log_mean_maps: Whether to log mean map images.
+    """
+
+    log_snapshots: bool = True
+    log_mean_maps: bool = True
+
+    def build(
+        self,
+        horizontal_coordinates: HorizontalCoordinates,
+        save_diagnostics: bool = True,
+        output_dir: Optional[str] = None,
+        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        loss_scaling: Optional[TensorMapping] = None,
+    ):
+        return OneStepAggregator(
+            horizontal_coordinates=horizontal_coordinates,
+            save_diagnostics=save_diagnostics,
+            output_dir=output_dir,
+            variable_metadata=variable_metadata,
+            loss_scaling=loss_scaling,
+            log_snapshots=self.log_snapshots,
+            log_mean_maps=self.log_mean_maps,
+        )
