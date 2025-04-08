@@ -24,6 +24,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
+from fme.downscaling.patching import PatchPredictor
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 
@@ -113,6 +114,9 @@ class CheckpointModelConfig:
             fine_names=out_names,
             coarse_names=list(set(in_names).union(out_names)),
             n_timesteps=1,
+            use_fine_topography=self.checkpoint_dict["model"]["config"][
+                "use_fine_topography"
+            ],
         )
 
 
@@ -120,9 +124,9 @@ class Evaluator:
     def __init__(
         self,
         data: GriddedData,
+        model: Union[Model, DiffusionModel, PatchPredictor],
         experiment_dir: str,
         n_samples: int,
-        model: Union[Model, DiffusionModel],
     ) -> None:
         self.data = data
         self.model = model
@@ -157,12 +161,29 @@ class Evaluator:
 
 
 @dataclasses.dataclass
+class MultipatchConfig:
+    """
+    Configuration to enable predictions on multiple patches for evaluation.
+
+    Args:
+        divide_evaluation: enables the patched prediction of the full
+            input data extent for evaluation.
+        coarse_horizontal_overlap: number of pixels to overlap in the
+            coarse data.
+    """
+
+    divide_evaluation: bool = False
+    coarse_horizontal_overlap: int = 1
+
+
+@dataclasses.dataclass
 class EvaluatorConfig:
     model: CheckpointModelConfig
     experiment_dir: str
     data: DataLoaderConfig
     logging: LoggingConfig
     n_samples: int = 4
+    patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -180,11 +201,20 @@ class EvaluatorConfig:
         )
 
         model = self.model.build()
+        evaluator_model: Union[Model, DiffusionModel, PatchPredictor]
+        if self.patch.divide_evaluation:
+            evaluator_model = PatchPredictor(
+                model,
+                dataset.coarse_shape,
+                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+            )
+        else:
+            evaluator_model = model
         return Evaluator(
             data=dataset,
+            model=evaluator_model,
             experiment_dir=self.experiment_dir,
             n_samples=self.n_samples,
-            model=model,
         )
 
 

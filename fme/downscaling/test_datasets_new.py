@@ -505,3 +505,32 @@ def test_random_spatial_subset_paired_dataset():
 
     with pytest.raises(ValueError, match="Aspect ratio must match between lat and lon"):
         RandomSpatialSubsetPairedDataset(dataset_bad)
+
+
+def test_BatchData_slice_latlon():
+    sample_data = get_batch_items()
+    batch = BatchData.from_sequence(sample_data)
+
+    lat_slice = slice(1, 3)
+    lon_slice = slice(2, 5)
+    batch_slice = batch.latlon_slice(
+        lat_slice=lat_slice,
+        lon_slice=lon_slice,
+    )
+
+    assert torch.equal(
+        batch_slice.latlon_coordinates.lat,
+        batch.latlon_coordinates.lat[:, lat_slice],
+    )
+    assert torch.equal(
+        batch_slice.latlon_coordinates.lon,
+        batch.latlon_coordinates.lon[:, lon_slice],
+    )
+    assert torch.equal(
+        batch_slice.data["x"],
+        batch.data["x"][:, lat_slice, lon_slice],
+    )
+    assert torch.equal(
+        batch_slice.topography,
+        batch.topography[:, lat_slice, lon_slice],  # type: ignore
+    )
