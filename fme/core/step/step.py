@@ -59,6 +59,14 @@ class StepConfigABC(abc.ABC):
         pass
 
     @property
+    @abc.abstractmethod
+    def next_step_input_names(self) -> List[str]:
+        """
+        Names of variables required in next_step_input_data for .step.
+        """
+        pass
+
+    @property
     @final
     def prognostic_names(self) -> List[str]:
         return list(set(self.input_names).intersection(self.output_names))
@@ -156,6 +164,13 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.output_names
 
     @property
+    def next_step_input_names(self) -> List[str]:
+        """
+        Names of variables required in next_step_input_data for .step.
+        """
+        return self._step_config_instance.next_step_input_names
+
+    @property
     def loss_names(self) -> List[str]:
         """
         Names of variables to be included in the loss function.
@@ -245,12 +260,12 @@ class StepABC(abc.ABC):
         pass
 
     @property
-    @abc.abstractmethod
+    @final
     def next_step_input_names(self) -> List[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
-        pass
+        return self.config.next_step_input_names
 
     @property
     @final
