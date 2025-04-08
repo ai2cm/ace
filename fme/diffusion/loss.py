@@ -130,30 +130,6 @@ class MSELoss(torch.nn.Module):
         return torch.mean(torch.square(x - y) * weights)
 
 
-class WeightedSum(torch.nn.Module):
-    """
-    A module which applies multiple loss-function modules (taking two inputs)
-    to the same input and returns a tensor equal to the weighted sum of the
-    outputs of the modules.
-    """
-
-    def __init__(self, modules: List[torch.nn.Module], weights: List[float]):
-        """
-        Args:
-            modules: A list of modules, each of which takes two tensors and
-                returns a scalar tensor.
-            weights: A list of weights to apply to the outputs of the modules.
-        """
-        super().__init__()
-        if len(modules) != len(weights):
-            raise ValueError("modules and weights must have the same length")
-        self._wrapped = modules
-        self._weights = weights
-
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return sum(w * module(x, y) for w, module in zip(self._weights, self._wrapped))
-
-
 class VariableWeightingLoss(torch.nn.Module):
     def __init__(self, weights: torch.Tensor, loss: torch.nn.Module):
         """
