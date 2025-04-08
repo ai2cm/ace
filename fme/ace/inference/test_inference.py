@@ -38,6 +38,7 @@ from fme.core.coordinates import (
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
+from fme.core.ocean import OceanConfig
 from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -66,6 +67,10 @@ def save_stepper(
             means={name: mean for name in all_names},
             stds={name: std for name in all_names},
         ),
+        ocean=OceanConfig(
+            surface_temperature_name="sst",
+            ocean_fraction_name="ocean_fraction",
+        ),
     )
     area = torch.ones(data_shape[-2:], device=fme.get_device())
     vertical_coordinate = HybridSigmaPressureCoordinate(
@@ -84,8 +89,8 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     forward_steps_in_memory = 2
     # NOTE: number of inputs and outputs has to be the same for the PlusOne
     # stepper module to work properly
-    in_names = ["prog", "forcing_var", "DSWRFtoa"]
-    out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
+    in_names = ["prog", "sst", "forcing_var", "DSWRFtoa"]
+    out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
     horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
 
@@ -104,7 +109,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     data = FV3GFSData(
         path=tmp_path,
-        names=["forcing_var", "DSWRFtoa"],
+        names=["forcing_var", "DSWRFtoa", "sst", "ocean_fraction"],
         dim_sizes=dim_sizes,
         timestep_days=0.25,
         save_vertical_coordinate=False,
@@ -115,7 +120,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
             "prog": xr.DataArray(
                 np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
-            "forcing": xr.DataArray(
+            "sst": xr.DataArray(
                 np.random.rand(2, 16, 32).astype(np.float32), dims=dims
             ),
             "DSWRFtoa": xr.DataArray(

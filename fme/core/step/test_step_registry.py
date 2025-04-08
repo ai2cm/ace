@@ -41,10 +41,6 @@ class MockStep(StepABC):
     def ocean_fraction_name(self):
         return None
 
-    @property
-    def next_step_input_names(self):
-        raise NotImplementedError()
-
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
 
@@ -84,6 +80,10 @@ class MockStepConfig(StepConfigABC):
     @property
     def output_names(self) -> List[str]:
         return self.out_names
+
+    @property
+    def next_step_input_names(self):
+        raise NotImplementedError()
 
     @property
     def loss_names(self) -> List[str]:
