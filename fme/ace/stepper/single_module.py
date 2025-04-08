@@ -166,14 +166,6 @@ class SingleModuleStepperConfig:
             n_timesteps=self.n_ic_timesteps,
         )
 
-    def get_forcing_window_data_requirements(
-        self, n_forward_steps: int
-    ) -> DataRequirements:
-        return DataRequirements(
-            names=self.input_only_names,
-            n_timesteps=self._window_steps_required(n_forward_steps),
-        )
-
     def _window_steps_required(self, n_forward_steps: int) -> int:
         return n_forward_steps + self.n_ic_timesteps
 
@@ -725,7 +717,9 @@ class StepperConfig:
         self, n_forward_steps: int
     ) -> DataRequirements:
         return DataRequirements(
-            names=self.input_only_names,
+            names=list(
+                set(self.input_only_names).union(self.step.next_step_input_names)
+            ),
             n_timesteps=self._window_steps_required(n_forward_steps),
         )
 

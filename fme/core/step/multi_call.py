@@ -180,6 +180,10 @@ class MultiCallStepConfig(StepConfigABC):
         return self.wrapped_step.output_names + self._multi_call_outputs
 
     @property
+    def next_step_input_names(self) -> List[str]:
+        return self.wrapped_step.next_step_input_names
+
+    @property
     def loss_names(self) -> List[str]:
         if self.include_multi_call_in_loss:
             return self.wrapped_step.loss_names + self._multi_call_outputs
@@ -262,10 +266,6 @@ class MultiCallStep(StepABC):
         return self._config.extend_normalizer_with_multi_call_outputs(
             self._wrapped_step.normalizer
         )
-
-    @property
-    def next_step_input_names(self) -> List[str]:
-        return self._wrapped_step.next_step_input_names
 
     @property
     def surface_temperature_name(self) -> Optional[str]:
