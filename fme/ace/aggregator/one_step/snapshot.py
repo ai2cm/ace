@@ -17,16 +17,16 @@ class SnapshotAggregator:
 
     _captions = {
         "full-field": (
-            "{name} one step full field for last sample; "
+            "{name} one step full field for first sample in last batch; "
             "(top) generated and (bottom) target [{units}]"
         ),
         "residual": (
-            "{name} one step residual (prediction - previous time) for last sample; "
-            "(top) generated and (bottom) target [{units}]"
+            "{name} one step residual (prediction - previous time) for first sample in "
+            "last batch; (top) generated and (bottom) target [{units}]"
         ),
         "error": (
             "{name} one step full field error (generated - target) "
-            "for last sample [{units}]"
+            "for first sample in last batch [{units}]"
         ),
     }
 
