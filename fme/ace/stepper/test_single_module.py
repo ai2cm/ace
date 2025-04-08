@@ -1377,10 +1377,10 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
     for k, v in data.metrics.items():
         return_dict[f"metrics.{k}"] = v
     for k, v in data.gen_data.items():
-        return_dict[f"gen_data.{k}"] = v[:, 0, ...]
+        return_dict[f"gen_data.{k}"] = v
     for k, v in data.target_data.items():
         assert v.shape[1] == 1
-        return_dict[f"target_data.{k}"] = v[:, 0, ...]
+        return_dict[f"target_data.{k}"] = v
     return return_dict
 
 
