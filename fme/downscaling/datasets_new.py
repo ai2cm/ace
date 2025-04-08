@@ -751,6 +751,28 @@ class BatchData:
 
         return BatchData(data, time, latlon_coordinates, topography)
 
+    def latlon_slice(
+        self,
+        lat_slice: slice,
+        lon_slice: slice,
+    ) -> "BatchData":
+        sliced_data = {k: v[..., lat_slice, lon_slice] for k, v in self.data.items()}
+        sliced_latlon = BatchedLatLonCoordinates(
+            lat=self.latlon_coordinates.lat[..., lat_slice],
+            lon=self.latlon_coordinates.lon[..., lon_slice],
+            dims=self.latlon_coordinates.dims,
+        )
+        if self.topography is not None:
+            sliced_topo = self.topography[..., lat_slice, lon_slice]
+        else:
+            sliced_topo = None
+        return BatchData(
+            data=sliced_data,
+            time=self.time,
+            latlon_coordinates=sliced_latlon,
+            topography=sliced_topo,
+        )
+
 
 @dataclasses.dataclass
 class PairedBatchData:
@@ -772,6 +794,18 @@ class PairedBatchData:
 
     def __len__(self):
         return len(self.fine)
+
+    def latlon_slice(
+        self,
+        coarse_lat_slice: slice,
+        coarse_lon_slice: slice,
+        fine_lat_slice: slice,
+        fine_lon_slice: slice,
+    ):
+        return PairedBatchData(
+            fine=self.fine.latlon_slice(fine_lat_slice, fine_lon_slice),
+            coarse=self.coarse.latlon_slice(coarse_lat_slice, coarse_lon_slice),
+        )
 
     @classmethod
     def from_sequence(
