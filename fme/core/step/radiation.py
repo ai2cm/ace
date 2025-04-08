@@ -212,6 +212,14 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
+    def next_step_input_names(self) -> List[str]:
+        """Names of variables provided in next_step_input_data."""
+        input_only_names = set(self.input_names).difference(self.output_names)
+        if self.ocean is None:
+            return list(input_only_names)
+        return list(input_only_names.union(self.ocean.forcing_names))
+
+    @property
     def loss_names(self) -> List[str]:
         return self.output_names
 
@@ -297,13 +305,6 @@ class SeparateRadiationStep(StepABC):
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
-
-    @property
-    def next_step_input_names(self) -> List[str]:
-        input_only_names = list(set(self.input_names) - set(self.output_names))
-        if self.ocean is None:
-            return input_only_names
-        return list(set(input_only_names).union(self.ocean.forcing_names))
 
     @property
     def normalizer(self) -> StandardNormalizer:
