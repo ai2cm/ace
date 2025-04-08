@@ -197,6 +197,8 @@ class UNetBlock(torch.nn.Module):
 class PositionalEmbedding(torch.nn.Module):
     def __init__(self, num_channels, max_positions=10000, endpoint=False):
         super().__init__()
+        if num_channels % 2 != 0:
+            raise ValueError("num_channels must be even")
         self.num_channels = num_channels
         self.max_positions = max_positions
         self.endpoint = endpoint
