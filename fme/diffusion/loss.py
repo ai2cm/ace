@@ -1,10 +1,11 @@
 import dataclasses
-from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
+from typing import Any, Callable, Dict, List, Literal, Mapping
 
 import torch
 import torch.linalg
 
 from fme.core.device import get_device
+from fme.core.normalizer import StandardNormalizer
 from fme.core.packer import Packer
 from fme.core.typing_ import TensorDict
 
@@ -13,25 +14,79 @@ class NaNLoss(torch.nn.Module):
     def __init__(self):
         super(NaNLoss, self).__init__()
 
-    def forward(self, input, target):
+    def forward(self, input, target, batch_weights):
         return torch.tensor(torch.nan)
 
 
-class MappingLoss:
-    def __init__(self, loss: torch.nn.Module, packer: Packer, channel_dim: int = -3):
-        self.loss = loss
-        self.packer = packer
+class WeightedMappingLoss:
+    def __init__(
+        self,
+        loss: torch.nn.Module,
+        weights: Dict[str, float],
+        out_names: List[str],
+        normalizer: StandardNormalizer,
+        channel_dim: int = -3,
+    ):
+        """
+        Args:
+            loss: The loss function to apply, taking predict, target, and batch weight
+                tensors as inputs.
+            weights: A dictionary of variable names with individual
+                weights to apply to their normalized losses
+            out_names: The names of the output variables.
+            normalizer: The normalizer to use.
+            channel_dim: The channel dimension of the input tensors.
+        """
+        self._weight_tensor = _construct_weight_tensor(
+            weights, out_names, channel_dim=channel_dim
+        )
+        self.loss = VariableWeightingLoss(
+            weights=self._weight_tensor,
+            loss=loss,
+        )
+        if self._weight_tensor.flatten().shape[0] != len(out_names):
+            raise RuntimeError(
+                "The number of weights must match the number of output names, "
+                "behavior of _construct_weight_tensor has changed."
+            )
+        self.packer = Packer(out_names)
         self.channel_dim = channel_dim
+        self.normalizer = normalizer
 
     def __call__(
         self,
         predict_dict: TensorDict,
         target_dict: TensorDict,
+        batch_weights: torch.Tensor,
     ):
-        predict_tensors = self.packer.pack(predict_dict, axis=self.channel_dim)
-        target_tensors = self.packer.pack(target_dict, axis=self.channel_dim)
+        """
+        Args:
+            predict_dict: A dictionary of predicted tensors.
+            target_dict: A dictionary of target tensors.
+            batch_weights: A tensor which can be broadcasted to the shape of
+                the predicted and target tensors. This will be multiplied with each
+                element (without normalizing the weights) before reducing the loss
+                but after any nonlinear operations.
+        """
+        predict_tensors = self.packer.pack(
+            self.normalizer.normalize(predict_dict), axis=self.channel_dim
+        )
+        target_tensors = self.packer.pack(
+            self.normalizer.normalize(target_dict), axis=self.channel_dim
+        )
 
-        return self.loss(predict_tensors, target_tensors)
+        return self.loss(predict_tensors, target_tensors, batch_weights[:, None])
+
+    def get_normalizer_state(self) -> Dict[str, float]:
+        return self.normalizer.get_state()
+
+    @property
+    def effective_loss_scaling(self) -> Dict[str, float]:
+        custom_weights = dict(zip(self.packer.names, self._weight_tensor.flatten()))
+        loss_normalizer_stds = self.normalizer.stds
+        return {
+            k: loss_normalizer_stds[k] / custom_weights[k] for k in self.packer.names
+        }
 
 
 def _construct_weight_tensor(
@@ -61,40 +116,18 @@ def _construct_weight_tensor(
     return weights_tensor.reshape(*reshape_dim).to(get_device(), dtype=torch.float)
 
 
-class LpLoss(torch.nn.Module):
-    def __init__(self, p=2):
-        """
-        Args:
-            p: Lp-norm type. For example, p=1 for L1-norm, p=2 for L2-norm.
-        """
-        super(LpLoss, self).__init__()
-
-        if p <= 0:
-            raise ValueError("Lp-norm type should be positive")
-
-        self.p = p
-
-    def rel(self, x, y):
-        num_examples = x.size()[0]
-
-        diff_norms = torch.linalg.norm(
-            x.reshape(num_examples, -1) - y.reshape(num_examples, -1), ord=self.p, dim=1
-        )
-        y_norms = torch.linalg.norm(y.reshape(num_examples, -1), ord=self.p, dim=1)
-
-        return torch.mean(diff_norms / y_norms)
-
-    def __call__(self, x, y):
-        return self.rel(x, y)
-
-
 class AreaWeightedMSELoss(torch.nn.Module):
     def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
         super(AreaWeightedMSELoss, self).__init__()
         self._area_weighted_mean = area_weighted_mean
 
-    def __call__(self, x, y):
-        return torch.mean(self._area_weighted_mean((x - y) ** 2))
+    def forward(self, x, y, weights):
+        return torch.mean(self._area_weighted_mean(torch.square(x - y) * weights))
+
+
+class MSELoss(torch.nn.Module):
+    def forward(self, x, y, weights):
+        return torch.mean(torch.square(x - y) * weights)
 
 
 class WeightedSum(torch.nn.Module):
@@ -121,53 +154,6 @@ class WeightedSum(torch.nn.Module):
         return sum(w * module(x, y) for w, module in zip(self._weights, self._wrapped))
 
 
-class GlobalMeanLoss(torch.nn.Module):
-    """
-    A module which computes a loss on the global mean of each sample.
-    """
-
-    def __init__(
-        self,
-        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-        loss: torch.nn.Module,
-    ):
-        """
-        Args:
-            area_weighted_mean: Computes an area-weighted mean, removing the
-                horizontal dimensions.
-            loss: A loss function which takes two tensors of shape
-                (n_samples, n_timesteps, n_channels) and returns a scalar
-                tensor.
-        """
-        super().__init__()
-        self.global_mean = GlobalMean(area_weighted_mean)
-        self.loss = loss
-
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        x = self.global_mean(x)
-        y = self.global_mean(y)
-        return self.loss(x, y)
-
-
-class GlobalMean(torch.nn.Module):
-    def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
-        """
-        Args:
-            area_weighted_mean: Computes an area-weighted mean, removing the
-                horizontal dimensions.
-        """
-        super().__init__()
-        self._area_weighted_mean = area_weighted_mean
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: A tensor with spatial dimensions in shape (n_samples, n_timesteps,
-             n_channels, n_lat, n_lon).
-        """
-        return self._area_weighted_mean(x)
-
-
 class VariableWeightingLoss(torch.nn.Module):
     def __init__(self, weights: torch.Tensor, loss: torch.nn.Module):
         """
@@ -180,8 +166,13 @@ class VariableWeightingLoss(torch.nn.Module):
         self.loss = loss
         self.weights = weights
 
-    def __call__(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        return self.loss(self.weights * x, self.weights * y)
+    def forward(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        batch_weights: torch.Tensor,
+    ) -> torch.Tensor:
+        return self.loss(self.weights * x, self.weights * y, batch_weights)
 
 
 @dataclasses.dataclass
@@ -193,64 +184,42 @@ class LossConfig:
     Args:
         type: the type of the loss function
         kwargs: data for a loss function instance of the indicated type
-        global_mean_type: the type of the loss function to apply to the global
-            mean of each sample, by default no loss is applied
-        global_mean_kwargs: data for a loss function instance of the indicated
-            type to apply to the global mean of each sample
-        global_mean_weight: the weight to apply to the global mean loss
-            relative to the main loss
     """
 
-    type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"] = "MSE"
+    type: Literal["MSE", "AreaWeightedMSE", "NaN"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
-    global_mean_type: Optional[Literal["LpLoss"]] = None
-    global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
-        default_factory=lambda: {}
-    )
-    global_mean_weight: float = 1.0
 
     def __post_init__(self):
-        if self.type not in ("LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"):
+        if self.type not in ("MSE", "AreaWeightedMSE", "NaN"):
             raise NotImplementedError(self.type)
-        if self.global_mean_type is not None and self.global_mean_type != "LpLoss":
-            raise NotImplementedError(self.global_mean_type)
 
     def build(
         self,
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-        reduction: Literal["mean", "none"],
     ) -> Any:
         """
         Args:
             area_weighted_mean: Computes an area-weighted mean, removing the
                 horizontal dimensions. Only used if the loss function is
                 AreaWeightedMSE.
-            reduction: The reduction to apply to the loss, either "mean" or "none".
-                Only used if the loss function is L1, MSE, or LpLoss.
         """
-        if self.type == "LpLoss":
-            main_loss = LpLoss(**self.kwargs)
-        elif self.type == "L1":
-            main_loss = torch.nn.L1Loss(reduction=reduction)
-        elif self.type == "MSE":
-            main_loss = torch.nn.MSELoss(reduction=reduction)
+        if self.type == "MSE":
+            loss = MSELoss()
         elif self.type == "AreaWeightedMSE":
-            main_loss = AreaWeightedMSELoss(area_weighted_mean)
+            loss = AreaWeightedMSELoss(area_weighted_mean)
         elif self.type == "NaN":
-            main_loss = NaNLoss()
+            loss = NaNLoss()
 
-        if self.global_mean_type is not None:
-            global_mean_loss = GlobalMeanLoss(
-                area_weighted_mean=area_weighted_mean,
-                loss=LpLoss(**self.global_mean_kwargs),
-            )
-            final_loss = WeightedSum(
-                modules=[main_loss, global_mean_loss],
-                weights=[1.0, self.global_mean_weight],
-            )
-        else:
-            final_loss = main_loss
-        return final_loss.to(device=get_device())
+        return loss.to(device=get_device())
+
+
+class WeightedMSELoss(torch.nn.Module):
+    def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
+        super().__init__()
+        self.area_weighted_mean = area_weighted_mean
+
+    def forward(self, x, y, weights):
+        return torch.mean(self.area_weighted_mean(torch.square(x - y) * weights))
 
 
 @dataclasses.dataclass
@@ -265,47 +234,39 @@ class WeightedMappingLossConfig:
     Args:
         type: the type of the loss function
         kwargs: data for a loss function instance of the indicated type
-        global_mean_type: the type of the loss function to apply to the global
-            mean of each sample, by default no loss is applied
-        global_mean_kwargs: data for a loss function instance of the indicated
-            type to apply to the global mean of each sample
-        global_mean_weight: the weight to apply to the global mean loss
-            relative to the main loss
         weights: A dictionary of variable names with individual
             weights to apply to their normalized losses
 
     """
 
-    type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "MSE"
+    type: Literal["MSE", "AreaWeightedMSE", "NaN"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
-    global_mean_type: Optional[Literal["LpLoss"]] = None
-    global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
-        default_factory=lambda: {}
-    )
-    global_mean_weight: float = 1.0
     weights: Dict[str, float] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
         self.loss_config = LossConfig(
             type=self.type,
             kwargs=self.kwargs,
-            global_mean_type=self.global_mean_type,
-            global_mean_kwargs=self.global_mean_kwargs,
-            global_mean_weight=self.global_mean_weight,
         )
 
     def build(
         self,
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
         out_names: List[str],
+        normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ) -> Any:
-        loss = self.loss_config.build(area_weighted_mean, reduction="mean")
+        loss = self.loss_config.build(area_weighted_mean)
         weighted_loss = VariableWeightingLoss(
             weights=_construct_weight_tensor(
                 self.weights, out_names, channel_dim=channel_dim
             ),
             loss=loss,
         )
-        packer = Packer(out_names)
-        return MappingLoss(loss=weighted_loss, packer=packer, channel_dim=channel_dim)
+        return WeightedMappingLoss(
+            loss=weighted_loss,
+            weights=self.weights,
+            out_names=out_names,
+            normalizer=normalizer,
+            channel_dim=channel_dim,
+        )

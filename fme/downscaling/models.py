@@ -354,6 +354,53 @@ def _separate_interleaved_samples(
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
 
 
+@dataclasses.dataclass
+class ConditionedTarget:
+    """
+    A class to hold the conditioned targets and the loss weighting.
+
+    Attributes:
+        latents: The normalized targets with noise added.
+        sigma: The noise level.
+        weight: The loss weighting.
+    """
+
+    latents: torch.Tensor
+    sigma: torch.Tensor
+    weight: torch.Tensor
+
+
+def condition_with_noise_for_training(
+    targets_norm: torch.Tensor,
+    p_std: float,
+    p_mean: float,
+    sigma_data: float,
+) -> ConditionedTarget:
+    """
+    Condition the targets with noise for training.
+
+    Args:
+        targets_norm: The normalized targets.
+        p_std: The standard deviation of the noise distribution used during training.
+        p_mean: The mean of the noise distribution used during training.
+        sigma_data: The standard deviation of the data,
+            used to determine loss weighting.
+
+    Returns:
+        The conditioned targets and the loss weighting.
+    """
+    rnd_normal = torch.randn(
+        [targets_norm.shape[0], 1, 1, 1], device=targets_norm.device
+    )
+    # This is taken from EDM's original implementation in EDMLoss:
+    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
+    sigma = (rnd_normal * p_std + p_mean).exp()
+    weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
+    noise = torch.randn_like(targets_norm) * sigma
+    latents = targets_norm + noise
+    return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
+
+
 class DiffusionModel:
     def __init__(
         self,
@@ -398,7 +445,7 @@ class DiffusionModel:
 
     def _get_input_from_coarse(
         self, coarse: TensorMapping, topography: Optional[torch.Tensor]
-    ) -> TensorMapping:
+    ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
             self.normalizer.coarse.normalize(inputs), axis=self._channel_axis
@@ -426,20 +473,10 @@ class DiffusionModel:
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
+        inputs_norm = self._get_input_from_coarse(coarse, batch.fine.topography)
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
-
-        rnd_normal = torch.randn(
-            [targets_norm.shape[0], 1, 1, 1], device=targets_norm.device
-        )
-        # This is taken from EDM's original implementation in EDMLoss:
-        # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
-        sigma = (rnd_normal * self.config.p_std + self.config.p_mean).exp()
-        weight = (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
-        noise = torch.randn_like(targets_norm) * sigma
-        latents = targets_norm + noise
 
         if self.config.predict_residual:
             base_prediction = interpolate(
@@ -452,10 +489,17 @@ class DiffusionModel:
                 self.downscale_factor,
             )
             targets_norm = targets_norm - base_prediction
-            latents = latents - base_prediction
 
-        denoised_norm = self.module(latents, inputs_, sigma)
-        loss = torch.mean(weight * self.loss(targets_norm, denoised_norm))
+        conditioned_target = condition_with_noise_for_training(
+            targets_norm, self.config.p_std, self.config.p_mean, self.sigma_data
+        )
+
+        denoised_norm = self.module(
+            conditioned_target.latents, inputs_norm, conditioned_target.sigma
+        )
+        loss = torch.mean(
+            conditioned_target.weight * self.loss(targets_norm, denoised_norm)
+        )
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
 
