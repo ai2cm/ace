@@ -351,10 +351,6 @@ class DiffusionStepper(
         self._vertical_coordinates = vertical_coordinate.to(get_device())
         self._timestep = timestep
 
-        self.loss_obj = config.loss.build(
-            gridded_operations.area_weighted_mean, config.out_names, self.CHANNEL_DIM
-        )
-
         self._corrector = vertical_coordinate.build_corrector(
             config=config.corrector,
             gridded_operations=gridded_operations,
@@ -375,6 +371,13 @@ class DiffusionStepper(
             )
         else:
             self.loss_normalizer = self.normalizer
+
+        self.loss_obj = config.loss.build(
+            gridded_operations.area_weighted_mean,
+            config.out_names,
+            normalizer=self.loss_normalizer,
+            channel_dim=self.CHANNEL_DIM,
+        )
         self.in_names = config.in_names
         self.out_names = config.out_names
 
@@ -681,6 +684,7 @@ class DiffusionStepper(
         loss = torch.tensor(0.0, device=get_device())
         metrics: Dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        device = get_device()
 
         optimization.set_mode(self.modules)
         with optimization.autocast():
@@ -701,10 +705,17 @@ class DiffusionStepper(
                 target_step = {
                     k: v.select(time_dim, step) for k, v in target_data.items()
                 }
-                gen_norm_step = self.loss_normalizer.normalize(gen_step)
-                target_norm_step = self.loss_normalizer.normalize(target_step)
+                tensor_shape = next(iter(gen_step.values())).shape
+                n_batch = tensor_shape[0]
 
-                step_loss = self.loss_obj(gen_norm_step, target_norm_step)
+                step_loss = self.loss_obj(
+                    gen_step,
+                    target_step,
+                    torch.ones(
+                        (n_batch, *[1] * (len(tensor_shape) - 1)),
+                        device=device,
+                    ),
+                )
                 loss += step_loss
                 metrics[f"loss_step_{step}"] = step_loss.detach()
 

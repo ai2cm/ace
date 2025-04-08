@@ -122,7 +122,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
         (5, 5), gridded_operations, vertical_coordinate, TIMESTEP
     )
     stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
-    assert torch.allclose(
+    torch.testing.assert_close(
         stepped.gen_data["a"], stepped.normalize(stepped.gen_data)["a"]
     )  # as std=1, mean=0, no change
     normalization_config.stds = get_scalar_data(["a", "b"], 2.0)
@@ -137,21 +137,29 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     stepped_double_std = stepper.train_on_batch(
         data=data, optimization=NullOptimization()
     )
-    assert torch.allclose(
-        stepped.gen_data["a"], stepped_double_std.gen_data["a"], rtol=1e-4
+    torch.testing.assert_close(
+        stepped.gen_data["a"],
+        stepped_double_std.gen_data["a"],
+        rtol=1e-4,
+        atol=0,
     )
-    assert torch.allclose(
+    torch.testing.assert_close(
         stepped.gen_data["a"],
         2.0 * stepped_double_std.normalize(stepped_double_std.gen_data)["a"],
         rtol=1e-4,
+        atol=0,
     )
-    assert torch.allclose(
+    torch.testing.assert_close(
         stepped.target_data["a"],
         2.0 * stepped_double_std.normalize(stepped_double_std.target_data)["a"],
         rtol=1e-4,
+        atol=0,
     )
-    assert torch.allclose(
-        stepped.metrics["loss"], 9.0 * stepped_double_std.metrics["loss"], rtol=1e-4
+    torch.testing.assert_close(
+        stepped.metrics["loss"],
+        9.0 * stepped_double_std.metrics["loss"],
+        rtol=1e-4,
+        atol=0,
     )  # mse scales with std**2
 
 
@@ -697,17 +705,17 @@ def test__combine_normalizers():
     assert combined_normalizer.fill_nans_on_denormalize
     for var in combined_normalizer.means:
         if "prog" in var:
-            assert torch.allclose(
+            torch.testing.assert_close(
                 combined_normalizer.means[var], residual_normalizer.means[var]
             )
-            assert torch.allclose(
+            torch.testing.assert_close(
                 combined_normalizer.stds[var], residual_normalizer.stds[var]
             )
         else:
-            assert torch.allclose(
+            torch.testing.assert_close(
                 combined_normalizer.means[var], full_field_normalizer.means[var]
             )
-            assert torch.allclose(
+            torch.testing.assert_close(
                 combined_normalizer.stds[var], full_field_normalizer.stds[var]
             )
 
