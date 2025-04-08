@@ -168,9 +168,7 @@ def compute_mae_error(
         sample_dim: The dimension of `prediction` corresponding to sample.
     """
     sample_mae_estimate = get_sample_mae_estimate(prediction, sample_dim)
-    truth_mae = torch.abs(target.unsqueeze(sample_dim) - prediction).mean(
-        axis=sample_dim
-    )
+    truth_mae = torch.abs(target - prediction).mean(axis=sample_dim)
     return truth_mae - sample_mae_estimate
 
 
