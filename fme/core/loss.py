@@ -64,6 +64,10 @@ class WeightedMappingLoss:
         target_tensors = self.packer.pack(
             self.normalizer.normalize(target_dict), axis=self.channel_dim
         )
+        nan_mask = target_tensors.isnan()
+        if nan_mask.any():
+            predict_tensors = torch.where(nan_mask, 0.0, predict_tensors)
+            target_tensors = torch.where(nan_mask, 0.0, target_tensors)
 
         return self.loss(predict_tensors, target_tensors)
 
