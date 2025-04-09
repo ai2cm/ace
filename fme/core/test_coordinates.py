@@ -189,6 +189,21 @@ def test_depth_integral_3d_data():
     torch.testing.assert_close(result, expected)
 
 
+@pytest.mark.parametrize(
+    "name, level",
+    [
+        ("sfc_level", 0),
+        ("depth_0", 0),
+        ("depth_3", 3),
+    ],
+)
+def test_depth_get_mask_tensor_for(name, level):
+    idepth = torch.arange(end=5)
+    mask = torch.arange(end=4)
+    coord = DepthCoordinate(idepth, mask)
+    assert coord.get_mask_tensor_for(name) == level
+
+
 @pytest.mark.parametrize("pad", [True, False])
 def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
     if very_fast_only:

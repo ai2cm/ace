@@ -1,8 +1,44 @@
+import re
+from typing import Optional
+
 import pytest
 import torch
 
 import fme
-from fme.core.masking import StaticMasking, StaticMaskingConfig
+from fme.core.masking import StaticMaskingConfig
+
+DEVICE = fme.get_device()
+
+
+class _Mask:
+    LEVEL_PATTERN = re.compile(r"_(\d+)$")
+
+    def __init__(
+        self,
+        mask_2d: Optional[torch.Tensor] = None,
+        mask_3d: Optional[torch.Tensor] = None,
+    ):
+        self.mask_2d = mask_2d
+        self.mask_3d = mask_3d
+
+    def get_mask_tensor_for(self, name) -> Optional[torch.Tensor]:
+        match = self.LEVEL_PATTERN.search(name)
+        if match:
+            # 3D variable
+            if self.mask_3d is None:
+                return None
+            level = int(match.group(1))
+            return self.mask_3d.select(dim=-1, index=level)
+        else:
+            # 2D variable
+            return self.mask_2d
+
+        if name in self.mask_2d:
+            return self.mask_2d[name]
+        elif name in self.mask_3d:
+            return self.mask_3d[name]
+        else:
+            return None
 
 
 def test_masking_config():
@@ -11,38 +47,15 @@ def test_masking_config():
         mask_value=1,
         fill_value=0.0,
     )
-    _ = config.build(mask_2d=torch.ones(1, 1))
-    _ = config.build(mask_3d=torch.ones(1, 1, 1))
-    _ = config.build(mask_2d=torch.ones(1, 1), mask_3d=torch.ones(1, 1, 1))
+    _ = config.build(_Mask(mask_2d=torch.ones(1, 1)))
+    _ = config.build(_Mask(mask_3d=torch.ones(1, 1, 1)))
+    _ = config.build(_Mask(mask_2d=torch.ones(1, 1), mask_3d=torch.ones(1, 1, 1)))
 
     with pytest.raises(ValueError, match="mask_value must be either 0 or 1"):
         _ = StaticMaskingConfig(
             variable_names_and_prefixes=["c"],
             mask_value=3,
             fill_value=0.0,
-        )
-
-
-def test_masking_init_errors():
-    with pytest.raises(ValueError, match="mask_2d or mask_3d must be provided"):
-        _ = StaticMasking(
-            variable_names_and_prefixes=["c"],
-            mask_value=3,
-            fill_value=0.0,
-        )
-    with pytest.raises(ValueError, match="mask_2d with 2 dimensions"):
-        _ = StaticMasking(
-            variable_names_and_prefixes=["c"],
-            mask_value=3,
-            fill_value=0.0,
-            mask_2d=torch.ones(1, 1, 1),
-        )
-    with pytest.raises(ValueError, match="mask_3d with 3 dimensions"):
-        _ = StaticMasking(
-            variable_names_and_prefixes=["c"],
-            mask_value=3,
-            fill_value=0.0,
-            mask_3d=torch.ones(1, 1),
         )
 
 
@@ -62,18 +75,30 @@ _DATA = {
 }
 
 
-def test_masking():
+@pytest.mark.parametrize(
+    "var_names_and_prefixes",
+    [
+        ["PRESsfc", "specific_total_water_"],
+        ["PRESsfc", "specific_total_water"],
+        ["PRESsfc", "specific_total_water_0"],
+        None,
+    ],
+)
+def test_masking(var_names_and_prefixes):
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["PRESsfc", "specific_total_water_"],
+        variable_names_and_prefixes=var_names_and_prefixes,
         mask_value=0,
         fill_value=0.0,
     )
-    mask = config.build(_MASK_2D, _MASK_3D)
+    mask = config.build(_Mask(_MASK_2D, _MASK_3D))
     output = mask(_DATA)
     assert output["PRESsfc"][1, 1] == 0.0
     assert output["PRESsfc"][0, 1] != 0.0
     assert torch.all(output["specific_total_water_0"][0, :] == 0.0)
-    assert torch.all(output["specific_total_water_1"][1, :] == 0.0)
+    if var_names_and_prefixes and "specific_total_water_0" in var_names_and_prefixes:
+        assert torch.all(output["specific_total_water_1"][1, :] != 0.0)
+    else:
+        assert torch.all(output["specific_total_water_1"][1, :] == 0.0)
     assert torch.all(output["specific_total_water_1"][0, :] != 0.0)
 
 
@@ -83,7 +108,7 @@ def test_masking_no_3d_masking():
         mask_value=0,
         fill_value=0.0,
     )
-    mask = config.build(mask_2d=_MASK_2D)
+    mask = config.build(_Mask(mask_2d=_MASK_2D))
     output = mask(_DATA)
     assert output["PRESsfc"][1, 1] == 0.0
     assert output["PRESsfc"][0, 1] != 0.0
@@ -94,11 +119,11 @@ def test_masking_no_3d_masking():
 
 def test_masking_no_surface_masking():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["specific_total_water_"],
+        variable_names_and_prefixes=["specific_total_water"],
         mask_value=0,
         fill_value=0.0,
     )
-    mask = config.build(mask_3d=_MASK_3D)
+    mask = config.build(_Mask(mask_3d=_MASK_3D))
     output = mask(_DATA)
     assert output["PRESsfc"][1, 1] != 0.0
     assert output["PRESsfc"][0, 1] != 0.0
@@ -113,9 +138,9 @@ def test_masking_missing_2d_mask():
         mask_value=0,
         fill_value=0.0,
     )
-    mask = config.build(mask_3d=_MASK_3D)
-    with pytest.raises(RuntimeError, match="PRESsfc is a 2D variable"):
-        _ = mask(_DATA)
+    mask = config.build(_Mask(mask_3d=_MASK_3D))
+    masked = mask(_DATA)
+    torch.testing.assert_close(masked["PRESsfc"], _DATA["PRESsfc"])
 
 
 def test_masking_missing_3d_mask():
@@ -124,6 +149,9 @@ def test_masking_missing_3d_mask():
         mask_value=0,
         fill_value=0.0,
     )
-    mask = config.build(mask_2d=_MASK_2D)
-    with pytest.raises(RuntimeError, match="specific_total_water is a 3D variable"):
-        _ = mask(_DATA)
+    mask = config.build(_Mask(mask_2d=_MASK_2D))
+    masked = mask(_DATA)
+    assert masked["PRESsfc"][1, 1] == 0.0
+    assert masked["PRESsfc"][0, 1] != 0.0
+    for name in ["specific_total_water_0", "specific_total_water_1"]:
+        torch.testing.assert_close(masked[name], _DATA[name])
