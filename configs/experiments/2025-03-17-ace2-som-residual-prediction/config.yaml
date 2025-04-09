@@ -21,7 +21,7 @@ inference:
         - "2094-01-01T06:00:00"
     dataset:
       data_path: /climate-default/2024-09-06-1deg-c96-shield-som-increasing-co2-double-call-rad-netcdfs
-    num_data_workers: 32
+    num_data_workers: 4
   aggregator:
     log_histograms: true
 logging:
@@ -32,7 +32,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 8
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-09-06-1deg-c96-shield-som-increasing-co2-double-call-rad-netcdfs
       subset:
@@ -44,7 +45,8 @@ train_loader:
         stop_time: "2101-01-01T00:00:00"
 validation_loader:
   batch_size: 32
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-09-06-1deg-c96-shield-som-increasing-co2-double-call-rad-netcdfs
       subset:

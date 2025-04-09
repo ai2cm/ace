@@ -13,7 +13,7 @@ inference:
       interval: 1460  # 1 year
     dataset:
       data_path: validation
-    num_data_workers: 2
+    num_data_workers: 4
 logging:
   log_to_screen: true
   log_to_wandb: false
@@ -22,7 +22,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 4
-  num_data_workers: 8
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: traindata/ic_0001
     - data_path: traindata/ic_0002
@@ -36,7 +37,8 @@ train_loader:
     - data_path: traindata/ic_0010
 validation_loader:
   batch_size: 16
-  num_data_workers: 2
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: validation
       subset:
