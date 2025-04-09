@@ -23,7 +23,7 @@ gantry run \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority normal \
-    --preemptible \
+    --not-preemptible \
     --cluster ai2/saturn-cirrascale \
     --cluster ai2/jupiter-cirrascale-2 \
     --cluster ai2/ceres-cirrascale \
