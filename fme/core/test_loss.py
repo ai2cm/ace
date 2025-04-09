@@ -285,3 +285,38 @@ def test_WeightedMappingLoss_with_ensemble_dim(mean, scale):
     x_mapping = {name: x[:, :, i, :, :] for i, name in enumerate(packer.names)}
     y_mapping = {name: y[:, :, i, :, :] for i, name in enumerate(packer.names)}
     assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y) / scale**2)
+
+
+def test_WeightedMappingLoss_with_target_nans():
+    loss = torch.nn.MSELoss()
+    n_channels = 5
+    packer = Packer([f"var_{i}" for i in range(n_channels)])
+    out_names = [f"var_{i}" for i in range(n_channels)]
+    normalizer = StandardNormalizer(
+        means={name: torch.as_tensor(0.0) for name in out_names},
+        stds={name: torch.as_tensor(1.0) for name in out_names},
+    )
+    mapping_loss = WeightedMappingLoss(
+        loss,
+        weights={},
+        out_names=out_names,
+        normalizer=normalizer,
+    )
+    x = torch.randn(
+        15,
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    y = torch.randn(
+        15,
+        n_channels,
+        10,
+        10,
+    ).to(get_device(), dtype=torch.float)
+    x_mapping = {name: x[:, i, :, :].clone() for i, name in enumerate(packer.names)}
+    y_mapping = {name: y[:, i, :, :].clone() for i, name in enumerate(packer.names)}
+    y_mapping[packer.names[0]][:, :, 0] = float("nan")
+    x[:, 0, :, 0] = 0.0
+    y[:, 0, :, 0] = 0.0
+    assert torch.allclose(mapping_loss(x_mapping, y_mapping), loss(x, y))
