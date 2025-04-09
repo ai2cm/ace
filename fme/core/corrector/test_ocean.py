@@ -1,5 +1,6 @@
 import datetime
 import math
+from typing import Optional
 
 import pytest
 import torch
@@ -55,6 +56,12 @@ class _MockDepth:
 
     def get_mask_level(self, level: int):
         return _MASK.select(-1, level)
+
+    def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
+        if name.endswith("_1"):
+            return _MASK.select(-1, 1)
+        else:
+            return _MASK.select(-1, 0)
 
     def get_idepth(self) -> torch.Tensor:
         return torch.tensor([0, 5, 15], device=DEVICE)

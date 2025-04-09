@@ -59,10 +59,7 @@ class OceanCorrector(CorrectorABC):
                 raise ValueError(
                     "OceanCorrector.masking configured but DepthCoordinate missing."
                 )
-            self._masking = config.masking.build(
-                mask_2d=vertical_coordinate.get_mask_level(0),
-                mask_3d=vertical_coordinate.get_mask(),
-            )
+            self._masking = config.masking.build(vertical_coordinate)
         else:
             self._masking = None
 
