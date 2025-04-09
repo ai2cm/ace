@@ -1,6 +1,7 @@
 import abc
 import dataclasses
 import math
+import re
 from datetime import timedelta
 from typing import (
     Callable,
@@ -303,6 +304,9 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return (integrand * pressure_thickness).sum(dim=-1) / GRAVITY
 
 
+LEVEL_PATTERN = re.compile(r"_(\d+)$")
+
+
 @dataclasses.dataclass
 class DepthCoordinate(VerticalCoordinate):
     """
@@ -345,6 +349,16 @@ class DepthCoordinate(VerticalCoordinate):
 
     def get_mask_level(self, level: int) -> torch.Tensor:
         return self.mask.select(dim=-1, index=level)
+
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor:
+        match = LEVEL_PATTERN.search(name)
+        if match:
+            # 3D variable
+            level = int(match.group(1))
+            return self.get_mask_level(level)
+        else:
+            # 2D variable
+            return self.get_mask_level(0)
 
     def get_idepth(self) -> torch.Tensor:
         return self.idepth
@@ -389,8 +403,7 @@ class DepthCoordinate(VerticalCoordinate):
         return StaticMasking(
             mask_value=0,
             fill_value=float("nan"),
-            mask_2d=self.get_mask_level(0),
-            mask_3d=self.mask,
+            mask=self,
         )
 
     @property
