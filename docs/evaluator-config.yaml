@@ -14,7 +14,7 @@ loader:
   start_indices:
     first: 0
     n_initial_conditions: 1
-  num_data_workers: 8
+  num_data_workers: 4
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
