@@ -102,13 +102,11 @@ def load_series_data(
     n_steps: int,
     ds: xr.Dataset,
     names: List[str],
-    time_dim: Hashable,
-    spatial_dim_names: List[str],
+    dims: List[str],
+    shape: List[int],
     fill_nans: Optional[FillNaNsConfig] = None,
 ):
     time_slice = slice(idx, idx + n_steps)
-    dims = [time_dim] + spatial_dim_names
-    shape = [n_steps] + [ds.sizes[spatial_dim] for spatial_dim in dims[1:]]
     loaded = _load_all_variables(ds, names, time_slice)
     # Fill NaNs after subsetting time slice to avoid triggering loading all
     # data, since we do not use dask.
