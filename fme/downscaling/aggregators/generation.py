@@ -8,7 +8,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.typing_ import TensorMapping
 from fme.core.wandb import WandB
 
-from ..datasets_new import PairedBatchData
+from ..datasets import PairedBatchData
 from ..metrics_and_maths import compute_crps, filter_tensor_mapping
 from ..models import ModelOutputs
 from .main import (

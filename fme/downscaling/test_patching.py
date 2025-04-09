@@ -5,7 +5,7 @@ import xarray as xr
 
 from fme.core.device import get_device
 from fme.core.packer import Packer
-from fme.downscaling.datasets_new import (
+from fme.downscaling.datasets import (
     BatchData,
     BatchedLatLonCoordinates,
     PairedBatchData,
