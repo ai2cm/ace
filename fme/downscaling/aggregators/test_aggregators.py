@@ -8,7 +8,7 @@ from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import TensorMapping
 
 from .. import metrics_and_maths
-from ..datasets_new import BatchData, BatchedLatLonCoordinates, PairedBatchData
+from ..datasets import BatchData, BatchedLatLonCoordinates, PairedBatchData
 from ..models import ModelOutputs
 from .generation import GenerationAggregator
 from .main import Mean, MeanComparison, MeanMapAggregator, SnapshotAggregator
