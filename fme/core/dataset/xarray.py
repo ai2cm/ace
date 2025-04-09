@@ -405,6 +405,10 @@ class XarrayDataset(Dataset):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
+        self._shape_excluding_time = [
+            first_dataset.sizes[dim] for dim in self._horizontal_coordinates.loaded_dims
+        ]
+        self._dims = ["time"] + self._horizontal_coordinates.loaded_dims
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self.overwrite = config.overwrite
 
@@ -619,14 +623,15 @@ class XarrayDataset(Dataset):
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
+            shape = [n_steps] + self._shape_excluding_time
             total_steps += n_steps
             tensor_dict = load_series_data(
                 idx=start,
                 n_steps=n_steps,
                 ds=ds,
                 names=self._time_dependent_names,
-                time_dim="time",
-                spatial_dim_names=self._horizontal_coordinates.loaded_dims,
+                dims=self._dims,
+                shape=shape,
                 fill_nans=self.fill_nans,
             )
             for n in self._time_dependent_names:
@@ -642,13 +647,12 @@ class XarrayDataset(Dataset):
         # load time-invariant variables from first dataset
         if len(self._time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
-            dims = ["time"] + self._horizontal_coordinates.loaded_dims
-            shape = [total_steps] + [ds.sizes[dim] for dim in dims[1:]]
+            shape = [total_steps] + self._shape_excluding_time
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, dims, shape)
+                tensors[name] = as_broadcasted_tensor(variable, self._dims, shape)
             ds.close()
             del ds
 
