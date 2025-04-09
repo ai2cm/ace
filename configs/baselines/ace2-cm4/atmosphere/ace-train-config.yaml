@@ -21,7 +21,7 @@ inference:
         - '0291-01-01T06:00:00'
     dataset:
       data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
-    num_data_workers: 32
+    num_data_workers: 4
   aggregator:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
@@ -33,14 +33,16 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
       subset:
         stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
       subset:

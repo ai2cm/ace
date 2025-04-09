@@ -21,7 +21,7 @@ inference:
         - '2022-10-01T18:00:00'
     dataset:
       data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
-    num_data_workers: 16
+    num_data_workers: 4
   aggregator:
     log_histograms: true
     time_mean_reference_data: /statsdata/time-mean.nc
@@ -33,7 +33,8 @@ logging:
   entity: ai2cm
 train_loader:
   batch_size: 16
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0001
       subset: &subset
@@ -58,7 +59,8 @@ train_loader:
       subset: *subset
 validation_loader:
   batch_size: 128
-  num_data_workers: 32
+  num_data_workers: 4
+  prefetch_factor: 4
   dataset:
     - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
       subset:
