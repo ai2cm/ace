@@ -498,7 +498,7 @@ class DiffusionModel:
             conditioned_target.latents, inputs_norm, conditioned_target.sigma
         )
         loss = torch.mean(
-            conditioned_target.weight * self.loss(targets_norm, denoised_norm)
+            conditioned_target.weight * self.loss(denoised_norm, targets_norm)
         )
         optimizer.accumulate_loss(loss)
         optimizer.step_weights()
@@ -557,7 +557,7 @@ class DiffusionModel:
             )
             samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
 
-        loss = self.loss(targets_norm, samples_norm)
+        loss = self.loss(samples_norm, targets_norm)
 
         samples_norm_reshaped = _separate_interleaved_samples(
             samples_norm, n_batch, n_samples
