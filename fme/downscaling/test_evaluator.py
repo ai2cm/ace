@@ -12,7 +12,7 @@ from fme.core.normalizer import NormalizationConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling import evaluator
-from fme.downscaling.datasets_new import DataLoaderConfig
+from fme.downscaling.datasets import DataLoaderConfig
 from fme.downscaling.models import (
     DiffusionModelConfig,
     DownscalingModelConfig,

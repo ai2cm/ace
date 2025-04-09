@@ -20,7 +20,7 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import NullOptimization, Optimization, OptimizationConfig
 from fme.core.wandb import WandB
 from fme.downscaling.aggregators import Aggregator, GenerationAggregator
-from fme.downscaling.datasets_new import DataLoaderConfig, GriddedData, PairedBatchData
+from fme.downscaling.datasets import DataLoaderConfig, GriddedData, PairedBatchData
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
