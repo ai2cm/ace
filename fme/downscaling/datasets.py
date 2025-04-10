@@ -170,9 +170,14 @@ class BatchItem:
 
     def __post_init__(self):
         self._validate()
+        self._horizontal_shape = next(iter(self.data.values())).shape[-2:]
 
     def __iter__(self):
         return iter([self.data, self.time, self.latlon_coordinates, self.topography])
+
+    @property
+    def horizontal_shape(self) -> Tuple[int, int]:
+        return self._horizontal_shape
 
     def to_device(self) -> "BatchItem":
         device_latlon = LatLonCoordinates(
@@ -390,9 +395,27 @@ class PairedBatchItem:
     fine: BatchItem
     coarse: BatchItem
 
+    def _validated_scale_factor(self):
+        fine = self.fine.horizontal_shape
+        coarse = self.coarse.horizontal_shape
+
+        if fine[0] // coarse[0] != fine[1] // coarse[1]:
+            raise ValueError(
+                "Fine and coarse datasets must have the same scale factor "
+                f"between lat and lon dimensions. Got fine {fine} and coarse {coarse}"
+            )
+        if fine[0] % coarse[0] != 0 or fine[1] % coarse[1] != 0:
+            raise ValueError(
+                "Fine and coarse horizontal dimensions must be evenly divisible."
+                f" Got fine {fine} and coarse {coarse}"
+            )
+
+        return fine[0] // coarse[0]
+
     def _validate(self):
         if not self.fine.time == self.coarse.time:
             raise ValueError("Time must match between fine and coarse items.")
+        self.downscale_factor = self._validated_scale_factor()
 
     def __post_init__(self):
         self._validate()
@@ -672,6 +695,11 @@ class BatchData:
     def __post_init__(self):
         leading_dim = self._validate()
         self._len = leading_dim[0]
+        self._horizontal_shape = self[0].horizontal_shape
+
+    @property
+    def horizontal_shape(self) -> Tuple[int, int]:
+        return self._horizontal_shape
 
     @classmethod
     def from_sequence(
@@ -779,9 +807,27 @@ class PairedBatchData:
     fine: BatchData
     coarse: BatchData
 
+    def _validated_scale_factor(self):
+        fine = self.fine.horizontal_shape
+        coarse = self.coarse.horizontal_shape
+
+        if fine[0] // coarse[0] != fine[1] // coarse[1]:
+            raise ValueError(
+                "Fine and coarse datasets must have the same scale factor "
+                f"between lat and lon dimensions. Got fine {fine} and coarse {coarse}"
+            )
+        if fine[0] % coarse[0] != 0 or fine[1] % coarse[1] != 0:
+            raise ValueError(
+                "Fine and coarse horizontal dimensions must be evenly divisible."
+                f" Got fine {fine} and coarse {coarse}"
+            )
+
+        return fine[0] // coarse[0]
+
     def _validate(self):
         if not len(self.fine) == len(self.coarse):
             raise ValueError("Batch must have the same number of items.")
+        self.downscale_factor = self._validated_scale_factor()
 
     def __post_init__(self):
         self._validate()
@@ -984,20 +1030,8 @@ class DataLoaderConfig:
             persistent_workers=persistent_workers,
         )
 
-        first_item = dataset[0]
-        example_fine, example_coarse = first_item.fine, first_item.coarse
-        fine_shape = next(iter(example_fine.data.values())).shape[-2:]
-        coarse_shape = next(iter(example_coarse.data.values())).shape[-2:]
+        example = dataset[0]
 
-        fine_height, fine_width = fine_shape
-        coarse_height, coarse_width = coarse_shape
-        dims = first_item.fine.latlon_coordinates.dims
-
-        if not (fine_height % coarse_height == 0 and fine_width % coarse_width == 0):
-            raise ValueError("Fine resolution must be divisible by coarse resolution")
-        if not (fine_height // coarse_height == fine_width // coarse_width):
-            raise ValueError("Aspect ratio must match between patch height and width")
-        downscale_factor = fine_height // coarse_height
         common_metadata_keys = set(dataset_fine_subset.variable_metadata).intersection(
             dataset_coarse_subset.variable_metadata
         )
@@ -1013,8 +1047,8 @@ class DataLoaderConfig:
 
         return GriddedData(
             dataloader,
-            coarse_shape,
-            downscale_factor,
-            dims,
+            example.coarse.horizontal_shape,
+            example.downscale_factor,
+            example.fine.latlon_coordinates.dims,
             variable_metadata,
         )

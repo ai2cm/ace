@@ -322,6 +322,8 @@ def test_batch_item_dataset_adapter_validation():
 def test_paired_batch_item_validation():
     fine_item = get_batch_items(num_items=1, lat_dim=8, lon_dim=16)[0]
     coarse_item = get_batch_items(num_items=1, lat_dim=4, lon_dim=8)[0]
+    mismatched_dim_scales = get_batch_items(num_items=1, lat_dim=2, lon_dim=8)[0]
+    non_divisible_dim = get_batch_items(num_items=1, lat_dim=3, lon_dim=8)[0]
 
     # This should work - times match
     paired = PairedBatchItem(fine_item, coarse_item)
@@ -335,6 +337,12 @@ def test_paired_batch_item_validation():
     # This should raise ValueError due to time mismatch
     with pytest.raises(ValueError):
         PairedBatchItem(fine_item, coarse_item_mismatch)
+
+    with pytest.raises(ValueError):
+        PairedBatchItem(fine_item, mismatched_dim_scales)
+
+    with pytest.raises(ValueError):
+        PairedBatchItem(fine_item, non_divisible_dim)
 
     # Test device movement
     paired.to_device()
@@ -489,22 +497,6 @@ def test_random_spatial_subset_paired_dataset():
     )
     assert len(subset_dataset) == 5
     subset_dataset[0]
-
-    # Test with mismatched aspect ratio
-    fine_item_bad = BatchItem(
-        random_named_tensor(["x"], (2, 8)),  # Square shape
-        fine_item.time,
-        get_example_latlon_coordinates(2, 8),
-        torch.rand(2, 8),
-    )
-
-    dataset_bad = MagicMock(spec=FineCoarsePairedDataset)
-    dataset_bad.__getitem__ = MagicMock(
-        return_value=PairedBatchItem(fine_item_bad, coarse_item)
-    )
-
-    with pytest.raises(ValueError, match="Aspect ratio must match between lat and lon"):
-        RandomSpatialSubsetPairedDataset(dataset_bad)
 
 
 def test_BatchData_slice_latlon():
