@@ -15,6 +15,7 @@ from fme.core.coordinates import (
 )
 
 from .utils import (
+    _broadcast_array_to_tensor,
     _get_indexers,
     as_broadcasted_tensor,
     decode_timestep,
@@ -191,3 +192,27 @@ def test_encode_decode_timestep_roundtrip():
     encoded = encode_timestep(timestep)
     roundtripped = decode_timestep(encoded)
     assert roundtripped == timestep
+
+
+def test__broadcast_array_to_tensor_no_broadcast():
+    arr = np.arange(6).reshape(1, 2, 3)
+    out = _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (1, 2, 3))
+    expected = torch.as_tensor(arr)
+    torch.testing.assert_close(out, expected)
+
+
+def test__broadcast_array_to_tensor_with_broadcast():
+    arr = np.arange(6)
+    out = _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (6, 2, 3))
+    expected = torch.broadcast_to(torch.as_tensor(arr)[:, None, None], (6, 2, 3))
+    torch.testing.assert_close(out, expected)
+
+
+def test__broadcast_array_to_tensor_raises_assertion_error():
+    arr = np.zeros((1, 2))
+    with pytest.raises(AssertionError, match="must be 1D"):
+        _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (1, 2, 3))
+
+    arr = np.zeros(3)
+    with pytest.raises(AssertionError, match="matching time dimension"):
+        _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (4, 2, 3))

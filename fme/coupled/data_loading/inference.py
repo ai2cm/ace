@@ -45,6 +45,18 @@ class InferenceDataLoaderConfig:
     ]
     num_data_workers: int = 0
 
+    def __post_init__(self):
+        self._zarr_engine_used = any(
+            ds.engine == "zarr" for ds in self.dataset.data_configs
+        )
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether any dataset uses the zarr engine.
+        """
+        return self._zarr_engine_used
+
     @property
     def n_initial_conditions(self) -> int:
         return self.start_indices.n_initial_conditions
