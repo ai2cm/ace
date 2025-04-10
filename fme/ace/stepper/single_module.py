@@ -185,18 +185,12 @@ class SingleModuleStepperConfig:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
         init_weights: bool = True,
     ) -> "Stepper":
         """
         Args:
-            img_shape: Shape of domain as (n_lat, n_lon).
-            gridded_operations: Gridded operations to use.
-            vertical_coordinate: Vertical coordinate to use.
-            timestep: Timestep of the model.
+            dataset_info: Information about the training dataset.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
@@ -214,10 +208,7 @@ class SingleModuleStepperConfig:
             normalizer=normalizer, loss_normalizer=loss_normalizer
         )
         return new_config.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
+            dataset_info=dataset_info,
             init_weights=init_weights,
         )
 
@@ -480,10 +471,7 @@ class ExistingStepperConfig:
 
     def get_stepper(
         self,
-        img_shape,
-        gridded_operations,
-        vertical_coordinate,
-        timestep,
+        dataset_info: DatasetInfo,
     ):
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return Stepper.from_state(self._load_checkpoint()["stepper"])
@@ -735,27 +723,15 @@ class StepperConfig:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
         init_weights: bool = True,
     ):
         """
         Args:
-            img_shape: Shape of domain as (n_lat, n_lon).
-            gridded_operations: Gridded operations to use.
-            vertical_coordinate: Vertical coordinate to use.
-            timestep: Timestep of the model.
+            dataset_info: Information about the training dataset.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
-        dataset_info = DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
-        )
         logging.info("Initializing stepper from provided config")
         step = self.step.get_step(dataset_info)
         derive_func = dataset_info.vertical_coordinate.build_derive_function(
@@ -1035,10 +1011,7 @@ class Stepper(
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: "Stepper" = self._config.get_stepper(
-            img_shape=self._dataset_info.img_shape,
-            gridded_operations=self._dataset_info.gridded_operations,
-            vertical_coordinate=self._dataset_info.vertical_coordinate,
-            timestep=self._dataset_info.timestep,
+            dataset_info=self._dataset_info,
             init_weights=False,
         )
         new_stepper._step_obj.load_state(new_state)
@@ -1053,10 +1026,7 @@ class Stepper(
         """
         self._config.replace_ocean(ocean)
         new_stepper: "Stepper" = self._config.get_stepper(
-            img_shape=self._dataset_info.img_shape,
-            gridded_operations=self._dataset_info.gridded_operations,
-            vertical_coordinate=self._dataset_info.vertical_coordinate,
-            timestep=self._dataset_info.timestep,
+            dataset_info=self._dataset_info,
             init_weights=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
@@ -1512,10 +1482,7 @@ class Stepper(
             config = StepperConfig.from_stepper_state(state)
             dataset_info = DatasetInfo.from_state(state["dataset_info"])
         stepper = config.get_stepper(
-            img_shape=dataset_info.img_shape,
-            gridded_operations=dataset_info.gridded_operations,
-            vertical_coordinate=dataset_info.vertical_coordinate,
-            timestep=dataset_info.timestep,
+            dataset_info=dataset_info,
             init_weights=False,
         )
         stepper.load_state(state)

@@ -569,6 +569,8 @@ class HorizontalCoordinates(abc.ABC):
     Contains coords which must be subclassed to provide the coordinates.
     """
 
+    SelfType = TypeVar("SelfType", bound="HorizontalCoordinates")
+
     @abc.abstractmethod
     def __eq__(self, other) -> bool:
         pass

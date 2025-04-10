@@ -130,7 +130,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
     data = get_data_loader(config, True, requirements)
     assert data.n_batches == samples_per_member * num_ensemble_members
-    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
 def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1):
@@ -161,7 +161,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 
     data = get_data_loader(config, True, requirements)
     assert data.n_batches == n_samples * num_ensemble_members
-    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
 
 
 def test_xarray_loader(tmp_path):
@@ -175,8 +175,8 @@ def test_xarray_loader(tmp_path):
     window_timesteps = 2  # 1 initial condition and 1 step forward
     requirements = DataRequirements(["foo"], window_timesteps)
     data = get_data_loader(config, True, requirements)  # type: ignore
-    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
-    assert data.vertical_coordinate.ak.device == fme.get_device()
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
 
 
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
@@ -302,8 +302,8 @@ def test_xarray_loader_hpx(tmp_path):
         # expect healpix shape
         assert batch.data["foo"].shape == (1, window_timesteps, 12, 16, 16)
         break
-    assert isinstance(data.vertical_coordinate, HybridSigmaPressureCoordinate)
-    assert data.vertical_coordinate.ak.device == fme.get_device()
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
 
 
 def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):

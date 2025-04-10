@@ -33,11 +33,8 @@ from fme.ace.stepper.single_module import (
     StepperConfig,
     get_serialized_stepper_vertical_coordinate,
 )
-from fme.core.coordinates import (
-    DepthCoordinate,
-    OptionalDepthCoordinate,
-    OptionalHybridSigmaPressureCoordinate,
-)
+from fme.core.coordinates import DepthCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
@@ -403,28 +400,28 @@ class CoupledStepperConfig:
 
     def _get_ocean_stepper(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalDepthCoordinate,
+        dataset_info: DatasetInfo,
     ) -> Stepper:
+        if dataset_info.timestep != self.ocean_timestep:
+            raise ValueError(
+                "Ocean timestep must match the dataset timestep. "
+                f"Got {dataset_info.timestep} and {self.ocean_timestep}."
+            )
         return self.ocean.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=self.ocean_timestep,
+            dataset_info=dataset_info,
         )
 
     def _get_atmosphere_stepper(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: OptionalHybridSigmaPressureCoordinate,
+        dataset_info: DatasetInfo,
     ) -> Stepper:
+        if dataset_info.timestep != self.atmosphere_timestep:
+            raise ValueError(
+                "Atmosphere timestep must match the dataset timestep. "
+                f"Got {dataset_info.timestep} and {self.atmosphere_timestep}."
+            )
         return self.atmosphere.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=self.atmosphere_timestep,
+            dataset_info=dataset_info,
         )
 
     def get_stepper(
@@ -440,14 +437,20 @@ class CoupledStepperConfig:
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
-                img_shape=img_shape,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=vertical_coordinate.ocean,
+                dataset_info=DatasetInfo(
+                    img_shape=img_shape,
+                    gridded_operations=gridded_operations,
+                    vertical_coordinate=vertical_coordinate.ocean,
+                    timestep=self.ocean_timestep,
+                ),
             ),
             atmosphere=self._get_atmosphere_stepper(
-                img_shape=img_shape,
-                gridded_operations=gridded_operations,
-                vertical_coordinate=vertical_coordinate.atmosphere,
+                dataset_info=DatasetInfo(
+                    img_shape=img_shape,
+                    gridded_operations=gridded_operations,
+                    vertical_coordinate=vertical_coordinate.atmosphere,
+                    timestep=self.atmosphere_timestep,
+                ),
             ),
             sst_mask=sst_mask,
         )
