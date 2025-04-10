@@ -381,6 +381,10 @@ def test_regional_index_aggregator(variable_name):
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)
 
+    metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
+
 
 @pytest.mark.parametrize(
     "variable_name",
@@ -426,5 +430,9 @@ def test_paired_regional_index_aggregator(variable_name):
     logs = agg.get_logs(label="test")
     assert len(logs) > 0
     metric_name = f"test/{variable_name}_nino34_index"
+    assert metric_name in logs
+    assert isinstance(logs[metric_name], plt.Figure)
+
+    metric_name = f"test/{variable_name}_nino34_index_power_spectrum"
     assert metric_name in logs
     assert isinstance(logs[metric_name], plt.Figure)

@@ -51,6 +51,36 @@ class LatLonRegion(Region):
         return self._regional_weights
 
 
+def compute_nino34_index_power_spectrum(
+    data: xr.DataArray,
+    fs=1,
+    time_dim: int = TIME_DIM,
+    sample_dim: int = SAMPLE_DIM,
+):
+    """
+    Compute the power spectrum of the input data.
+
+    Args:
+        data: A tensor of size n_time_steps containing the data.
+        fs: The sampling frequency, defaults to 1 sample per month.
+        time_dim: Time dimension index
+        sample_dim: Sample dimension index
+    """
+    if len(data.shape) == 2:
+        uhat = np.fft.rfft(data, axis=time_dim)
+        power = np.abs(uhat) ** 2
+        power = power.mean(axis=sample_dim)
+    else:
+        raise ValueError(
+            f"Expected indicies to be of shape (sample, time) when calculating \
+                nino 3.4 index power spectrum, got {data.shape}"
+        )
+    n_samples = data.shape[time_dim]
+    freqs = np.fft.rfftfreq(n_samples, d=1 / fs)
+    freqs_per_year = freqs / fs * 12.0
+    return freqs_per_year, power
+
+
 class RegionalIndexAggregator:
     """Aggregator for computing a regional index, in this case a monthly- and area-
     weighted average of a variable over a region.
@@ -195,6 +225,24 @@ class RegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 plots[f"{sst_name}_nino34_index"] = fig
+        for sst_name in self.sea_surface_temperature_names:
+            if (
+                sst_name in indices
+                and indices[sst_name].dropna("time").sizes["time"] > 1
+            ):
+                freq, power_spectrum = compute_nino34_index_power_spectrum(
+                    indices.dropna("time")[sst_name]
+                )
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(freq, power_spectrum, label="predicted ensemble mean")
+                ax.set_title("Power Spectrum of Nino3.4 Index")
+                ax.set_xlabel("Frequency [cycles/year]")
+                ax.set_ylabel("Power [K**2]")
+                ax.set(yscale="log")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
+
         if len(label) > 0:
             label = label + "/"
         return {f"{label}{k}": v for k, v in plots.items()}
@@ -262,7 +310,28 @@ class PairedRegionalIndexAggregator:
                 ax.legend()
                 fig.tight_layout()
                 plots[f"{sst_name}_nino34_index"] = fig
-
+        for sst_name in self._prediction_aggregator.sea_surface_temperature_names:
+            if (
+                sst_name in prediction_indices
+                and prediction_indices[sst_name].dropna("time").sizes["time"] > 1
+            ):
+                freq, prediction_power_spectrum = compute_nino34_index_power_spectrum(
+                    prediction_indices.dropna("time")[sst_name]
+                )
+                freq, target_power_spectrum = compute_nino34_index_power_spectrum(
+                    target_indices.dropna("time")[sst_name]
+                )
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(
+                    freq, prediction_power_spectrum, label="predicted ensemble mean"
+                )
+                ax.plot(freq, target_power_spectrum, label="target", color="orange")
+                ax.set_title("Power Spectrum of Nino3.4 Index")
+                ax.set_xlabel("Frequency [cycles/year]")
+                ax.set(yscale="log")
+                ax.legend()
+                fig.tight_layout()
+                plots[f"{sst_name}_nino34_index_power_spectrum"] = fig
         if len(label) > 0:
             label = label + "/"
 
