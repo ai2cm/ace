@@ -140,3 +140,28 @@ def test_ocean_corrector_has_no_negative_ocean_fraction():
     ) > 1.0
     assert not corrected_violation.any()
     assert not (gen_data_corrected["sea_ice_fraction"] < 0.0).any()
+
+
+def test_sea_ice_thickness_correction():
+    config = OceanCorrectorConfig(
+        sea_ice_fraction_correction=SeaIceFractionConfig(
+            sea_ice_fraction_name="sea_ice_fraction",
+            land_fraction_name="land_fraction",
+            sea_ice_thickness_name="HI",
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    timestep = datetime.timedelta(seconds=3600)
+    input_data = {"land_fraction": torch.ones(IMG_SHAPE, device=DEVICE)}
+    input_data["land_fraction"][:3, :3] = torch.rand(3, 3, device=DEVICE)
+    gen_data = {
+        "sea_ice_fraction": torch.rand(IMG_SHAPE, device=DEVICE),
+        "HI": torch.rand(IMG_SHAPE, device=DEVICE) * 10,
+    }
+    corrector = OceanCorrector(config, ops, None, timestep)
+    gen_data_corrected = corrector(input_data, gen_data, {})
+    sea_ice_zero = gen_data_corrected["sea_ice_fraction"] == 0.0
+    thickness = gen_data_corrected["HI"]
+    torch.testing.assert_close(
+        torch.where(sea_ice_zero, thickness, 0.0), torch.zeros_like(thickness)
+    )
