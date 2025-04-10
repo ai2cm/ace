@@ -95,18 +95,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
 
-    for batch in train_data.loader:
-        shapes = {k: v.shape for k, v in batch.data.items()}
-        for value in shapes.values():
-            img_shape = value[-2:]
-            break
-        break
+    dataset_info = train_data.dataset_info
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(
-        img_shape=img_shape,
-        gridded_operations=train_data.gridded_operations,
-        vertical_coordinate=train_data.vertical_coordinate,
-        timestep=train_data.timestep,
+        dataset_info=dataset_info,
     )
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
@@ -115,9 +107,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         break
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
-        gridded_operations=train_data.gridded_operations,
+        gridded_operations=dataset_info.gridded_operations,
         horizontal_coordinates=train_data.horizontal_coordinates,
-        timestep=train_data.timestep,
+        timestep=dataset_info.timestep,
         output_dir=config.output_dir,
         initial_inference_time=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,

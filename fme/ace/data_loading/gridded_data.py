@@ -24,6 +24,7 @@ from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.step.step import InferenceDataProtocol
@@ -82,9 +83,24 @@ class GriddedData(GriddedDataABC[BatchData]):
         """
         self._loader = loader
         self._properties = properties.to_device()
+        self._timestep = self._properties.timestep
+        self._vertical_coordinate = self._properties.vertical_coordinate
+        self._gridded_operations = (
+            self._properties.horizontal_coordinates.gridded_operations
+        )
         self._sampler = sampler
         self._modifier = modifier
         self._batch_size: Optional[int] = None
+        img_shape = None
+        for batch in self.loader:
+            shapes = {k: v.shape for k, v in batch.data.items()}
+            for value in shapes.values():
+                img_shape = value[-2:]
+                break
+            break
+        if img_shape is None:
+            raise ValueError("No data found in loader")
+        self._img_shape = img_shape
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -98,31 +114,28 @@ class GriddedData(GriddedDataABC[BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._properties.vertical_coordinate
+    def dataset_info(self) -> DatasetInfo:
+        return DatasetInfo(
+            img_shape=self._img_shape,
+            gridded_operations=self._gridded_operations,
+            vertical_coordinate=self._vertical_coordinate,
+            timestep=self._timestep,
+        )
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
         return self._properties.horizontal_coordinates
 
     @property
-    def timestep(self) -> datetime.timedelta:
-        return self._properties.timestep
-
-    @property
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
-            **self.vertical_coordinate.coords,
+            **self._vertical_coordinate.coords,
         }
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
         return self.horizontal_coordinates.grid
-
-    @property
-    def gridded_operations(self) -> GriddedOperations:
-        return self.horizontal_coordinates.gridded_operations
 
     @property
     def n_samples(self) -> int:

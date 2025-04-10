@@ -11,6 +11,7 @@ import torch
 
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.typing_ import TensorMapping
@@ -42,10 +43,12 @@ def test_builder_with_weights_loads_same_state(tmpdir):
     ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
-        img_shape=(16, 32),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+        dataset_info=DatasetInfo(
+            img_shape=(16, 32),
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
+            timestep=TIMESTEP,
+        ),
     )
     torch.save(
         {
@@ -66,13 +69,16 @@ def test_builder_with_weights_loads_same_state(tmpdir):
             "stds": {"x": np.random.randn(1).item()},
         },
     }
-    with_builder_stepper = SingleModuleStepperConfig.from_state(
-        with_builder_stepper_config_data
-    ).get_stepper(
+    dataset_info = DatasetInfo(
         img_shape=(16, 32),
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
+    )
+    with_builder_stepper = SingleModuleStepperConfig.from_state(
+        with_builder_stepper_config_data
+    ).get_stepper(
+        dataset_info=dataset_info,
     )
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
@@ -147,24 +153,24 @@ def test_builder_with_weights_sfno_init(
     with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
         loaded_shape, extra_built_layer, tmpdir
     )
+    dataset_info = DatasetInfo(
+        img_shape=built_shape,
+        gridded_operations=LatLonOperations(area),
+        vertical_coordinate=vertical_coordinate,
+        timestep=TIMESTEP,
+    )
     if expect_exception:
         with pytest.raises(ValueError):
             with_builder_stepper = SingleModuleStepperConfig.from_state(
                 with_builder_stepper_config_data
             ).get_stepper(
-                img_shape=built_shape,
-                gridded_operations=LatLonOperations(area),
-                vertical_coordinate=vertical_coordinate,
-                timestep=TIMESTEP,
+                dataset_info=dataset_info,
             )
     else:
         with_builder_stepper = SingleModuleStepperConfig.from_state(
             with_builder_stepper_config_data
         ).get_stepper(
-            img_shape=built_shape,
-            gridded_operations=LatLonOperations(area),
-            vertical_coordinate=vertical_coordinate,
-            timestep=TIMESTEP,
+            dataset_info=dataset_info,
         )
         assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
@@ -211,10 +217,12 @@ def get_config(
     ).to(get_device())
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
-        img_shape=loaded_shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+        dataset_info=DatasetInfo(
+            img_shape=loaded_shape,
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
+            timestep=TIMESTEP,
+        ),
     )
     built_sfno_config_data = copy.deepcopy(sfno_config_data)
     if extra_built_layer:
@@ -249,10 +257,12 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
+        dataset_info=DatasetInfo(
+            img_shape=img_shape,
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
+            timestep=TIMESTEP,
+        ),
     )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights

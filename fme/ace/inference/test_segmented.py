@@ -28,6 +28,7 @@ from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
@@ -64,10 +65,12 @@ def save_stepper(
         ak=torch.arange(7), bk=torch.arange(7)
     )
     stepper = config.get_stepper(
-        img_shape=(data_shape[-2], data_shape[-1]),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=timestep,
+        dataset_info=DatasetInfo(
+            img_shape=(data_shape[-2], data_shape[-1]),
+            gridded_operations=LatLonOperations(area),
+            vertical_coordinate=vertical_coordinate,
+            timestep=timestep,
+        ),
     )
     torch.save({"stepper": stepper.get_state()}, path)
 
