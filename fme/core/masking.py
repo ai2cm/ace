@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import re
-from typing import List, Literal, Optional, Protocol, Union
+from typing import List, Literal, Optional, Protocol, Union, runtime_checkable
 
 import torch
 
@@ -30,6 +30,7 @@ def replace_on_mask(
     )
 
 
+@runtime_checkable
 class HasGetMaskTensorFor(Protocol):
     def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
         """Get the mask for a specific variable name."""
@@ -61,9 +62,7 @@ class StaticMaskingConfig:
                 "mask_value must be either 0 or 1, but got " f"{self.mask_value}"
             )
 
-    def build(
-        self, mask: HasGetMaskTensorFor, fill_values: Optional[TensorMapping] = None
-    ):
+    def build(self, mask: HasGetMaskTensorFor, means: Optional[TensorMapping] = None):
         """
         Build StaticMasking.
 
@@ -77,14 +76,14 @@ class StaticMaskingConfig:
                 mask=mask,
                 variable_names_and_prefixes=self.variable_names_and_prefixes,
             )
-        if fill_values is None:
+        if means is None:
             raise ValueError(
                 "fill_values mapping required by build unless configured "
                 "fill_value is a float."
             )
         return StaticMasking(
             mask_value=self.mask_value,
-            fill_value=fill_values,
+            fill_value=means,
             mask=mask,
             variable_names_and_prefixes=self.variable_names_and_prefixes,
         )
@@ -157,3 +156,8 @@ class StaticMasking:
             )
             data_[name] = masked
         return data_
+
+
+class NullMasking:
+    def __call__(self, data: TensorMapping) -> TensorDict:
+        return dict(data)

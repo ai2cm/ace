@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.masking import HasGetMaskTensorFor
 
 
 class MissingDatasetInfo(ValueError):
@@ -73,6 +74,16 @@ class DatasetInfo:
         if self._vertical_coordinate is None:
             raise MissingDatasetInfo("vertical_coordinate")
         return self._vertical_coordinate
+
+    @property
+    def mask_provider(self) -> HasGetMaskTensorFor:
+        try:
+            coord = self.vertical_coordinate
+        except MissingDatasetInfo as err:
+            raise MissingDatasetInfo("mask_provider") from err
+        if not isinstance(coord, HasGetMaskTensorFor):
+            raise MissingDatasetInfo("mask_provider")
+        return coord
 
     @property
     def timestep(self) -> datetime.timedelta:

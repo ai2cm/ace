@@ -112,7 +112,7 @@ def test_masking_with_means():
     )
     mask = config.build(
         mask=_Mask(_MASK_2D, _MASK_3D),
-        fill_values={
+        means={
             "PRESsfc": torch.tensor(1.0, device=DEVICE),
             "specific_total_water_0": torch.tensor(2.0, device=DEVICE),
             "specific_total_water_1": torch.tensor(3.0, device=DEVICE),
