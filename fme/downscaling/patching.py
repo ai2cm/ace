@@ -3,10 +3,11 @@ from itertools import product
 from typing import Generator, List, Tuple, Union
 
 import torch
+from torch.utils.data import DataLoader
 
 from fme.core.device import get_device
 from fme.core.typing_ import TensorDict
-from fme.downscaling.datasets import BatchData, PairedBatchData
+from fme.downscaling.datasets import BatchData, PairedBatchData, PairedBatchItem
 from fme.downscaling.models import DiffusionModel, Model, ModelOutputs
 
 
@@ -96,6 +97,36 @@ def get_patches(
     return patches
 
 
+def get_paired_patches(
+    coarse_yx_extent: Tuple[int, int],
+    coarse_yx_patch_extents: Tuple[int, int],
+    downscale_factor: int,
+    overlap: int = 0,
+    drop_partial_patches: bool = True,
+) -> Tuple[List[Patch], List[Patch]]:
+    fine_yx_extent = (
+        coarse_yx_extent[0] * downscale_factor,
+        coarse_yx_extent[1] * downscale_factor,
+    )
+    fine_yx_patch_extents = (
+        coarse_yx_patch_extents[0] * downscale_factor,
+        coarse_yx_patch_extents[1] * downscale_factor,
+    )
+    coarse_patches = get_patches(
+        yx_extents=coarse_yx_extent,
+        yx_patch_extents=coarse_yx_patch_extents,
+        overlap=overlap,
+        drop_partial_patches=drop_partial_patches,
+    )
+    fine_patches = get_patches(
+        yx_extents=fine_yx_extent,
+        yx_patch_extents=fine_yx_patch_extents,
+        overlap=overlap,
+        drop_partial_patches=drop_partial_patches,
+    )
+    return coarse_patches, fine_patches
+
+
 def generate_patched_data(
     data: BatchData, patches: List[Patch]
 ) -> Generator[BatchData, None, None]:
@@ -108,7 +139,7 @@ def generate_patched_data(
         yield patch_data
 
 
-def paired_patch_generator(
+def paired_patch_generator_from_batch(
     batch: PairedBatchData,
     coarse_patches: List[Patch],
     fine_patches: List[Patch],
@@ -130,6 +161,20 @@ def paired_patch_generator(
             fine=fine_patch,
             coarse=coarse_patch,
         )
+
+
+def paired_patch_generator_from_loader(
+    loader: DataLoader[PairedBatchItem],
+    coarse_patches: List[Patch],
+    fine_patches: List[Patch],
+) -> Generator[PairedBatchData, None, None]:
+    for batch in loader:
+        for patch_data in paired_patch_generator_from_batch(
+            batch,
+            coarse_patches=coarse_patches,
+            fine_patches=fine_patches,
+        ):
+            yield patch_data
 
 
 def _get_full_extent_from_patches(patches: List[Patch]) -> Tuple[int, int]:
@@ -215,7 +260,7 @@ class PatchPredictor:
         self.modules = self.model.modules
 
         self.downscale_factor = self.model.downscale_factor
-        coarse_extent = coarse_extent
+        self.coarse_shape = coarse_extent
         fine_extent = (
             coarse_extent[0] * self.downscale_factor,
             coarse_extent[1] * self.downscale_factor,
@@ -249,7 +294,7 @@ class PatchPredictor:
     ) -> ModelOutputs:
         predictions = []
         loss = 0.0
-        for patch_data in paired_patch_generator(
+        for patch_data in paired_patch_generator_from_batch(
             batch, self._coarse_patches, self._fine_patches
         ):
             model_output = self.model.generate_on_batch(patch_data, n_samples)
