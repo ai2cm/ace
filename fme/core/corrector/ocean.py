@@ -48,9 +48,12 @@ class SeaIceFractionConfig:
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig:
-    masking: Optional[StaticMaskingConfig] = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: Optional[SeaIceFractionConfig] = None
+    # NOTE: OceanCorrector.masking is deprecated and kept for backwards
+    # compatibility with legacy SingleModuleStepperConfig checkpoints. Please
+    # use SingleModuleStepConfig.input_masking instead.
+    masking: Optional[StaticMaskingConfig] = None
 
     def __post_init__(self):
         if self.masking is not None and self.masking.mask_value != 0:

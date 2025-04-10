@@ -36,6 +36,7 @@ from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
+from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
@@ -680,6 +681,7 @@ class StepperConfig:
         loss: The loss configuration.
         crps_training: Whether to use CRPS training for stochastic models.
         parameter_init: The parameter initialization configuration.
+        input_masking: Config for masking step inputs.
     """
 
     step: StepSelector
@@ -690,6 +692,7 @@ class StepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
+    input_masking: Optional[StaticMaskingConfig] = None
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -758,6 +761,13 @@ class StepperConfig:
         derive_func = dataset_info.vertical_coordinate.build_derive_function(
             dataset_info.timestep
         )
+        if self.input_masking is None:
+            input_masking = NullMasking()
+        else:
+            input_masking = self.input_masking.build(
+                mask=dataset_info.mask_provider,
+                means=step.normalizer.means,
+            )
         post_process_func = (
             dataset_info.vertical_coordinate.build_post_process_function()
         )
@@ -765,6 +775,7 @@ class StepperConfig:
             config=self,
             step=step,
             dataset_info=dataset_info,
+            input_process_func=input_masking,
             post_process_func=post_process_func,
             derive_func=derive_func,
             init_weights=init_weights,
@@ -913,6 +924,7 @@ class Stepper(
         config: StepperConfig,
         step: StepABC,
         dataset_info: DatasetInfo,
+        input_process_func: Callable[[TensorMapping], TensorDict],
         post_process_func: Callable[[TensorMapping], TensorDict],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         init_weights: bool = True,
@@ -924,6 +936,9 @@ class Stepper(
             dataset_info: Information about dataset used for training.
             post_process_func: Function to post-process the output of the step function.
             derive_func: Function to compute derived variables.
+            input_process_func: Optional function for processing inputs and next-step
+                inputs before passing them to the step object, e.g., by masking
+                specific regions.
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
@@ -932,6 +947,7 @@ class Stepper(
         self._dataset_info = dataset_info
         self._derive_func = derive_func
         self._post_process_func = post_process_func
+        self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
 
         def get_loss_obj():
@@ -1095,6 +1111,8 @@ class Stepper(
         Returns:
             The denormalized output data at the next time step.
         """
+        input = self._input_process_func(input)
+        next_step_input_data = self._input_process_func(next_step_input_data)
         return self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
 
     def get_prediction_generator(
