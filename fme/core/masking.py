@@ -1,6 +1,7 @@
+import collections
 import dataclasses
 import re
-from typing import List, Optional, Protocol
+from typing import List, Literal, Optional, Protocol, Union
 
 import torch
 
@@ -41,14 +42,17 @@ class StaticMaskingConfig:
     Replace static masked regions with a fill value.
 
     Parameters:
-        variable_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
-            to mask, which are used to build a variable Stacker.
         mask_value: Value of the mask variable in masked regions. Either 0 or 1.
-        fill_value: The constant fill value to use outside of masked regions.
+        fill_value: A float fill value to use outside of masked regions. Can also be
+            "mean", in which case the normalizer means are used as channel-specific
+            fill values.
+        variable_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
+            to mask. If null or empty, all variables are masked.
+
     """
 
     mask_value: int
-    fill_value: float = 0.0
+    fill_value: Union[Literal["mean"], float] = 0.0
     variable_names_and_prefixes: Optional[List[str]] = None
 
     def __post_init__(self):
@@ -57,14 +61,30 @@ class StaticMaskingConfig:
                 "mask_value must be either 0 or 1, but got " f"{self.mask_value}"
             )
 
-    def build(self, mask: HasGetMaskTensorFor):
+    def build(
+        self, mask: HasGetMaskTensorFor, fill_values: Optional[TensorMapping] = None
+    ):
         """
         Build StaticMasking.
 
         """
+        if isinstance(self.fill_value, float):
+            return StaticMasking(
+                mask_value=self.mask_value,
+                fill_value=collections.defaultdict(
+                    lambda: torch.as_tensor(self.fill_value)
+                ),
+                mask=mask,
+                variable_names_and_prefixes=self.variable_names_and_prefixes,
+            )
+        if fill_values is None:
+            raise ValueError(
+                "fill_values mapping required by build unless configured "
+                "fill_value is a float."
+            )
         return StaticMasking(
             mask_value=self.mask_value,
-            fill_value=self.fill_value,
+            fill_value=fill_values,
             mask=mask,
             variable_names_and_prefixes=self.variable_names_and_prefixes,
         )
@@ -74,11 +94,17 @@ class StaticMasking:
     def __init__(
         self,
         mask_value: int,
-        fill_value: float,
+        fill_value: Union[float, TensorMapping],
         mask: HasGetMaskTensorFor,
         variable_names_and_prefixes: Optional[List[str]] = None,
     ):
-        self._fill_value = fill_value
+        if isinstance(fill_value, float):
+            fill_mapping: TensorMapping = collections.defaultdict(
+                lambda: torch.as_tensor(fill_value)
+            )
+        else:
+            fill_mapping = fill_value
+        self._fill_mapping = fill_mapping
         self._mask_value = mask_value
         self._mask = mask
         self._include_regex = self._build_regex(variable_names_and_prefixes)
@@ -115,7 +141,14 @@ class StaticMasking:
             mask = self._mask.get_mask_tensor_for(name)
             if mask is None:
                 continue
-            fill = torch.full_like(tensor, self._fill_value)
+            try:
+                fill_value = self._fill_mapping[name]
+            except KeyError as err:
+                raise KeyError(
+                    "StaticMasking was initialized with a fill_value mapping "
+                    f"but the mapping is missing key '{name}'."
+                ) from err
+            fill = torch.full_like(tensor, fill_value)
             masked = replace_on_mask(
                 original=tensor,
                 replacement=fill,
