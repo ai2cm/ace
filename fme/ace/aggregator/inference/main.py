@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import logging
 import warnings
 from typing import Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Union
 
@@ -459,6 +460,7 @@ class InferenceEvaluatorAggregator(
     def get_summary_logs(self) -> InferenceLog:
         logs = {}
         for name, aggregator in self._summary_aggregators.items():
+            logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         return logs
 
@@ -719,6 +721,7 @@ class InferenceAggregator(
     def get_summary_logs(self) -> InferenceLog:
         logs = {}
         for name, aggregator in self._summary_aggregators.items():
+            logging.info(f"Getting summary logs for {name} aggregator")
             logs.update(aggregator.get_logs(label=name))
         return logs
 
