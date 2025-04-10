@@ -10,6 +10,7 @@ import pytest
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.data_loading.inference import ExplicitIndices
 from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
 from fme.ace.testing import save_scalar_netcdf
@@ -19,6 +20,7 @@ from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
 from .getters import get_data_loader
+from .inference import InferenceDataLoaderConfig
 
 N_LAT = 16
 N_LON = 32
@@ -285,3 +287,59 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
     # check that
     assert np.allclose(sample.ocean[0]["bar"].cpu().numpy(), expected_ocean)
     assert np.allclose(sample.atmosphere[0]["foo"].cpu().numpy(), expected_atmos)
+
+
+def test_zarr_engine_used_true():
+    config = CoupledDataLoaderConfig(
+        dataset=[
+            CoupledDatasetConfig(
+                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                atmosphere=XarrayDataConfig(
+                    data_path="atmos", file_pattern="data.zarr", engine="zarr"
+                ),
+            ),
+            CoupledDatasetConfig(
+                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+            ),
+        ],
+        batch_size=1,
+    )
+    assert config.zarr_engine_used
+
+
+def test_zarr_engine_used_false():
+    config = CoupledDataLoaderConfig(
+        dataset=[
+            CoupledDatasetConfig(
+                ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+                atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+            )
+        ],
+        batch_size=1,
+    )
+    assert not config.zarr_engine_used
+
+
+def test_zarr_engine_used_true_inference():
+    config = InferenceDataLoaderConfig(
+        dataset=CoupledDatasetConfig(
+            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            atmosphere=XarrayDataConfig(
+                data_path="atmos", file_pattern="data.zarr", engine="zarr"
+            ),
+        ),
+        start_indices=ExplicitIndices([0]),
+    )
+    assert config.zarr_engine_used
+
+
+def test_zarr_engine_used_false_inference():
+    config = InferenceDataLoaderConfig(
+        dataset=CoupledDatasetConfig(
+            ocean=XarrayDataConfig(data_path="ocean", engine="netcdf4"),
+            atmosphere=XarrayDataConfig(data_path="atmos", engine="netcdf4"),
+        ),
+        start_indices=ExplicitIndices([0]),
+    )
+    assert not config.zarr_engine_used

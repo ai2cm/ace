@@ -49,3 +49,15 @@ class CoupledDataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
+        self._zarr_engine_used = any(
+            ds.engine == "zarr"
+            for ds_coupled in self.dataset
+            for ds in ds_coupled.data_configs
+        )
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether the dataset uses the Zarr engine in any of its components.
+        """
+        return self._zarr_engine_used

@@ -756,3 +756,28 @@ def test_inference_persistence_names(tmp_path):
     torch.testing.assert_close(first_item["foo"], second_item["foo"])
     # ensure this is not the case for another variable
     assert not torch.all(first_item["bar"] == second_item["bar"])
+
+
+def test_zarr_engine_used_sequence():
+    config = DataLoaderConfig(
+        dataset=[
+            XarrayDataConfig(data_path="foo", file_pattern=".zarr", engine="zarr"),
+            XarrayDataConfig(data_path="bar"),
+        ],
+        batch_size=1,
+    )
+    assert config.zarr_engine_used
+
+
+def test_zarr_engine_used_mapping():
+    config = DataLoaderConfig(
+        dataset={
+            "first": [
+                XarrayDataConfig(data_path="foo", file_pattern=".zarr", engine="zarr"),
+                XarrayDataConfig(data_path="bar"),
+            ],
+            "second": [XarrayDataConfig(data_path="bar")],
+        },
+        batch_size=1,
+    )
+    assert config.zarr_engine_used

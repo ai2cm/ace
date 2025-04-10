@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "fme"
 description = "Train and evaluate weather/climate model emulators"
 readme = "PACKAGE_README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [
     {name = "Ai2 Climate Modeling", email = "climate-public-maintainer@allenai.org"}
