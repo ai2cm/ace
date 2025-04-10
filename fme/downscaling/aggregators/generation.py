@@ -55,11 +55,17 @@ class RelativeCRPSInterpAggregator:
         name: The name to use for the metric in the wandb output.
     """
 
-    def __init__(self, downscale_factor: int, name: str = "") -> None:
+    def __init__(
+        self,
+        downscale_factor: int,
+        name: str = "",
+        include_positional_comparisons: bool = True,
+    ) -> None:
         self.downscale_factor = downscale_factor
         self._prediction_crps = MeanComparison(_batch_mean_crps)
         self._interpolated_mae = MeanComparison(_batch_mean_mae_loss)
         self._name = _ensure_trailing_slash(name)
+        self._include_positional_comparisons = include_positional_comparisons
 
     def _interpolate(
         self, data: TensorMapping, keys: Optional[Collection[str]] = None
@@ -111,7 +117,8 @@ class RelativeCRPSInterpAggregator:
         ret = {}
         for k, v in self._get().items():
             v = v.cpu().numpy()
-            ret[f"{prefix}maps/{k}"] = self._plot_image(v, k)
+            if self._include_positional_comparisons:
+                ret[f"{prefix}maps/{k}"] = self._plot_image(v, k)
             ret[f"{prefix}metrics/{k}"] = v.mean()
         return ret
 
@@ -176,9 +183,15 @@ class SplitMapAndMetricLogs:
         name: The name to use for the maps in the wandb output.
     """
 
-    def __init__(self, agg: Union[MeanComparison, SumComparison], name: str) -> None:
+    def __init__(
+        self,
+        agg: Union[MeanComparison, SumComparison],
+        name: str,
+        include_positional_comparisons: bool = True,
+    ) -> None:
         self._agg = agg
         self._name = _ensure_trailing_slash(name)
+        self._include_positional_comparisons = include_positional_comparisons
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -210,7 +223,8 @@ class SplitMapAndMetricLogs:
         ret = {}
         for k, v in results.items():
             if len(v.shape) > 1:
-                ret[f"{prefix}maps/{self._name}{k}"] = self._plot_map(v, k)
+                if self._include_positional_comparisons:
+                    ret[f"{prefix}maps/{self._name}{k}"] = self._plot_map(v, k)
                 ret[f"{prefix}metrics/{self._name}{k}"] = v.mean()
             else:
                 ret[f"{prefix}metrics/{self._name}{k}"] = v
@@ -257,13 +271,18 @@ class GenerationAggregator:
         )
 
         # Non-folded sample dimension quantities
-        # Leaving maps here because validation/generation is not random subsets for now
         self._probabilistic_comparisons = [
-            SplitMapAndMetricLogs(MeanComparison(_batch_mean_crps), "crps"),
+            SplitMapAndMetricLogs(
+                MeanComparison(_batch_mean_crps), "crps", include_positional_comparisons
+            ),
         ]
 
         self._probabilistic_coarse_comparisons: List[_CoarseComparisonAggregator] = [
-            RelativeCRPSInterpAggregator(downscale_factor, name="relative_crps_bicubic")
+            RelativeCRPSInterpAggregator(
+                downscale_factor,
+                name="relative_crps_bicubic",
+                include_positional_comparisons=include_positional_comparisons,
+            )
         ]
 
         self._latent_step_aggregator = LatentStepAggregator(
