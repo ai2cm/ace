@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 from typing import Callable, Dict, Mapping, Optional, Protocol
 
 import numpy as np
@@ -127,8 +128,10 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         """
         logs = {}
         for agg_label in self._aggregators:
+            logging.info(f"Getting logs for {agg_label} aggregator")
             for k, v in self._aggregators[agg_label].get_logs(label=agg_label).items():
                 logs[f"{label}/{k}"] = v
+        logging.info(f"Inserting loss-scaled MSE componenets into logs")
         logs.update(
             self._get_loss_scaled_mse_components(
                 validation_metrics=logs,
