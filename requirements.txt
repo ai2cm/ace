@@ -10,7 +10,7 @@ xarray
 dacite
 torch>=2
 torch-harmonics==0.6.2
-zarr
+zarr>=3
 gcsfs
 s3fs
 plotly
