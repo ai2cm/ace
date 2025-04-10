@@ -1,7 +1,6 @@
 import dataclasses
-import datetime
 import os
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Union
 
 import torch
 
@@ -16,11 +15,10 @@ from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
-from fme.core.coordinates import VerticalCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.typing_ import Slice
@@ -208,16 +206,10 @@ class TrainBuilders:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
-        gridded_operations: GriddedOperations,
-        vertical_coordinate: VerticalCoordinate,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
     ) -> Stepper:
         return self.config.stepper.get_stepper(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
-            timestep=timestep,
+            dataset_info=dataset_info,
         )
 
     def get_ema(self, modules) -> EMATracker:

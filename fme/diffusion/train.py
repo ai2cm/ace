@@ -85,19 +85,14 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     validation_data = builder.get_validation_data()
     inference_data = builder.get_evaluation_inference_data()
 
-    for batch in train_data.loader:
-        shapes = {k: v.shape for k, v in batch.data.items()}
-        for value in shapes.values():
-            img_shape = value[-2:]
-            break
-        break
     logging.info("Starting model initialization")
     # diffusion only supports atmospheric vertical coordinate for now
+    dataset_info = train_data.dataset_info
     stepper = builder.get_stepper(
-        img_shape=img_shape,
-        gridded_operations=train_data.gridded_operations,
-        vertical_coordinate=train_data.vertical_coordinate,
-        timestep=train_data.timestep,
+        img_shape=dataset_info.img_shape,
+        gridded_operations=dataset_info.gridded_operations,
+        vertical_coordinate=dataset_info.vertical_coordinate,
+        timestep=dataset_info.timestep,
     )
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
@@ -106,9 +101,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         break
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
-        gridded_operations=train_data.gridded_operations,
+        gridded_operations=dataset_info.gridded_operations,
         horizontal_coordinates=train_data.horizontal_coordinates,
-        timestep=train_data.timestep,
+        timestep=dataset_info.timestep,
         initial_inference_time=initial_inference_times,
         record_step_20=config.inference_n_forward_steps >= 20,
         n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,

@@ -7,6 +7,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
@@ -123,7 +124,14 @@ def test_integration_with_stepper():
         multi_call_names
     )
     assert set(config.all_names) == expected_all_names
-    stepper = config.get_stepper(img_shape, gridded_ops, vertical_coord, timestep)
+    stepper = config.get_stepper(
+        dataset_info=DatasetInfo(
+            img_shape=img_shape,
+            gridded_operations=gridded_ops,
+            vertical_coordinate=vertical_coord,
+            timestep=timestep,
+        ),
+    )
     time = xr.DataArray([[1, 1, 1]], dims=["sample", "time"])
     data = BatchData(
         {
@@ -167,7 +175,14 @@ def test_integration_with_stepper():
     config = _get_stepper_config(
         in_names, out_names, expected_all_names, multi_call_config, False
     )
-    stepper = config.get_stepper(img_shape, gridded_ops, vertical_coord, timestep)
+    stepper = config.get_stepper(
+        dataset_info=DatasetInfo(
+            img_shape=img_shape,
+            gridded_operations=gridded_ops,
+            vertical_coordinate=vertical_coord,
+            timestep=timestep,
+        ),
+    )
     with GlobalTimer():
         output_without_loss = stepper.train_on_batch(data, NullOptimization())
 
