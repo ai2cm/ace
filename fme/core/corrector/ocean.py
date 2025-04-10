@@ -16,8 +16,33 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 @dataclasses.dataclass
 class SeaIceFractionConfig:
+    """Correct predicted sea_ice_fraction to ensure it is always in 0-1, and
+    land_fraction + sea_ice_fraction + ocean_fraction = 1. After
+    sea_ice_fraction is corrected, if the sea_ice_thickness_name is provided
+    it will be set to 0 everywhere the sea_ice_fraction is 0.
+    """
+
     sea_ice_fraction_name: str
     land_fraction_name: str
+    sea_ice_thickness_name: Optional[str] = None
+
+    def __call__(
+        self, gen_data: TensorMapping, input_data: TensorMapping
+    ) -> TensorDict:
+        out = {**gen_data}
+        out[self.sea_ice_fraction_name] = torch.clamp(
+            out[self.sea_ice_fraction_name], min=0.0, max=1.0
+        )
+        negative_ocean_fraction = (
+            1 - out[self.sea_ice_fraction_name] - input_data[self.land_fraction_name]
+        )
+        negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
+        out[self.sea_ice_fraction_name] += negative_ocean_fraction
+        if self.sea_ice_thickness_name:
+            thickness = gen_data[self.sea_ice_thickness_name]
+            thickness = thickness * (out[self.sea_ice_fraction_name] > 0.0)
+            out[self.sea_ice_thickness_name] = thickness
+        return out
 
 
 @CorrectorSelector.register("ocean_corrector")
@@ -63,28 +88,6 @@ class OceanCorrector(CorrectorABC):
         else:
             self._masking = None
 
-    def _correct_sea_ice_fraction(
-        self, gen_data: TensorMapping, input_data: TensorMapping
-    ) -> TensorDict:
-        """Correct predicted sea ice fraction to ensure \
-            sea ice fraction is always 0-1, and \
-            land fraction + sea ice fraction + ocean fraction = 1.
-        """
-        out = {**gen_data}
-        sea_ice_config = self._config.sea_ice_fraction_correction
-        if sea_ice_config is not None:
-            out[sea_ice_config.sea_ice_fraction_name] = torch.clamp(
-                out[sea_ice_config.sea_ice_fraction_name], min=0.0, max=1.0
-            )
-            negative_ocean_fraction = (
-                1
-                - out[sea_ice_config.sea_ice_fraction_name]
-                - input_data[sea_ice_config.land_fraction_name]
-            )
-            negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
-            out[sea_ice_config.sea_ice_fraction_name] += negative_ocean_fraction
-        return out
-
     def __call__(
         self,
         input_data: TensorMapping,
@@ -93,7 +96,8 @@ class OceanCorrector(CorrectorABC):
     ) -> TensorDict:
         if len(self._config.force_positive_names) > 0:
             gen_data = force_positive(gen_data, self._config.force_positive_names)
-        gen_data = self._correct_sea_ice_fraction(gen_data, input_data)
+        if self._config.sea_ice_fraction_correction is not None:
+            gen_data = self._config.sea_ice_fraction_correction(gen_data, input_data)
         if self._masking is not None:
             # NOTE: masking should be applied last to avoid overwriting
             gen_data = self._masking(gen_data)
