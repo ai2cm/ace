@@ -140,10 +140,23 @@ class InferenceDataLoaderConfig:
             for key, data in self.dataset.items():
                 if data.subset != Slice(None, None, None):
                     raise ValueError(f"Inference data for {key} may not be subset.")
+        if isinstance(self.dataset, XarrayDataConfig):
+            self._zarr_engine_used = self.dataset.engine == "zarr"
+        elif isinstance(self.dataset, Mapping):
+            self._zarr_engine_used = any(
+                ds.engine == "zarr" for ds in self.dataset.values()
+            )
 
     @property
     def n_initial_conditions(self) -> int:
         return self.start_indices.n_initial_conditions
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether any of the configured datasets are using the Zarr engine.
+        """
+        return self._zarr_engine_used
 
 
 @dataclasses.dataclass

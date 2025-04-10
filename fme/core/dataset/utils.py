@@ -1,9 +1,12 @@
+import asyncio
 import datetime
 import warnings
-from typing import Hashable, List, Optional, Sequence, Tuple
+from typing import Hashable, List, MutableMapping, Optional, Sequence, Tuple
 
+import numpy as np
 import torch
 import xarray as xr
+import zarr
 
 from fme.core.dataset.config import FillNaNsConfig
 
@@ -84,6 +87,54 @@ def as_broadcasted_tensor(
     return torch.broadcast_to(tensor, shape)
 
 
+def _broadcast_array_to_tensor(
+    array: np.ndarray,
+    dims: Sequence[Hashable],
+    shape: Sequence[int],
+) -> torch.tensor:
+    """Convert from numpy array to tensor and broadcast to the given shape.
+
+    Note: if number of dimensions is different between input array and
+    desired shape, it is assumed that array only has time dimension and will be
+    broadcasted over all spatial dimensions.
+    """
+    tensor = torch.as_tensor(array)
+    if len(array.shape) != len(shape):
+        assert array.shape[0] == shape[0], "Must have matching time dimension"
+        assert len(array.shape) == 1, "If broadcasting, array must be 1D"
+        # insert new singleton dimensions for missing spatial dimensions
+        n_spatial_dims = len(dims) - 1
+        tensor = tensor[(...,) + (None,) * n_spatial_dims]
+    return torch.broadcast_to(tensor, shape)
+
+
+async def _get_item(group, name, selection):
+    async_array = await group.getitem(name)
+    return await async_array.getitem(selection)
+
+
+async def _get_items(url, names, timestep):
+    async_group = await zarr.api.asynchronous.open(store=url)
+    coroutines = []
+    for name in names:
+        coroutines.append(_get_item(async_group, name, timestep))
+    return await asyncio.gather(*coroutines)
+
+
+def _load_all_variables_zarr_async(
+    path: str, variables: Sequence[str], time_slice: slice = SLICE_NONE
+) -> MutableMapping[str, np.ndarray]:
+    """Load data from a variables into memory.
+
+    Assumes that path contains a zarr group and uses async.
+
+    Assumes that the time dimension is the first dimension in the dataset.
+    """
+    loop = asyncio.get_event_loop()
+    arrays = loop.run_until_complete(_get_items(path, variables, time_slice))
+    return {k: v for k, v in zip(variables, arrays)}
+
+
 def _load_all_variables(
     ds: xr.Dataset, variables: Sequence[str], time_slice: slice = SLICE_NONE
 ) -> xr.Dataset:
@@ -95,6 +146,26 @@ def _load_all_variables(
     if "time" in ds.dims:
         ds = ds.isel(time=time_slice)
     return ds[variables].compute()
+
+
+def load_series_data_zarr_async(
+    idx: int,
+    n_steps: int,
+    path: str,
+    names: List[str],
+    dims: List[str],
+    shape: List[int],
+    fill_nans: Optional[FillNaNsConfig] = None,
+):
+    time_slice = slice(idx, idx + n_steps)
+    loaded = _load_all_variables_zarr_async(path, names, time_slice)
+    if fill_nans is not None:
+        for k, v in loaded.items():
+            loaded[k] = np.nan_to_num(v, nan=fill_nans.value)
+    arrays = {}
+    for n in names:
+        arrays[n] = _broadcast_array_to_tensor(loaded[n], dims, shape)
+    return arrays
 
 
 def load_series_data(

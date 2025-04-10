@@ -33,6 +33,7 @@ from .utils import (
     get_horizontal_dimensions,
     infer_horizontal_dimension_names,
     load_series_data,
+    load_series_data_zarr_async,
 )
 
 SLICE_NONE = slice(None)
@@ -625,15 +626,26 @@ class XarrayDataset(Dataset):
             n_steps = stop - start + 1
             shape = [n_steps] + self._shape_excluding_time
             total_steps += n_steps
-            tensor_dict = load_series_data(
-                idx=start,
-                n_steps=n_steps,
-                ds=ds,
-                names=self._time_dependent_names,
-                dims=self._dims,
-                shape=shape,
-                fill_nans=self.fill_nans,
-            )
+            if self.engine == "zarr":
+                tensor_dict = load_series_data_zarr_async(
+                    idx=start,
+                    n_steps=n_steps,
+                    path=self.full_paths[file_idx],
+                    names=self._time_dependent_names,
+                    dims=self._dims,
+                    shape=shape,
+                    fill_nans=self.fill_nans,
+                )
+            else:
+                tensor_dict = load_series_data(
+                    idx=start,
+                    n_steps=n_steps,
+                    ds=ds,
+                    names=self._time_dependent_names,
+                    dims=self._dims,
+                    shape=shape,
+                    fill_nans=self.fill_nans,
+                )
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
             ds.close()
