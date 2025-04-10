@@ -11,6 +11,7 @@ import yaml
 from fme.ace.inference.data_writer.main import DataWriterConfig
 from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
@@ -86,18 +87,20 @@ def save_coupled_stepper(
         bk=torch.arange(nz_interface, device=get_device()),
     )
     if save_standalone_component_checkpoints:
-        ocean_stepper = config.ocean.stepper.get_stepper(
+        ocean_dataset_info = DatasetInfo(
             img_shape=img_shape,
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=ocean_vertical_coordinate,
             timestep=config.ocean_timestep,
         )
-        atmos_stepper = config.atmosphere.stepper.get_stepper(
+        ocean_stepper = config.ocean.stepper.get_stepper(ocean_dataset_info)
+        atmos_dataset_info = DatasetInfo(
             img_shape=img_shape,
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=atmos_vertical_coordinate,
             timestep=config.atmosphere_timestep,
         )
+        atmos_stepper = config.atmosphere.stepper.get_stepper(atmos_dataset_info)
         ocean_path = base_dir / "ocean.pt"
         atmos_path = base_dir / "atmos.pt"
         torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
