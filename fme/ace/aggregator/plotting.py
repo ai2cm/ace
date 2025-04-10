@@ -1,4 +1,3 @@
-import gc
 from typing import Any, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -134,10 +133,6 @@ def plot_paneled_data(
     wandb = WandB.get_instance()
     wandb_image = wandb.Image(fig, caption=caption)
     plt.close(fig)
-
-    # necessary to avoid CUDA error in some contexts
-    # see https://github.com/ai2cm/full-model/issues/740#issuecomment-2086546187
-    gc.collect()
 
     return wandb_image
 
