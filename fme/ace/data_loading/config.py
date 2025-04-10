@@ -47,3 +47,19 @@ class DataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
+        self._zarr_engine_used = False
+        if isinstance(self.dataset, Sequence):
+            self._zarr_engine_used = any(ds.engine == "zarr" for ds in self.dataset)
+        elif isinstance(self.dataset, Mapping):
+            self._zarr_engine_used = any(
+                ds.engine == "zarr"
+                for ds_list in self.dataset.values()
+                for ds in ds_list
+            )
+
+    @property
+    def zarr_engine_used(self) -> bool:
+        """
+        Whether any of the configured datasets are using the Zarr engine.
+        """
+        return self._zarr_engine_used

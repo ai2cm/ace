@@ -254,6 +254,23 @@ def mock_monthly_zarr(tmp_path_factory, mock_monthly_netcdfs) -> MockData:
 
 
 @pytest.fixture(scope="session")
+def mock_monthly_zarr_with_nans(
+    tmp_path_factory, mock_monthly_netcdfs_with_nans
+) -> MockData:
+    zarr_parent = tmp_path_factory.mktemp("zarr")
+    filename = "data.zarr"
+    data = load_files_without_dask(mock_monthly_netcdfs_with_nans.tmpdir.glob("*.nc"))
+    data.to_zarr(zarr_parent / filename)
+    return MockData(
+        zarr_parent,
+        mock_monthly_netcdfs_with_nans.obs_times,
+        mock_monthly_netcdfs_with_nans.start_times,
+        mock_monthly_netcdfs_with_nans.start_indices,
+        mock_monthly_netcdfs_with_nans.var_names,
+    )
+
+
+@pytest.fixture(scope="session")
 def mock_yearly_netcdfs(tmp_path_factory):
     return _get_data(
         tmp_path_factory,
@@ -653,12 +670,23 @@ def test_dataset_config_dtype_raises():
         XarrayDataConfig(data_path="path/to/data", dtype="invalid_dtype")
 
 
-def test_fill_nans(mock_monthly_netcdfs_with_nans):
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_with_nans", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_with_nans", "zarr", "*.zarr"),
+    ],
+)
+def test_fill_nans(mock_data_fixture, engine, file_pattern, request):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
     nan_config = FillNaNsConfig()
     config = XarrayDataConfig(
-        data_path=mock_monthly_netcdfs_with_nans.tmpdir, fill_nans=nan_config
+        data_path=mock_data.tmpdir,
+        fill_nans=nan_config,
+        engine=engine,
+        file_pattern=file_pattern,
     )
-    names = mock_monthly_netcdfs_with_nans.var_names.all_names
+    names = mock_data.var_names.all_names
     dataset = XarrayDataset(config, names, 2)
     data, _ = dataset[0]
     assert torch.all(data["foo"][0, :, 0] == 0)
