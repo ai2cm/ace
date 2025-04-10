@@ -39,12 +39,15 @@ from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
+    NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.dataset_info import MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.masking import StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
@@ -1401,3 +1404,58 @@ def test_get_serialized_stepper_vertical_coordinate():
     state = stepper.get_state()
     vertical_coordinate = get_serialized_stepper_vertical_coordinate(state)
     assert isinstance(vertical_coordinate, VerticalCoordinate)
+
+
+def _get_stepper_with_input_masking(vertical_coordinate: VerticalCoordinate):
+    # basic StepperConfig with input_masking configured
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=["a"],
+                    out_names=["a"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(
+                            means={"a": 0.0},
+                            stds={"a": 1.0},
+                        ),
+                    ),
+                )
+            ),
+        ),
+        input_masking=StaticMaskingConfig(mask_value=0, fill_value=0.0),
+    )
+    img_shape = (5, 5)
+    area = torch.ones(img_shape, device=DEVICE)
+    gridded_operations = LatLonOperations(area)
+    timestep = datetime.timedelta(hours=6)
+    return config.get_stepper(
+        img_shape=img_shape,
+        gridded_operations=gridded_operations,
+        vertical_coordinate=vertical_coordinate,
+        timestep=timestep,
+    )
+
+
+def test_get_stepper_with_input_masking():
+    # check that no error is raised when building a stepper with input_masking
+    # configured when the vertical coordinate is a mask_provider
+
+    # VerticalCoordinate with mask
+    class MockMaskingCoord(NullVerticalCoordinate):
+        def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
+            return torch.ones(1, device=get_device())  # Return a dummy tensor
+
+    # no error raised
+    _ = _get_stepper_with_input_masking(MockMaskingCoord())
+
+
+def test_get_stepper_with_input_masking_raises():
+    # no get_mask_tensor_for method on vertical coordinate raises error when
+    # input_masking provided in config
+    with pytest.raises(MissingDatasetInfo, match="mask_provider"):
+        _ = _get_stepper_with_input_masking(NullVerticalCoordinate())
