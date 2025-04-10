@@ -31,6 +31,7 @@ from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
@@ -100,11 +101,14 @@ def save_plus_one_stepper(
         vertical_coordinate = HybridSigmaPressureCoordinate(
             ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
         )
-        stepper = config.get_stepper(
+        dataset_info = DatasetInfo(
             img_shape=(data_shape[-2], data_shape[-1]),
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
+        )
+        stepper = config.get_stepper(
+            dataset_info=dataset_info,
         )
         torch.save({"stepper": stepper.get_state()}, path)
         mean_filename.unlink()

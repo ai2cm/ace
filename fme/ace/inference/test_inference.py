@@ -35,6 +35,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
@@ -76,11 +77,14 @@ def save_stepper(
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    stepper = config.get_stepper(
+    dataset_info = DatasetInfo(
         img_shape=(data_shape[-2], data_shape[-1]),
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
+    )
+    stepper = config.get_stepper(
+        dataset_info=dataset_info,
     )
     torch.save({"stepper": stepper.get_state()}, path)
 

@@ -12,6 +12,7 @@ import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.data import SimpleInferenceData
 from fme.core.generics.inference import (
@@ -128,10 +129,12 @@ def _get_stepper():
         loss=WeightedMappingLossConfig(),
     )
     stepper = config.get_stepper(
-        img_shape,
-        gridded_operations,
-        vertical_coordinate,
-        datetime.timedelta(seconds=1),
+        dataset_info=DatasetInfo(
+            img_shape=img_shape,
+            gridded_operations=gridded_operations,
+            vertical_coordinate=vertical_coordinate,
+            timestep=datetime.timedelta(seconds=1),
+        ),
     )
     return stepper, spherical_data, time, in_names, out_names
 
