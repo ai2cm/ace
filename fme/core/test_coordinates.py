@@ -204,6 +204,16 @@ def test_depth_get_mask_tensor_for(name, level):
     assert coord.get_mask_tensor_for(name) == level
 
 
+def test_depth_returns_surface_mask_if_specified():
+    idepth = torch.arange(end=5)
+    mask = torch.arange(end=4)
+    surface_mask = torch.tensor([4])
+    coord_sfc_mask = DepthCoordinate(idepth, mask, surface_mask)
+    coord_no_sfc_mask = DepthCoordinate(idepth, mask)
+    assert coord_sfc_mask.get_mask_tensor_for("sfc_level") == surface_mask[0]
+    assert coord_no_sfc_mask.get_mask_tensor_for("sfc_level") == mask[0]
+
+
 @pytest.mark.parametrize("pad", [True, False])
 def test_healpix_coordinates_xyz(pad: bool, very_fast_only: bool):
     if very_fast_only:
