@@ -1,4 +1,5 @@
 import dataclasses
+import random
 from itertools import product
 from typing import Generator, List, Tuple, Union
 
@@ -63,6 +64,8 @@ def get_patches(
     yx_patch_extents: Tuple[int, int],
     overlap: int,
     drop_partial_patches: bool = True,
+    y_offset: int = 0,
+    x_offset: int = 0,
 ) -> List[Patch]:
     """
     Generate a list of patches for the given extents and patch size.
@@ -74,9 +77,14 @@ def get_patches(
         drop_partial_patches: if True, drop patches that are not full
             patches (i.e., the last patch in each dimension if not
             fully included by yx_extent bounds)
+        y_offset: added to the start of y slices
+        x_offset: added to the start of x slices
     """
     y_slices = _divide_into_slices(yx_extents[0], yx_patch_extents[0], overlap)
     x_slices = _divide_into_slices(yx_extents[1], yx_patch_extents[1], overlap)
+
+    y_slices = [slice(s.start + y_offset, s.stop + y_offset) for s in y_slices]
+    x_slices = [slice(s.start + x_offset, s.stop + x_offset) for s in x_slices]
 
     if drop_partial_patches:
         if y_slices[-1].stop > yx_extents[0]:
@@ -95,36 +103,6 @@ def get_patches(
             )
         )
     return patches
-
-
-def get_paired_patches(
-    coarse_yx_extent: Tuple[int, int],
-    coarse_yx_patch_extents: Tuple[int, int],
-    downscale_factor: int,
-    overlap: int = 0,
-    drop_partial_patches: bool = True,
-) -> Tuple[List[Patch], List[Patch]]:
-    fine_yx_extent = (
-        coarse_yx_extent[0] * downscale_factor,
-        coarse_yx_extent[1] * downscale_factor,
-    )
-    fine_yx_patch_extents = (
-        coarse_yx_patch_extents[0] * downscale_factor,
-        coarse_yx_patch_extents[1] * downscale_factor,
-    )
-    coarse_patches = get_patches(
-        yx_extents=coarse_yx_extent,
-        yx_patch_extents=coarse_yx_patch_extents,
-        overlap=overlap,
-        drop_partial_patches=drop_partial_patches,
-    )
-    fine_patches = get_patches(
-        yx_extents=fine_yx_extent,
-        yx_patch_extents=fine_yx_patch_extents,
-        overlap=overlap,
-        drop_partial_patches=drop_partial_patches,
-    )
-    return coarse_patches, fine_patches
 
 
 def generate_patched_data(
@@ -163,12 +141,63 @@ def paired_patch_generator_from_batch(
         )
 
 
+def _random_offset(full_size, patch_size):
+    max_offset = min(patch_size - 1, full_size - patch_size)
+    return random.randint(0, max_offset)
+
+
 def paired_patch_generator_from_loader(
     loader: DataLoader[PairedBatchItem],
-    coarse_patches: List[Patch],
-    fine_patches: List[Patch],
+    coarse_yx_extent: Tuple[int, int],
+    coarse_yx_patch_extents: Tuple[int, int],
+    downscale_factor: int,
+    coarse_overlap: int = 0,
+    drop_partial_patches: bool = True,
+    random_offset: bool = False,
 ) -> Generator[PairedBatchData, None, None]:
+    fine_yx_extent = (
+        coarse_yx_extent[0] * downscale_factor,
+        coarse_yx_extent[1] * downscale_factor,
+    )
+    fine_yx_patch_extents = (
+        coarse_yx_patch_extents[0] * downscale_factor,
+        coarse_yx_patch_extents[1] * downscale_factor,
+    )
     for batch in loader:
+        # get_patches is called at each iteration so that each batch has
+        # a different random offset if this option is enabled.
+
+        coarse_y_random_offset = (
+            _random_offset(
+                full_size=coarse_yx_extent[0], patch_size=coarse_yx_patch_extents[0]
+            )
+            if random_offset
+            else 0
+        )
+        coarse_x_random_offset = (
+            _random_offset(
+                full_size=coarse_yx_extent[1], patch_size=coarse_yx_patch_extents[1]
+            )
+            if random_offset
+            else 0
+        )
+
+        coarse_patches = get_patches(
+            yx_extents=coarse_yx_extent,
+            yx_patch_extents=coarse_yx_patch_extents,
+            overlap=coarse_overlap,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=coarse_y_random_offset,
+            x_offset=coarse_x_random_offset,
+        )
+        fine_patches = get_patches(
+            yx_extents=fine_yx_extent,
+            yx_patch_extents=fine_yx_patch_extents,
+            overlap=coarse_overlap * downscale_factor,
+            drop_partial_patches=drop_partial_patches,
+            y_offset=coarse_y_random_offset * downscale_factor,
+            x_offset=coarse_x_random_offset * downscale_factor,
+        )
         for patch_data in paired_patch_generator_from_batch(
             batch,
             coarse_patches=coarse_patches,
