@@ -6,7 +6,6 @@ from fme.downscaling.modules.registry import (
     InterpolateConfig,
     ModuleRegistrySelector,
     SwinirConfig,
-    compute_unet_padding_size,
 )
 
 
@@ -190,6 +189,7 @@ def test_unets_output_shape(type_):
             type_,
             dict(
                 model_channels=4,
+                attn_resolutions=[],
             ),
         )
         .build(
@@ -205,8 +205,29 @@ def test_unets_output_shape(type_):
     assert outputs.shape == (2, 3, *fine_shape)
 
 
+@pytest.mark.parametrize("type_", ["unet_regression_song", "unet_regression_dhariwal"])
 @pytest.mark.parametrize(
-    "value,divisor,expected", [(180, 8, 4), (128, 2, 0), (128, 16, 0), (5, 8, 3)]
+    "channel_mult,attn_resolution",
+    [
+        pytest.param([1, 2, 3, 4, 5], [], id="too_may_levels"),
+        pytest.param([1, 2], [4, 1], id="missing_requested_attn"),
+    ],
 )
-def test_unet_compute_padding_size(value, divisor, expected):
-    assert compute_unet_padding_size(value, divisor) == expected
+def test_unets_invalid_config(type_, channel_mult, attn_resolution):
+    # determined by min coarse dimension
+    coarse_shape = (8, 16)
+    downscale_factor = 1
+    with pytest.raises(ValueError):
+        ModuleRegistrySelector(
+            type_,
+            dict(
+                model_channels=4,
+                attn_resolutions=attn_resolution,
+                channel_mult=channel_mult,
+            ),
+        ).build(
+            n_in_channels=3,
+            n_out_channels=3,
+            coarse_shape=coarse_shape,
+            downscale_factor=downscale_factor,
+        )
