@@ -26,7 +26,6 @@ def test_ocean_corrector_init_error():
 
     config = OceanCorrectorConfig(
         masking=StaticMaskingConfig(
-            variable_names_and_prefixes=["sst", "so_"],
             mask_value=0,
             fill_value=float("nan"),
         ),
@@ -81,7 +80,6 @@ def test_ocean_corrector_integration(fill_value):
     torch.manual_seed(0)
     config = OceanCorrectorConfig(
         masking=StaticMaskingConfig(
-            variable_names_and_prefixes=["sst", "so_"],
             mask_value=0,
             fill_value=fill_value,
         ),
