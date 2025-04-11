@@ -68,31 +68,6 @@ class SwinirConfig:
         )
 
 
-def compute_unet_padding_size(value: int, divisor: int) -> int:
-    """Compute the padding size so that `value + padding_size` is divisible by
-    `divisor`.
-    """
-    remainder = value % divisor
-    if remainder == 0:
-        return 0
-    return divisor - remainder
-
-
-def pad_right(tensor: torch.Tensor, target_shape: Tuple[int, int]) -> torch.Tensor:
-    """Pad the right side of the tensor with zeros to match the target shape."""
-    return torch.nn.functional.pad(
-        tensor,
-        [
-            0,
-            target_shape[-1] - tensor.shape[-1],
-            0,
-            target_shape[-2] - tensor.shape[-2],
-        ],
-        mode="constant",
-        value=0,
-    )
-
-
 class UNetRegressionModule(torch.nn.Module):
     """
     Performs downscaling on an interpolated input as in [1] and [2].  Interpolation
@@ -149,12 +124,7 @@ class UNetRegressionSong:
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ):
-        divisor = 2 ** (len(self.channel_mult) - 1)
-        target_height, target_width = [
-            s * downscale_factor
-            + compute_unet_padding_size(s * downscale_factor, divisor)
-            for s in coarse_shape
-        ]
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
         unet = SongUNet(
             min(target_height, target_width),
             n_in_channels,
@@ -196,12 +166,7 @@ class UNetRegressionDhariwal:
         coarse_shape: Tuple[int, int],
         downscale_factor: int,
     ):
-        divisor = 2 ** (len(self.channel_mult) - 1)
-        target_height, target_width = [
-            s * downscale_factor
-            + compute_unet_padding_size(s * downscale_factor, divisor)
-            for s in coarse_shape
-        ]
+        target_height, target_width = [s * downscale_factor for s in coarse_shape]
         unet = DhariwalUNet(
             min(target_height, target_width),
             n_in_channels,
