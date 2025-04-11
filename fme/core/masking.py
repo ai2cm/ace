@@ -47,14 +47,14 @@ class StaticMaskingConfig:
         fill_value: A float fill value to use outside of masked regions. Can also be
             "mean", in which case the normalizer means are used as channel-specific
             fill values.
-        variable_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
-            to mask. If null or empty, all variables are masked.
+        exclude_names_and_prefixes: Names (2D variables) and prefixes (3D variables)
+            to exclude when applying the mask.
 
     """
 
     mask_value: int
     fill_value: Union[Literal["mean"], float] = 0.0
-    variable_names_and_prefixes: Optional[List[str]] = None
+    exclude_names_and_prefixes: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
@@ -74,7 +74,7 @@ class StaticMaskingConfig:
                     lambda: torch.as_tensor(self.fill_value)
                 ),
                 mask=mask,
-                variable_names_and_prefixes=self.variable_names_and_prefixes,
+                exclude_names_and_prefixes=self.exclude_names_and_prefixes,
             )
         if means is None:
             raise ValueError(
@@ -85,7 +85,7 @@ class StaticMaskingConfig:
             mask_value=self.mask_value,
             fill_value=means,
             mask=mask,
-            variable_names_and_prefixes=self.variable_names_and_prefixes,
+            exclude_names_and_prefixes=self.exclude_names_and_prefixes,
         )
 
 
@@ -95,7 +95,7 @@ class StaticMasking:
         mask_value: int,
         fill_value: Union[float, TensorMapping],
         mask: HasGetMaskTensorFor,
-        variable_names_and_prefixes: Optional[List[str]] = None,
+        exclude_names_and_prefixes: Optional[List[str]] = None,
     ):
         if isinstance(fill_value, float):
             fill_mapping: TensorMapping = collections.defaultdict(
@@ -106,7 +106,7 @@ class StaticMasking:
         self._fill_mapping = fill_mapping
         self._mask_value = mask_value
         self._mask = mask
-        self._include_regex = self._build_regex(variable_names_and_prefixes)
+        self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
 
     def _build_regex(self, names_and_prefixes: Optional[List[str]]) -> Optional[str]:
         if names_and_prefixes:
@@ -122,8 +122,9 @@ class StaticMasking:
             return r"|".join(regex)
         return None
 
-    def _include(self, name: str):
-        return self._include_regex is None or re.match(self._include_regex, name)
+    def _masks(self, name: str):
+        exclude = self._exclude_regex and re.match(self._exclude_regex, name)
+        return not exclude
 
     def __call__(self, data: TensorMapping) -> TensorDict:
         """
@@ -135,7 +136,7 @@ class StaticMasking:
         """
         data_: TensorDict = {**data}
         for name, tensor in data_.items():
-            if not self._include(name):
+            if not self._masks(name):
                 continue
             mask = self._mask.get_mask_tensor_for(name)
             if mask is None:
