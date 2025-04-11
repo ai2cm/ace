@@ -93,6 +93,7 @@ def _get_vertical_coordinate(
         )
 
     coordinate: VerticalCoordinate
+    surface_mask = None
     if len(idepth_list) > 0:
         if "mask_0" in ds.data_vars:
             mask_layers = {
@@ -105,13 +106,19 @@ def _get_vertical_coordinate(
                     raise ValueError("The ocean mask must by time-independent.")
             stacker = Stacker({"mask": ["mask_"]})
             mask = stacker("mask", mask_layers)
+            if "surface_mask" in ds.data_vars:
+                if "time" in ds["surface_mask"].dims:
+                    raise ValueError("The surface mask must be time-independent.")
+                surface_mask = torch.as_tensor(ds["surface_mask"].values, dtype=dtype)
         else:
             logger.warning(
                 "Dataset does not contain a mask. Providing a DepthCoordinate with "
                 "mask set to 1 at all layers."
             )
             mask = torch.ones(len(idepth_list) - 1, dtype=dtype)
-        coordinate = DepthCoordinate(torch.as_tensor(idepth_list, dtype=dtype), mask)
+        coordinate = DepthCoordinate(
+            torch.as_tensor(idepth_list, dtype=dtype), mask, surface_mask
+        )
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(
             ak=torch.as_tensor(ak_list, dtype=dtype),
