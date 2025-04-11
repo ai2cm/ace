@@ -17,6 +17,7 @@ from fme.downscaling.patching import (
     _get_patch_slices,
     composite_patch_predictions,
     get_patches,
+    paired_patch_generator_from_loader,
 )
 
 
@@ -193,3 +194,91 @@ def test_SpatialCompositePredictor(patch_size_coarse):
     # dummy model predicts same value as fine data for all samples
     for s in range(n_samples_generate):
         assert torch.equal(outputs.prediction["x"][:, s], outputs.target["x"][:, 0])
+
+
+def test_get_patches_with_offset():
+    yx_extents = (4, 4)
+    yx_patch_extents = (2, 2)
+    overlap = 0
+
+    offset_patches = get_patches(
+        yx_extents=yx_extents,
+        yx_patch_extents=yx_patch_extents,
+        overlap=overlap,
+        drop_partial_patches=True,
+        y_offset=1,
+        x_offset=1,
+    )
+
+    assert len(offset_patches) == 1
+    assert offset_patches[0].input_slice.x == slice(1, 3)
+    assert offset_patches[0].input_slice.y == slice(1, 3)
+    assert offset_patches[0].output_slice.x == slice(None, None)
+    assert offset_patches[0].output_slice.y == slice(None, None)
+
+
+def _mock_data_loader(
+    n_batches, coarse_y_size, coarse_x_size, downscale_factor, batch_size
+):
+    batch_data = get_paired_test_data(
+        coarse_y_size, coarse_x_size, downscale_factor, batch_size
+    )
+    for batch in range(n_batches):
+        yield batch_data
+
+
+@pytest.mark.parametrize("overlap", [0, 2])
+def test_paired_patches_with_random_offset_consistent(overlap):
+    coarse_shape = (20, 20)
+    downscale_factor = 2
+    batch_size = 3
+    loader = _mock_data_loader(
+        10, *coarse_shape, downscale_factor=downscale_factor, batch_size=batch_size
+    )
+
+    full_data = next(iter(loader))
+    full_coarse_coords = full_data.coarse.latlon_coordinates
+    full_fine_coords = full_data.fine.latlon_coordinates
+
+    y_offsets = []
+    x_offsets = []
+
+    for paired_batch in paired_patch_generator_from_loader(
+        loader,
+        coarse_yx_extent=coarse_shape,
+        coarse_yx_patch_extents=(10, 10),
+        downscale_factor=downscale_factor,
+        coarse_overlap=overlap,
+        drop_partial_patches=True,
+        random_offset=True,
+    ):
+        assert paired_batch.coarse.data["x"].shape == (batch_size, 10, 10)
+        assert paired_batch.fine.data["x"].shape == (batch_size, 20, 20)
+
+        coarse_patch_coords = paired_batch.coarse.latlon_coordinates
+        fine_patch_coords = paired_batch.fine.latlon_coordinates
+
+        # Lookup the index of the coordinate in the full coords
+        # that corresponds to the first patch coordinate in order to
+        # determine the offset applied
+        coarse_y_offset = torch.where(
+            full_coarse_coords.lat[0] == coarse_patch_coords.lat[0, 0]
+        )[0].item()
+        coarse_x_offset = torch.where(
+            full_coarse_coords.lon[0] == coarse_patch_coords.lon[0, 0]
+        )[0].item()
+        fine_y_offset = torch.where(
+            full_fine_coords.lat[0] == fine_patch_coords.lat[0, 0]
+        )[0].item()
+        fine_x_offset = torch.where(
+            full_fine_coords.lon[0] == fine_patch_coords.lon[0, 0]
+        )[0].item()
+
+        assert fine_y_offset == coarse_y_offset * downscale_factor
+        assert fine_x_offset == coarse_x_offset * downscale_factor
+
+        y_offsets.append(coarse_y_offset)
+        x_offsets.append(coarse_x_offset)
+
+    assert len(np.unique(y_offsets)) > 1
+    assert len(np.unique(x_offsets)) > 1
