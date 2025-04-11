@@ -38,7 +38,6 @@ class _Mask:
 
 def test_masking_config():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["c"],
         mask_value=1,
         fill_value=0.0,
     )
@@ -48,13 +47,11 @@ def test_masking_config():
 
     with pytest.raises(ValueError, match="mask_value must be either 0 or 1"):
         _ = StaticMaskingConfig(
-            variable_names_and_prefixes=["c"],
             mask_value=3,
             fill_value=0.0,
         )
 
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["c"],
         mask_value=1,
         fill_value="mean",
     )
@@ -79,30 +76,60 @@ _DATA = {
 
 
 @pytest.mark.parametrize(
-    "var_names_and_prefixes",
+    "exclude",
     [
-        ["PRESsfc", "specific_total_water_"],
-        ["PRESsfc", "specific_total_water"],
-        ["PRESsfc", "specific_total_water_0"],
         None,
+        [],
+        ["specific_total_water_1"],
     ],
 )
-def test_masking(var_names_and_prefixes):
+def test_masking(exclude):
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=var_names_and_prefixes,
         mask_value=0,
         fill_value=0.0,
+        exclude_names_and_prefixes=exclude,
     )
     mask = config.build(_Mask(_MASK_2D, _MASK_3D))
     output = mask(_DATA)
     assert output["PRESsfc"][1, 1] == 0.0
     assert output["PRESsfc"][0, 1] != 0.0
     assert torch.all(output["specific_total_water_0"][0, :] == 0.0)
-    if var_names_and_prefixes and "specific_total_water_0" in var_names_and_prefixes:
+    if exclude and "specific_total_water_1" in exclude:
         assert torch.all(output["specific_total_water_1"][1, :] != 0.0)
     else:
         assert torch.all(output["specific_total_water_1"][1, :] == 0.0)
     assert torch.all(output["specific_total_water_1"][0, :] != 0.0)
+
+
+@pytest.mark.parametrize(
+    "exclude",
+    [
+        "PRESsfc",
+        "specific_total_water_",
+        "specific_total_water",
+        "specific_total_water_0",
+    ],
+)
+def test_masking_exclusion(exclude):
+    config = StaticMaskingConfig(
+        mask_value=0,
+        fill_value=float("nan"),
+        exclude_names_and_prefixes=[exclude],
+    )
+    mask = config.build(mask=_Mask(_MASK_2D, _MASK_3D))
+    output = mask(_DATA)
+    if exclude == "PRESsfc":
+        assert torch.all(~output["PRESsfc"].isnan())
+        assert torch.all(output["specific_total_water_0"][0, :].isnan())
+        assert torch.all(output["specific_total_water_1"][1, :].isnan())
+    else:
+        assert output["PRESsfc"][1, 1].isnan()
+    if exclude == "specific_total_water_0":
+        assert torch.all(~output["specific_total_water_0"].isnan())
+        assert torch.all(output["specific_total_water_1"][1, :].isnan())
+    elif exclude != "PRESsfc":
+        assert torch.all(~output["specific_total_water_0"].isnan())
+        assert torch.all(~output["specific_total_water_1"].isnan())
 
 
 def test_masking_with_means():
@@ -128,9 +155,9 @@ def test_masking_with_means():
 
 def test_masking_no_3d_masking():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["PRESsfc"],
         mask_value=0,
         fill_value=0.0,
+        exclude_names_and_prefixes=["specific_total_water"],
     )
     mask = config.build(_Mask(mask_2d=_MASK_2D))
     output = mask(_DATA)
@@ -143,9 +170,9 @@ def test_masking_no_3d_masking():
 
 def test_masking_no_surface_masking():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["specific_total_water"],
         mask_value=0,
         fill_value=0.0,
+        exclude_names_and_prefixes=["PRESsfc"],
     )
     mask = config.build(_Mask(mask_3d=_MASK_3D))
     output = mask(_DATA)
@@ -158,9 +185,9 @@ def test_masking_no_surface_masking():
 
 def test_masking_missing_2d_mask():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["PRESsfc"],
         mask_value=0,
         fill_value=0.0,
+        exclude_names_and_prefixes=["specific_total_water"],
     )
     mask = config.build(_Mask(mask_3d=_MASK_3D))
     masked = mask(_DATA)
@@ -169,7 +196,6 @@ def test_masking_missing_2d_mask():
 
 def test_masking_missing_3d_mask():
     config = StaticMaskingConfig(
-        variable_names_and_prefixes=["PRESsfc", "specific_total_water_"],
         mask_value=0,
         fill_value=0.0,
     )
