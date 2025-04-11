@@ -25,11 +25,7 @@ from fme.downscaling.models import (
     PairedNormalizationConfig,
 )
 from fme.downscaling.modules.registry import ModuleRegistrySelector
-from fme.downscaling.patching import (
-    PatchPredictor,
-    get_paired_patches,
-    paired_patch_generator_from_loader,
-)
+from fme.downscaling.patching import PatchPredictor, paired_patch_generator_from_loader
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
 
@@ -149,26 +145,18 @@ class Evaluator:
         )
 
         if self.patch_data:
-            coarse_patches, fine_patches = get_paired_patches(
+            batch_generator = paired_patch_generator_from_loader(
+                loader=self.data.loader,
                 coarse_yx_extent=self.data.coarse_shape,
                 coarse_yx_patch_extents=self.model.coarse_shape,
                 downscale_factor=self.model.downscale_factor,
-                overlap=0,
-                drop_partial_patches=True,
             )
-            batch_generator = paired_patch_generator_from_loader(
-                self.data.loader,
-                coarse_patches=coarse_patches,
-                fine_patches=fine_patches,
-            )
-            total_len = len(coarse_patches) * len(self.data.loader)
         else:
             batch_generator = self.data.loader
-            total_len = len(self.data.loader)
 
         for i, batch in enumerate(batch_generator):
             with torch.no_grad():
-                logging.info(f"Generating predictions on batch {i + 1}/{total_len} ")
+                logging.info(f"Generating predictions on batch {i + 1}")
                 outputs = self.model.generate_on_batch(batch, n_samples=self.n_samples)
                 logging.info("Recording diagnostics to aggregator")
                 # Add sample dimension to coarse values for generation comparison

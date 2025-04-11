@@ -27,6 +27,7 @@ from fme.downscaling.models import (
     DownscalingModelConfig,
     Model,
 )
+from fme.downscaling.patching import paired_patch_generator_from_loader
 
 
 def count_parameters(modules: torch.nn.ModuleList) -> int:
@@ -95,6 +96,11 @@ class Trainer:
         wandb.watch(self.model.modules)
         self.num_batches_seen = 0
         self.config = config
+        self.patch_data = (
+            True
+            if (config.coarse_patch_extent_lat and config.coarse_patch_extent_lon)
+            else False
+        )
 
         self.startEpoch = 0
         self.segment_epochs = self.config.segment_epochs
@@ -122,10 +128,23 @@ class Trainer:
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
 
+    def _get_batch_generator(self, data: GriddedData, random_offset: bool):
+        if self.patch_data:
+            batch_generator = paired_patch_generator_from_loader(
+                loader=data.loader,
+                coarse_yx_extent=data.coarse_shape,
+                coarse_yx_patch_extents=self.model.coarse_shape,
+                downscale_factor=self.model.downscale_factor,
+                random_offset=random_offset,
+            )
+        else:
+            batch_generator = data.loader
+        return batch_generator
+
     def train_one_epoch(self) -> None:
         self.model.module.train()
         include_positional_comparisons = _include_positional_comparisons(
-            self.config.train_data
+            self.config.train_data, self.patch_data
         )
         train_aggregator = Aggregator(
             self.dims,
@@ -134,9 +153,13 @@ class Trainer:
         )
         batch: PairedBatchData
         wandb = WandB.get_instance()
-        for batch in self.train_data.loader:
-            outputs = self.model.train_on_batch(batch, self.optimization)
+        train_batch_generator = self._get_batch_generator(
+            self.train_data, random_offset=True
+        )
+        for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
+            logging.info(f"Training on batch {i+1}")
+            outputs = self.model.train_on_batch(batch, self.optimization)
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs=outputs,
@@ -147,7 +170,6 @@ class Trainer:
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
                     step=self.num_batches_seen,
                 )
-
         with torch.no_grad():
             wandb.log(
                 train_aggregator.get_wandb(prefix="train"),
@@ -183,7 +205,7 @@ class Trainer:
     def valid_one_epoch(self) -> float:
         self.model.module.eval()
         include_positional_comparisons = _include_positional_comparisons(
-            self.config.validation_data
+            self.config.validation_data, self.patch_data
         )
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
@@ -197,7 +219,10 @@ class Trainer:
                 include_positional_comparisons=include_positional_comparisons,
             )
             batch: PairedBatchData
-            for batch in self.validation_data.loader:
+            validation_batch_generator = self._get_batch_generator(
+                self.validation_data, random_offset=False
+            )
+            for batch in validation_batch_generator:
                 outputs = self.model.train_on_batch(batch, self.null_optimization)
                 validation_aggregator.record_batch(
                     outputs=outputs,
@@ -303,6 +328,32 @@ class TrainerConfig:
     generate_n_samples: int = 1
     segment_epochs: Optional[int] = None
     validate_interval: int = 1
+    coarse_patch_extent_lat: Optional[int] = None
+    coarse_patch_extent_lon: Optional[int] = None
+
+    def __post_init__(self):
+        if (
+            self.coarse_patch_extent_lat is not None
+            and self.coarse_patch_extent_lon is None
+        ) or (
+            self.coarse_patch_extent_lat is None
+            and self.coarse_patch_extent_lon is not None
+        ):
+            raise ValueError(
+                "Either none or both of coarse_patch_extent_lat and "
+                "coarse_patch_extent_lon must be set."
+            )
+
+        if self.coarse_patch_extent_lat and (
+            self.train_data.coarse_random_lat_cells
+            or self.train_data.coarse_random_lon_cells
+        ):
+            # TODO: single patch random subsetting will be removed
+            # in following PR
+            raise ValueError(
+                "coarse_patch_extent_lat and coarse_patch_extent_lon cannot be set "
+                "together with coarse_random_lat_cells or coarse_random_lon_cells."
+            )
 
     @property
     def checkpoint_dir(self) -> str:
@@ -315,9 +366,15 @@ class TrainerConfig:
         validation_data: GriddedData = self.validation_data.build(
             train=False, requirements=self.model.data_requirements
         )
-
+        if self.coarse_patch_extent_lat and self.coarse_patch_extent_lon:
+            model_coarse_shape = (
+                self.coarse_patch_extent_lat,
+                self.coarse_patch_extent_lon,
+            )
+        else:
+            model_coarse_shape = train_data.coarse_shape
         downscaling_model = self.model.build(
-            train_data.coarse_shape,
+            model_coarse_shape,
             train_data.downscale_factor,
         )
 
@@ -360,7 +417,10 @@ def _get_crps(metrics, prefix="generation/metrics/crps"):
         return sum(channel_crps) / len(channel_crps)
 
 
-def _include_positional_comparisons(config: DataLoaderConfig) -> bool:
+def _include_positional_comparisons(config: DataLoaderConfig, patch_data: bool) -> bool:
+    # TODO: remove this check when the single random subsetting feature is deprecated
+    if patch_data:
+        return False
     if (
         config.coarse_random_lat_cells is not None
         or config.coarse_random_lon_cells is not None

@@ -29,11 +29,18 @@ def test_trainer(tmp_path):
     mock_config.experiment_dir = str(tmp_path / "experiment_dir")
     mock_config.checkpoint_dir = str(tmp_path / "checkpoint_dir")
 
+    mock_data = MagicMock()
+    mock_data.coarse_shape = [64, 64]
+
+    mock_model = MagicMock()
+    mock_model.coarse_shape = [16, 16]
+    mock_model.downscale_factor = 2
+
     trainer = Trainer(
-        model=MagicMock(),
+        model=mock_model,
         optimization=MagicMock(),
-        train_data=MagicMock(),
-        validation_data=MagicMock(),
+        train_data=mock_data,
+        validation_data=mock_data,
         config=mock_config,
     )
 
