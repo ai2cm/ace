@@ -33,7 +33,10 @@ from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.masking import StaticMasking
-from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
+from fme.core.ocean_derived_variables import (
+    UNMASKED_OCEAN_DERIVED_NAMES,
+    compute_ocean_derived_quantities,
+)
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.winds import lon_lat_to_xyz
@@ -404,6 +407,7 @@ class DepthCoordinate(VerticalCoordinate):
             mask_value=0,
             fill_value=float("nan"),
             mask=self,
+            exclude_names_and_prefixes=UNMASKED_OCEAN_DERIVED_NAMES,
         )
 
     @property
