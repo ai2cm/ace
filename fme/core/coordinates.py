@@ -326,6 +326,7 @@ class DepthCoordinate(VerticalCoordinate):
 
     idepth: torch.Tensor
     mask: torch.Tensor
+    surface_mask: Optional[torch.Tensor] = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -361,6 +362,8 @@ class DepthCoordinate(VerticalCoordinate):
             return self.get_mask_level(level)
         else:
             # 2D variable
+            if self.surface_mask is not None:
+                return self.surface_mask
             return self.get_mask_level(0)
 
     def get_idepth(self) -> torch.Tensor:
@@ -425,6 +428,11 @@ class DepthCoordinate(VerticalCoordinate):
     def to(self, device: str) -> "DepthCoordinate":
         idepth_on_device = self.idepth.to(device)
         mask_on_device = self.mask.to(device)
+        if self.surface_mask is not None:
+            surface_mask_on_device = self.surface_mask.to(device)
+            return DepthCoordinate(
+                idepth_on_device, mask_on_device, surface_mask_on_device
+            )
         return DepthCoordinate(idepth_on_device, mask_on_device)
 
     def __eq__(self, other) -> bool:
