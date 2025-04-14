@@ -62,6 +62,7 @@ class SpectralFilterLayer(nn.Module):
         complex_activation="real",
         spectral_layers=1,
         drop_rate=0.0,
+        filter_residual=False,
     ):
         super(SpectralFilterLayer, self).__init__()
 
@@ -111,6 +112,7 @@ class SpectralFilterLayer(nn.Module):
                 separable=separable,
                 bias=True,
                 use_tensorly=False if factorization is None else True,
+                filter_residual=filter_residual,
             )
 
         else:
@@ -149,6 +151,7 @@ class FourierNeuralOperatorBlock(nn.Module):
         complex_activation="real",
         spectral_layers=1,
         checkpointing=0,
+        filter_residual=False,
     ):
         super(FourierNeuralOperatorBlock, self).__init__()
 
@@ -180,6 +183,7 @@ class FourierNeuralOperatorBlock(nn.Module):
             complex_activation=complex_activation,
             spectral_layers=spectral_layers,
             drop_rate=drop_rate,
+            filter_residual=filter_residual,
         )
 
         if inner_skip == "linear":
@@ -391,6 +395,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         complex_activation: str = "real",
         spectral_layers: int = 3,
         checkpointing: int = 0,
+        filter_residual: bool = False,
+        filter_output: bool = False,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -403,6 +409,15 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.filter_type = (
             params.filter_type if hasattr(params, "filter_type") else filter_type
         )
+        self.filter_residual = (
+            params.filter_residual
+            if hasattr(params, "filter_residual")
+            else filter_residual
+        )
+        self.filter_output = (
+            params.filter_output if hasattr(params, "filter_output") else filter_output
+        )
+        self.mlp_ratio = params.mlp_ratio if hasattr(params, "mlp_ratio") else mlp_ratio
         self.operator_type = (
             params.operator_type if hasattr(params, "operator_type") else operator_type
         )
@@ -503,7 +518,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # no global padding because we removed the horizontal distributed code
         self.padding = (0, 0)
 
-        if residual_filter_factor == 1:
+        if residual_filter_factor == 1 and not self.filter_residual:
             self.residual_filter_down = nn.Identity()
             self.residual_filter_up = nn.Identity()
         else:
@@ -519,6 +534,23 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 mmax=modes_lon_residual,
                 grid=data_grid,
             ).float()
+
+        if self.filter_output:
+            self.filter_output_down = th.RealSHT(
+                *self.img_shape,
+                lmax=modes_lat,
+                mmax=modes_lon,
+                grid=data_grid,
+            ).float()
+            self.filter_output_up = th.InverseRealSHT(
+                *self.img_shape,
+                lmax=modes_lat,
+                mmax=modes_lon,
+                grid=data_grid,
+            ).float()
+        else:
+            self.filter_output_down = nn.Identity()
+            self.filter_output_up = nn.Identity()
 
         # prepare the spectral transforms
         if self.spectral_transform == "sht":
@@ -620,7 +652,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 context_config=context_config,
                 filter_type=self.filter_type,
                 operator_type=self.operator_type,
-                mlp_ratio=mlp_ratio,
+                mlp_ratio=self.mlp_ratio,
                 drop_rate=drop_rate,
                 drop_path=dpr[i],
                 act_layer=self.activation_function,
@@ -637,6 +669,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 complex_activation=self.complex_activation,
                 spectral_layers=self.spectral_layers,
                 checkpointing=self.checkpointing,
+                filter_residual=self.filter_residual,
             )
 
             self.blocks.append(block)
@@ -726,5 +759,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = checkpoint(self.decoder, x)
         else:
             x = self.decoder(x)
+
+        x = self.filter_output_up(self.filter_output_down(x))
 
         return x
