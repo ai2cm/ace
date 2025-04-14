@@ -17,12 +17,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.step import (
-    InferenceDataProtocol,
-    StepABC,
-    StepConfigABC,
-    StepSelector,
-)
+from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -317,13 +312,6 @@ class SeparateRadiationStep(StepABC):
             A list of modules being trained.
         """
         return nn.ModuleList([self.module, self.radiation_module])
-
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        if self._timestep != data.timestep:
-            raise ValueError(
-                f"Timestep of step object, {self._timestep}, does not "
-                f"match that of the inference data, {data.timestep}."
-            )
 
     def step(
         self,

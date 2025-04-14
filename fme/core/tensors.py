@@ -1,6 +1,27 @@
-from typing import Tuple
+from typing import Any, Dict, Tuple
+
+import torch
 
 from .typing_ import EnsembleTensorDict, TensorDict, TensorMapping
+
+
+def assert_dict_allclose(a: Dict[str, Any], b: Dict[str, Any]):
+    """
+    Check if two (possibly nested) dictionaries which may contain tensors are close.
+
+    Non-tensor values are checked for equality.
+    """
+    if a.keys() != b.keys():
+        raise AssertionError(f"Keys do not match, got {a.keys()} and {b.keys()}")
+    for k in a.keys():
+        if isinstance(a[k], torch.Tensor) and isinstance(b[k], torch.Tensor):
+            torch.testing.assert_close(
+                a[k], b[k], msg=f"Tensors for key {k} are not close"
+            )
+        elif isinstance(a[k], dict) and isinstance(b[k], dict):
+            assert_dict_allclose(a[k], b[k])
+        elif a[k] != b[k]:
+            raise AssertionError(f"Values for key {k} are not equal")
 
 
 def add_ensemble_dim(d: TensorMapping, repeats: int = 1) -> EnsembleTensorDict:

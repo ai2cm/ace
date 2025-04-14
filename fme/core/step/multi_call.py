@@ -9,12 +9,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
 from fme.core.normalizer import StandardNormalizer
 from fme.core.ocean import OceanConfig
-from fme.core.step.step import (
-    InferenceDataProtocol,
-    StepABC,
-    StepConfigABC,
-    StepSelector,
-)
+from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -274,9 +269,6 @@ class MultiCallStep(StepABC):
     @property
     def ocean_fraction_name(self) -> Optional[str]:
         return self._wrapped_step.ocean_fraction_name
-
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        self._wrapped_step.validate_inference_data(data)
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return self._wrapped_step.get_regularizer_loss()
