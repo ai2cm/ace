@@ -161,6 +161,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
         data_writer=DataWriterConfig(save_prediction_files=True),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:

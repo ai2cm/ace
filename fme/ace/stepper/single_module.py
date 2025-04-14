@@ -48,7 +48,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.multi_call import MultiCallStepConfig, replace_multi_call
 from fme.core.step.single_module import SingleModuleStepConfig
-from fme.core.step.step import InferenceDataProtocol, StepABC, StepSelector
+from fme.core.step.step import StepABC, StepSelector
 from fme.core.tensors import (
     add_ensemble_dim,
     fold_ensemble_dim,
@@ -987,8 +987,9 @@ class Stepper(
     def ocean_fraction_name(self) -> Optional[str]:
         return self._step_obj.ocean_fraction_name
 
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        self._step_obj.validate_inference_data(data)
+    @property
+    def training_dataset_info(self) -> DatasetInfo:
+        return self._dataset_info
 
     @property
     def effective_loss_scaling(self) -> TensorDict:

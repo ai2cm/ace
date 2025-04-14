@@ -1,6 +1,5 @@
 import abc
 import dataclasses
-import datetime
 from typing import (
     Any,
     Callable,
@@ -8,7 +7,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
     Set,
     Type,
     TypeVar,
@@ -199,12 +197,6 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class InferenceDataProtocol(Protocol):
-    @property
-    def timestep(self) -> datetime.timedelta:
-        pass
-
-
 class StepABC(abc.ABC):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
@@ -286,13 +278,6 @@ class StepABC(abc.ABC):
     def ocean_fraction_name(self) -> Optional[str]:
         """
         Name of the ocean fraction variable, if one is available.
-        """
-        pass
-
-    @abc.abstractmethod
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        """
-        Validate the inference data.
         """
         pass
 

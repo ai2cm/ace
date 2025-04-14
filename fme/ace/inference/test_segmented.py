@@ -141,6 +141,7 @@ def test_inference_segmented_entrypoint():
             ),
             forcing_loader=forcing_loader,
             data_writer=DataWriterConfig(save_prediction_files=True),
+            allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info  # noqa: E501
         )
 
         # run one segment of 3 steps
