@@ -2,6 +2,7 @@ import abc
 from typing import Any, Dict, List, Type, TypeVar
 
 import torch
+import torch_harmonics
 
 from fme.core import metrics
 from fme.core.device import get_device
@@ -60,6 +61,12 @@ class GriddedOperations(abc.ABC):
         regional_weights: torch.Tensor,
         keepdim: bool = False,
     ) -> torch.Tensor: ...
+
+    @abc.abstractmethod
+    def get_real_sht(
+        self,
+        grid: str = "legendre-gauss",
+    ) -> torch_harmonics.RealSHT: ...
 
     def to_state(self) -> Dict[str, Any]:
         return {
@@ -167,6 +174,11 @@ class LatLonOperations(GriddedOperations):
             truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
         )
 
+    def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
+        return torch_harmonics.RealSHT(
+            self._cpu_area.shape[-2], self._cpu_area.shape[-1], grid=grid
+        ).to(get_device())
+
     def get_initialization_kwargs(self) -> Dict[str, Any]:
         return {"area_weights": self._cpu_area}
 
@@ -192,6 +204,9 @@ class HEALPixOperations(GriddedOperations):
         raise NotImplementedError(
             "Regional area weighted mean is not implemented for HEALPix."
         )
+
+    def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
+        raise NotImplementedError("SHT is not implemented for HEALPix.")
 
     def get_initialization_kwargs(self) -> Dict[str, Any]:
         return {}
