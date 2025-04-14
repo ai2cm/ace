@@ -19,12 +19,7 @@ from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
-from fme.core.step.step import (
-    InferenceDataProtocol,
-    StepABC,
-    StepConfigABC,
-    StepSelector,
-)
+from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
@@ -298,13 +293,6 @@ class SingleModuleStep(StepABC):
         if self.ocean is not None:
             output = self.ocean(input, output, next_step_input_data)
         return output
-
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        if self._timestep != data.timestep:
-            raise ValueError(
-                f"Timestep of step object, {self._timestep}, does not "
-                f"match that of the inference data, {data.timestep}."
-            )
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)

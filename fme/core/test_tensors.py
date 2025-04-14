@@ -2,11 +2,51 @@ import pytest
 import torch
 
 from fme.core.tensors import (
+    assert_dict_allclose,
     fold_sized_ensemble_dim,
     repeat_interleave_batch_dim,
     unfold_ensemble_dim,
 )
 from fme.core.typing_ import EnsembleTensorDict
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        (
+            {"a": torch.tensor(1)},
+            {"a": torch.tensor(1)},
+        ),
+        (
+            {"a": torch.tensor(1), "b": {"c": torch.tensor(2)}},
+            {"a": torch.tensor(1), "b": {"c": torch.tensor(2)}},
+        ),
+    ],
+)
+def test_assert_dict_allclose_passes_for_equal_dicts(a, b):
+    assert_dict_allclose(a, b)
+
+
+@pytest.mark.parametrize(
+    "a, b",
+    [
+        (
+            {"a": torch.tensor(1), "b": {"c": torch.tensor(2)}},
+            {"a": torch.tensor(1), "b": {"c": torch.tensor(3)}},
+        ),
+        (
+            {"a": torch.tensor(1)},
+            {"b": torch.tensor(1)},
+        ),
+        (
+            {"a": torch.tensor(1)},
+            {"a": torch.tensor(2)},
+        ),
+    ],
+)
+def test_assert_allclose_raises_for_unequal_dicts(a, b):
+    with pytest.raises(AssertionError):
+        assert_dict_allclose(a, b)
 
 
 @pytest.mark.parametrize("repeats", [1, 3])
