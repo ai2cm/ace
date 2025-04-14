@@ -50,7 +50,6 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPrognosticState,
 )
 from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
-from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -728,10 +727,6 @@ class CoupledStepper(
     @property
     def n_ic_timesteps(self) -> int:
         return 1
-
-    def validate_inference_data(self, data: InferenceGriddedData):
-        self.atmosphere.validate_inference_data(data.atmosphere_properties)
-        self.ocean.validate_inference_data(data.ocean_properties)
 
     @property
     def n_inner_steps(self) -> int:

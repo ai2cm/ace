@@ -239,6 +239,7 @@ def inference_helper(
     timestep: datetime.timedelta,
     save_monthly_files: bool = True,
     derived_names: List[str] = [],
+    allow_incompatible_dataset_info: bool = True,  # stepper checkpoint has arbitrary info  # noqa: E501
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
     all_names = list(set(in_names).union(out_names))
@@ -292,6 +293,7 @@ def inference_helper(
             save_monthly_files=save_monthly_files,
         ),
         forward_steps_in_memory=1,
+        allow_incompatible_dataset=allow_incompatible_dataset_info,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -482,6 +484,7 @@ def test_inference_writer_boundaries(
             time_coarsen=None,
         ),
         forward_steps_in_memory=forward_steps_in_memory,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -623,6 +626,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
             time_coarsen=TimeCoarsenConfig(coarsen_factor=coarsen_factor),
             save_histogram_files=True,
         ),
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -771,6 +775,7 @@ def test_derived_metrics_run_without_errors(
         prediction_loader=None,
         data_writer=DataWriterConfig(save_prediction_files=True),
         forward_steps_in_memory=1,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
@@ -876,6 +881,7 @@ def test_inference_override(tmp_path: pathlib.Path):
         data_writer=DataWriterConfig(save_prediction_files=True, time_coarsen=None),
         forward_steps_in_memory=4,
         stepper_override=stepper_override,
+        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
     )
     stepper = config.load_stepper()
     validate_stepper_ocean(stepper, ocean_override)
@@ -908,7 +914,13 @@ def validate_stepper_config(
     )
 
 
-def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
+@pytest.mark.parametrize(
+    "use_correct_timestep",
+    [True, False],
+)
+def test_inference_timestep_mismatch_error(
+    tmp_path: pathlib.Path, use_correct_timestep: bool
+):
     """Test that inference with a model trained with a different timestep than
     the forcing data raises an error.
     """
@@ -930,17 +942,33 @@ def test_inference_timestep_mismatch_error(tmp_path: pathlib.Path):
     )
     use_prediction_data = False
     n_forward_steps = 2
-    with pytest.raises(ValueError, match="Timestep of step object"):
-        inference_helper(
-            tmp_path,
-            in_names,
-            out_names,
-            use_prediction_data,
-            dim_sizes,
-            n_forward_steps,
-            stepper_path,
-            timestep=datetime.timedelta(days=20),
-        )
+    if use_correct_timestep:
+        with pytest.raises(ValueError) as err:
+            inference_helper(
+                tmp_path,
+                in_names,
+                out_names,
+                use_prediction_data,
+                dim_sizes,
+                n_forward_steps,
+                stepper_path,
+                timestep=TIMESTEP,
+                allow_incompatible_dataset_info=False,
+            )
+        assert "timestep is not compatible" not in str(err.value)
+    else:
+        with pytest.raises(ValueError, match="timestep is not compatible"):
+            inference_helper(
+                tmp_path,
+                in_names,
+                out_names,
+                use_prediction_data,
+                dim_sizes,
+                n_forward_steps,
+                stepper_path,
+                timestep=datetime.timedelta(days=20),
+                allow_incompatible_dataset_info=False,
+            )
 
 
 def test_inference_includes_diagnostics(tmp_path: pathlib.Path):

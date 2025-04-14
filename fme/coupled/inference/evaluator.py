@@ -299,7 +299,6 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    stepper.validate_inference_data(data)
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     batch = next(iter(data.loader))
