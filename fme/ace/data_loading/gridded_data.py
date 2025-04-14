@@ -11,6 +11,7 @@ from typing import (
     Mapping,
     Optional,
     Sized,
+    Tuple,
     TypeVar,
     Union,
 )
@@ -27,7 +28,6 @@ from fme.core.dataset.xarray import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.step.step import InferenceDataProtocol
 
 T = TypeVar("T", covariant=True)
 
@@ -45,6 +45,19 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
 
     def __iter__(self) -> Iterator[U]:
         return map(self._func, self._iterable)
+
+
+def get_img_shape(loader: DataLoader[BatchData]) -> Tuple[int, int]:
+    img_shape = None
+    for batch in loader:
+        shapes = {k: v.shape for k, v in batch.data.items()}
+        for value in shapes.values():
+            img_shape = value[-2:]
+            break
+        break
+    if img_shape is None:
+        raise ValueError("No data found in loader")
+    return img_shape
 
 
 class GriddedData(GriddedDataABC[BatchData]):
@@ -91,16 +104,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._sampler = sampler
         self._modifier = modifier
         self._batch_size: Optional[int] = None
-        img_shape = None
-        for batch in self.loader:
-            shapes = {k: v.shape for k, v in batch.data.items()}
-            for value in shapes.values():
-                img_shape = value[-2:]
-                break
-            break
-        if img_shape is None:
-            raise ValueError("No data found in loader")
-        self._img_shape = img_shape
+        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -227,8 +231,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
-
-        _: InferenceDataProtocol = self
+        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -242,7 +245,16 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return self._properties.variable_metadata
 
     @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
+    def dataset_info(self) -> DatasetInfo:
+        return DatasetInfo(
+            img_shape=self._img_shape,
+            gridded_operations=self._gridded_operations,
+            vertical_coordinate=self._vertical_coordinate,
+            timestep=self.timestep,
+        )
+
+    @property
+    def _vertical_coordinate(self) -> VerticalCoordinate:
         return self._properties.vertical_coordinate
 
     @property
@@ -257,11 +269,11 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def coords(self) -> Mapping[str, np.ndarray]:
         return {
             **self.horizontal_coordinates.coords,
-            **self.vertical_coordinate.coords,
+            **self._vertical_coordinate.coords,
         }
 
     @property
-    def gridded_operations(self) -> GriddedOperations:
+    def _gridded_operations(self) -> GriddedOperations:
         return self.horizontal_coordinates.gridded_operations
 
     @property

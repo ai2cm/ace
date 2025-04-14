@@ -14,6 +14,10 @@ class MissingDatasetInfo(ValueError):
         )
 
 
+class IncompatibleDatasetInfo(ValueError):
+    pass
+
+
 class DatasetInfo:
     """
     Information about a dataset.
@@ -56,6 +60,44 @@ class DatasetInfo:
             f"vertical_coordinate={self._vertical_coordinate}, "
             f"timestep={self._timestep})"
         )
+
+    def assert_compatible_with(self, other: "DatasetInfo"):
+        issues = []
+        if self._img_shape != other._img_shape:
+            issues.append(
+                "img_shape is not compatible, {} != {}".format(
+                    self._img_shape, other._img_shape
+                )
+            )
+        if self._gridded_operations is not None:
+            if self._gridded_operations != other._gridded_operations:
+                issues.append(
+                    "gridded_operations is not compatible, {} != {}".format(
+                        self._gridded_operations, other._gridded_operations
+                    )
+                )
+        if (
+            self._vertical_coordinate is not None
+            and other._vertical_coordinate is not None
+        ):
+            if self._vertical_coordinate != other._vertical_coordinate:
+                issues.append(
+                    "vertical_coordinate is not compatible, {} != {}".format(
+                        self._vertical_coordinate, other._vertical_coordinate
+                    )
+                )
+        if self._timestep is not None:
+            if self._timestep != other._timestep:
+                issues.append(
+                    "timestep is not compatible, {} != {}".format(
+                        self._timestep, other._timestep
+                    )
+                )
+        if issues:
+            raise IncompatibleDatasetInfo(
+                "DatasetInfo is not compatible with other DatasetInfo:\n"
+                + "\n".join(issues)
+            )
 
     @property
     def img_shape(self) -> Tuple[int, int]:

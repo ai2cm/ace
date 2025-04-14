@@ -24,6 +24,7 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -71,6 +72,11 @@ class InferenceEvaluatorConfig:
         aggregator: Configuration for inference evaluator aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        allow_incompatible_dataset: If True, allow the forcing dataset used
+            for inference to be incompatible with the dataset used for stepper training.
+            This should be used with caution, as it may allow the stepper to make
+            scientifically invalid predictions, but it can allow running inference with
+            incorrectly formatted or missing grid information.
     """
 
     experiment_dir: str
@@ -87,6 +93,7 @@ class InferenceEvaluatorConfig:
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
     stepper_override: Optional[StepperOverrideConfig] = None
+    allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -204,7 +211,15 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
 
     stepper = config.load_stepper()
     stepper.set_eval()
-    stepper.validate_inference_data(data)
+
+    if not config.allow_incompatible_dataset:
+        try:
+            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+        except IncompatibleDatasetInfo as err:
+            raise IncompatibleDatasetInfo(
+                "Inference dataset is not compatible with dataset "
+                f"used for stepper training: {str(err)}"
+            ) from err
 
     aggregator_config: InferenceEvaluatorAggregatorConfig = config.aggregator
     for batch in data.loader:

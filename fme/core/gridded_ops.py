@@ -5,13 +5,27 @@ import torch
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.tensors import assert_dict_allclose
 
 
 class GriddedOperations(abc.ABC):
     def __eq__(self, other) -> bool:
         if not isinstance(other, GriddedOperations):
             return False
-        return self.to_state() == other.to_state()
+        try:
+            assert_dict_allclose(self.to_state(), other.to_state())
+        except AssertionError:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}("
+            + ", ".join(
+                [f"{k}={v}" for k, v in self.get_initialization_kwargs().items()]
+            )
+            + ")"
+        )
 
     @abc.abstractmethod
     def area_weighted_mean(

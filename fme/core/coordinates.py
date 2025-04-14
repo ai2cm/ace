@@ -123,6 +123,14 @@ class VerticalCoordinate(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def __repr__(self) -> str:
+        pass
+
+    @abc.abstractmethod
+    def __eq__(self, other) -> bool:
+        pass
+
+    @abc.abstractmethod
     def build_corrector(
         self,
         config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
@@ -256,7 +264,15 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
     def __eq__(self, other) -> bool:
         if not isinstance(other, HybridSigmaPressureCoordinate):
             return False
-        return torch.allclose(self.ak, other.ak) and torch.allclose(self.bk, other.bk)
+        try:
+            torch.testing.assert_close(self.ak, other.ak)
+            torch.testing.assert_close(self.bk, other.bk)
+        except AssertionError:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"HybridSigmaPressureCoordinate(\n    ak={self.ak},\n    bk={self.bk}\n)"
 
     def as_dict(self) -> TensorMapping:
         return {"ak": self.ak, "bk": self.bk}
@@ -438,9 +454,15 @@ class DepthCoordinate(VerticalCoordinate):
     def __eq__(self, other) -> bool:
         if not isinstance(other, DepthCoordinate):
             return False
-        idepth_equals = torch.allclose(self.idepth, other.idepth)
-        mask_equals = torch.allclose(self.mask, other.mask)
-        return idepth_equals and mask_equals
+        try:
+            torch.testing.assert_close(self.idepth, other.idepth)
+            torch.testing.assert_close(self.mask, other.mask)
+        except AssertionError:
+            return False
+        return True
+
+    def __repr__(self) -> str:
+        return f"DepthCoordinate(\n    idepth={self.idepth},\n    mask={self.mask}\n)"
 
     def as_dict(self) -> TensorMapping:
         return {"idepth": self.idepth, "mask": self.mask}
@@ -481,6 +503,9 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def __eq__(self, other) -> bool:
         return isinstance(other, NullVerticalCoordinate)
+
+    def __repr__(self) -> str:
+        return "NullVerticalCoordinate()"
 
     def __len__(self) -> int:
         return 0
@@ -588,6 +613,10 @@ class HorizontalCoordinates(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def __repr__(self) -> str:
+        pass
+
+    @abc.abstractmethod
     def to(self: HC, device: str) -> HC:
         pass
 
@@ -686,6 +715,16 @@ class LatLonCoordinates(HorizontalCoordinates):
             and self.loaded_lon_name == other.loaded_lon_name
         )
 
+    def __repr__(self) -> str:
+        return (
+            "LatLonCoordinates(\n"
+            f"    lat={self.lat},\n"
+            f"    lon={self.lon},\n"
+            f"    loaded_lat_name={self.loaded_lat_name},\n"
+            f"    loaded_lon_name={self.loaded_lon_name}\n"
+            ")"
+        )
+
     def to(self, device: str) -> "LatLonCoordinates":
         return LatLonCoordinates(
             lon=self.lon.to(device),
@@ -779,6 +818,15 @@ class HEALPixCoordinates(HorizontalCoordinates):
             torch.allclose(self.face, other.face)
             and torch.allclose(self.height, other.height)
             and torch.allclose(self.width, other.width)
+        )
+
+    def __repr__(self) -> str:
+        return (
+            "HEALPixCoordinates(\n"
+            f"    face={self.face},\n"
+            f"    height={self.height},\n"
+            f"    width={self.width}\n"
+            ")"
         )
 
     def to(self, device: str) -> "HEALPixCoordinates":

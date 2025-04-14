@@ -9,7 +9,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean import OceanConfig
 
-from .step import InferenceDataProtocol, StepABC, StepConfigABC, StepSelector
+from .step import StepABC, StepConfigABC, StepSelector
 
 
 class MockStep(StepABC):
@@ -43,9 +43,6 @@ class MockStep(StepABC):
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
-
-    def validate_inference_data(self, data: InferenceDataProtocol):
-        raise NotImplementedError()
 
     def step(self, input, next_step_input_data, use_activation_checkpointing=False):
         raise NotImplementedError()

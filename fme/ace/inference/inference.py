@@ -29,6 +29,7 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -143,6 +144,11 @@ class InferenceConfig:
         aggregator: Configuration for inference aggregator.
         stepper_override: Configuration for overriding select stepper configuration
             options at inference time (optional).
+        allow_incompatible_dataset: If True, allow the dataset used for inference
+            to be incompatible with the dataset used for stepper training. This should
+            be used with caution, as it may allow the stepper to make scientifically
+            invalid predictions, but it can allow running inference with incorrectly
+            formatted or missing grid information.
     """
 
     experiment_dir: str
@@ -159,6 +165,7 @@ class InferenceConfig:
         default_factory=lambda: InferenceAggregatorConfig()
     )
     stepper_override: Optional[StepperOverrideConfig] = None
+    allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
         if self.data_writer.time_coarsen is not None:
@@ -257,7 +264,14 @@ def run_inference_from_config(config: InferenceConfig):
         surface_temperature_name=stepper.surface_temperature_name,
         ocean_fraction_name=stepper.ocean_fraction_name,
     )
-    stepper.validate_inference_data(data)
+    if not config.allow_incompatible_dataset:
+        try:
+            stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
+        except IncompatibleDatasetInfo as err:
+            raise IncompatibleDatasetInfo(
+                "Inference dataset is not compatible with dataset "
+                "used for stepper training"
+            ) from err
 
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
     aggregator = config.aggregator.build(
