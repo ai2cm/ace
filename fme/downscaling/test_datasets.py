@@ -16,10 +16,7 @@ from fme.downscaling.datasets import (
     HorizontalSubsetDataset,
     LatLonCoordinates,
     PairedBatchItem,
-    RandomSpatialSubsetPairedDataset,
-    _generate_random_extent_slice,
     _scale_slice,
-    _subset_fine_coarse,
     _subset_horizontal,
 )
 
@@ -372,25 +369,6 @@ def test_fine_coarse_paired_dataset():
         FineCoarsePairedDataset(adapter1, adapter3)
 
 
-def test_generate_random_extent_slice():
-    # Test when extent is None
-    slice_ = _generate_random_extent_slice(10, None)
-    assert slice_ == slice(None)
-
-    with pytest.raises(ValueError):
-        _generate_random_extent_slice(10, 10)
-
-    # Test when extent > dim_len raises ValueError
-    with pytest.raises(ValueError):
-        _generate_random_extent_slice(5, 10)
-
-    # Test multiple calls give different results
-    slices = [_generate_random_extent_slice(10, 5) for _ in range(5)]
-    starts = [s.start for s in slices]
-    # Check that at least two starts are different (random)
-    assert len(set(starts)) > 1
-
-
 @pytest.mark.parametrize(
     "input_slice,expected",
     [
@@ -433,70 +411,6 @@ def test__subset_horizontal_component_consistency():
     expected_data = torch.arange(*lon_ext).repeat(2, 1)
     assert torch.equal(result.data["x"], expected_data)
     assert torch.equal(result.topography, expected_data)
-
-
-@pytest.mark.parametrize(
-    "coarse_lat_extent,coarse_lon_extent,expected_coarse_shape,expected_fine_shape",
-    [
-        pytest.param(None, None, (4, 8), (8, 16), id="no-extents"),
-        pytest.param(2, 4, (2, 4), (4, 8), id="both-extents"),
-        pytest.param(2, None, (2, 8), (4, 16), id="lat-extent-only"),
-        pytest.param(None, 4, (4, 4), (8, 8), id="lon-extent-only"),
-    ],
-)
-def test_subset_fine_coarse(
-    coarse_lat_extent, coarse_lon_extent, expected_coarse_shape, expected_fine_shape
-):
-    # Create example fine and coarse batch items with known dimensions
-    fine_item = get_batch_items(num_items=1, lat_dim=8, lon_dim=16)[0]
-    coarse_item = get_batch_items(num_items=1, lat_dim=4, lon_dim=8)[0]
-    coarse_item.topography = None
-
-    paired = PairedBatchItem(fine_item, coarse_item)
-    scale = 2
-
-    # Test subsetting
-    subset = _subset_fine_coarse(paired, scale, coarse_lat_extent, coarse_lon_extent)
-
-    # Check dimensions of subset data
-    assert subset.coarse.data["x"].shape == expected_coarse_shape
-    assert subset.fine.data["x"].shape == expected_fine_shape
-
-    # Check lat/lon coordinates were properly subset
-    assert len(subset.coarse.latlon_coordinates.lat) == expected_coarse_shape[0]
-    assert len(subset.coarse.latlon_coordinates.lon) == expected_coarse_shape[1]
-    assert len(subset.fine.latlon_coordinates.lat) == expected_fine_shape[0]
-    assert len(subset.fine.latlon_coordinates.lon) == expected_fine_shape[1]
-
-    # Check topography was properly subset
-    assert subset.coarse.topography is None
-    assert subset.fine.topography is not None
-    assert subset.fine.topography.shape == expected_fine_shape
-
-    # Check time is preserved
-    assert subset.coarse.time == paired.coarse.time
-    assert subset.fine.time == paired.fine.time
-
-
-def test_random_spatial_subset_paired_dataset():
-    # Create example fine and coarse batch items with known dimensions
-    # Fine is 2x scale
-    fine_item = get_batch_items(num_items=1, lat_dim=8, lon_dim=16)[0]
-    coarse_item = get_batch_items(num_items=1, lat_dim=4, lon_dim=8)[0]
-
-    # Mock dataset that returns paired items
-    dataset = MagicMock(spec=FineCoarsePairedDataset)
-    dataset.__len__ = MagicMock(return_value=5)
-    dataset.__getitem__ = MagicMock(
-        return_value=PairedBatchItem(fine_item, coarse_item)
-    )
-
-    # Test successful case with valid scale factor
-    subset_dataset = RandomSpatialSubsetPairedDataset(
-        dataset, coarse_lat_extent=2, coarse_lon_extent=4
-    )
-    assert len(subset_dataset) == 5
-    subset_dataset[0]
 
 
 def test_BatchData_slice_latlon():
