@@ -143,9 +143,8 @@ class Trainer:
 
     def train_one_epoch(self) -> None:
         self.model.module.train()
-        include_positional_comparisons = _include_positional_comparisons(
-            self.config.train_data, self.patch_data
-        )
+        include_positional_comparisons = False if self.patch_data else True
+
         train_aggregator = Aggregator(
             self.dims,
             self.model.downscale_factor,
@@ -204,9 +203,13 @@ class Trainer:
 
     def valid_one_epoch(self) -> float:
         self.model.module.eval()
-        include_positional_comparisons = _include_positional_comparisons(
-            self.config.validation_data, self.patch_data
-        )
+        if (
+            self.patch_data
+            and self.validation_data.coarse_shape != self.model.coarse_shape
+        ):
+            include_positional_comparisons = False
+        else:
+            include_positional_comparisons = True
         with torch.no_grad(), self._validation_context():
             validation_aggregator = Aggregator(
                 self.dims,
@@ -344,17 +347,6 @@ class TrainerConfig:
                 "coarse_patch_extent_lon must be set."
             )
 
-        if self.coarse_patch_extent_lat and (
-            self.train_data.coarse_random_lat_cells
-            or self.train_data.coarse_random_lon_cells
-        ):
-            # TODO: single patch random subsetting will be removed
-            # in following PR
-            raise ValueError(
-                "coarse_patch_extent_lat and coarse_patch_extent_lon cannot be set "
-                "together with coarse_random_lat_cells or coarse_random_lon_cells."
-            )
-
     @property
     def checkpoint_dir(self) -> str:
         return os.path.join(self.experiment_dir, "checkpoints")
@@ -415,18 +407,6 @@ def _get_crps(metrics, prefix="generation/metrics/crps"):
         return float("inf")
     else:
         return sum(channel_crps) / len(channel_crps)
-
-
-def _include_positional_comparisons(config: DataLoaderConfig, patch_data: bool) -> bool:
-    # TODO: remove this check when the single random subsetting feature is deprecated
-    if patch_data:
-        return False
-    if (
-        config.coarse_random_lat_cells is not None
-        or config.coarse_random_lon_cells is not None
-    ):
-        return False
-    return True
 
 
 def main(config_path: str):
