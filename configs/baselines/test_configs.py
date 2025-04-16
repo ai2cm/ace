@@ -4,6 +4,7 @@ import dacite
 import yaml
 
 from fme.ace.inference.evaluator import InferenceEvaluatorConfig
+from fme.ace.inference.inference import InferenceConfig
 from fme.ace.train.train_config import TrainConfig
 
 EXAMPLES_DIRECTORY = pathlib.Path(__file__).parent
@@ -38,3 +39,10 @@ def test_evaluator_configs_are_valid():
     assert len(evaluator_files) > 0, "No evaluator files found"
     for file in evaluator_files:
         validate_config(file, InferenceEvaluatorConfig)
+
+
+def test_inference_configs_are_valid():
+    inference_files = get_yaml_files("*inference*.yaml")
+    assert len(inference_files) > 0, "No inference files found"
+    for file in inference_files:
+        validate_config(file, InferenceConfig)

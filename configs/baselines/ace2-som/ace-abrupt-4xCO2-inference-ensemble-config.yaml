@@ -1,0 +1,65 @@
+experiment_dir: /results
+n_forward_steps: 360
+forward_steps_in_memory: 1
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-som
+  entity: ai2cm
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr
+    file_pattern: 1xCO2-ic_0005.zarr
+    engine: zarr
+    overwrite:
+      constant:
+        global_mean_co2: 0.0014537
+  num_data_workers: 4
+initial_condition:
+  path: /climate-default/2025-04-07-vertically-resolved-1deg-c96-shield-som-ensemble-fme-dataset-combined-spin-up-and-post-spin-up-zarr/1xCO2-ic_0005.zarr
+  engine: zarr
+  start_indices:
+    times:
+      - "2031-01-01T00:00:00"
+      - "2031-02-01T00:00:00"
+      - "2031-03-01T00:00:00"
+      - "2031-04-01T00:00:00"
+      - "2031-05-01T00:00:00"
+      - "2031-06-01T00:00:00"
+      - "2031-07-01T00:00:00"
+      - "2031-08-01T00:00:00"
+      - "2031-09-01T00:00:00"
+      - "2031-10-01T00:00:00"
+      - "2031-11-01T00:00:00"
+      - "2031-12-01T00:00:00"
+      - "2032-01-01T00:00:00"
+      - "2032-02-01T00:00:00"
+      - "2032-03-01T00:00:00"
+      - "2032-04-01T00:00:00"
+      - "2032-05-01T00:00:00"
+      - "2032-06-01T00:00:00"
+      - "2032-07-01T00:00:00"
+      - "2032-08-01T00:00:00"
+      - "2032-09-01T00:00:00"
+      - "2032-10-01T00:00:00"
+      - "2032-11-01T00:00:00"
+      - "2032-12-01T00:00:00"
+      - "2033-01-01T00:00:00"
+      - "2033-02-01T00:00:00"
+      - "2033-03-01T00:00:00"
+      - "2033-04-01T00:00:00"
+      - "2033-05-01T00:00:00"
+      - "2033-06-01T00:00:00"
+      - "2033-07-01T00:00:00"
+      - "2033-08-01T00:00:00"
+      - "2033-09-01T00:00:00"
+      - "2033-10-01T00:00:00"
+      - "2033-11-01T00:00:00"
+      - "2033-12-01T00:00:00"
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+stepper_override:
+  multi_call: null
