@@ -159,6 +159,7 @@ class Trainer:
             self.num_batches_seen += 1
             logging.info(f"Training on batch {i+1}")
             outputs = self.model.train_on_batch(batch, self.optimization)
+            self.ema(self.model.modules)
             with torch.no_grad():
                 train_aggregator.record_batch(
                     outputs=outputs,
