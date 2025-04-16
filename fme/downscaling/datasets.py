@@ -1,7 +1,6 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-import random
 from typing import (
     Callable,
     Dict,
@@ -455,22 +454,6 @@ class FineCoarsePairedDataset(torch.utils.data.Dataset):
         return PairedBatchItem(self.fine[idx], self.coarse[idx])
 
 
-def _generate_random_extent_slice(dim_len: int, extent: Optional[int]) -> slice:
-    """Gets a random slice of the specified extent within the dim length."""
-    if extent is None:
-        return slice(None)
-
-    if extent >= dim_len:
-        raise ValueError(
-            f"Cannnot generate slice when extent {extent} is greater than or equal"
-            f"dimension to length {dim_len}"
-        )
-
-    start = random.randint(0, dim_len - extent)
-    stop = start + extent
-    return slice(start, stop)
-
-
 def _scale_slice(slice_: slice, scale: int) -> slice:
     if slice_ == slice(None):
         return slice_
@@ -505,93 +488,6 @@ def _subset_horizontal(
         latlon_coords,
         topography,
     )
-
-
-def _subset_fine_coarse(
-    pair: PairedBatchItem,
-    scale: int,
-    coarse_lat_extent: Optional[int],
-    coarse_lon_extent: Optional[int],
-) -> PairedBatchItem:
-    """
-    Subset the coarse and fine batch items to the specified extents.
-
-    Randomly selects a subset of the domain and applies this uniformly to
-    all spatial fields within the batch item pair.
-
-    Args:
-        pair: The fine and coarse batch items to subset.
-        scale: The scale factor between the fine and coarse resolutions.
-        coarse_lat_extent: The output length of the coarse latitude dimension.
-        coarse_lon_extent: The output length of the coarse longitude dimension.
-
-    Returns:
-        The subsetted fine and coarse batches.
-    """
-    coarse = pair.coarse
-    fine = pair.fine
-    coarse_shape = next(iter(coarse.data.values())).shape[-2:]
-    coarse_lat_slice = _generate_random_extent_slice(
-        coarse_shape[-2], coarse_lat_extent
-    )
-    fine_lat_slice = _scale_slice(coarse_lat_slice, scale)
-
-    coarse_lon_slice = _generate_random_extent_slice(
-        coarse_shape[-1], coarse_lon_extent
-    )
-    fine_lon_slice = _scale_slice(coarse_lon_slice, scale)
-
-    fine = _subset_horizontal(fine, fine_lat_slice, fine_lon_slice)
-    coarse = _subset_horizontal(coarse, coarse_lat_slice, coarse_lon_slice)
-    return PairedBatchItem(fine, coarse)
-
-
-class RandomSpatialSubsetPairedDataset(torch.utils.data.Dataset):
-    """
-    Subsets the horizontal latitude-longitude dimensions of a dataset randomly
-    for each returned batch item.  This dataset ensures that the scale factor
-    between the lat / lon dimensions of the fine/coarse datasets are equal to
-    simplify the slice generation for both datasets.
-
-    Args:
-        paired_dataset: The paired dataset to subset.
-        coarse_lat_extent: The output length of the coarse latitude dimension.
-        coarse_lon_extent: The output length of the coarse longitude dimension.
-    """
-
-    def __init__(
-        self,
-        paired_dataset: FineCoarsePairedDataset,
-        coarse_lat_extent: Optional[int] = None,
-        coarse_lon_extent: Optional[int] = None,
-    ):
-        self.paired_dataset = paired_dataset
-        self.coarse_lat_extent = coarse_lat_extent
-        self.coarse_lon_extent = coarse_lon_extent
-
-        first_item = paired_dataset[0]
-        example_fine, example_coarse = first_item.fine, first_item.coarse
-        fine_shape = next(iter(example_fine.data.values())).shape[-2:]
-        coarse_shape = next(iter(example_coarse.data.values())).shape[-2:]
-        scale = fine_shape[0] // coarse_shape[0]
-        if fine_shape[1] // coarse_shape[1] != scale:
-            raise ValueError("Aspect ratio must match between lat and lon")
-
-        self._scale = scale
-
-    def __len__(self):
-        return len(self.paired_dataset)
-
-    def __getitem__(self, idx) -> PairedBatchItem:
-        return self._spatial_subset(self.paired_dataset[idx])
-
-    def _spatial_subset(self, paired_item) -> PairedBatchItem:
-        return _subset_fine_coarse(
-            paired_item,
-            self._scale,
-            self.coarse_lat_extent,
-            self.coarse_lon_extent,
-        )
 
 
 T = TypeVar("T", covariant=True)
@@ -898,12 +794,6 @@ class DataLoaderConfig:
         repeat: The number of times to repeat the underlying xarray dataset
             time dimension.  Useful to include longer sequences of small
             data for testing.
-        coarse_random_lat_cells: The coarse latitude extent (in gridpoints) to use
-            for generating a random subset of patches to use in a batch. This
-            value is scaled to match the random subset in the fine dataset.
-        coarse_random_lon_cells: The coarse longitude extent (in gridpoints) to use
-            for generating a random subset of patches to use in a batch. This
-            value is scaled to match the random subset in the fine dataset.
     """
 
     fine: Sequence[XarrayDataConfig]
@@ -918,8 +808,6 @@ class DataLoaderConfig:
         default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
     )
     repeat: int = 1
-    coarse_random_lat_cells: Optional[int] = None
-    coarse_random_lon_cells: Optional[int] = None
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
@@ -990,17 +878,6 @@ class DataLoaderConfig:
             dataset_fine_subset,
             dataset_coarse_subset,
         )
-
-        # Add random subsetting if requested
-        if (
-            self.coarse_random_lat_cells is not None
-            or self.coarse_random_lon_cells is not None
-        ):
-            dataset = RandomSpatialSubsetPairedDataset(
-                dataset,
-                coarse_lat_extent=self.coarse_random_lat_cells,
-                coarse_lon_extent=self.coarse_random_lon_cells,
-            )
 
         sampler: Optional[DistributedSampler] = (
             DistributedSampler(dataset, shuffle=train)

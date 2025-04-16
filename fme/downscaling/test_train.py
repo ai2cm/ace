@@ -165,8 +165,6 @@ def _create_config_dict(
     config["validation_data"]["coarse"] = [
         {"data_path": str(valid_paths.coarse), "subset": {"stop": 2}}
     ]
-    config["train_data"]["coarse_random_lat_cells"] = 4
-    config["train_data"]["coarse_random_lon_cells"] = 4
 
     config["experiment_dir"] = str(experiment_dir)
     config["save_checkpoints"] = True
