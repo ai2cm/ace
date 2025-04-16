@@ -277,4 +277,4 @@ def compute_rank(
         prediction: The prediction tensor.
         sample_dim: The dimension of `prediction` corresponding to sample.
     """
-    return prediction <= target.sum(dim=sample_dim)
+    return (prediction <= target).sum(dim=sample_dim)

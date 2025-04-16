@@ -15,7 +15,7 @@ from .main import (
     Aggregator,
     MeanComparison,
     SumComparison,
-    _ensure_trailing_slash,
+    ensure_trailing_slash,
     interpolate,
 )
 from .shape_helpers import _check_batch_dims_for_recording, _fold_sample_dim
@@ -64,7 +64,7 @@ class RelativeCRPSInterpAggregator:
         self.downscale_factor = downscale_factor
         self._prediction_crps = MeanComparison(_batch_mean_crps)
         self._interpolated_mae = MeanComparison(_batch_mean_mae_loss)
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
         self._include_positional_comparisons = include_positional_comparisons
 
     def _interpolate(
@@ -113,7 +113,7 @@ class RelativeCRPSInterpAggregator:
         """
         Get the relative CRPS logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         ret = {}
         for k, v in self._get().items():
             v = v.cpu().numpy()
@@ -137,7 +137,7 @@ class LatentStepAggregator:
 
     def __init__(self, name: str = "") -> None:
         self._latent_steps: List[torch.Tensor] = []
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
     def record_batch(self, latent_steps: List[torch.Tensor]) -> None:
@@ -168,7 +168,7 @@ class LatentStepAggregator:
         """
         Get the latent step logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         return {f"{prefix}{self._name}": self._get()}
 
 
@@ -190,7 +190,7 @@ class SplitMapAndMetricLogs:
         include_positional_comparisons: bool = True,
     ) -> None:
         self._agg = agg
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
         self._include_positional_comparisons = include_positional_comparisons
 
     @torch.no_grad()
@@ -218,7 +218,7 @@ class SplitMapAndMetricLogs:
         Get the wandb output to log. The names of the output items are segmented
         into {prefix}/maps for 2D data,a nd {prefix}/metrics for single-value data.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         results = self._agg.get_wandb()
         ret = {}
         for k, v in results.items():
