@@ -43,6 +43,13 @@ def create_evaluator_config(tmp_path, model: Mapping[str, Any], n_samples: int):
     config["experiment_dir"] = str(experiment_dir)
     config["model"] = model
     config["n_samples"] = n_samples
+    config["events"] = [
+        {
+            "name": "test_event",
+            "date": "2000-01-01T00:00",
+            "n_samples": n_samples,
+        }
+    ]
 
     out_path = tmp_path / "evaluator-config.yaml"
     with open(out_path, "w") as file:
@@ -134,7 +141,15 @@ def get_trainer_model_config(model_type: str):
         ),
     ],
 )
-def test_evaluator_runs(tmp_path, evaluator_model_config, model_type, num_samples):
+def test_evaluator_runs(
+    tmp_path,
+    evaluator_model_config,
+    model_type,
+    num_samples,
+    very_fast_only: bool,
+):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
     """Check that evaluator runs with different models."""
     evaluator_config_path = create_evaluator_config(
         tmp_path, evaluator_model_config, num_samples

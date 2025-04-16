@@ -1,7 +1,8 @@
 import argparse
 import dataclasses
 import logging
-from typing import Any, List, Literal, Mapping, Union
+from datetime import datetime, timedelta
+from typing import Any, List, Literal, Mapping, Optional, Union
 
 import dacite
 import torch
@@ -9,14 +10,20 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_directory
+from fme.core.dataset.config import TimeSlice
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.wandb import WandB
-from fme.downscaling.aggregators import GenerationAggregator
-from fme.downscaling.datasets import DataLoaderConfig, GriddedData
+from fme.downscaling.aggregators import GenerationAggregator, SampleAggregator
+from fme.downscaling.datasets import (
+    ClosedInterval,
+    DataLoaderConfig,
+    GriddedData,
+    PairedBatchData,
+)
 from fme.downscaling.models import (
     DiffusionModel,
     DiffusionModelConfig,
@@ -28,6 +35,7 @@ from fme.downscaling.modules.registry import ModuleRegistrySelector
 from fme.downscaling.patching import PatchPredictor, paired_patch_generator_from_loader
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.train import count_parameters
+from fme.downscaling.typing_ import FineResCoarseResPair
 
 
 @dataclasses.dataclass
@@ -173,6 +181,53 @@ class Evaluator:
         wandb.log(logs, step=0)
 
 
+class EventEvaluator:
+    def __init__(
+        self,
+        event_name: str,
+        data: GriddedData,
+        model: Union[Model, DiffusionModel, PatchPredictor],
+        experiment_dir: str,
+        n_samples: int,
+    ) -> None:
+        self.event_name = event_name
+        self.data = data
+        self.model = model
+        self.experiment_dir = experiment_dir
+        self.n_samples = n_samples
+        self.dist = Distributed.get_instance()
+        self._max_sample_group = 8
+
+    def run(self):
+        logging.info(f"Running {self.event_name} event evaluation")
+        batch: PairedBatchData = next(iter(self.data.loader))
+
+        sample_agg = SampleAggregator(
+            target=batch[0].fine.data,
+            coarse=batch[0].coarse.data,
+            latlon_coordinates=FineResCoarseResPair(
+                fine=batch[0].fine.latlon_coordinates,
+                coarse=batch[0].coarse.latlon_coordinates,
+            ),
+        )
+        # Sample generation is split up into chunks for GPU parallelism
+        # since there is no batch parallelism in event evaluation.
+        total_samples = self.dist.local_batch_size(self.n_samples)
+        for start_idx in range(0, total_samples, self._max_sample_group):
+            end_idx = min(start_idx + self._max_sample_group, total_samples)
+            logging.info(
+                f"Generating samples {start_idx} to {end_idx} "
+                f"for event {self.event_name}"
+            )
+            outputs = self.model.generate_on_batch(batch, n_samples=end_idx - start_idx)
+            sample_agg.record_batch(outputs.prediction)
+
+        to_log = sample_agg.get_wandb()
+        wandb = WandB.get_instance()
+        wandb.log({f"{self.event_name}/{k}": v for k, v in to_log.items()}, step=0)
+        torch.cuda.empty_cache()
+
+
 @dataclasses.dataclass
 class MultipatchConfig:
     """
@@ -193,6 +248,49 @@ class MultipatchConfig:
 
 
 @dataclasses.dataclass
+class EventConfig:
+    name: str
+    date: str
+    lat_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(-90.0, 90.0)
+    )
+    lon_extent: ClosedInterval = dataclasses.field(
+        default_factory=lambda: ClosedInterval(float("-inf"), float("inf"))
+    )
+    n_samples: int = 64
+    date_format: str = "%Y-%m-%dT%H:%M"
+
+    def get_gridded_data(
+        self, base_data_config: DataLoaderConfig, requirements: DataRequirements
+    ) -> GriddedData:
+        # Event evaluation only load the first snapshot.
+        # Filling the slice stop isn't necessary but guards against
+        # future code trying to iterate over the entire dataloader.
+        _stop = (
+            datetime.strptime(self.date, self.date_format) + timedelta(hours=6)
+        ).strftime(self.date_format)
+
+        time_slice = TimeSlice(self.date, _stop)
+        event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
+        event_coarse = dataclasses.replace(
+            base_data_config.coarse[0], subset=time_slice
+        )
+
+        n_processes = Distributed.get_instance().world_size
+
+        event_data_config = dataclasses.replace(
+            base_data_config,
+            fine=[event_fine],
+            coarse=[event_coarse],
+            repeat=n_processes,
+            batch_size=n_processes,
+            lat_extent=self.lat_extent,
+            lon_extent=self.lon_extent,
+        )
+        return event_data_config.build(train=False, requirements=requirements)
+
+
+@dataclasses.dataclass
 class EvaluatorConfig:
     model: CheckpointModelConfig
     experiment_dir: str
@@ -200,6 +298,7 @@ class EvaluatorConfig:
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
+    events: Optional[List[EventConfig]] = None
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -211,7 +310,7 @@ class EvaluatorConfig:
             config=config, env_vars=env_vars, resumable=resumable, **kwargs
         )
 
-    def build(self) -> Evaluator:
+    def _build_default_evaluator(self) -> Evaluator:
         dataset = self.data.build(
             train=False, requirements=self.model.data_requirements
         )
@@ -240,6 +339,44 @@ class EvaluatorConfig:
             patch_data=patch_data,
         )
 
+    def _build_event_evaluator(
+        self,
+        event_config: EventConfig,
+    ) -> EventEvaluator:
+        model = self.model.build()
+        evaluator_model: Union[Model, DiffusionModel, PatchPredictor]
+
+        dataset = event_config.get_gridded_data(
+            base_data_config=self.data, requirements=self.model.data_requirements
+        )
+
+        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
+            dataset.coarse_shape[1] > model.coarse_shape[1]
+        ):
+            evaluator_model = PatchPredictor(
+                model,
+                dataset.coarse_shape,
+                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
+            )
+        else:
+            evaluator_model = model
+
+        return EventEvaluator(
+            event_name=event_config.name,
+            data=dataset,
+            model=evaluator_model,
+            experiment_dir=self.experiment_dir,
+            n_samples=event_config.n_samples,
+        )
+
+    def build(self) -> List[Union[Evaluator, EventEvaluator]]:
+        default_evaluator = self._build_default_evaluator()
+        event_evaluators = []
+        for event_config in self.events or []:
+            event_evaluator = self._build_event_evaluator(event_config)
+            event_evaluators.append(event_evaluator)
+        return [default_evaluator] + event_evaluators
+
 
 def main(config_path: str):
     with open(config_path, "r") as f:
@@ -258,9 +395,12 @@ def main(config_path: str):
     evaluator_config.configure_wandb(resumable=True, notes=beaker_url)
 
     logging.info("Starting downscaling model evaluation")
-    evaluator = evaluator_config.build()
-    logging.info(f"Number of parameters: {count_parameters(evaluator.model.modules)}")
-    evaluator.run()
+    evaluators = evaluator_config.build()
+    logging.info(
+        f"Number of parameters: {count_parameters(evaluators[0].model.modules)}"
+    )
+    for evaluator in evaluators:
+        evaluator.run()
 
 
 def parse_args():

@@ -4,7 +4,6 @@
 beaker-py
 beaker-gantry>=1.12.0
 Bottleneck
-cartopy>=0.22.0
 dask[distributed]
 ipywidgets
 nc-time-axis
