@@ -36,7 +36,7 @@ from .typing import (
 )
 
 
-def _ensure_trailing_slash(key: str) -> str:
+def ensure_trailing_slash(key: str) -> str:
     if key and not key.endswith("/"):
         key += "/"
     return key
@@ -65,7 +65,7 @@ class Mean:
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping) -> None:
@@ -94,7 +94,7 @@ class Mean:
         """
         Get the running average metric logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         return {
             f"{prefix}{self._name}{k}": v.detach().cpu().numpy()
             for k, v in self.get().items()
@@ -121,7 +121,7 @@ class SumComparison:
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
         self._count = 0
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -148,7 +148,7 @@ class SumComparison:
         """
         Get the running sum comparison metric logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         return {
             f"{prefix}{self._name}{k}": v.cpu().numpy() for k, v in self.get().items()
         }
@@ -178,7 +178,7 @@ class MeanComparison:
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
     def record_batch(
@@ -223,7 +223,7 @@ class MeanComparison:
         """
         Get the running average comparison metric logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         return {
             f"{prefix}{self._name}{k}": v.cpu().numpy() for k, v in self.get().items()
         }
@@ -241,7 +241,7 @@ class ComparedDynamicHistogramsAdapter:
 
     def __init__(self, histograms: ComparedDynamicHistograms, name: str = "") -> None:
         self._histograms = histograms
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping) -> None:
@@ -254,7 +254,7 @@ class ComparedDynamicHistogramsAdapter:
         """
         Get the histogram logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         histograms = self._histograms.get_wandb()
         return {f"{prefix}{self._name}{k}": v for k, v in histograms.items()}
 
@@ -282,7 +282,7 @@ class ZonalPowerSpectrumAggregator:
 
     def __init__(self, downscale_factor: int, name: str = "") -> None:
         self.wandb = WandB.get_instance()
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
         self._coarse_spectrum = Mean(_compute_zonal_mean_power_spectrum)
         self._fine_spectrum = Mean(_compute_zonal_mean_power_spectrum)
         self.downscale_factor = downscale_factor
@@ -334,7 +334,7 @@ class ZonalPowerSpectrumAggregator:
         """
         Get the zonal power spectrum logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         fine, coarse = self.get()
         fine = _tensor_mapping_to_numpy(fine)
         coarse = _tensor_mapping_to_numpy(coarse)
@@ -358,7 +358,7 @@ class ZonalPowerSpectrumComparison:
     """
 
     def __init__(self, downscale_factor: int, name: str = "") -> None:
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
         self._mean_target_aggregator = Mean(_compute_zonal_mean_power_spectrum)
         # power spectrum for prediction and coarse data
         self._mean_prediction_aggregator = ZonalPowerSpectrumAggregator(
@@ -396,7 +396,7 @@ class ZonalPowerSpectrumComparison:
         """
         Get the zonal power spectrum logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         prediction, coarse = self._mean_prediction_aggregator.get()
         target = self._mean_target_aggregator.get()
         prediction = _tensor_mapping_to_numpy(prediction)
@@ -425,7 +425,7 @@ class SnapshotAggregator:
         name: str = "",
     ) -> None:
         self._snapshot_aggregator = CoreSnapshotAggregator(dims, variable_metadata)
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     def _tile_time_dim(self, x: torch.Tensor) -> torch.Tensor:
         time_dim = -3
@@ -443,7 +443,7 @@ class SnapshotAggregator:
         self._snapshot_aggregator.record_batch(-1.0, target, prediction, {}, {})
 
     def _get(self, label: str = "") -> Mapping[str, Any]:
-        label = _ensure_trailing_slash(label)
+        label = ensure_trailing_slash(label)
         logs = self._snapshot_aggregator.get_logs(label)
         ret = {}
         for k, v in logs.items():
@@ -459,7 +459,7 @@ class SnapshotAggregator:
         """
         Retrieve a snapshot from the currently stored batch for wandb.
         """
-        label = _ensure_trailing_slash(label)
+        label = ensure_trailing_slash(label)
         return self._get(label)
 
 
@@ -492,7 +492,7 @@ class MeanMapAggregator:
             self._variable_metadata: Mapping[str, VariableMetadata] = {}
         else:
             self._variable_metadata = variable_metadata
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
         self._mean_target = Mean(batch_mean)
         self._mean_prediction = Mean(batch_mean)
@@ -563,7 +563,7 @@ class MeanMapAggregator:
         """
         Get all time average map logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         ret = {}
         wandb = WandB.get_instance()
         metrics, maps = self._get()
@@ -597,7 +597,7 @@ class RelativeMSEInterpAggregator:
         self.downscale_factor = downscale_factor
         self._prediction_mse = MeanComparison(torch.nn.MSELoss())
         self._interpolated_mse = MeanComparison(torch.nn.MSELoss())
-        self._name = _ensure_trailing_slash(name)
+        self._name = ensure_trailing_slash(name)
 
     def _interpolate(
         self, data: TensorMapping, keys: Optional[Collection[str]] = None
@@ -628,7 +628,7 @@ class RelativeMSEInterpAggregator:
         """
         Get the relative MSE logs for wandb.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
         prediction_mse = self._prediction_mse.get()
         interpolated_mse = self._interpolated_mse.get()
         return {
@@ -751,7 +751,7 @@ class Aggregator:
         """
         Get the wandb output to log from all sub aggregators.
         """
-        prefix = _ensure_trailing_slash(prefix)
+        prefix = ensure_trailing_slash(prefix)
 
         ret: Dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
