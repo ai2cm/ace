@@ -18,3 +18,5 @@ matplotlib
 pandas
 omegaconf>=2.1.0
 h5netcdf
+cartopy>=0.22.0
+
