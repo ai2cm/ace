@@ -10,8 +10,6 @@ from fme.core.typing_ import TensorDict
 
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
 
-UNMASKED_OCEAN_DERIVED_NAMES = ["ocean_heat_content"]
-
 _OCEAN_DERIVED_VARIABLE_REGISTRY: MutableMapping[
     str, Tuple[OceanDerivedVariableFunc, VariableMetadata]
 ] = {}
