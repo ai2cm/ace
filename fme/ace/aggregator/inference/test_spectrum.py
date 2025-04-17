@@ -28,7 +28,7 @@ def test_spherical_power_spectrum_aggregator():
     assert "a" in result
     assert result["a"].shape == (nlat,)
 
-    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid)
+    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(fme.get_device())
     data_concat = torch.cat([data["a"], data2["a"]], dim=1)
     expected_value = torch.mean(spherical_power_spectrum(data_concat, sht), dim=(0, 1))
     torch.testing.assert_close(result["a"], expected_value)
