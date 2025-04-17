@@ -25,6 +25,7 @@ class SeaIceFractionConfig:
     sea_ice_fraction_name: str
     land_fraction_name: str
     sea_ice_thickness_name: Optional[str] = None
+    remove_negative_ocean_fraction: bool = True
 
     def __call__(
         self, gen_data: TensorMapping, input_data: TensorMapping
@@ -33,11 +34,14 @@ class SeaIceFractionConfig:
         out[self.sea_ice_fraction_name] = torch.clamp(
             out[self.sea_ice_fraction_name], min=0.0, max=1.0
         )
-        negative_ocean_fraction = (
-            1 - out[self.sea_ice_fraction_name] - input_data[self.land_fraction_name]
-        )
-        negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
-        out[self.sea_ice_fraction_name] += negative_ocean_fraction
+        if self.remove_negative_ocean_fraction:
+            negative_ocean_fraction = (
+                1
+                - out[self.sea_ice_fraction_name]
+                - input_data[self.land_fraction_name]
+            )
+            negative_ocean_fraction = negative_ocean_fraction.clip(max=0)
+            out[self.sea_ice_fraction_name] += negative_ocean_fraction
         if self.sea_ice_thickness_name:
             thickness = gen_data[self.sea_ice_thickness_name]
             thickness = thickness * (out[self.sea_ice_fraction_name] > 0.0)
