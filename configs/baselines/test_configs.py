@@ -3,9 +3,7 @@ import pathlib
 import dacite
 import yaml
 
-from fme.ace.inference.evaluator import InferenceEvaluatorConfig
-from fme.ace.inference.inference import InferenceConfig
-from fme.ace.train.train_config import TrainConfig
+import fme
 
 EXAMPLES_DIRECTORY = pathlib.Path(__file__).parent
 
@@ -31,18 +29,18 @@ def test_train_configs_are_valid():
     train_files = get_yaml_files("*train*.yaml")
     assert len(train_files) > 0, "No train files found"
     for file in train_files:
-        validate_config(file, TrainConfig)
+        validate_config(file, fme.ace.TrainConfig)
 
 
 def test_evaluator_configs_are_valid():
     evaluator_files = get_yaml_files("*evaluator*.yaml")
     assert len(evaluator_files) > 0, "No evaluator files found"
     for file in evaluator_files:
-        validate_config(file, InferenceEvaluatorConfig)
+        validate_config(file, fme.ace.InferenceEvaluatorConfig)
 
 
 def test_inference_configs_are_valid():
     inference_files = get_yaml_files("*inference*.yaml")
     assert len(inference_files) > 0, "No inference files found"
     for file in inference_files:
-        validate_config(file, InferenceConfig)
+        validate_config(file, fme.ace.InferenceConfig)
