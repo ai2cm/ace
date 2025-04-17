@@ -8,6 +8,7 @@ import torch
 import torch_harmonics
 import xarray as xr
 
+from fme.core.device import get_device
 from fme.core.distributed import Distributed
 from fme.core.metrics import spherical_power_spectrum
 from fme.core.typing_ import TensorMapping
@@ -17,7 +18,7 @@ class SphericalPowerSpectrumAggregator:
     """Average the power spectrum over batch and time dimensions."""
 
     def __init__(self, nlat: int, nlon: int, grid: str = "legendre-gauss"):
-        self._real_sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid)
+        self._real_sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(get_device())
         self._power_spectrum: Dict[str, torch.Tensor] = {}
         self._counts: Dict[str, int] = defaultdict(int)
 

@@ -5,6 +5,7 @@ import torch_harmonics
 
 import fme
 from fme.core.constants import GRAVITY
+from fme.core.device import get_device
 from fme.core.metrics import (
     net_surface_energy_flux,
     quantile,
@@ -369,7 +370,7 @@ def test_quantile(bins, hist, pct, expected):
 
 def test_spherical_power_spectrum():
     nlat, nlon = 4, 8
-    data = torch.rand(2, nlat, nlon)
-    sht = torch_harmonics.RealSHT(nlat, nlon)
+    data = torch.rand(2, nlat, nlon, device=get_device())
+    sht = torch_harmonics.RealSHT(nlat, nlon).to(get_device())
     spectrum = spherical_power_spectrum(data, sht)
     assert spectrum.shape == (2, nlat - 1)
