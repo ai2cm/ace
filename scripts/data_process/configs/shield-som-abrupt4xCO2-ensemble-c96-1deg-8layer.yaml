@@ -121,5 +121,11 @@ dataset_computation:
       - prescribed_qflux
     scalar.zarr:
       - global_mean_co2
+    tendencies_3d.zarr:
+      - tendency_of_air_temperature_due_to_longwave_heating
+      - tendency_of_air_temperature_due_to_shortwave_heating
   standard_names:
     total_frozen_precip_rate: None
+    additional_vertically_resolved_names:
+      - tendency_of_air_temperature_due_to_longwave_heating
+      - tendency_of_air_temperature_due_to_shortwave_heating
