@@ -122,19 +122,19 @@ def get_trainer_model_config(model_type: str):
     "evaluator_model_config, model_type, num_samples",
     [
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "deterministic",
             1,
             id="checkpoint_deterministic_model",
         ),
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "diffusion",
             1,
             id="checkpoint_diffusion_model_single_sample",
         ),
         pytest.param(
-            {"checkpoint": "unused value"},
+            {"checkpoint_path": "unused value"},
             "diffusion",
             2,
             id="checkpoint_diffusion_model_multiple_samples",
@@ -159,7 +159,7 @@ def test_evaluator_runs(
 
     trainer_model_config = get_trainer_model_config(model_type)
 
-    if "checkpoint" in evaluator_model_config:
+    if "checkpoint_path" in evaluator_model_config:
         with open(evaluator_config_path, "r") as file:
             config = yaml.safe_load(file)
 
@@ -184,7 +184,7 @@ def test_evaluator_runs(
         trainer.save_all_checkpoints(float("-inf"))
 
         with open(evaluator_config_path, "w") as file:
-            config["model"] = {"checkpoint": trainer.epoch_checkpoint_path}
+            config["model"] = {"checkpoint_path": trainer.epoch_checkpoint_path}
             yaml.dump(config, file)
 
     with unittest.mock.patch(
