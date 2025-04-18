@@ -155,6 +155,7 @@ class Trainer:
         train_batch_generator = self._get_batch_generator(
             self.train_data, random_offset=True
         )
+        outputs = None
         for i, batch in enumerate(train_batch_generator):
             self.num_batches_seen += 1
             logging.info(f"Training on batch {i+1}")
@@ -170,6 +171,9 @@ class Trainer:
                     {"train/batch_loss": outputs.loss.detach().cpu().numpy()},
                     step=self.num_batches_seen,
                 )
+        if outputs is None:
+            raise RuntimeError("Empty training batch generator")
+        self.optimization.step_scheduler(outputs.loss.item())
         with torch.no_grad():
             wandb.log(
                 train_aggregator.get_wandb(prefix="train"),
