@@ -1,0 +1,95 @@
+experiment_dir: /eval
+n_samples: 2
+model:
+  checkpoint_path: /checkpoints/ema_ckpt.tar
+data:
+  fine:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      engine: zarr
+      file_pattern: 3km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  coarse:
+    - data_path: gs://vcm-ml-intermediate/2025-03-10-downscaling-2yr-XSHiELD
+      engine: zarr
+      file_pattern: 25km.zarr
+      subset:
+        interval_length: 1d
+        start: 6d
+        block_length: 7d
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+  # Note: somewhere between batch-size 16 and 32 causes get OOM errors
+  #       for full-extent evaluation
+  batch_size: 16
+  num_data_workers: 2
+  strict_ensemble: False
+events:
+- name: fl-convection
+  date: 2021-08-24T00:00
+  lat_extent:
+    start: 22.0
+    stop: 38.0
+  lon_extent:
+    start: 273.0
+    stop: 289.0
+- name: fl-hurricane
+  date: 2020-07-11T00:00
+  lat_extent:
+    start: 22.0
+    stop: 38.0
+  lon_extent:
+    start: 273.0
+    stop: 289.0
+- name: california-ar
+  date: 2020-12-02T00:00
+  lat_extent:
+    start: 29.0
+    stop: 45.0
+  lon_extent:
+    start: 232.0
+    stop: 248.0
+- name: california-low
+  date: 2021-12-15T12:00
+  lat_extent:
+    start: 29.0
+    stop: 45.0
+  lon_extent:
+    start: 232.0
+    stop: 248.0
+- name: conus-plains-tstorm
+  date: 2020-03-31T18:00
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+- name: conus-winter-front
+  date: 2021-01-05T06:00
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+- name: conus-hurricane
+  date: 2021-10-05T00:00
+  lat_extent:
+    start: 22.0
+    stop: 50.0
+  lon_extent:
+    start: 230.0
+    stop: 295.0
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: andrep-downscaling
+  entity: ai2cm
