@@ -4,13 +4,18 @@ import dacite
 import yaml
 
 import fme
+from fme.downscaling.evaluator import EvaluatorConfig
+from fme.downscaling.train import TrainerConfig as DownscalingTrainConfig
 
 EXAMPLES_DIRECTORY = pathlib.Path(__file__).parent
 
 
-def get_yaml_files(pattern):
+def get_yaml_files(pattern, exclude=None):
     """Get all files matching the pattern in the directory and subdirectories."""
-    return list(EXAMPLES_DIRECTORY.rglob(pattern))
+    paths = list(EXAMPLES_DIRECTORY.rglob(pattern))
+    if exclude is not None:
+        paths = [p for p in paths if exclude not in str(p)]
+    return paths
 
 
 def validate_config(file_path, config_class):
@@ -26,17 +31,29 @@ def validate_config(file_path, config_class):
 
 
 def test_train_configs_are_valid():
-    train_files = get_yaml_files("*train*.yaml")
+    train_files = get_yaml_files("*train*.yaml", exclude="downscaling")
     assert len(train_files) > 0, "No train files found"
     for file in train_files:
         validate_config(file, fme.ace.TrainConfig)
 
 
 def test_evaluator_configs_are_valid():
-    evaluator_files = get_yaml_files("*evaluator*.yaml")
+    evaluator_files = get_yaml_files("*evaluator*.yaml", exclude="downscaling")
     assert len(evaluator_files) > 0, "No evaluator files found"
     for file in evaluator_files:
         validate_config(file, fme.ace.InferenceEvaluatorConfig)
+
+
+def test_downscaling_train_configs_are_valid():
+    downscaling_files = get_yaml_files("**/downscaling/*train*.yaml")
+    for file in downscaling_files:
+        validate_config(file, DownscalingTrainConfig)
+
+
+def test_downscaling_evaluator_configs_are_valid():
+    downscaling_files = get_yaml_files("**/downscaling/*eval*.yaml")
+    for file in downscaling_files:
+        validate_config(file, EvaluatorConfig)
 
 
 def test_inference_configs_are_valid():
