@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import time
 import warnings
 from typing import Optional, Union
 
@@ -310,15 +311,25 @@ class Trainer:
         for epoch in range(self.startEpoch, segment_max_epochs):
             self.startEpoch = epoch
             logging.info(f"Training epoch: {epoch + 1}")
+            start_time = time.time()
             self.train_one_epoch()
+            train_end = time.time()
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
                 valid_loss = self.valid_one_epoch()
+                valid_end = time.time()
                 wandb.log({"epoch": epoch}, step=self.num_batches_seen)
 
                 dist = Distributed.get_instance()
                 if dist.is_root():
                     self.save_all_checkpoints(valid_loss)
+            epoch_end = time.time()
+            timings = {
+                "epoch_train_seconds": train_end - start_time,
+                "epoch_valid_seconds": valid_end - train_end,
+                "epoch_total_seconds": epoch_end - start_time,
+            }
+            wandb.log(timings, step=self.num_batches_seen)
 
 
 @dataclasses.dataclass
