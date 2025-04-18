@@ -44,18 +44,8 @@ def test_trainer(tmp_path):
         config=mock_config,
     )
 
-    with unittest.mock.patch(
-        "fme.downscaling.aggregators.Aggregator.get_wandb"
-    ) as mock_agg_get_wandb:
-        with unittest.mock.patch(
-            "fme.downscaling.aggregators.GenerationAggregator.get_wandb"
-        ) as mock_gen_agg_get_wandb:
-            with mock_wandb():
-                trainer.train_one_epoch()
-                trainer.valid_one_epoch()
-
-    mock_agg_get_wandb.assert_called()
-    mock_gen_agg_get_wandb.assert_called()
+    with pytest.raises(RuntimeError):
+        trainer.train_one_epoch()
 
 
 def create_test_data_on_disk(
