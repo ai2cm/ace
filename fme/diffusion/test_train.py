@@ -35,8 +35,7 @@ def _get_test_yaml_files(
     out_variable_names,
     mask_name,
     n_forward_steps=1,
-    nettype="SphericalFourierNeuralOperatorNet",
-    stepper_checkpoint_file=None,
+    nettype="ConditionalSFNO",
     log_to_wandb=False,
     max_epochs=1,
     segment_epochs=1,
@@ -64,15 +63,10 @@ def _get_test_yaml_files(
   ocean:
     surface_temperature_name: {in_variable_names[0]}
     ocean_fraction_name: {mask_name}
-"""
-    existing_stepper_config = f"""
-  checkpoint_file: {stepper_checkpoint_file}
+  n_sigma_embedding_channels: 6
 """
 
-    if stepper_checkpoint_file:
-        stepper_config = existing_stepper_config
-    else:
-        stepper_config = new_stepper_config
+    stepper_config = new_stepper_config
 
     train_string = f"""
 train_loader:
@@ -108,7 +102,7 @@ inference:
       n_initial_conditions: 2
       interval: 1
   n_forward_steps: {inference_forward_steps}
-  forward_steps_in_memory: 2
+  forward_steps_in_memory: 4
 n_forward_steps: {n_forward_steps}
 max_epochs: {max_epochs}
 segment_epochs: {segment_epochs}
@@ -251,7 +245,7 @@ def _setup(
 @pytest.mark.parametrize(
     "nettype",
     [
-        "SphericalFourierNeuralOperatorNet",
+        "ConditionalSFNO",
     ],
 )
 def test_train_inline(tmp_path, nettype, very_fast_only: bool):

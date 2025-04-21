@@ -1,0 +1,186 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 300
+n_forward_steps: 1
+ema:
+  decay: 0.999
+inference:
+  n_forward_steps: 480  # 120 days
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+        - '2021-01-01T00:00:00'
+        - '2021-04-01T06:00:00'
+        - '2021-07-01T12:00:00'
+        - '2021-10-01T18:00:00'
+        - '2022-01-01T00:00:00'
+        - '2022-04-01T06:00:00'
+        - '2022-07-01T12:00:00'
+        - '2022-10-01T18:00:00'
+    dataset:
+      data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
+    num_data_workers: 16
+  aggregator:
+    log_histograms: true
+    time_mean_reference_data: /statsdata/time-mean.nc
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-diffusion
+  entity: ai2cm
+train_loader:
+  batch_size: 8
+  num_data_workers: 8
+  dataset:
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0001
+      subset: &subset
+        start: 0
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0002
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0003
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0004
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0005
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0006
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0007
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0008
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0009
+      subset: *subset
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0010
+      subset: *subset
+validation_loader:
+  batch_size: 32
+  num_data_workers: 8
+  dataset:
+    - data_path: /climate-default/2023-08-11-vertically-resolved-1deg-fme-ensemble-dataset/ic_0011
+      subset:
+        stop: 1456
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  kwargs:
+    weight_decay: 0.01
+stepper:
+  n_sigma_embedding_channels: 256
+  p_mean: -1
+  p_std: 3.5
+  sigma_min: 0.0005
+  sigma_max: 400
+  num_diffusion_generation_steps: 25
+  builder:
+    type: SphericalFourierNeuralOperatorNet
+    config:
+      embed_dim: 384
+      filter_type: linear
+      hard_thresholding_fraction: 1.0
+      use_mlp: true
+      num_layers: 8
+      operator_type: dhconv
+      scale_factor: 1
+      separable: false
+      spectral_layers: 3
+      spectral_transform: sht
+  loss:
+    type: MSE
+  normalization:
+    global_means_path: /statsdata/centering.nc
+    global_stds_path: /statsdata/scaling-full-field.nc
+  ocean:
+    surface_temperature_name: surface_temperature
+    ocean_fraction_name: ocean_fraction
+  next_step_forcing_names:
+  - DSWRFtoa
+  in_names:
+  - land_fraction
+  - ocean_fraction
+  - sea_ice_fraction
+  - DSWRFtoa
+  - HGTsfc
+  - PRESsfc
+  - surface_temperature
+  - air_temperature_0
+  - air_temperature_1
+  - air_temperature_2
+  - air_temperature_3
+  - air_temperature_4
+  - air_temperature_5
+  - air_temperature_6
+  - air_temperature_7
+  - specific_total_water_0
+  - specific_total_water_1
+  - specific_total_water_2
+  - specific_total_water_3
+  - specific_total_water_4
+  - specific_total_water_5
+  - specific_total_water_6
+  - specific_total_water_7
+  - eastward_wind_0
+  - eastward_wind_1
+  - eastward_wind_2
+  - eastward_wind_3
+  - eastward_wind_4
+  - eastward_wind_5
+  - eastward_wind_6
+  - eastward_wind_7
+  - northward_wind_0
+  - northward_wind_1
+  - northward_wind_2
+  - northward_wind_3
+  - northward_wind_4
+  - northward_wind_5
+  - northward_wind_6
+  - northward_wind_7
+  out_names:
+  - PRESsfc
+  - surface_temperature
+  - air_temperature_0
+  - air_temperature_1
+  - air_temperature_2
+  - air_temperature_3
+  - air_temperature_4
+  - air_temperature_5
+  - air_temperature_6
+  - air_temperature_7
+  - specific_total_water_0
+  - specific_total_water_1
+  - specific_total_water_2
+  - specific_total_water_3
+  - specific_total_water_4
+  - specific_total_water_5
+  - specific_total_water_6
+  - specific_total_water_7
+  - eastward_wind_0
+  - eastward_wind_1
+  - eastward_wind_2
+  - eastward_wind_3
+  - eastward_wind_4
+  - eastward_wind_5
+  - eastward_wind_6
+  - eastward_wind_7
+  - northward_wind_0
+  - northward_wind_1
+  - northward_wind_2
+  - northward_wind_3
+  - northward_wind_4
+  - northward_wind_5
+  - northward_wind_6
+  - northward_wind_7
+  - LHTFLsfc
+  - SHTFLsfc
+  - PRATEsfc
+  - ULWRFsfc
+  - ULWRFtoa
+  - DLWRFsfc
+  - DSWRFsfc
+  - USWRFsfc
+  - USWRFtoa
+  - tendency_of_total_water_path_due_to_advection
