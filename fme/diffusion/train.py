@@ -66,7 +66,6 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.ace.stepper import TrainOutput
 from fme.core.cli import get_parser, prepare_config, prepare_directory
 from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
@@ -75,6 +74,7 @@ from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, TrainConfigProtocol, Trainer
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
+from fme.diffusion.stepper import TrainOutput
 from fme.diffusion.train_config import TrainBuilders, TrainConfig
 
 
@@ -94,8 +94,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         vertical_coordinate=dataset_info.vertical_coordinate,
         timestep=dataset_info.timestep,
     )
-    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
-
     for batch in inference_data.loader:
         initial_inference_times = batch.time.isel(time=0)
         break
@@ -114,6 +112,11 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         output_dir=config.output_dir,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
     )
+    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+    end_of_epoch_ops = builder.get_end_of_epoch_ops(
+        stepper, validation_data, aggregator_builder.get_validation_aggregator
+    )
+
     do_gc_collect = fme.get_device() != torch.device("cpu")
     trainer_config: TrainConfigProtocol = config  # documenting trainer input type
     return Trainer(
@@ -126,6 +129,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         config=trainer_config,
         aggregator_builder=aggregator_builder,
         end_of_batch_callback=end_of_batch_ops,
+        end_of_epoch_callback=end_of_epoch_ops,
         do_gc_collect=do_gc_collect,
     )
 
