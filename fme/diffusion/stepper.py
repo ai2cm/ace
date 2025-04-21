@@ -3,7 +3,7 @@ import datetime
 import logging
 import pathlib
 from copy import copy
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 import dacite
 import torch
@@ -19,7 +19,6 @@ from fme.core.coordinates import (
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -27,16 +26,20 @@ from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
+from fme.core.models.conditional_sfno.layers import Context
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
-from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.rand import randn, randn_like
 from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
+from fme.diffusion.registry import ModuleSelector
+from fme.downscaling.models import condition_with_noise_for_training
+from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
@@ -55,11 +58,11 @@ class DiffusionStepperConfig:
         parameter_init: The parameter initialization configuration.
         ocean: The ocean configuration.
         loss: The loss configuration.
-        corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
         loss_normalization: The normalization configuration for the loss.
         residual_normalization: Optional alternative to configure loss normalization.
             If provided, it will be used for all *prognostic* variables in loss scaling.
+        n_sigma_embedding_channels: Number of channels for the positional embedding.
     """
 
     builder: ModuleSelector
@@ -73,12 +76,16 @@ class DiffusionStepperConfig:
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
-        default_factory=lambda: AtmosphereCorrectorConfig()
-    )
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
     loss_normalization: Optional[NormalizationConfig] = None
     residual_normalization: Optional[NormalizationConfig] = None
+    p_mean: float = 0.0
+    p_std: float = 1.0
+    S_churn: float = 0.0
+    sigma_min: float = 0.002
+    sigma_max: float = 80.0
+    n_sigma_embedding_channels: int = 128
+    num_diffusion_generation_steps: int = 18
 
     def __post_init__(self):
         for name in self.next_step_forcing_names:
@@ -281,6 +288,158 @@ def _combine_normalizers(
     )
 
 
+class PositionalEmbeddingWrapper(torch.nn.Module):
+    """
+    Wraps a module to generate a positional embedding for the input based
+    on the noise level or step position within the denoising process.
+    """
+
+    def __init__(self, module: torch.nn.Module, n_channels: int, channel_dim=1):
+        super().__init__()
+        self.module = module
+        self.positional_embedding = PositionalEmbedding(n_channels)
+        self.channel_dim = channel_dim
+        self.map_layer0 = Linear(
+            in_features=n_channels,
+            out_features=n_channels,
+            init_mode="xavier_uniform",
+        )
+        self.map_layer1 = Linear(
+            in_features=n_channels,
+            out_features=n_channels,
+            init_mode="xavier_uniform",
+        )
+        self.n_channels = n_channels
+
+    def forward(self, x: torch.Tensor, sigma: torch.Tensor, *args, **kwargs):
+        emb = self.positional_embedding(sigma)
+        emb = silu(self.map_layer0(emb))
+        emb = silu(self.map_layer1(emb))
+        return self.module(
+            x,
+            Context(
+                embedding_scalar=emb,
+                embedding_2d=None,
+            ),
+        )
+
+
+class EDMPrecond(torch.nn.Module):
+    def __init__(
+        self,
+        model: nn.Module,
+        sigma_data=1.0,
+    ):
+        """
+        Preconditioner for EDM.
+
+        Scales inputs and outputs of the model according to the strength of the
+        added noise, so that the variance of the latents are not dependent on the
+        noise level.
+
+        Args:
+            model: The underlying neural network model.
+            sigma_data: Expected standard deviation of the training data.
+        """
+        super().__init__()
+        self.sigma_data = sigma_data
+        self.model = model
+
+    def forward(self, latent, conditioning, sigma):
+        latent = latent.to(torch.float32)
+        sigma = sigma.to(torch.float32).reshape(-1, 1, 1, 1)
+        if sigma.shape[0] == 1:
+            sigma = sigma.repeat(latent.shape[0], 1, 1, 1)
+
+        c_skip = self.sigma_data**2 / (sigma**2 + self.sigma_data**2)
+        c_out = sigma * self.sigma_data / (sigma**2 + self.sigma_data**2).sqrt()
+        c_in = 1 / (self.sigma_data**2 + sigma**2).sqrt()
+        c_noise = sigma.log() / 4
+
+        channel_dim = 1
+        input_ = torch.concat(
+            ((c_in.to(latent.device) * latent), conditioning.to(latent.device)),
+            dim=channel_dim,
+        )
+
+        F_x = self.model(
+            input_,
+            c_noise.flatten().to(input_.device),
+        )
+        D_x = c_skip * latent + c_out * F_x.to(torch.float32)
+        return D_x
+
+
+def edm_sampler(
+    net,
+    latents: torch.Tensor,
+    conditioning: torch.Tensor,
+    num_steps=18,
+    sigma_min=0.002,
+    sigma_max=80.0,
+    rho=7,
+    S_churn=0.0,
+    S_min=0.0,
+    S_max=float("inf"),
+    S_noise=1,
+) -> torch.Tensor:
+    # This function is vendorized from edm/generate.py which you can find here:
+    # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/generate.py
+    # this comes from the paper
+    # "Elucidating the Design Space of Diffusion-Based Generative Models"
+    # https://arxiv.org/abs/2206.00364
+
+    # Copyright (c) 2022, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+    #
+    # This work is licensed under a Creative Commons
+    # Attribution-NonCommercial-ShareAlike 4.0 International License.
+    # You should have received a copy of the license along with this
+    # work. If not, see http://creativecommons.org/licenses/by-nc-sa/4.0/
+
+    input_dtype = torch.float32  # what is expected by the model
+    # we will integrate in float64 to avoid numerical issues
+
+    step_indices = torch.arange(num_steps, dtype=torch.float64, device=latents.device)
+    t_steps = (
+        sigma_max ** (1 / rho)
+        + step_indices
+        / (num_steps - 1)
+        * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))
+    ) ** rho
+    t_steps = torch.cat([t_steps, torch.zeros_like(t_steps[:1])])  # t_N = 0
+
+    # Main sampling loop.
+    x_next = latents.to(torch.float64) * t_steps[0]
+    for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):  # 0, ..., N-1
+        x_cur = x_next
+
+        # Increase noise temporarily.
+        gamma = min(S_churn / num_steps, 2**0.5 - 1) if S_min <= t_cur <= S_max else 0
+        t_hat = t_cur + gamma * t_cur
+        x_hat = x_cur + (t_hat**2 - t_cur**2).sqrt() * S_noise * randn_like(x_cur)
+
+        # Euler step.
+        denoised = net(
+            x_hat.to(input_dtype),
+            conditioning.to(input_dtype),
+            t_hat.to(input_dtype),
+        ).to(torch.float64)
+        d_cur = (x_hat - denoised) / t_hat
+        x_next = x_hat + (t_next - t_hat) * d_cur
+
+        # Apply 2nd order correction.
+        if i < num_steps - 1:
+            denoised = net(
+                x_next.to(input_dtype),
+                conditioning.to(input_dtype),
+                t_next.to(input_dtype),
+            ).to(torch.float64)
+            d_prime = (x_next - denoised) / t_next
+            x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+
+    return x_next.to(torch.float32)
+
+
 class DiffusionStepper(
     TrainStepperABC[
         PrognosticState,
@@ -330,32 +489,34 @@ class DiffusionStepper(
             )
         else:
             self.ocean = None
-        self.module = config.builder.build(
-            n_in_channels=n_in_channels,
+        module = config.builder.build(
+            n_in_channels=n_in_channels + n_out_channels,
             n_out_channels=n_out_channels,
             img_shape=img_shape,
+            n_sigma_embedding_channels=config.n_sigma_embedding_channels,
         )
         self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            [self.module], init_weights=init_weights, load_weights=_load_weights
+            [module], init_weights=init_weights, load_weights=_load_weights
         )
-        self.module = self.module.to(get_device())
+        module = EDMPrecond(
+            PositionalEmbeddingWrapper(
+                module,
+                n_channels=config.n_sigma_embedding_channels,
+                channel_dim=self.CHANNEL_DIM,
+            ),
+        )
+        module = module.to(get_device())
+        dist = Distributed.get_instance()
+        self._is_distributed = dist.is_distributed()
+        self.module = dist.wrap_module(module)
         self.derive_func = derive_func
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
 
-        dist = Distributed.get_instance()
-        self._is_distributed = dist.is_distributed()
-        self.module = dist.wrap_module(self.module)
-
         self._vertical_coordinates = vertical_coordinate.to(get_device())
         self._timestep = timestep
 
-        self._corrector = vertical_coordinate.build_corrector(
-            config=config.corrector,
-            gridded_operations=gridded_operations,
-            timestep=timestep,
-        )
         if config.loss_normalization is not None:
             self.loss_normalizer = config.loss_normalization.build(
                 names=config.normalize_names
@@ -490,11 +651,28 @@ class DiffusionStepper(
         """
         input_norm = self.normalizer.normalize(input)
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-        output_tensor = self.module(input_tensor)
+        output_shape = list(input_tensor.shape)
+        output_shape[self.CHANNEL_DIM] = len(self._config.out_names)
+        latents = randn(
+            output_shape, device=input_tensor.device, dtype=input_tensor.dtype
+        )
+        output_tensor = edm_sampler(
+            self.module,
+            latents,
+            input_tensor,
+            S_churn=self._config.S_churn,
+            sigma_min=self._config.sigma_min,
+            sigma_max=self._config.sigma_max,
+            num_steps=self._config.num_diffusion_generation_steps,
+        )
+        if output_tensor.shape != torch.Size(output_shape):
+            # this should never happen, would likely get an error during edm_sampler
+            raise RuntimeError(
+                f"Output shape {output_tensor.shape} does not match expected shape "
+                f"{output_shape}."
+            )
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
         output = self.normalizer.denormalize(output_norm)
-        if self._corrector is not None:
-            output = self._corrector(input, output, next_step_forcing_data)
         if self.ocean is not None:
             output = self.ocean(input, output, next_step_forcing_data)
         return output
@@ -658,6 +836,55 @@ class DiffusionStepper(
             return self._config.forcing_names
         return list(set(self._config.forcing_names).union(self.ocean.forcing_names))
 
+    def _train_on_step(
+        self,
+        input: TensorMapping,
+        target: TensorMapping,
+        next_step_forcing_data: TensorMapping,
+    ) -> Tuple[torch.Tensor, TensorMapping]:
+        input_norm = self.normalizer.normalize(input)
+        input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+        target_norm = self.normalizer.normalize(target)
+        target_tensor = self.out_packer.pack(target_norm, axis=self.CHANNEL_DIM)
+        conditioned = condition_with_noise_for_training(
+            target_tensor, self._config.p_std, self._config.p_mean, sigma_data=1.0
+        )
+        output_tensor = self.module(
+            conditioned.latents, input_tensor, conditioned.sigma
+        )
+        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        output = self.normalizer.denormalize(output_norm)
+        if self.ocean is not None:
+            output = self.ocean(input, output, next_step_forcing_data)
+        return conditioned.weight, output
+
+    def generate_on_batch(
+        self,
+        data: BatchData,
+        compute_derived_variables: bool = False,
+    ) -> TrainOutput:
+        initial_condition = data.get_start(self.prognostic_names, self.n_ic_timesteps)
+        output, _ = self.predict_paired(
+            initial_condition,
+            forcing=data,
+            compute_derived_variables=False,  # done below
+        )
+        stepped = TrainOutput(
+            metrics={},
+            gen_data=add_ensemble_dim(output.prediction),
+            target_data=add_ensemble_dim(output.target),
+            time=output.time,
+            normalize=self.normalizer.normalize,
+            derive_func=self.derive_func,
+        )
+        full_initial_condition = data.get_start(
+            set(data.data.keys()), self.n_ic_timesteps
+        )
+        stepped = stepped.prepend_initial_condition(full_initial_condition)
+        if compute_derived_variables:
+            stepped = stepped.compute_derived_variables()
+        return stepped
+
     def train_on_batch(
         self,
         data: BatchData,
@@ -679,45 +906,30 @@ class DiffusionStepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        time_dim = self.TIME_DIM
-
         loss = torch.tensor(0.0, device=get_device())
         metrics: Dict[str, float] = {}
-        input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
-        device = get_device()
 
         optimization.set_mode(self.modules)
         with optimization.autocast():
-            # output from self.predict does not include initial condition
-            output, _ = self.predict_paired(
-                input_data,
-                forcing=data,
+            n_forward_steps = data.time.shape[1] - 1
+            if n_forward_steps > 1:
+                # requires calling full generation loop to get next-step sample as
+                # conditioning input for next-step loss
+                raise NotImplementedError("Multiple forward steps not implemented")
+            input_data = {k: data.data[k][:, 0] for k in self._config.in_names}
+            for name in self._config.next_step_forcing_names:
+                if name in self._config.in_names:
+                    input_data[name] = data.data[name][:, 1]
+            target_step = {k: data.data[k][:, 1] for k in self._config.out_names}
+            next_step_forcing_data = {
+                k: data.data[k][:, 1] for k in self._forcing_names()
+            }
+            weight, gen_step = self._train_on_step(
+                input_data, target_step, next_step_forcing_data
             )
-            gen_data = output.prediction
-            target_data = output.reference
-            n_forward_steps = output.time.shape[1]
-
-            # compute loss for each timestep
-            for step in range(n_forward_steps):
-                # Note: here we examine the loss for a single timestep,
-                # not a single model call (which may contain multiple timesteps).
-                gen_step = {k: v.select(time_dim, step) for k, v in gen_data.items()}
-                target_step = {
-                    k: v.select(time_dim, step) for k, v in target_data.items()
-                }
-                tensor_shape = next(iter(gen_step.values())).shape
-                n_batch = tensor_shape[0]
-
-                step_loss = self.loss_obj(
-                    gen_step,
-                    target_step,
-                    torch.ones(
-                        (n_batch, *[1] * (len(tensor_shape) - 1)),
-                        device=device,
-                    ),
-                )
-                loss += step_loss
-                metrics[f"loss_step_{step}"] = step_loss.detach()
+            step_loss = self.loss_obj(gen_step, target_step, weight)
+            loss += step_loss
+            metrics[f"loss_step_0"] = step_loss.detach()
 
         loss += self._l2_sp_tuning_regularizer()
 
@@ -727,9 +939,13 @@ class DiffusionStepper(
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=add_ensemble_dim(gen_data),
-            target_data=add_ensemble_dim(target_data),
-            time=output.time,
+            gen_data=add_ensemble_dim(
+                {k: gen_step[k].unsqueeze(self.TIME_DIM) for k in gen_step.keys()}
+            ),
+            target_data=add_ensemble_dim(
+                {k: target_step[k].unsqueeze(self.TIME_DIM) for k in target_step.keys()}
+            ),
+            time=data.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
         )

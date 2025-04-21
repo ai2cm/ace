@@ -11,6 +11,7 @@ from fme.core.loss import LossConfig
 from fme.core.normalizer import NormalizationConfig, StandardNormalizer
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.packer import Packer
+from fme.core.rand import randn, randn_like
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.downscaling.datasets import PairedBatchData
 from fme.downscaling.metrics_and_maths import filter_tensor_mapping, interpolate
@@ -27,12 +28,6 @@ class ModelOutputs:
     target: TensorDict
     loss: torch.Tensor
     latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
-
-
-def _tensor_mapping_to_device(
-    tensor_mapping: TensorMapping, device: torch.device
-) -> TensorMapping:
-    return {k: v.to(device) for k, v in tensor_mapping.items()}
 
 
 @dataclasses.dataclass
@@ -389,14 +384,12 @@ def condition_with_noise_for_training(
     Returns:
         The conditioned targets and the loss weighting.
     """
-    rnd_normal = torch.randn(
-        [targets_norm.shape[0], 1, 1, 1], device=targets_norm.device
-    )
+    rnd_normal = randn([targets_norm.shape[0], 1, 1, 1], device=targets_norm.device)
     # This is taken from EDM's original implementation in EDMLoss:
     # https://github.com/NVlabs/edm/blob/008a4e5316c8e3bfe61a62f874bddba254295afb/training/loss.py#L72-L80  # noqa: E501
     sigma = (rnd_normal * p_std + p_mean).exp()
     weight = (sigma**2 + sigma_data**2) / (sigma * sigma_data) ** 2
-    noise = torch.randn_like(targets_norm) * sigma
+    noise = randn_like(targets_norm) * sigma
     latents = targets_norm + noise
     return ConditionedTarget(latents=latents, sigma=sigma, weight=weight)
 
@@ -531,7 +524,7 @@ class DiffusionModel:
         # expand samples and fold to [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
         targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
-        latents = torch.randn_like(targets_norm)
+        latents = randn_like(targets_norm)
 
         logging.info("Running EDM sampler...")
         samples_norm, latent_steps = edm_sampler(

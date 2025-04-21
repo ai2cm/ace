@@ -1,11 +1,12 @@
 import dataclasses
 import datetime
 import os
-from typing import List, Optional, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Tuple
 
 import torch
 
 from fme.ace.aggregator import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.one_step.main import OneStepAggregator
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader, get_inference_data
 from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
@@ -13,10 +14,11 @@ from fme.ace.requirements import DataRequirements, PrognosticStateDataRequiremen
 from fme.ace.train.train_config import InlineInferenceConfig
 from fme.core.coordinates import VerticalCoordinate
 from fme.core.ema import EMAConfig, EMATracker
-from fme.core.generics.trainer import EndOfBatchCallback
+from fme.core.generics.trainer import EndOfBatchCallback, EndOfEpochCallback
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
+from fme.core.timing import GlobalTimer
 from fme.core.typing_ import Slice
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.diffusion.stepper import DiffusionStepper, DiffusionStepperConfig
@@ -79,6 +81,10 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     save_per_epoch_diagnostics: bool = False
+
+    def __post_init__(self):
+        if self.n_forward_steps != 1:
+            raise NotImplementedError("Only n_forward_steps=1 is currently supported")
 
     @property
     def inference_n_forward_steps(self) -> int:
@@ -179,3 +185,24 @@ class TrainBuilders:
             copy_after_batch = self.config.copy_weights_after_batch
             return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)
         return lambda: None
+
+    def get_end_of_epoch_ops(
+        self,
+        stepper: DiffusionStepper,
+        validation_data: GriddedData,
+        get_validation_aggregator: Callable[[], OneStepAggregator],
+    ) -> EndOfEpochCallback:
+        def end_of_epoch_ops(epoch: int) -> Mapping[str, Any]:
+            aggregator = get_validation_aggregator()
+            with torch.no_grad(), GlobalTimer():
+                for batch in validation_data.loader:
+                    stepped = stepper.generate_on_batch(
+                        batch,
+                        compute_derived_variables=True,
+                    )
+                    aggregator.record_batch(
+                        batch=stepped,
+                    )
+            return aggregator.get_logs(label="generation")
+
+        return end_of_epoch_ops
