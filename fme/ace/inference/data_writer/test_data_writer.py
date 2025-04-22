@@ -484,7 +484,15 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
-            assert set(ds.data_vars) == {"counts", "temp", "pressure", "insolation"}
+            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert set(ds.coords) == {
+                "init_time",
+                "valid_time",
+                "counts",
+                "lat",
+                "lon",
+                "time",
+            }
 
 
 @pytest.mark.parametrize(
