@@ -50,6 +50,10 @@ create_environment:
 test:
 	pytest --durations 40 .
 
+# --cov must come  after pytest args to use the sources defined by config
+test_cov:
+	pytest --durations 40 --cov --cov-report=term-missing:skip-covered --cov-config=pyproject.toml .
+
 test_fast:
 	pytest --durations 40 --fast .
 
