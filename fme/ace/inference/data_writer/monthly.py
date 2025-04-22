@@ -266,7 +266,7 @@ class MonthlyDataWriter:
                         variable_name
                     ].long_name = self.variable_metadata[variable_name].long_name
                 self.dataset.variables[variable_name].coordinates = " ".join(
-                    [INIT_TIME, VALID_TIME]
+                    [INIT_TIME, VALID_TIME, COUNTS]
                 )
 
             array = data[variable_name].cpu().numpy()
