@@ -58,3 +58,18 @@ convention = "google"
 [tool.ruff.lint.isort]
 split-on-trailing-comma = false
 known-third-party = ["wandb"]
+
+[tool.coverage.run]
+branch = true
+source_pkgs = ["fme"]
+
+[tool.coverage.report]
+omit = ["test_*.py"]
+# Regexes for lines to exclude from consideration
+exclude_also = [
+    # Don't complain about missing debug-only code:
+    "def __repr__",
+
+    # Don't complain about abstract methods, they aren't run:
+    "@(abc\\.)?abstractmethod",
+    ]

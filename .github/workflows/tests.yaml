@@ -30,10 +30,10 @@ jobs:
           uv venv --python 3.11
           uv pip install -c constraints.txt -e .[dev]
           uv pip install --no-build-isolation -c constraints.txt -e .[dev,healpix]
-      - name: Run pytest
+      - name: Run pytest with code coverage
         run: |
           source .venv/bin/activate
-          make test
+          make test_cov
   cpu-very-fast-no-healpix:
     runs-on: ubuntu-latest
     steps:

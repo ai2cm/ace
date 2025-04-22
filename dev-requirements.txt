@@ -1,2 +1,4 @@
 pre-commit
 pytest
+pytest-cov
+coverage[toml]
