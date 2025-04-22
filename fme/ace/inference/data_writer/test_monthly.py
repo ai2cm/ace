@@ -75,6 +75,9 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         written["x"],
         torch.cat(month_values, dim=1).cpu().numpy(),
     )
+    assert "counts" in written.coords
+    assert "counts" in written.x.coords
+    assert "counts" in written.valid_time.coords
 
 
 @pytest.mark.parametrize(
