@@ -423,7 +423,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         for diagnostic in ("mean", "snapshot", "mean_map"):
             diagnostic_output = validation_output_dir / f"{diagnostic}_diagnostics.nc"
             assert diagnostic_output.exists()
-            ds = xr.open_dataset(diagnostic_output)
+            ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
             assert len(ds) > 0
 
     for domain in ("ocean", "atmosphere"):
@@ -439,7 +439,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
                 inline_inference_output_dir / f"{diagnostic}_diagnostics.nc"
             )
             assert diagnostic_output.exists()
-            ds = xr.open_dataset(diagnostic_output)
+            ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
             assert len(ds) > 0
 
     best_checkpoint_path = (
@@ -483,14 +483,14 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     )
     assert atmosphere_output_path.exists()
 
-    ds_ocean = xr.open_dataset(ocean_output_path)
+    ds_ocean = xr.open_dataset(ocean_output_path, decode_timedelta=False)
     assert ds_ocean["time"].size == 6  # configured inference coupled steps
     assert (
         ds_ocean["sample"].size == 2
     )  # 2 initial conditions in _INFERENCE_CONFIG_TEMPLATE
     assert np.sum(np.isnan(ds_ocean["sst"].values)) == 0
     assert np.sum(np.isnan(ds_ocean["thetao_0"].values)) == 0
-    ds_atmos = xr.open_dataset(atmosphere_output_path)
+    ds_atmos = xr.open_dataset(atmosphere_output_path, decode_timedelta=False)
     assert ds_atmos["time"].size == 6 * n_inner_steps
     assert ds_atmos["sample"].size == 2
     assert np.sum(np.isnan(ds_atmos["surface_temperature"].values)) == 0

@@ -701,9 +701,9 @@ def test_inference_data_with_perturbations(tmp_path):
         ),
     )
     n_forward_steps_in_memory = 3
-    original_foo = xr.open_dataset(os.path.join(tmp_path, "data.nc"))["foo"].values[
-        0 : n_forward_steps_in_memory + 1, :, :
-    ]
+    original_foo = xr.open_dataset(
+        os.path.join(tmp_path, "data.nc"), decode_times=False
+    )["foo"].values[0 : n_forward_steps_in_memory + 1, :, :]
     window_requirements = DataRequirements(
         names=["foo", "constant_mask"],
         n_timesteps=n_forward_steps_in_memory + 1,

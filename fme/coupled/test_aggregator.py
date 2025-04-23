@@ -156,7 +156,9 @@ def test_inference_logs_labels_exist(tmpdir):
         ),
         n_ensemble=3,
     )
-    monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
+    monthly_ds = xr.open_dataset(
+        monthly_reference_data.data_filename, decode_timedelta=False
+    )
 
     output_dir = pathlib.Path(tmpdir) / "output"
     agg = InferenceEvaluatorAggregator(
@@ -292,11 +294,13 @@ def test_inference_logs_labels_exist(tmpdir):
         assert ocean_file.exists()
         atmosphere_file = atmosphere_directory / f"{file_type}_diagnostics.nc"
         assert atmosphere_file.exists()
-    ocean_mean_dataset = xr.open_dataset(ocean_directory / "mean_diagnostics.nc")
+    ocean_mean_dataset = xr.open_dataset(
+        ocean_directory / "mean_diagnostics.nc", decode_timedelta=False
+    )
     assert "weighted_bias-ocean_var" in ocean_mean_dataset.data_vars
     assert ocean_mean_dataset["weighted_bias-ocean_var"].size == n_time
     atmosphere_mean_dataset = xr.open_dataset(
-        atmosphere_directory / "mean_diagnostics.nc"
+        atmosphere_directory / "mean_diagnostics.nc", decode_timedelta=False
     )
     assert "weighted_bias-atmos_var" in atmosphere_mean_dataset.data_vars
     assert atmosphere_mean_dataset["weighted_bias-atmos_var"].size == n_time

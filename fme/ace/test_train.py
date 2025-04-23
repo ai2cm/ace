@@ -438,7 +438,7 @@ def test_train_and_inference(
             assert not diagnostic_output.exists()
         else:
             assert diagnostic_output.exists()
-            ds = xr.open_dataset(diagnostic_output)
+            ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
             assert len(ds) > 0
 
     inline_inference_output_dir = (
@@ -453,7 +453,7 @@ def test_train_and_inference(
     ):
         diagnostic_output = inline_inference_output_dir / f"{diagnostic}_diagnostics.nc"
         assert diagnostic_output.exists()
-        ds = xr.open_dataset(diagnostic_output)
+        ds = xr.open_dataset(diagnostic_output, decode_timedelta=False)
         assert len(ds) > 0
 
     # inference should not require stats files
@@ -479,12 +479,14 @@ def test_train_and_inference(
     n_summary_steps = 1
     assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
     assert prediction_output_path.exists()
-    ds_prediction = xr.open_dataset(prediction_output_path)
+    ds_prediction = xr.open_dataset(prediction_output_path, decode_timedelta=False)
     assert np.sum(np.isnan(ds_prediction["PRESsfc"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["specific_total_water_0"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["specific_total_water_1"].values)) == 0
     assert np.sum(np.isnan(ds_prediction["total_water_path"].values)) == 0
-    ds_target = xr.open_dataset(tmp_path / "results" / "autoregressive_target.nc")
+    ds_target = xr.open_dataset(
+        tmp_path / "results" / "autoregressive_target.nc", decode_timedelta=False
+    )
     assert np.sum(np.isnan(ds_target["baz"].values)) == 0
 
 

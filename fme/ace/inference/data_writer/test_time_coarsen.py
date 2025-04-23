@@ -48,8 +48,12 @@ def _get_time_array(
     start_time = cftime.DatetimeJulian(*start_time) + timedelta(
         hours=6 * start_n_offset
     )
-    time_index = xr.cftime_range(
-        start=start_time, periods=n_timesteps, freq=f"{freq_hrs}h", calendar="julian"
+    time_index = xr.date_range(
+        start=start_time,
+        periods=n_timesteps,
+        freq=f"{freq_hrs}h",
+        calendar="julian",
+        use_cftime=True,
     )
     return xr.DataArray(data=time_index, dims=["time"]).drop_vars(["time"])
 
