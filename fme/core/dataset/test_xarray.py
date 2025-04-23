@@ -458,12 +458,15 @@ def test_dataset_dtype_casting(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     config = XarrayDataConfig(data_path=mock_data.tmpdir, dtype="bfloat16")
     dataset = XarrayDataset(config, mock_data.var_names.all_names, 2)
-    assert isinstance(dataset.horizontal_coordinates, LatLonCoordinates)
-    assert dataset.horizontal_coordinates.lat.dtype == torch.bfloat16
-    assert dataset.horizontal_coordinates.lon.dtype == torch.bfloat16
-    assert isinstance(dataset.vertical_coordinate, HybridSigmaPressureCoordinate)
-    assert dataset.vertical_coordinate.ak.dtype == torch.bfloat16
-    assert dataset.vertical_coordinate.bk.dtype == torch.bfloat16
+    data_properties = dataset.properties
+    assert isinstance(data_properties.horizontal_coordinates, LatLonCoordinates)
+    assert data_properties.horizontal_coordinates.lat.dtype == torch.bfloat16
+    assert data_properties.horizontal_coordinates.lon.dtype == torch.bfloat16
+    assert isinstance(
+        data_properties.vertical_coordinate, HybridSigmaPressureCoordinate
+    )
+    assert data_properties.vertical_coordinate.ak.dtype == torch.bfloat16
+    assert data_properties.vertical_coordinate.bk.dtype == torch.bfloat16
     data, _ = dataset[0]
     for tensor in data.values():
         assert tensor.dtype == torch.bfloat16
