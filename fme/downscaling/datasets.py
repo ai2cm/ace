@@ -25,10 +25,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.getters import get_dataset
-from fme.core.dataset.xarray import DatasetProperties, XarrayConcat
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import get_device, move_tensordict_to_device, using_gpu
 from fme.core.distributed import Distributed
 from fme.core.metrics import spherical_area_weights

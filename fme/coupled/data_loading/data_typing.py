@@ -12,7 +12,7 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.typing_ import TensorDict
 
 
