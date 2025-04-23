@@ -23,6 +23,7 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.device import get_device
+from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
@@ -129,6 +130,30 @@ def _get_vertical_coordinate(
         coordinate = NullVerticalCoordinate()
 
     return coordinate
+
+
+def _get_mask_provider(ds: xr.Dataset, dtype: Optional[torch.dtype]) -> MaskProvider:
+    """
+    Get mask provider from a dataset.
+
+    If the dataset contains static variables that start with the string "mask_" or a
+    variable named "surface_mask", then these variables will be used to instantiate
+    a MaskProvider object. Otherwise, an empty MaskProvider is returned.
+
+    Args:
+        ds: Dataset to get vertical coordinates from.
+        dtype: Data type of the returned tensors. If None, the dtype is not
+            changed from the original in ds.
+    """
+    masks: Dict[str, torch.Tensor] = {
+        name: torch.as_tensor(ds[name].values, dtype=dtype)
+        for name in ds.data_vars
+        if "mask_" in name
+    }
+    for name in masks:
+        if "time" in ds[name].dims:
+            raise ValueError("Masks must be time-independent.")
+    return MaskProvider(masks)
 
 
 def get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
@@ -312,12 +337,14 @@ class DatasetProperties:
         variable_metadata: Dict[str, VariableMetadata],
         vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
+        mask_provider: MaskProvider,
         timestep: datetime.timedelta,
         is_remote: bool,
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
         self.horizontal_coordinates = horizontal_coordinates
+        self.mask_provider = mask_provider
         self.timestep = timestep
         self.is_remote = is_remote
 
@@ -327,6 +354,7 @@ class DatasetProperties:
             self.variable_metadata,
             self.vertical_coordinate.to(device),
             self.horizontal_coordinates.to(device),
+            self.mask_provider.to(device),
             self.timestep,
             self.is_remote,
         )
@@ -341,10 +369,13 @@ class DatasetProperties:
             raise ValueError("Inconsistent vertical coordinates between datasets")
         if self.horizontal_coordinates != other.horizontal_coordinates:
             raise ValueError("Inconsistent horizontal coordinates between datasets")
+        if self.mask_provider != other.mask_provider:
+            raise ValueError("Inconsistent mask providers between datasets")
 
     def update_merged_dataset(self, other: "DatasetProperties"):
         if isinstance(self.variable_metadata, dict):
             self.variable_metadata.update(other.variable_metadata)
+        self.mask_provider.update(other.mask_provider)
         self.is_remote = self.is_remote or other.is_remote
         if self.timestep != other.timestep:
             raise ValueError("Inconsistent timesteps between datasets")
@@ -418,6 +449,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         ]
         self._dims = ["time"] + self._horizontal_coordinates.loaded_dims
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
+        self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
         self.overwrite = config.overwrite
 
     @property
@@ -426,6 +458,7 @@ class XarrayDataset(torch.utils.data.Dataset):
             self._variable_metadata,
             self._vertical_coordinate,
             self._horizontal_coordinates,
+            self._mask_provider,
             self.timestep,
             self._is_remote,
         )
