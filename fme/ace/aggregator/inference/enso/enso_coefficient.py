@@ -381,11 +381,12 @@ def get_sample_index_series(
             # no overlap
             sample_index_series.append(None)
         else:
-            sample_time = xr.cftime_range(
+            sample_time = xr.date_range(
                 start=initial_time_sample.item(),
                 end=end_time.item(),
                 freq=f"{int(timestep.total_seconds())}s",
                 calendar=data_calendar,
+                use_cftime=True,
             )
             valid_sample_time = sample_time.where(
                 np.logical_and(

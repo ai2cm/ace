@@ -7,6 +7,7 @@ import pytest
 import torch
 import xarray as xr
 from netCDF4 import Dataset
+from xarray.coding.times import CFDatetimeCoder
 
 from fme.ace.data_loading.batch_data import PairedData
 from fme.ace.inference.data_writer.main import (
@@ -70,11 +71,12 @@ class TestDataWriter:
         start_time = datetime_class(*start_time)
         end_time = datetime_class(*end_time)
         batch_time = xr.DataArray(
-            xr.cftime_range(
+            xr.date_range(
                 start_time,
                 end_time,
                 freq=freq,
                 calendar=calendar,
+                use_cftime=True,
             ).values,
             dims="time",
         )
@@ -233,7 +235,7 @@ class TestDataWriter:
         # since the values opened this way depend on calendar/units
         with xr.open_dataset(
             tmp_path / "autoregressive_predictions.nc",
-            use_cftime=True,
+            decode_times=CFDatetimeCoder(use_cftime=True),
             decode_timedelta=False,  # prefer handling lead times in ints not timedelta
         ) as ds:
             expected_lead_times = xr.DataArray(
@@ -266,7 +268,9 @@ class TestDataWriter:
                 assert "valid_time" in ds[var_name].coords
                 assert "init_time" in ds[var_name].coords
         for source in ["target", "prediction"]:
-            histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+            histograms = xr.open_dataset(
+                tmp_path / f"histograms_{source}.nc", decode_timedelta=False
+            )
             actual_var_names = sorted([str(k) for k in histograms.keys()])
             assert histograms.data_vars["temp"].attrs["units"] == "count"
             assert "temp_bin_edges" in actual_var_names
@@ -277,7 +281,9 @@ class TestDataWriter:
             )
             assert same_count_each_timestep
 
-        with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
+        with xr.open_dataset(
+            tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
+        ) as ds:
             assert ds.counts.sum() == n_initial_conditions * n_timesteps
             assert np.sum(np.isnan(ds["precipitation"])) == 0
             assert np.sum(np.isnan(ds["temp"])) == 0
@@ -470,14 +476,19 @@ class TestDataWriter:
         )
         writer.flush()
 
-        with xr.open_dataset(tmp_path / "autoregressive_predictions.nc") as ds:
+        with xr.open_dataset(
+            tmp_path / "autoregressive_predictions.nc",
+            decode_timedelta=False,
+        ) as ds:
             assert "temp" in ds
             expected_shape = (n_samples, n_timesteps // coarsen_factor, 4, 5)
             assert ds.temp.shape == expected_shape
             assert ds.valid_time.shape == expected_shape[:2]
             assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
 
-        with xr.open_dataset(tmp_path / "monthly_mean_predictions.nc") as ds:
+        with xr.open_dataset(
+            tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
+        ) as ds:
             assert ds.counts.sum() == n_samples * n_timesteps
             assert np.sum(np.isnan(ds["temp"])) == 0
             assert np.sum(np.isnan(ds["pressure"])) == 0
@@ -502,10 +513,11 @@ class TestDataWriter:
             np.array([cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0) for _ in range(3)]),
             np.array(
                 [
-                    xr.cftime_range(
+                    xr.date_range(
                         cftime.DatetimeJulian(2020, 1, 1, 0, 0, 0),
                         freq="6h",
                         periods=3,
+                        use_cftime=True,
                     ).values
                     for _ in range(3)
                 ]
@@ -524,10 +536,11 @@ class TestDataWriter:
             ),
             np.array(
                 [
-                    xr.cftime_range(
+                    xr.date_range(
                         cftime.DatetimeJulian(2020, 1, 1, 6 * i, 0, 0),
                         freq="6h",
                         periods=3,
+                        use_cftime=True,
                     )
                     for i in range(3)
                 ]
@@ -546,10 +559,11 @@ class TestDataWriter:
             ),
             np.array(
                 [
-                    xr.cftime_range(
+                    xr.date_range(
                         cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
                         freq="6h",
                         periods=3,
+                        use_cftime=True,
                     )
                     for i in range(3)
                 ]
@@ -576,10 +590,11 @@ def test_get_batch_lead_time_microseconds_length_mismatch():
     )
     batch_time = np.array(
         [
-            xr.cftime_range(
+            xr.date_range(
                 cftime.DatetimeJulian(2020, 1, 2, 6 * i, 0, 0),
                 freq="6h",
                 periods=3,
+                use_cftime=True,
             ).values
             for i in range(2)
         ],
@@ -594,15 +609,17 @@ def test_get_batch_lead_time_microseconds_inconsistent_samples():
     )
     batch_time = np.array(
         [
-            xr.cftime_range(
+            xr.date_range(
                 cftime.DatetimeJulian(2020, 1, 1, 6, 0, 0),
                 freq="6h",
                 periods=3,
+                use_cftime=True,
             ),
-            xr.cftime_range(
+            xr.date_range(
                 cftime.DatetimeJulian(2020, 1, 1, 12, 0, 0),
                 freq="6h",
                 periods=3,
+                use_cftime=True,
             ),
         ]
     )

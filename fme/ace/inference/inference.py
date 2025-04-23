@@ -7,6 +7,7 @@ from typing import Literal, Optional, Sequence, Union
 import dacite
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
 import fme
 import fme.core.logging_utils as logging_utils
@@ -65,7 +66,12 @@ class InitialConditionConfig:
     start_indices: Optional[StartIndices] = None
 
     def get_dataset(self) -> xr.Dataset:
-        ds = xr.open_dataset(self.path, engine=self.engine, use_cftime=True)
+        ds = xr.open_dataset(
+            self.path,
+            engine=self.engine,
+            decode_times=CFDatetimeCoder(use_cftime=True),
+            decode_timedelta=False,
+        )
         return self._subselect_initial_conditions(ds)
 
     def _subselect_initial_conditions(self, ds: xr.Dataset) -> xr.Dataset:

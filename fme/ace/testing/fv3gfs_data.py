@@ -189,7 +189,7 @@ class MonthlyReferenceData:
             variable_names=self.names,
         )
         # drop default time coord from get_nd_dataset
-        ds = ds.drop(["time"])
+        ds = ds.drop_vars(["time"])
         # add a time axis for months
         months = []
         for i in range(self.dim_sizes.n_time):

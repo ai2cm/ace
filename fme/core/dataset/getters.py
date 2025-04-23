@@ -9,7 +9,7 @@ from fme.core.dataset.config import RepeatedInterval, TimeSlice, XarrayDataConfi
 from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.subset import XarraySubset
-from fme.core.dataset.xarray import XarrayDataset, _get_raw_paths
+from fme.core.dataset.xarray import XarrayDataset, get_raw_paths
 from fme.core.typing_ import Slice
 
 
@@ -88,9 +88,13 @@ def _infer_available_variables(config: XarrayDataConfig):
     """
     Infer the available variables from a XarrayDataset.
     """
-    paths = _get_raw_paths(config.data_path, config.file_pattern)
+    paths = get_raw_paths(config.data_path, config.file_pattern)
     dataset = xr.open_dataset(
-        paths[0], decode_times=False, engine=config.engine, chunks=None
+        paths[0],
+        decode_times=False,
+        decode_timedelta=False,
+        engine=config.engine,
+        chunks=None,
     )
     return dataset.data_vars
 
