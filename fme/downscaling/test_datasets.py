@@ -4,7 +4,7 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.properties import DatasetProperties
 from fme.downscaling.datasets import (
     BatchData,
     BatchedLatLonCoordinates,

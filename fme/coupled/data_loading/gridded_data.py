@@ -7,7 +7,7 @@ import torch
 from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
