@@ -264,6 +264,9 @@ class DatasetComputationConfig:
         reference_vertical_coordinate_file_land: (optional) path to netCDF file
             containing vertical coordinate definition for the land model of the
             reference simulation.
+        mask_soil_moisture: (optional) whether to mask soil moisture content using soil
+            temperature. This is useful for CM4 dataset, where soil moisture content is
+            zero instead of NaN over the oceans.
     """
 
     reference_vertical_coordinate_file: str
@@ -286,6 +289,7 @@ class DatasetComputationConfig:
     vertical_coarsening_indices_land: Optional[Sequence[Tuple[int, int]]] = None
     validate_vertical_coarsening_indices_land: bool = True
     reference_vertical_coordinate_file_land: Optional[str] = None
+    mask_soil_moisture: bool = False
 
 
 @dataclasses.dataclass
@@ -317,7 +321,7 @@ class DatasetConfig:
 
 def weighted_mean(da: xr.DataArray, weights: xr.DataArray, dims) -> xr.DataArray:
     """Compute weighted mean of xr.DataArray."""
-    return (da * weights).sum(dims) / weights.sum(dims)
+    return (da * weights).sum(dims, skipna=False) / weights.sum(dims)
 
 
 def get_dataset_urls(
@@ -556,6 +560,7 @@ def compute_vertical_coarsening_land(
     height_thickness_name: str,
     summed_variables: Sequence[str],
     validate_indices: bool,
+    mask_soil_moisture: bool = False,
 ) -> xr.Dataset:
     """Compute vertical coarsening of 3D land variables by height-weighted mean or
     unweighted sum. Outputs are saved as new variables in the dataset with the
@@ -591,6 +596,17 @@ def compute_vertical_coarsening_land(
         thickness = xr.open_dataset(f, decode_timedelta=False).load()
 
     coarsened_arrays = {}
+
+    if mask_soil_moisture and (
+        "total_moisture_content_of_soil_layer" in vertically_resolved_names
+        and "temperature_of_soil_layer" in vertically_resolved_names
+    ):
+        # Mask out soil moisture content when temperature is NaN
+        logging.info("Masking soil moisture content using temperature")
+        ds["total_moisture_content_of_soil_layer"] = ds[
+            "total_moisture_content_of_soil_layer"
+        ].where(ds.temperature_of_soil_layer.notnull())
+
     for i, (start, end) in enumerate(interface_indices):
         height_thickness = thickness[height_thickness_name].isel(
             {dim: slice(start, end)}
@@ -598,9 +614,9 @@ def compute_vertical_coarsening_land(
         for name in vertically_resolved_names:
             array_slice = ds[name].isel({dim: slice(start, end)})
 
-            # some land variables are total quantity in layer so just need to sum
+            # some land variables are total quantity in layer so just need to be summed
             if name in summed_variables:
-                coarsened_da = array_slice.sum(dim)
+                coarsened_da = array_slice.sum(dim, skipna=False)
             else:
                 coarsened_da = weighted_mean(
                     array_slice, height_thickness.astype(array_slice.dtype), dim
@@ -801,6 +817,7 @@ def construct_lazy_dataset(
             height_thickness_name=standard_names.height_thickness,
             summed_variables=standard_names.land_names_to_vertically_coarsen_by_sum,
             validate_indices=config.validate_vertical_coarsening_indices_land,
+            mask_soil_moisture=config.mask_soil_moisture,
         )
 
     ds = compute_column_moisture_integral(
