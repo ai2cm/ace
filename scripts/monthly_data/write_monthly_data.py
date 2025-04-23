@@ -22,7 +22,7 @@ from fme.core.coordinates import (
     OptionalHybridSigmaPressureCoordinate,
 )
 from fme.core.dataset.getters import get_datasets, get_merged_datasets
-from fme.core.dataset.xarray import DatasetProperties
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
 from fme.core.logging_utils import LoggingConfig

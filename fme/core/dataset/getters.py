@@ -1,15 +1,46 @@
 import warnings
-from typing import List, Mapping, Optional, Sequence, Tuple
+from typing import List, Mapping, Optional, Sequence, Tuple, Union
 
-from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.xarray import (
-    DatasetProperties,
-    MergedXarrayDataset,
-    XarrayConcat,
-    XarraySubset,
-    get_per_dataset_names,
-    get_xarray_dataset,
-)
+import numpy as np
+import xarray as xr
+
+from fme.core.dataset.concat import XarrayConcat
+from fme.core.dataset.config import RepeatedInterval, TimeSlice, XarrayDataConfig
+from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset.subset import XarraySubset
+from fme.core.dataset.xarray import XarrayDataset, _get_raw_paths
+from fme.core.typing_ import Slice
+
+
+def _as_index_selection(
+    subset: Union[Slice, TimeSlice, RepeatedInterval], dataset: XarrayDataset
+) -> Union[slice, np.ndarray]:
+    """Converts a subset defined either as a Slice or TimeSlice into an index slice
+    based on time coordinate in provided dataset.
+    """
+    if isinstance(subset, Slice):
+        index_selection = subset.slice
+    elif isinstance(subset, TimeSlice):
+        index_selection = subset.slice(dataset.sample_start_times)
+    elif isinstance(subset, RepeatedInterval):
+        try:
+            index_selection = subset.get_boolean_mask(len(dataset), dataset.timestep)
+        except ValueError as e:
+            raise ValueError(f"Error when applying RepeatedInterval to dataset: {e}")
+    else:
+        raise TypeError(f"subset must be Slice or TimeSlice, got {type(subset)}")
+    return index_selection
+
+
+def get_xarray_dataset(
+    config: XarrayDataConfig, names: List[str], n_timesteps: int
+) -> Tuple["XarraySubset", DatasetProperties]:
+    dataset = XarrayDataset(config, names, n_timesteps)
+    properties = dataset.properties
+    index_slice = _as_index_selection(config.subset, dataset)
+    dataset = XarraySubset(dataset, index_slice)
+    return dataset, properties
 
 
 def get_datasets(
@@ -51,6 +82,37 @@ def get_dataset(
     )
     ensemble = XarrayConcat(datasets)
     return ensemble, properties
+
+
+def _infer_available_variables(config: XarrayDataConfig):
+    """
+    Infer the available variables from a XarrayDataset.
+    """
+    paths = _get_raw_paths(config.data_path, config.file_pattern)
+    dataset = xr.open_dataset(
+        paths[0], decode_times=False, engine=config.engine, chunks=None
+    )
+    return dataset.data_vars
+
+
+def get_per_dataset_names(
+    dataset_configs: Mapping[str, Union[XarrayDataConfig, Sequence[XarrayDataConfig]]],
+    names: List[str],
+) -> Mapping[str, List[str]]:
+    merged_required_names = names.copy()
+    per_dataset_names = {}
+    for key, config in dataset_configs.items():
+        if isinstance(config, XarrayDataConfig):
+            current_source_variables = _infer_available_variables(config)
+        elif isinstance(config, Sequence):
+            current_source_variables = _infer_available_variables(config[0])
+        current_source_names = [
+            name for name in merged_required_names if name in current_source_variables
+        ]
+        per_dataset_names[key] = current_source_names
+        for name in current_source_names:
+            merged_required_names.remove(name)
+    return per_dataset_names
 
 
 def get_merged_datasets(
