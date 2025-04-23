@@ -7,6 +7,7 @@ import torch
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo, IncompatibleDatasetInfo
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.mask_provider import MaskProvider
 
 
 @pytest.mark.parametrize(
@@ -27,6 +28,15 @@ from fme.core.gridded_ops import LatLonOperations
                 timestep=datetime.timedelta(hours=1),
             ),
             id="vertical_coordinate",
+        ),
+        pytest.param(
+            DatasetInfo(
+                img_shape=(10, 10),
+                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10)),
+                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)}),
+                timestep=datetime.timedelta(hours=1),
+            ),
+            id="mask_provider",
         ),
     ],
 )
@@ -97,6 +107,25 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
             id="vertical_coordinate_missing_from_first",
         ),
         pytest.param(
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+            ),
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+            ),
+            id="mask_provider_equal",
+        ),
+        pytest.param(
+            DatasetInfo(mask_provider=MaskProvider()),
+            DatasetInfo(),
+            id="mask_provider_missing_from_second",
+        ),
+        pytest.param(
+            DatasetInfo(),
+            DatasetInfo(mask_provider=MaskProvider()),
+            id="mask_provider_missing_from_first",
+        ),
+        pytest.param(
             DatasetInfo(),
             DatasetInfo(timestep=datetime.timedelta(hours=1)),
             id="timestep_missing_from_first",
@@ -159,6 +188,16 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
             ),
             ["vertical_coordinate"],
             id="vertical_coordinate_values_differ",
+        ),
+        pytest.param(
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+            ),
+            DatasetInfo(
+                mask_provider=MaskProvider(masks={"mask_0": torch.zeros(10, 10)})
+            ),
+            ["mask_provider"],
+            id="mask_provider_masks_differ",
         ),
         pytest.param(
             DatasetInfo(timestep=datetime.timedelta(hours=1)),

@@ -101,6 +101,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._gridded_operations = (
             self._properties.horizontal_coordinates.gridded_operations
         )
+        self._mask_provider = self._properties.mask_provider
         self._sampler = sampler
         self._modifier = modifier
         self._batch_size: Optional[int] = None
@@ -123,6 +124,7 @@ class GriddedData(GriddedDataABC[BatchData]):
             img_shape=self._img_shape,
             gridded_operations=self._gridded_operations,
             vertical_coordinate=self._vertical_coordinate,
+            mask_provider=self._mask_provider,
             timestep=self._timestep,
         )
 
