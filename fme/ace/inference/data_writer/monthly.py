@@ -378,7 +378,7 @@ def get_days_since_reference(
     calendar_year = years[:, None] + (months[:, None] + months_elapsed[None, :]) // 12
     days_since_reference = np.zeros_like(calendar_month, dtype=np.int64)
     for i in range(calendar_month.shape[0]):
-        dates_sample = xr.cftime_range(
+        dates_sample = xr.date_range(
             cftime.datetime(
                 calendar_year[i, 0], calendar_month[i, 0] + 1, 1, calendar=calendar
             ),
@@ -387,6 +387,7 @@ def get_days_since_reference(
             ),
             freq="MS",
             calendar=calendar,
+            use_cftime=True,
         )
         days_since_reference[i, :] = (
             dates_sample.values - reference_date

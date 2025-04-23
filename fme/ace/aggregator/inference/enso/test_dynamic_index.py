@@ -62,10 +62,11 @@ def _get_windowed_times(
         hours=6 * i_start
     )
     sample_time_array = xr.DataArray(
-        data=xr.cftime_range(
+        data=xr.date_range(
             start=start_time,
             periods=n_times,
             freq=freq,
+            use_cftime=True,
         ).values,
         dims=("time",),
     )
@@ -186,10 +187,11 @@ def test_regional__raw_index():
     expected_times = xr.concat(
         [
             xr.DataArray(
-                data=xr.cftime_range(
+                data=xr.date_range(
                     start=cftime.DatetimeNoLeap(*start_date),
                     periods=n_times,
                     freq="6h",
+                    use_cftime=True,
                 ).values,
                 dims=("time"),
             )

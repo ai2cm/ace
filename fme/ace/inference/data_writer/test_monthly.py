@@ -64,7 +64,9 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
                 assert time.shape == (n_samples, window_size)
                 writer.append_batch(data=month_data, start_timestep=0, batch_time=time)
     writer.flush()
-    written = xr.open_dataset(str(tmpdir / "monthly_mean_predictions.nc"))
+    written = xr.open_dataset(
+        str(tmpdir / "monthly_mean_predictions.nc"), decode_timedelta=False
+    )
     assert written["x"].shape == (n_samples, 24, n_lat, n_lon)
     assert np.sum(written["x"].values != 0) > 0, "No non-zero values written"
     assert (

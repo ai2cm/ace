@@ -368,7 +368,9 @@ def inference_helper(
         )
         np.testing.assert_allclose(ic_ds[var].values, 0.0)
 
-    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    metric_ds = xr.open_dataset(
+        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
+    )
     assert var in metric_ds.data_vars
     assert metric_ds.data_vars[var].attrs["units"] == "m"
     assert metric_ds.data_vars[var].attrs["long_name"] == f"ensemble mean of {var}"
@@ -393,7 +395,9 @@ def inference_helper(
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
 
-    time_mean_diagnostics = xr.open_dataset(tmp_path / "time_mean_diagnostics.nc")
+    time_mean_diagnostics = xr.open_dataset(
+        tmp_path / "time_mean_diagnostics.nc", decode_timedelta=False
+    )
     actual_var_names = sorted([str(k) for k in time_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
     assert f"bias_map-{var}" in actual_var_names
@@ -404,7 +408,9 @@ def inference_helper(
     assert "lat" in time_mean_diagnostics.coords
     assert "lon" in time_mean_diagnostics.coords
 
-    zonal_mean_diagnostics = xr.open_dataset(tmp_path / "zonal_mean_diagnostics.nc")
+    zonal_mean_diagnostics = xr.open_dataset(
+        tmp_path / "zonal_mean_diagnostics.nc", decode_timedelta=False
+    )
     actual_var_names = sorted([str(k) for k in zonal_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
     assert f"error-{var}" in actual_var_names
@@ -415,7 +421,9 @@ def inference_helper(
     assert "lat" in zonal_mean_diagnostics.coords
 
     for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        histograms = xr.open_dataset(
+            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
+        )
         actual_var_names = sorted([str(k) for k in histograms.keys()])
         # NOTE: target histograms include forcing variables
         n_vars = (
@@ -534,7 +542,7 @@ def test_inference_writer_boundaries(
 
     prediction_ds = prediction_ds.isel(sample=0)
     target_ds = target_ds.isel(sample=0)
-    ds = xr.open_dataset(data.data_filename)
+    ds = xr.open_dataset(data.data_filename, decode_timedelta=False)
 
     for i in range(0, n_forward_steps):
         # metrics logs includes IC while saved data does not
@@ -640,12 +648,16 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     assert (
         len(prediction_ds["time"]) == n_coarsened_timesteps
     ), "raw predictions time dimension size"
-    metric_ds = xr.open_dataset(tmp_path / "reduced_autoregressive_predictions.nc")
+    metric_ds = xr.open_dataset(
+        tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
+    )
     assert (
         metric_ds.sizes["timestep"] == n_coarsened_timesteps
     ), "reduced predictions time dimension size"
     for source in ["target", "prediction"]:
-        histograms = xr.open_dataset(tmp_path / f"histograms_{source}.nc")
+        histograms = xr.open_dataset(
+            tmp_path / f"histograms_{source}.nc", decode_timedelta=False
+        )
         assert (
             histograms.sizes["time"] == n_coarsened_timesteps
         ), "histograms time dimension size"
@@ -790,7 +802,9 @@ def test_derived_metrics_run_without_errors(
     assert "inference/mean_norm/weighted_rmse/total_water_path" not in inference_logs[0]
     assert "inference/time_mean_norm/rmse/total_water_path" not in inference_logs[-1]
 
-    ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
     assert "units" in ds["total_water_path"].attrs
     assert "long_name" in ds["total_water_path"].attrs
 
@@ -1024,7 +1038,7 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
     assert "forcing_var" not in ds
     # assert only prognostic variables are in initial condition and restart files
     for filename in ["initial_condition.nc", "restart.nc"]:
-        ds = xr.open_dataset(tmp_path / filename)
+        ds = xr.open_dataset(tmp_path / filename, decode_timedelta=False)
         assert "USWRFtoa" not in ds
         assert "forcing_var" not in ds
         assert "prog" in ds

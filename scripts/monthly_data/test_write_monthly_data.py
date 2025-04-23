@@ -59,4 +59,4 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
         variable_names=all_names,
     )
     run(config)
-    xr.open_dataset(tmp_path / "monthly_mean_data.nc")
+    xr.open_dataset(tmp_path / "monthly_mean_data.nc", decode_timedelta=False)

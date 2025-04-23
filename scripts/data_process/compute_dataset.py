@@ -361,7 +361,7 @@ def get_coarse_ak_bk(
         variables since they represent the interfaces between levels.
     """
     with fsspec.open(url) as f:
-        vertical_coordinate = xr.open_dataset(f).load()
+        vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
 
     vertical_coordinate = vertical_coordinate.astype(dtype)
 
@@ -453,7 +453,7 @@ def compute_pressure_thickness(
         return ds
 
     with fsspec.open(vertical_coordinate_file) as f:
-        vertical_coordinate = xr.open_dataset(f).load()
+        vertical_coordinate = xr.open_dataset(f, decode_timedelta=False).load()
 
     vertical_coordinate = vertical_coordinate.astype(ds[surface_pressure_name].dtype)
 
@@ -588,7 +588,7 @@ def compute_vertical_coarsening_land(
         )
 
     with fsspec.open(vertical_coordinate_file) as f:
-        thickness = xr.open_dataset(f).load()
+        thickness = xr.open_dataset(f, decode_timedelta=False).load()
 
     coarsened_arrays = {}
     for i, (start, end) in enumerate(interface_indices):

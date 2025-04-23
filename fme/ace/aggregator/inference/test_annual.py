@@ -40,7 +40,10 @@ def test_paired_annual_aggregator(tmpdir):
         ),
         n_ensemble=3,
     )
-    monthly_ds = xr.open_dataset(monthly_reference_data.data_filename)
+    monthly_ds = xr.open_dataset(
+        monthly_reference_data.data_filename,
+        decode_timedelta=False,
+    )
     agg = PairedGlobalMeanAnnualAggregator(
         ops=LatLonOperations(area_weights),
         timestep=TIMESTEP,

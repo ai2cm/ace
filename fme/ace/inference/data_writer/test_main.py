@@ -34,7 +34,7 @@ def test_write_single_timestep():
         )
         filename = os.path.join(tmpdir, "initial_condition.nc")
         assert os.path.exists(filename)
-        with xr.open_dataset(filename) as ds:
+        with xr.open_dataset(filename, decode_timedelta=False) as ds:
             assert "air_temperature" in ds
             assert ds.air_temperature.shape == (n_samples, n_lat, n_lon)
             assert ds.time.shape == (n_samples,)
@@ -74,7 +74,7 @@ def test_write_multiple_timesteps():
         )
         filename = os.path.join(tmpdir, "initial_condition.nc")
         assert os.path.exists(filename)
-        with xr.open_dataset(filename) as ds:
+        with xr.open_dataset(filename, decode_timedelta=False) as ds:
             assert "air_temperature" in ds
             assert ds.air_temperature.shape == (n_samples, n_time, n_lat, n_lon)
             assert ds.time.shape == (n_samples, n_time)
