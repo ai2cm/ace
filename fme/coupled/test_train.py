@@ -389,6 +389,8 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     epoch_logs = train_logs[-1]
     assert "train/mean/loss" in epoch_logs
     assert "val/mean/loss" in epoch_logs
+    assert "val/mean/loss/ocean" in epoch_logs
+    assert "val/mean/loss/atmosphere" in epoch_logs
     assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
