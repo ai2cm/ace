@@ -22,6 +22,8 @@ class DataLoaderConfig:
               source2:
                 - data_path: ...
             ```
+            If multiple sources contain the same data variable, the version
+            from the first source is loaded and other sources are ignored.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
