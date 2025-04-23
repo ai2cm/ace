@@ -25,18 +25,17 @@ from fme.core.dataset.config import (
     TimeSlice,
     XarrayDataConfig,
 )
-from fme.core.dataset.getters import get_dataset
+from fme.core.dataset.getters import get_dataset, get_xarray_dataset
+from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.subset import XarraySubset
 from fme.core.dataset.xarray import (
-    MergedXarrayDataset,
     XarrayDataset,
-    XarraySubset,
+    _get_cumulative_timesteps,
+    _get_file_local_index,
+    _get_raw_times,
+    _get_timestep,
     _get_vertical_coordinate,
-    get_cumulative_timesteps,
-    get_file_local_index,
-    get_raw_times,
-    get_timestep,
-    get_xarray_dataset,
-    repeat_and_increment_time,
+    _repeat_and_increment_time,
 )
 from fme.core.typing_ import Slice
 
@@ -158,7 +157,7 @@ def _get_data(
         filenames.append(filename)
 
     initial_condition_names = ()
-    start_indices = get_cumulative_timesteps(get_raw_times(filenames, "netcdf4"))
+    start_indices = _get_cumulative_timesteps(_get_raw_times(filenames, "netcdf4"))
     if write_extra_vars:
         variable_names = VariableNames(
             time_dependent_names=(*var_names, "varying_scalar_var"),
@@ -301,7 +300,7 @@ def test_monthly_file_local_index(
     mock_monthly_netcdfs, global_idx, expected_file_local_idx
 ):
     mock_data: MockData = mock_monthly_netcdfs
-    file_local_idx = get_file_local_index(global_idx, mock_data.start_indices)
+    file_local_idx = _get_file_local_index(global_idx, mock_data.start_indices)
     assert file_local_idx == expected_file_local_idx
     delta = mock_data.obs_times[1] - mock_data.obs_times[0]
     target_timestamp = np.datetime64(
@@ -408,7 +407,7 @@ def test_yearly_file_local_index(
     mock_yearly_netcdfs, global_idx, expected_file_local_idx
 ):
     mock_data: MockData = mock_yearly_netcdfs
-    file_local_idx = get_file_local_index(global_idx, mock_data.start_indices)
+    file_local_idx = _get_file_local_index(global_idx, mock_data.start_indices)
     assert file_local_idx == expected_file_local_idx
     delta = mock_data.obs_times[1] - mock_data.obs_times[0]
     target_timestamp = (
@@ -594,11 +593,11 @@ def test_get_timestep(periods, freq, reverse, expected, exception):
         index = index[::-1]
 
     if exception is None:
-        result = get_timestep(index.values)
+        result = _get_timestep(index.values)
         assert result == expected
     else:
         with pytest.raises(exception):
-            get_timestep(index.values)
+            _get_timestep(index.values)
 
 
 @pytest.mark.parametrize("n_repeats", [1, 3])
@@ -618,7 +617,7 @@ def test_repeat_and_increment_times(n_repeats):
     raw_periods = [periods_a, periods_b]
     raw_total_periods = sum(raw_periods)
 
-    result = repeat_and_increment_time(raw_times, n_repeats, delta)
+    result = _repeat_and_increment_time(raw_times, n_repeats, delta)
     full_periods = [len(times) for times in result]
     full_total_periods = sum(full_periods)
 
