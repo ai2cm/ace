@@ -47,6 +47,7 @@ from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
@@ -1435,7 +1436,7 @@ def test_get_serialized_stepper_vertical_coordinate():
     assert isinstance(vertical_coordinate, VerticalCoordinate)
 
 
-def _get_stepper_with_input_masking(vertical_coordinate: VerticalCoordinate):
+def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True):
     # basic StepperConfig with input_masking configured
     config = StepperConfig(
         step=StepSelector(
@@ -1462,11 +1463,15 @@ def _get_stepper_with_input_masking(vertical_coordinate: VerticalCoordinate):
     area = torch.ones(img_shape, device=DEVICE)
     gridded_operations = LatLonOperations(area)
     timestep = datetime.timedelta(hours=6)
+    mask_provider: Optional[MaskProvider] = None
+    if dataset_info_has_mask_provider:
+        mask_provider = MaskProvider()
     return config.get_stepper(
         DatasetInfo(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
-            vertical_coordinate=vertical_coordinate,
+            vertical_coordinate=NullVerticalCoordinate(),
+            mask_provider=mask_provider,
             timestep=timestep,
         )
     )
@@ -1476,17 +1481,12 @@ def test_get_stepper_with_input_masking():
     # check that no error is raised when building a stepper with input_masking
     # configured when the vertical coordinate is a mask_provider
 
-    # VerticalCoordinate with mask
-    class MockMaskingCoord(NullVerticalCoordinate):
-        def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
-            return torch.ones(1, device=get_device())  # Return a dummy tensor
-
     # no error raised
-    _ = _get_stepper_with_input_masking(MockMaskingCoord())
+    _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=True)
 
 
 def test_get_stepper_with_input_masking_raises():
     # no get_mask_tensor_for method on vertical coordinate raises error when
     # input_masking provided in config
     with pytest.raises(MissingDatasetInfo, match="mask_provider"):
-        _ = _get_stepper_with_input_masking(NullVerticalCoordinate())
+        _ = _get_stepper_with_input_masking(dataset_info_has_mask_provider=False)
