@@ -11,7 +11,7 @@ from fme.core.coordinates import (
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
 )
-from fme.core.dataset.data_typing import Dataset, VariableMetadata
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.xarray import DatasetProperties
 from fme.core.typing_ import TensorDict
 
@@ -135,8 +135,8 @@ class CoupledDatasetItem:
 class CoupledDataset(torch.utils.data.Dataset):
     def __init__(
         self,
-        ocean: Dataset,
-        atmosphere: Dataset,
+        ocean: torch.utils.data.Dataset,
+        atmosphere: torch.utils.data.Dataset,
         properties: CoupledDatasetProperties,
         n_steps_fast: int,
     ):

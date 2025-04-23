@@ -27,7 +27,7 @@ from fme.core.stacker import Stacker
 from fme.core.typing_ import Slice, TensorDict
 
 from .config import RepeatedInterval, TimeSlice, XarrayDataConfig
-from .data_typing import Dataset, VariableMetadata
+from .data_typing import VariableMetadata
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_dimensions,
@@ -373,7 +373,7 @@ def infer_available_variables(config: XarrayDataConfig):
     return dataset.data_vars
 
 
-class XarrayDataset(Dataset):
+class XarrayDataset(torch.utils.data.Dataset):
     """Load data from a directory of files matching a pattern using xarray. The
     number of contiguous timesteps to load for each sample is specified by the
     n_timesteps argument.
@@ -399,7 +399,7 @@ class XarrayDataset(Dataset):
                 f"No files found matching '{self.path}/{self.file_pattern}'."
             )
         self.full_paths = self._raw_paths * config.n_repeats
-        self.n_steps = n_timesteps
+        self.sample_n_times = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
             self.full_paths[0], decode_times=False, engine=self.engine, chunks=None
@@ -427,15 +427,11 @@ class XarrayDataset(Dataset):
             self._vertical_coordinate,
             self._horizontal_coordinates,
             self.timestep,
-            self.is_remote,
+            self._is_remote,
         )
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self._horizontal_coordinates
-
-    @property
-    def is_remote(self) -> bool:
+    def _is_remote(self) -> bool:
         protocol = _get_protocol(str(self.path))
         if not protocol or protocol == "file":
             return False
@@ -473,7 +469,7 @@ class XarrayDataset(Dataset):
         cum_num_timesteps = get_cumulative_timesteps(time_coord)
         self.start_indices = cum_num_timesteps[:-1]
         self.total_timesteps = cum_num_timesteps[-1]
-        self._n_initial_conditions = self.total_timesteps - self.n_steps + 1
+        self._n_initial_conditions = self.total_timesteps - self.sample_n_times + 1
         self._sample_start_times = xr.CFTimeIndex(
             np.concatenate(time_coord)[: self._n_initial_conditions]
         )
@@ -569,14 +565,6 @@ class XarrayDataset(Dataset):
         return horizontal_coordinates, static_derived_data
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
-        return self._variable_metadata
-
-    @property
-    def vertical_coordinate(self) -> VerticalCoordinate:
-        return self._vertical_coordinate
-
-    @property
     def timestep(self) -> datetime.timedelta:
         if self._timestep is None:
             raise ValueError(
@@ -600,7 +588,8 @@ class XarrayDataset(Dataset):
         return self._sample_start_times
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
-        """Return a sample of data spanning the timesteps [idx, idx + self.n_steps).
+        """Return a sample of data spanning the timesteps
+        [idx, idx + self.sample_n_times).
 
         Args:
             idx: Index of the sample to retrieve.
@@ -609,7 +598,7 @@ class XarrayDataset(Dataset):
             Tuple of a sample's data (i.e. a mapping from names to torch.Tensors) and
             its corresponding time coordinate.
         """
-        time_slice = slice(idx, idx + self.n_steps)
+        time_slice = slice(idx, idx + self.sample_n_times)
         return self.get_sample_by_time_slice(time_slice)
 
     def get_sample_by_time_slice(
@@ -702,7 +691,7 @@ class XarraySubset(torch.utils.data.Dataset):
         logging.info(f"Subsetting dataset samples according to {subset}.")
         self._dataset = torch.utils.data.Subset(dataset, indices)
         self._sample_start_times = dataset.sample_start_times[indices]
-        self.properties = dataset.properties
+        self._sample_n_times = dataset.sample_n_times
 
     def __len__(self):
         return len(self._dataset)
@@ -715,9 +704,9 @@ class XarraySubset(torch.utils.data.Dataset):
         return self._sample_start_times
 
     @property
-    def n_steps(self) -> int:
+    def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
-        return self._dataset.dataset.n_steps
+        return self._sample_n_times
 
 
 class XarrayConcat(torch.utils.data.Dataset):
@@ -726,10 +715,15 @@ class XarrayConcat(torch.utils.data.Dataset):
         sample_start_times = datasets[0].sample_start_times
         for dataset in datasets[1:]:
             sample_start_times = sample_start_times.append(dataset.sample_start_times)
-            assert dataset.n_steps == datasets[0].n_steps
+            assert dataset.sample_n_times == datasets[0].sample_n_times
+            if not dataset.sample_n_times == datasets[0].sample_n_times:
+                raise ValueError(
+                    "All concatenated datasets \
+                         must have the same number of steps per sample item."
+                )
         self._sample_start_times = sample_start_times
         assert len(self._dataset) == len(sample_start_times)
-        self._n_steps = datasets[0].n_steps
+        self._sample_n_times = datasets[0].sample_n_times
 
     def __len__(self):
         return len(self._dataset)
@@ -742,9 +736,9 @@ class XarrayConcat(torch.utils.data.Dataset):
         return self._sample_start_times
 
     @property
-    def n_steps(self) -> int:
+    def sample_n_times(self) -> int:
         """The length of the time dimension of each sample."""
-        return self._n_steps
+        return self._sample_n_times
 
 
 def as_index_selection(
@@ -817,10 +811,10 @@ class MergedXarrayDataset:
                     "All datasets in a merged dataset must have the same sample "
                     "start times."
                 )
-            if not dataset.n_steps == self.datasets[0].n_steps:
+            if not dataset.sample_n_times == self.datasets[0].sample_n_times:
                 raise ValueError(
                     "All datasets in the merged datasets \
-                         must have the same number of steps."
+                         must have the same number of steps per sample item."
                 )
 
     def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
