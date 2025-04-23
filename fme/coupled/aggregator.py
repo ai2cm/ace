@@ -204,11 +204,15 @@ class InferenceEvaluatorAggregatorConfig:
         if self.monthly_reference_data is None:
             monthly_reference_data = None
         else:
-            monthly_reference_data = xr.open_dataset(self.monthly_reference_data)
+            monthly_reference_data = xr.open_dataset(
+                self.monthly_reference_data, decode_timedelta=False
+            )
         if self.time_mean_reference_data is None:
             time_mean = None
         else:
-            time_mean = xr.open_dataset(self.time_mean_reference_data)
+            time_mean = xr.open_dataset(
+                self.time_mean_reference_data, decode_timedelta=False
+            )
 
         if n_timesteps_atmosphere > 2**15 and self.log_zonal_mean_images:
             # matplotlib raises an error if image size is too large, and we plot

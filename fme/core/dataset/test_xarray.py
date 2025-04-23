@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
     DepthCoordinate,
@@ -89,19 +90,21 @@ def _get_data(
     write_extra_vars=True,
 ) -> MockData:
     """Constructs an xarray dataset and saves to disk in netcdf format."""
-    obs_times = xr.cftime_range(
+    obs_times = xr.date_range(
         start,
         end,
         freq=step_freq,
         calendar=calendar,
         inclusive="left",
+        use_cftime=True,
     )
-    start_times = xr.cftime_range(
+    start_times = xr.date_range(
         start,
         end,
         freq=file_freq,
         calendar=calendar,
         inclusive="left",
+        use_cftime=True,
     )
     obs_delta = obs_times[1] - obs_times[0]
     n_levels = 2
@@ -120,8 +123,13 @@ def _get_data(
             last = start_times[i + 1]
         else:
             last = obs_times[-1] + obs_delta
-        time = xr.cftime_range(
-            first, last, freq=step_freq, calendar=calendar, inclusive="left"
+        time = xr.date_range(
+            first,
+            last,
+            freq=step_freq,
+            calendar=calendar,
+            inclusive="left",
+            use_cftime=True,
         )
         data_vars: Dict[str, Union[float, xr.DataArray]] = {**ak, **bk}
         for var_name in var_names:
@@ -232,7 +240,12 @@ def load_files_without_dask(files, engine="netcdf4") -> xr.Dataset:
     """
     datasets = []
     for file in sorted(files):
-        with xr.open_dataset(file, use_cftime=True, engine=engine) as ds:
+        with xr.open_dataset(
+            file,
+            decode_times=CFDatetimeCoder(use_cftime=True),
+            decode_timedelta=False,
+            engine=engine,
+        ) as ds:
             datasets.append(ds.load())
     return xr.concat(datasets, dim="time", data_vars="minimal", coords="minimal")
 
@@ -309,7 +322,11 @@ def test_monthly_file_local_index(
     )
     file_idx, local_idx = file_local_idx
     full_paths = sorted(list(mock_data.tmpdir.glob("*.nc")))
-    with xr.open_dataset(full_paths[file_idx], use_cftime=True) as ds:
+    with xr.open_dataset(
+        full_paths[file_idx],
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
+    ) as ds:
         assert ds["time"][local_idx].item() == target_timestamp
 
 
@@ -416,7 +433,11 @@ def test_yearly_file_local_index(
     )
     file_idx, local_idx = file_local_idx
     full_paths = sorted(list(mock_data.tmpdir.glob("*.nc")))
-    with xr.open_dataset(full_paths[file_idx], use_cftime=True) as ds:
+    with xr.open_dataset(
+        full_paths[file_idx],
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
+    ) as ds:
         assert ds["time"][local_idx].item() == target_timestamp
 
 
@@ -529,7 +550,9 @@ def test_glob_file_pattern(
 
 def test_time_slice():
     time_slice = TimeSlice("2001-01-01", "2001-01-05", 2)
-    time_index = xr.cftime_range("2000", "2002", freq="D", calendar="noleap")
+    time_index = xr.date_range(
+        "2000", "2002", freq="D", calendar="noleap", use_cftime=True
+    )
     slice_ = time_slice.slice(time_index)
     assert slice_ == slice(365, 370, 2)
 
@@ -587,7 +610,7 @@ def test_XarrayDataset_timestep(mock_monthly_netcdfs, infer_timestep):
     ],
 )
 def test_get_timestep(periods, freq, reverse, expected, exception):
-    index = xr.cftime_range("2000", periods=periods, freq=freq)
+    index = xr.date_range("2000", periods=periods, freq=freq, use_cftime=True)
 
     if reverse:
         index = index[::-1]
@@ -607,11 +630,15 @@ def test_repeat_and_increment_times(n_repeats):
 
     start_a = cftime.DatetimeGregorian(2000, 1, 1)
     periods_a = 2
-    segment_a = xr.cftime_range(start_a, periods=periods_a, freq=freq).values
+    segment_a = xr.date_range(
+        start_a, periods=periods_a, freq=freq, use_cftime=True
+    ).values
 
     start_b = segment_a[-1] + delta
     periods_b = 3
-    segment_b = xr.cftime_range(start_b, periods=periods_b, freq=freq).values
+    segment_b = xr.date_range(
+        start_b, periods=periods_b, freq=freq, use_cftime=True
+    ).values
 
     raw_times = [segment_a, segment_b]
     raw_periods = [periods_a, periods_b]
@@ -622,8 +649,8 @@ def test_repeat_and_increment_times(n_repeats):
     full_total_periods = sum(full_periods)
 
     result_concatenated = np.concatenate(result)
-    expected_concatenated = xr.cftime_range(
-        start_a, periods=full_total_periods, freq=freq
+    expected_concatenated = xr.date_range(
+        start_a, periods=full_total_periods, freq=freq, use_cftime=True
     ).values
 
     assert full_periods == n_repeats * raw_periods
@@ -636,8 +663,11 @@ def test_all_times(mock_monthly_netcdfs, n_repeats):
     n_timesteps = 2  # Arbitrary for this test
     dataset = _get_repeat_dataset(mock_monthly_netcdfs, n_timesteps, n_repeats)
     expected_periods = n_repeats * len(mock_monthly_netcdfs.obs_times)
-    expected = xr.cftime_range(
-        MOCK_DATA_START_DATE, periods=expected_periods, freq=MOCK_DATA_FREQ
+    expected = xr.date_range(
+        MOCK_DATA_START_DATE,
+        periods=expected_periods,
+        freq=MOCK_DATA_FREQ,
+        use_cftime=True,
     )
     result = dataset.all_times
     assert result.equals(expected)

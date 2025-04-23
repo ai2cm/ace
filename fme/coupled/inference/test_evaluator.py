@@ -234,8 +234,8 @@ def test_evaluator_inference(
 
     ocean_output_path = tmp_path / "ocean" / "autoregressive_predictions.nc"
     atmos_output_path = tmp_path / "atmosphere" / "autoregressive_predictions.nc"
-    ds_ocean = xr.open_dataset(ocean_output_path)
-    ds_atmos = xr.open_dataset(atmos_output_path)
+    ds_ocean = xr.open_dataset(ocean_output_path, decode_timedelta=False)
+    ds_atmos = xr.open_dataset(atmos_output_path, decode_timedelta=False)
 
     # vertical coordinates are not written out
     assert "lat" in ds_ocean.coords

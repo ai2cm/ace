@@ -45,7 +45,7 @@ def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
     datasets = []
     for root in roots:
         with fsspec.open(root + filename) as file:
-            ds = xr.open_dataset(file).load()
+            ds = xr.open_dataset(file, decode_timedelta=False).load()
         datasets.append(ds)
     return datasets
 

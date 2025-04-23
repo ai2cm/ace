@@ -189,7 +189,9 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
                     assert metric in wandb_logs[i]
                     assert wandb_logs[i][metric] == val
 
-    ds = xr.open_dataset(tmp_path / "autoregressive_predictions.nc")
+    ds = xr.open_dataset(
+        tmp_path / "autoregressive_predictions.nc", decode_timedelta=False
+    )
     # prognostic in
     assert "prog" in ds
     # diags in
@@ -209,7 +211,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     np.testing.assert_allclose(
         ds["prog"].isel(time=1).values, ds["prog"].isel(time=0).values + 1, rtol=1e-6
     )
-    saved_data = xr.open_dataset(data.data_filename)
+    saved_data = xr.open_dataset(data.data_filename, decode_timedelta=False)
     ops = LatLonCoordinates(
         lat=torch.as_tensor(saved_data["grid_yt"].values.astype(np.float32)),
         lon=torch.as_tensor(saved_data["grid_xt"].values.astype(np.float32)),

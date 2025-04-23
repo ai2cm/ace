@@ -131,7 +131,9 @@ def open_dataset(
     start = time.time()
     if "time_invariant" in var_paths:
         for path in var_paths["time_invariant"]:
-            ds = xr.open_dataset(path).drop(DROP_VARIABLE_NAMES["2D"], errors="ignore")
+            ds = xr.open_dataset(path, decode_timedelta=False).drop(
+                DROP_VARIABLE_NAMES["2D"], errors="ignore"
+            )
             if "time" in ds.coords:
                 ds = ds.isel(time=0, drop=True)
             for varname in input_variable_names["time_invariant"]:

@@ -169,10 +169,12 @@ def test_inference_segmented_entrypoint():
 
         # assert each segment generated output of correct duration
         ds_two_segments_0 = xr.open_dataset(
-            run_dir / "segment_0000" / "autoregressive_predictions.nc"
+            run_dir / "segment_0000" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         ds_two_segments_1 = xr.open_dataset(
-            run_dir / "segment_0001" / "autoregressive_predictions.nc"
+            run_dir / "segment_0001" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         assert len(ds_two_segments_0.time) == len(ds_two_segments_1.time)
 
@@ -180,7 +182,8 @@ def test_inference_segmented_entrypoint():
         # 3-step run. Before comparing, drop init_time and time coordinates, since
         # we don't expect these to match.
         ds_one_segment = xr.open_dataset(
-            tmp_path / "non_segmented_run" / "autoregressive_predictions.nc"
+            tmp_path / "non_segmented_run" / "autoregressive_predictions.nc",
+            decode_timedelta=False,
         )
         ds_two_segments_1 = ds_two_segments_1.drop_vars(["init_time", "time"])
         ds_one_segment = ds_one_segment.drop_vars(["init_time", "time"])
