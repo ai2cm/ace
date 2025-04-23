@@ -12,6 +12,7 @@ import fsspec
 import numpy as np
 import torch
 import xarray as xr
+from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
     DepthCoordinate,
@@ -274,7 +275,8 @@ def _open_xr_dataset(path: str, *args, **kwargs):
     return xr.open_dataset(
         path,
         *args,
-        use_cftime=True,
+        decode_times=CFDatetimeCoder(use_cftime=True),
+        decode_timedelta=False,
         mask_and_scale=False,
         cache=False,
         chunks=None,
@@ -301,7 +303,7 @@ def _open_file_fh_cached(path, **kwargs):
     )
 
 
-def _get_raw_paths(path, file_pattern):
+def get_raw_paths(path, file_pattern):
     fs = _get_fs(path)
     glob_paths = sorted(fs.glob(os.path.join(path, file_pattern)))
     raw_paths = _preserve_protocol(path, glob_paths)
@@ -352,7 +354,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         self.spatial_dimensions = config.spatial_dimensions
         self.fill_nans = config.fill_nans
         self.subset_config = config.subset
-        self._raw_paths = _get_raw_paths(self.path, self.file_pattern)
+        self._raw_paths = get_raw_paths(self.path, self.file_pattern)
         if len(self._raw_paths) == 0:
             raise ValueError(
                 f"No files found matching '{self.path}/{self.file_pattern}'."
@@ -361,7 +363,11 @@ class XarrayDataset(torch.utils.data.Dataset):
         self.sample_n_times = n_timesteps
         self._get_files_stats(config.n_repeats, config.infer_timestep)
         first_dataset = xr.open_dataset(
-            self.full_paths[0], decode_times=False, engine=self.engine, chunks=None
+            self.full_paths[0],
+            decode_times=False,
+            decode_timedelta=False,
+            engine=self.engine,
+            chunks=None,
         )
         (
             self._horizontal_coordinates,
