@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Tuple
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
+from fme.core.mask_provider import MaskProvider
 from fme.core.masking import HasGetMaskTensorFor
 
 
@@ -36,11 +37,13 @@ class DatasetInfo:
         img_shape: Optional[Tuple[int, int]] = None,
         gridded_operations: Optional[GriddedOperations] = None,
         vertical_coordinate: Optional[VerticalCoordinate] = None,
+        mask_provider: Optional[MaskProvider] = None,
         timestep: Optional[datetime.timedelta] = None,
     ):
         self._img_shape = img_shape
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
+        self._mask_provider = mask_provider
         self._timestep = timestep
 
     def __eq__(self, other) -> bool:
@@ -50,6 +53,7 @@ class DatasetInfo:
             self._img_shape == other._img_shape
             and self._gridded_operations == other._gridded_operations
             and self._vertical_coordinate == other._vertical_coordinate
+            and self._mask_provider == other._mask_provider
             and self._timestep == other._timestep
         )
 
@@ -86,6 +90,13 @@ class DatasetInfo:
                         self._vertical_coordinate, other._vertical_coordinate
                     )
                 )
+        if self._mask_provider is not None and other._mask_provider is not None:
+            if self._mask_provider != other._mask_provider:
+                issues.append(
+                    "mask_provider is not compatible, {} != {}".format(
+                        self._mask_provider, other._mask_provider
+                    )
+                )
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
@@ -119,13 +130,15 @@ class DatasetInfo:
 
     @property
     def mask_provider(self) -> HasGetMaskTensorFor:
-        try:
-            coord = self.vertical_coordinate
-        except MissingDatasetInfo as err:
-            raise MissingDatasetInfo("mask_provider") from err
-        if not isinstance(coord, HasGetMaskTensorFor):
-            raise MissingDatasetInfo("mask_provider")
-        return coord
+        if self._mask_provider is None:
+            try:
+                coord = self.vertical_coordinate
+            except MissingDatasetInfo as err:
+                raise MissingDatasetInfo("mask_provider") from err
+            if not isinstance(coord, HasGetMaskTensorFor):
+                raise MissingDatasetInfo("mask_provider")
+            return coord
+        return self._mask_provider
 
     @property
     def timestep(self) -> datetime.timedelta:
@@ -142,6 +155,10 @@ class DatasetInfo:
             vertical_coordinate = None
         else:
             vertical_coordinate = self._vertical_coordinate.as_dict()
+        if self._mask_provider is None:
+            mask_provider = None
+        else:
+            mask_provider = self._mask_provider.to_state()
         if self._timestep is None:
             timestep = None
         else:
@@ -150,6 +167,7 @@ class DatasetInfo:
             "img_shape": self._img_shape,
             "gridded_operations": gridded_operations,
             "vertical_coordinate": vertical_coordinate,
+            "mask_provider": mask_provider,
             "timestep": timestep,
         }
 
@@ -171,6 +189,10 @@ class DatasetInfo:
             )
         else:
             vertical_coordinate = None
+        if state.get("mask_provider") is not None:
+            mask_provider = MaskProvider.from_state(state["mask_provider"])
+        else:
+            mask_provider = None
         if state.get("timestep") is not None:
             timestep = decode_timestep(state["timestep"])
         else:
@@ -179,5 +201,6 @@ class DatasetInfo:
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
+            mask_provider=mask_provider,
             timestep=timestep,
         )
