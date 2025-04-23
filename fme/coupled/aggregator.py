@@ -83,6 +83,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._coords = horizontal_coordinates.coords
         self._dist = Distributed.get_instance()
         self._loss = torch.tensor(0.0, device=get_device())
+        self._loss_ocean = torch.tensor(0.0, device=get_device())
+        self._loss_atmos = torch.tensor(0.0, device=get_device())
         self._n_batches = 0
         self._aggregators = {
             "ocean": OneStepAggregator_(
@@ -115,6 +117,8 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         batch: CoupledTrainOutput,
     ):
         self._loss += batch.total_metrics["loss"]
+        self._loss_ocean += batch.ocean.metrics["loss/ocean"]
+        self._loss_atmos += batch.atmosphere.metrics["loss/atmosphere"]
         self._aggregators["ocean"].record_batch(batch.ocean)
         self._aggregators["atmosphere"].record_batch(batch.atmosphere)
         self._n_batches += 1
@@ -140,8 +144,16 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             )
         logs = {**ocean_logs, **atmos_logs}
         loss = self._loss / self._n_batches
+        loss_ocean = self._loss_ocean / self._n_batches
+        loss_atmos = self._loss_atmos / self._n_batches
         logs[f"{label}/mean/loss"] = float(
             self._dist.reduce_mean(loss.detach()).cpu().numpy()
+        )
+        logs[f"{label}/mean/loss/ocean"] = float(
+            self._dist.reduce_mean(loss_ocean.detach()).cpu().numpy()
+        )
+        logs[f"{label}/mean/loss/atmosphere"] = float(
+            self._dist.reduce_mean(loss_atmos.detach()).cpu().numpy()
         )
         return logs
 
