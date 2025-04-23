@@ -9,7 +9,7 @@ from fme.ace.data_loading.inference import (
     InferenceInitialConditionIndices,
     TimestampList,
 )
-from fme.core.dataset.xarray import get_xarray_dataset
+from fme.core.dataset.getters import get_xarray_dataset
 from fme.core.distributed import Distributed
 from fme.coupled.data_loading.batch_data import CoupledBatchData
 from fme.coupled.data_loading.config import CoupledDatasetConfig
