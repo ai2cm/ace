@@ -1473,6 +1473,7 @@ class Stepper(
                 img_shape=state["img_shape"],
                 timestep=timestep,
                 vertical_coordinate=vertical_coordinate,
+                mask_provider=None,
                 gridded_operations=gridded_operations,
             )
             state["step"] = {
