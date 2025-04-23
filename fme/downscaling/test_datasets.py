@@ -4,7 +4,6 @@ import pytest
 import torch
 import xarray as xr
 
-from fme.core.dataset.data_typing import Dataset
 from fme.core.dataset.xarray import DatasetProperties
 from fme.downscaling.datasets import (
     BatchData,
@@ -185,7 +184,7 @@ def test_horizontal_subset(
         {"x": torch.zeros(batch_size, n_timesteps, n_lat, n_lon)},
         xr.DataArray([0.0]),
     )
-    base_dataset = MagicMock(spec=Dataset)
+    base_dataset = MagicMock(spec=torch.utils.data.Dataset)
     properties = MagicMock(spec=DatasetProperties)
     properties.horizontal_coordinates = coords
     topography = torch.randn(n_lat, n_lon)
