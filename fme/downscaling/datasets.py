@@ -764,6 +764,33 @@ class PairedBatchData:
         return PairedBatchData(fine, coarse)
 
 
+class ContiguousDistributedSampler(DistributedSampler):
+    """Distributes contiguous chunks of data across ranks.
+    This is useful when we desire generated chunks to be contiguous
+    in time, for example generating new datasets for downstream training.
+    """
+
+    def __init__(
+        self,
+        dataset,
+        num_replicas=None,
+        rank=None,
+    ):
+        super().__init__(dataset, num_replicas=num_replicas, rank=rank, shuffle=False)
+
+    def __iter__(self):
+        # Deterministically split data into contiguous chunks
+        indices = list(range(len(self.dataset)))
+
+        # Subsample contiguous chunk for this rank
+        total_size = len(indices)
+        chunk_size = total_size // self.num_replicas
+        start = self.rank * chunk_size
+        end = start + chunk_size if self.rank != self.num_replicas - 1 else total_size
+
+        return iter(indices[start:end])
+
+
 @dataclasses.dataclass
 class DataLoaderConfig:
     """
@@ -880,11 +907,14 @@ class DataLoaderConfig:
             dataset_coarse_subset,
         )
 
-        sampler: Optional[DistributedSampler] = (
-            DistributedSampler(dataset, shuffle=train)
-            if dist.is_distributed()
-            else None
-        )
+        sampler: Optional[DistributedSampler]
+        if dist.is_distributed():
+            if train:
+                sampler = DistributedSampler(dataset, shuffle=train)
+            else:
+                sampler = ContiguousDistributedSampler(dataset)
+        else:
+            sampler = None
 
         if properties_coarse.is_remote or properties_fine.is_remote:
             # GCSFS and S3FS are not fork-safe, so we need to use forkserver
