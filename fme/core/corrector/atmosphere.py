@@ -152,7 +152,7 @@ class AtmosphereCorrector(CorrectorABC):
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
 
-        self._timestep = timestep
+        self._timestep_seconds = timestep.total_seconds()
         if fme.get_device() == torch.device("mps", 0):
             self._dry_air_precision = torch.float32
         else:
@@ -232,7 +232,7 @@ class AtmosphereCorrector(CorrectorABC):
                 gen_data=gen_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
-                timestep=self._timestep,
+                timestep_seconds=self._timestep_seconds,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
         if self._do_energy_correction:
@@ -247,7 +247,7 @@ class AtmosphereCorrector(CorrectorABC):
                 forcing_data=forcing_data,
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
-                timestep=self._timestep,
+                timestep_seconds=self._timestep_seconds,
                 method=self._energy_correction_method,
                 unaccounted_heating=self._energy_unaccounted_heating,
             )
@@ -311,7 +311,7 @@ def _force_conserve_dry_air(
     new_pressure = (new_gen_dry_air + (ak_diff * wat).sum(-1)) / (
         1 - (bk_diff * wat).sum(-1)
     )
-    gen.surface_pressure = new_pressure.to(dtype=input.surface_pressure.dtype)
+    gen.set_surface_pressure(new_pressure.to(dtype=input.surface_pressure.dtype))
     return gen.data
 
 
@@ -334,7 +334,7 @@ def _force_zero_global_mean_moisture_advection(
     mean_moisture_advection = area_weighted_mean(
         gen.tendency_of_total_water_path_due_to_advection,
     )
-    gen.tendency_of_total_water_path_due_to_advection = (
+    gen.set_tendency_of_total_water_path_due_to_advection(
         gen.tendency_of_total_water_path_due_to_advection
         - mean_moisture_advection[..., None, None]
     )
@@ -346,7 +346,7 @@ def _force_conserve_moisture(
     gen_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasAtmosphereVerticalIntegral,
-    timestep: datetime.timedelta,
+    timestep_seconds: float,
     terms_to_modify: Literal[
         "precipitation",
         "evaporation",
@@ -369,7 +369,7 @@ def _force_conserve_moisture(
         area_weighted_mean: Computes an area-weighted mean,
             removing horizontal dimensions.
         vertical_coordinate: The sigma coordinates.
-        timestep: Timestep of the model.
+        timestep_seconds: Timestep of the model in seconds.
         terms_to_modify: Which terms to modify, in addition to modifying surface
             pressure to conserve dry air mass. One of:
             - "precipitation": modify precipitation only
@@ -381,7 +381,6 @@ def _force_conserve_moisture(
     gen = AtmosphereData(gen_data, vertical_coordinate)
 
     gen_total_water_path = gen.total_water_path
-    timestep_seconds = timestep / datetime.timedelta(seconds=1)
     twp_total_tendency = (
         gen_total_water_path - input.total_water_path
     ) / timestep_seconds
@@ -410,16 +409,18 @@ def _force_conserve_moisture(
         #    new_precip_rate = (
         #        new_global_precip_rate / current_global_precip_rate
         #    ) * current_precip_rate
-        gen.precipitation_rate = gen.precipitation_rate * (
-            new_precipitation_global_mean / precipitation_global_mean
+        gen.set_precipitation_rate(
+            gen.precipitation_rate
+            * (new_precipitation_global_mean / precipitation_global_mean)
         )
     elif terms_to_modify.endswith("evaporation"):
         # Derived similarly as for "precipitation" case.
         new_evaporation_global_mean = (
             twp_tendency_global_mean + precipitation_global_mean
         )
-        gen.evaporation_rate = gen.evaporation_rate * (
-            new_evaporation_global_mean / evaporation_global_mean
+        gen.set_evaporation_rate(
+            gen.evaporation_rate
+            * (new_evaporation_global_mean / evaporation_global_mean)
         )
     if terms_to_modify.startswith("advection"):
         # Having already corrected the global-mean budget, we recompute
@@ -429,7 +430,7 @@ def _force_conserve_moisture(
         new_advection = twp_total_tendency - (
             gen.evaporation_rate - gen.precipitation_rate
         )
-        gen.tendency_of_total_water_path_due_to_advection = new_advection
+        gen.set_tendency_of_total_water_path_due_to_advection(new_advection)
     return gen.data
 
 
@@ -439,7 +440,7 @@ def _force_conserve_total_energy(
     forcing_data: TensorMapping,
     area_weighted_mean: AreaWeightedMean,
     vertical_coordinate: HasAtmosphereVerticalIntegral,
-    timestep: datetime.timedelta,
+    timestep_seconds: float,
     method: Literal["constant_temperature"] = "constant_temperature",
     unaccounted_heating: float = 0.0,
 ) -> TensorDict:
@@ -457,13 +458,10 @@ def _force_conserve_total_energy(
         "DSWRFtoa": forcing.toa_down_sw_radiative_flux,
         "HGTsfc": forcing.surface_height,
     }
-    gen = AtmosphereData(dict(gen_data) | required_forcing, vertical_coordinate)
-    if torch.any(input.surface_pressure <= 0) or torch.any(gen.surface_pressure <= 0):
-        warnings.warn(
-            "Input or generated surface pressure has a non-positive value. Skipping "
-            "energy correction, since it would produce a NaN temperature correction."
-        )
-        return dict(gen_data)
+    atmosphere_data = dict(gen_data)
+    for name, tensor in required_forcing.items():
+        atmosphere_data[name] = tensor
+    gen = AtmosphereData(atmosphere_data, vertical_coordinate)
 
     gen_energy_path = gen.total_energy_ace2_path
     input_energy_path = input.total_energy_ace2_path
@@ -477,7 +475,7 @@ def _force_conserve_total_energy(
 
     desired_energy_path_global_mean = (
         input_energy_path_global_mean
-        + (energy_flux_global_mean + unaccounted_heating) * timestep.total_seconds()
+        + (energy_flux_global_mean + unaccounted_heating) * timestep_seconds
     )
 
     energy_correction = desired_energy_path_global_mean - gen_energy_path_global_mean
@@ -490,7 +488,9 @@ def _force_conserve_total_energy(
     n_levels = gen.air_temperature.shape[-1]
     for k in range(n_levels):
         name = f"air_temperature_{k}"
-        gen.data[name] = gen.data[name] + temperature_correction
+        gen.data[name] = gen.data[name] + torch.nan_to_num(
+            temperature_correction, nan=0.0
+        )
 
     # filter required here because we merged forcing data into gen above
     return {k: v for k, v in gen.data.items() if k in gen_data}

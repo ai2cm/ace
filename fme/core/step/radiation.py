@@ -252,6 +252,7 @@ class SeparateRadiationStep(StepABC):
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
         """
+        super().__init__()
         self.in_packer = Packer(config.main_in_names)
         self.out_packer = Packer(config.main_out_names)
         self.radiation_in_packer = Packer(config.radiation_in_names)
@@ -342,6 +343,7 @@ class SeparateRadiationStep(StepABC):
         radiation_output_norm = self.radiation_out_packer.unpack(
             radiation_output_tensor, axis=self.CHANNEL_DIM
         )
+        main_input_data = input_norm.copy()
         if self._config.detach_radiation:
             main_input_data = {
                 **input_norm,

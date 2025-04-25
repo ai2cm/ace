@@ -239,7 +239,7 @@ def test_force_conserve_moisture(
         out_data,
         vertical_coordinate=vertical_coordinate,
         area_weighted_mean=ops.area_weighted_mean,
-        timestep=TIMESTEP,
+        timestep_seconds=TIMESTEP.total_seconds(),
         terms_to_modify=terms_to_modify,
     )
     new_data = {
@@ -326,7 +326,8 @@ def _get_corrector_test_input(tensor_shape):
     return input_data, gen_data, forcing_data, vertical_coord
 
 
-def test__force_conserve_total_energy():
+@pytest.mark.parametrize("negative_pressure", [True, False])
+def test__force_conserve_total_energy(negative_pressure: bool):
     tensor_shape = (5, 5)
 
     ops = LatLonOperations(0.5 + torch.rand(size=tensor_shape))
@@ -336,22 +337,32 @@ def test__force_conserve_total_energy():
     )
     extra_heating = 10.0
 
+    if negative_pressure:
+        input_data["PRESsfc"] = -1 * input_data["PRESsfc"]
+
+    correction_expected = not negative_pressure
+
     corrected_gen_data = _force_conserve_total_energy(
         input_data=input_data,
         gen_data=gen_data,
         forcing_data=forcing_data,
         area_weighted_mean=ops.area_weighted_mean,
         vertical_coordinate=vertical_coord,
-        timestep=timestep,
+        timestep_seconds=timestep.total_seconds(),
         unaccounted_heating=extra_heating,
     )
 
     # ensure only temperature is modified
     for name in gen_data:
         if "air_temperature" in name:
-            assert not torch.allclose(
-                corrected_gen_data[name], gen_data[name], rtol=1e-6
-            )
+            if correction_expected:
+                assert not torch.allclose(
+                    corrected_gen_data[name], gen_data[name], rtol=1e-6
+                )
+            else:
+                assert torch.allclose(
+                    corrected_gen_data[name], gen_data[name], rtol=1e-6
+                )
         else:
             torch.testing.assert_close(corrected_gen_data[name], gen_data[name])
 
@@ -368,8 +379,11 @@ def test__force_conserve_total_energy():
         ops.area_weighted_mean(corrected_gen.net_energy_flux_into_atmosphere)
         + extra_heating
     )
-    expected_gm_mse = input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
-    torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
+    if correction_expected:
+        expected_gm_mse = (
+            input_gm_mse + predicted_mse_tendency * timestep.total_seconds()
+        )
+        torch.testing.assert_close(corrected_gen_gm_mse, expected_gm_mse)
 
     # ensure the temperature correction is constant
     corrected_gen_temperature = corrected_gen_data["air_temperature_1"]
@@ -399,7 +413,7 @@ def test__force_conserve_energy_doesnt_clobber():
         forcing_data=forcing_data,
         area_weighted_mean=ops.area_weighted_mean,
         vertical_coordinate=vertical_coord,
-        timestep=timestep,
+        timestep_seconds=timestep.total_seconds(),
     )
     torch.testing.assert_close(corrected_gen_data["PRESsfc"], gen_data["PRESsfc"])
 

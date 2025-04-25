@@ -3,7 +3,6 @@ from copy import copy
 from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
 
 import torch
-from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
@@ -243,6 +242,7 @@ class MultiCallStep(StepABC):
             wrapped_step: The step to wrap.
             config: The multi-call step configuration.
         """
+        super().__init__()
         self._wrapped_step = wrapped_step
         self._config = config
         self._multi_call = config.build(self._wrapped_step.step)
@@ -277,7 +277,7 @@ class MultiCallStep(StepABC):
         self,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
-        wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
+        wrapper: Callable[[torch.nn.Module], torch.nn.Module] = lambda x: x,
     ) -> TensorDict:
         state = self._wrapped_step.step(
             input,
