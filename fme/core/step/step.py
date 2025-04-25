@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import warnings
 from typing import (
     Any,
     Callable,
@@ -197,7 +198,7 @@ class StepSelector(StepConfigABC):
         self.config = dataclasses.asdict(self._step_config_instance)
 
 
-class StepABC(abc.ABC):
+class StepABC(abc.ABC, nn.Module):
     SelfType = TypeVar("SelfType", bound="StepABC")
 
     @property
@@ -243,7 +244,7 @@ class StepABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def modules(self) -> torch.nn.ModuleList:
+    def modules(self) -> nn.ModuleList:
         pass
 
     @property
@@ -290,7 +291,7 @@ class StepABC(abc.ABC):
 
     @abc.abstractmethod
     def step(
-        self,
+        self: SelfType,
         input: TensorMapping,
         next_step_input_data: TensorMapping,
         wrapper: Callable[[nn.Module], nn.Module] = lambda x: x,
@@ -313,6 +314,27 @@ class StepABC(abc.ABC):
             The denormalized output data at the next time step.
         """
         pass
+
+    @final
+    def forward(
+        self, input: TensorMapping, next_step_input_data: TensorMapping
+    ) -> TensorDict:
+        return self.step(input, next_step_input_data)
+
+    @final
+    def export(
+        self: SelfType,
+        input: TensorMapping,
+        next_step_input_data: TensorMapping,
+    ) -> torch.export.ExportedProgram:
+        """
+        Script the step function.
+        """
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=".*does not reference an nn.Module.*"
+            )
+            return torch.export.export(self, (input, next_step_input_data))
 
     @abc.abstractmethod
     def get_state(self) -> Dict[str, Any]:
