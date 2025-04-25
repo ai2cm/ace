@@ -1,4 +1,3 @@
-from types import MappingProxyType
 from typing import List, Mapping, Optional, Protocol
 
 import torch
@@ -15,31 +14,29 @@ from fme.core.constants import (
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
-ATMOSPHERE_FIELD_NAME_PREFIXES = MappingProxyType(
-    {
-        "specific_total_water": ["specific_total_water_"],
-        "surface_pressure": ["PRESsfc", "PS"],
-        "surface_height": ["HGTsfc"],
-        "surface_geopotential": ["PHIS"],
-        "tendency_of_total_water_path_due_to_advection": [
-            "tendency_of_total_water_path_due_to_advection"
-        ],
-        "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
-        "sensible_heat_flux": ["SHTFLsfc", "SHFLX"],
-        "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
-        "sfc_down_sw_radiative_flux": ["DSWRFsfc", "FSDS"],
-        "sfc_up_sw_radiative_flux": ["USWRFsfc", "surface_upward_shortwave_flux"],
-        "sfc_down_lw_radiative_flux": ["DLWRFsfc", "FLDS"],
-        "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux"],
-        "toa_up_lw_radiative_flux": ["ULWRFtoa", "FLUT"],
-        "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux"],
-        "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
-        "air_temperature": ["air_temperature_", "T_"],
-        "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
-        "eastward_wind_at_10m": ["UGRD10m"],
-        "northward_wind_at_10m": ["VGRD10m"],
-    }
-)
+ATMOSPHERE_FIELD_NAME_PREFIXES = {
+    "specific_total_water": ["specific_total_water_"],
+    "surface_pressure": ["PRESsfc", "PS"],
+    "surface_height": ["HGTsfc"],
+    "surface_geopotential": ["PHIS"],
+    "tendency_of_total_water_path_due_to_advection": [
+        "tendency_of_total_water_path_due_to_advection"
+    ],
+    "latent_heat_flux": ["LHTFLsfc", "LHFLX"],
+    "sensible_heat_flux": ["SHTFLsfc", "SHFLX"],
+    "precipitation_rate": ["PRATEsfc", "surface_precipitation_rate"],
+    "sfc_down_sw_radiative_flux": ["DSWRFsfc", "FSDS"],
+    "sfc_up_sw_radiative_flux": ["USWRFsfc", "surface_upward_shortwave_flux"],
+    "sfc_down_lw_radiative_flux": ["DLWRFsfc", "FLDS"],
+    "sfc_up_lw_radiative_flux": ["ULWRFsfc", "surface_upward_longwave_flux"],
+    "toa_up_lw_radiative_flux": ["ULWRFtoa", "FLUT"],
+    "toa_up_sw_radiative_flux": ["USWRFtoa", "top_of_atmos_upward_shortwave_flux"],
+    "toa_down_sw_radiative_flux": ["DSWRFtoa", "SOLIN"],
+    "air_temperature": ["air_temperature_", "T_"],
+    "frozen_precipitation_rate": ["total_frozen_precipitation_rate"],
+    "eastward_wind_at_10m": ["UGRD10m"],
+    "northward_wind_at_10m": ["VGRD10m"],
+}
 
 
 class HasAtmosphereVerticalIntegral(Protocol):
@@ -69,9 +66,7 @@ class AtmosphereData:
         self,
         atmosphere_data: TensorMapping,
         vertical_coordinate: Optional[HasAtmosphereVerticalIntegral] = None,
-        atmosphere_field_name_prefixes: Mapping[
-            str, List[str]
-        ] = ATMOSPHERE_FIELD_NAME_PREFIXES,
+        atmosphere_field_name_prefixes: Optional[Mapping[str, List[str]]] = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -86,6 +81,8 @@ class AtmosphereData:
                 (e.g., ["PRESsfc", "PS"] or ["air_temperature_", "T_"]) found in the
                 data.
         """
+        if atmosphere_field_name_prefixes is None:
+            atmosphere_field_name_prefixes = ATMOSPHERE_FIELD_NAME_PREFIXES.copy()
         self._data = dict(atmosphere_data)
         self._prefix_map = atmosphere_field_name_prefixes
         self._vertical_coordinate = vertical_coordinate
@@ -146,33 +143,20 @@ class AtmosphereData:
     def surface_pressure(self) -> torch.Tensor:
         return self._get("surface_pressure")
 
-    @surface_pressure.setter
-    def surface_pressure(self, value: torch.Tensor):
+    def set_surface_pressure(self, value: torch.Tensor):
         self._set("surface_pressure", value)
 
     @property
     def toa_down_sw_radiative_flux(self) -> torch.Tensor:
         return self._get("toa_down_sw_radiative_flux")
 
-    @toa_down_sw_radiative_flux.setter
-    def toa_down_sw_radiative_flux(self, value: torch.Tensor):
-        self._set("toa_down_sw_radiative_flux", value)
-
     @property
     def toa_up_sw_radiative_flux(self) -> torch.Tensor:
         return self._get("toa_up_sw_radiative_flux")
 
-    @toa_up_sw_radiative_flux.setter
-    def toa_up_sw_radiative_flux(self, value: torch.Tensor):
-        self._set("toa_up_sw_radiative_flux", value)
-
     @property
     def toa_up_lw_radiative_flux(self) -> torch.Tensor:
         return self._get("toa_up_lw_radiative_flux")
-
-    @toa_up_lw_radiative_flux.setter
-    def toa_up_lw_radiative_flux(self, value: torch.Tensor):
-        self._set("toa_up_lw_radiative_flux", value)
 
     @property
     def surface_pressure_due_to_dry_air(self) -> torch.Tensor:
@@ -251,8 +235,7 @@ class AtmosphereData:
         """
         return self._get("precipitation_rate")
 
-    @precipitation_rate.setter
-    def precipitation_rate(self, value: torch.Tensor):
+    def set_precipitation_rate(self, value: torch.Tensor):
         self._set("precipitation_rate", value)
 
     @property
@@ -261,10 +244,6 @@ class AtmosphereData:
         Latent heat flux in W m-2.
         """
         return self._get("latent_heat_flux")
-
-    @latent_heat_flux.setter
-    def latent_heat_flux(self, value: torch.Tensor):
-        self._set("latent_heat_flux", value)
 
     @property
     def evaporation_rate(self) -> torch.Tensor:
@@ -275,8 +254,7 @@ class AtmosphereData:
         # (W/m^2) / (J/kg) = (J s^-1 m^-2) / (J/kg) = kg/m^2/s
         return lhf / LATENT_HEAT_OF_VAPORIZATION
 
-    @evaporation_rate.setter
-    def evaporation_rate(self, value: torch.Tensor):
+    def set_evaporation_rate(self, value: torch.Tensor):
         self._set("latent_heat_flux", value * LATENT_HEAT_OF_VAPORIZATION)
 
     @property
@@ -286,8 +264,7 @@ class AtmosphereData:
         """
         return self._get("tendency_of_total_water_path_due_to_advection")
 
-    @tendency_of_total_water_path_due_to_advection.setter
-    def tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
+    def set_tendency_of_total_water_path_due_to_advection(self, value: torch.Tensor):
         self._set("tendency_of_total_water_path_due_to_advection", value)
 
     def height_at_log_midpoint(self) -> torch.Tensor:

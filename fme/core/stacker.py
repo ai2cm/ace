@@ -1,29 +1,9 @@
 import re
-from typing import Iterable, List, Mapping, Optional, Union
+from typing import Iterable, List, Mapping, Optional
 
 import torch
 
 from fme.core.typing_ import TensorMapping
-
-
-def natural_sort(alist: List[str]) -> List[str]:
-    """Sort to alphabetical order but with numbers sorted
-    numerically, e.g. a11 comes after a2. See [1] and [2].
-
-    [1] https://stackoverflow.com/questions/11150239/natural-sorting
-    [2] https://en.wikipedia.org/wiki/Natural_sort_order
-    """
-
-    def convert(text: str) -> Union[str, int]:
-        if text.isdigit():
-            return int(text)
-        else:
-            return text.lower()
-
-    def alphanum_key(item: str) -> List[Union[str, int]]:
-        return [convert(c) for c in re.split("([0-9]+)", item)]
-
-    return sorted(alist, key=alphanum_key)
 
 
 def unstack(tensor: torch.Tensor, names: List[str], dim: int = -1) -> TensorMapping:
@@ -39,8 +19,7 @@ def unstack(tensor: torch.Tensor, names: List[str], dim: int = -1) -> TensorMapp
     """
     if len(names) != tensor.size(dim):
         raise ValueError(
-            f"Received {len(names)} names, but 3D tensor has "
-            f"{tensor.size(-1)} levels."
+            f"Received {len(names)} names, but 3D tensor has {tensor.size(-1)} levels."
         )
     if len(names) == 1:
         return {names[0]: tensor.select(dim=dim, index=0)}
@@ -178,4 +157,4 @@ class Stacker:
         if len(names) == 0:
             raise KeyError(prefix)
 
-        return natural_sort(names)
+        return sorted(names, key=lambda name: levels[names.index(name)])
