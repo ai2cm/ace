@@ -1,6 +1,5 @@
 import datetime
-import pathlib
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 
 import pytest
 import torch
@@ -14,6 +13,19 @@ from fme.core.registry import ModuleSelector
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
+
+MODULE_TYPES = Literal["AddOne", "SphericalFourierNeuralOperatorNet"]
+IMAGE_SHAPE = (4, 2)
+MAIN_PROGNOSTIC_NAMES = ["prog_a", "prog_b"]
+SHARED_FORCING_NAMES = ["forcing_shared"]
+RADIATION_FORCING_NAMES = ["forcing_rad"]
+MAIN_DIAGNOSTIC_NAMES = ["diagnostic_main"]
+RADIATION_DIAGNOSTIC_NAMES = ["diagnostic_rad"]
+
+
+class AddOne(torch.nn.Module):
+    def forward(self, x):
+        return x + 1
 
 
 def get_tensor_dict(
@@ -32,85 +44,90 @@ def get_tensor_dict(
 
 def get_network_and_loss_normalization_config(
     names: List[str],
-    dir: Optional[pathlib.Path] = None,
+    norm_mean: float = 0.0,
 ) -> NetworkAndLossNormalizationConfig:
-    if dir is None:
-        return NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                means={name: 0.0 for name in names},
-                stds={name: 1.0 for name in names},
-            ),
-        )
-    else:
-        return NetworkAndLossNormalizationConfig(
-            network=NormalizationConfig(
-                global_means_path=dir / "means.nc",
-                global_stds_path=dir / "stds.nc",
-            ),
-        )
+    return NetworkAndLossNormalizationConfig(
+        network=NormalizationConfig(
+            means={name: norm_mean for name in names},
+            stds={name: 1.0 for name in names},
+        ),
+    )
 
 
 def get_separate_radiation_config(
-    dir: Optional[pathlib.Path] = None,
+    module_name: MODULE_TYPES = "SphericalFourierNeuralOperatorNet",
+    norm_mean: float = 0.0,
+    step_config_kwargs: Optional[dict] = None,
 ) -> SeparateRadiationStepConfig:
-    normalization = get_network_and_loss_normalization_config(
-        names=[
-            "prog_a",
-            "prog_b",
-            "forcing_shared",
-            "forcing_rad",
-            "diagnostic_rad",
-            "diagnostic_main",
-        ],
-        dir=dir,
+    if step_config_kwargs is None:
+        step_config_kwargs = {}
+
+    names = (
+        MAIN_PROGNOSTIC_NAMES
+        + SHARED_FORCING_NAMES
+        + RADIATION_FORCING_NAMES
+        + RADIATION_DIAGNOSTIC_NAMES
+        + MAIN_DIAGNOSTIC_NAMES
     )
+    normalization = get_network_and_loss_normalization_config(
+        names=names,
+        norm_mean=norm_mean,
+    )
+    if module_name == "SphericalFourierNeuralOperatorNet":
+        config = {
+            "scale_factor": 1,
+            "embed_dim": 4,
+            "num_layers": 2,
+        }
+        builder = ModuleSelector(type=module_name, config=config)
+        radiation_builder = ModuleSelector(type=module_name, config=config)
+    elif module_name == "AddOne":
+        config = {"module": AddOne()}
+        builder = ModuleSelector(type="prebuilt", config=config)
+        radiation_builder = ModuleSelector(type="prebuilt", config=config)
+    else:
+        raise ValueError(f"module_name {module_name!r} is not supported for this test.")
 
     return SeparateRadiationStepConfig(
-        builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet",
-            config={
-                "scale_factor": 1,
-                "embed_dim": 4,
-                "num_layers": 2,
-            },
-        ),
-        radiation_builder=ModuleSelector(
-            type="SphericalFourierNeuralOperatorNet",
-            config={
-                "scale_factor": 1,
-                "embed_dim": 4,
-                "num_layers": 2,
-            },
-        ),
-        main_prognostic_names=["prog_a", "prog_b"],
-        shared_forcing_names=["forcing_shared"],
-        radiation_only_forcing_names=["forcing_rad"],
-        radiation_diagnostic_names=["diagnostic_rad"],
-        main_diagnostic_names=["diagnostic_main"],
+        builder=builder,
+        radiation_builder=radiation_builder,
+        main_prognostic_names=MAIN_PROGNOSTIC_NAMES,
+        shared_forcing_names=SHARED_FORCING_NAMES,
+        radiation_only_forcing_names=RADIATION_FORCING_NAMES,
+        radiation_diagnostic_names=RADIATION_DIAGNOSTIC_NAMES,
+        main_diagnostic_names=MAIN_DIAGNOSTIC_NAMES,
         normalization=normalization,
+        **step_config_kwargs,
     )
 
 
-@pytest.mark.parametrize("detach_radiation", [True, False])
-def test_detach_radiation(detach_radiation: bool):
-    config = get_separate_radiation_config()
-    config.detach_radiation = detach_radiation
+def get_separate_radiation_step(
+    module_name: MODULE_TYPES = "SphericalFourierNeuralOperatorNet",
+    norm_mean: float = 0.0,
+    step_config_kwargs: Optional[dict] = None,
+):
+    config = get_separate_radiation_config(module_name, norm_mean, step_config_kwargs)
     device = fme.get_device()
-    img_shape = (4, 2)
-    area = torch.ones(img_shape, device=device)
+    area = torch.ones(IMAGE_SHAPE, device=device)
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
+        img_shape=IMAGE_SHAPE,
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=datetime.timedelta(hours=6),
     )
-    step = config.get_step(dataset_info)
+    return config.get_step(dataset_info)
+
+
+@pytest.mark.parametrize("detach_radiation", [True, False])
+def test_detach_radiation(detach_radiation: bool):
+    step_config_kwargs = {"detach_radiation": detach_radiation}
+    step = get_separate_radiation_step(step_config_kwargs=step_config_kwargs)
     input_data = get_tensor_dict(
-        names=["prog_a", "prog_b", "forcing_shared", "forcing_rad"],
-        img_shape=img_shape,
+        names=step.input_names,
+        img_shape=IMAGE_SHAPE,
         n_samples=1,
     )
     input_data["forcing_rad"].requires_grad = True
@@ -134,3 +151,30 @@ def test_detach_radiation(detach_radiation: bool):
         assert grad is None
     else:
         assert grad is not None
+
+
+@pytest.mark.parametrize("residual_prediction", [False, True])
+def test_residual_prediction(residual_prediction: bool):
+    norm_mean = 2.0
+    step_config_kwargs = {"residual_prediction": residual_prediction}
+    step = get_separate_radiation_step(
+        module_name="AddOne",
+        norm_mean=norm_mean,
+        step_config_kwargs=step_config_kwargs,
+    )
+    input_data = get_tensor_dict(
+        names=step.input_names,
+        img_shape=IMAGE_SHAPE,
+        n_samples=1,
+    )
+    output = step.step(input_data, {})
+
+    for name in MAIN_PROGNOSTIC_NAMES:
+        if residual_prediction:
+            expected_a_output = 2 * input_data[name] + 1 - norm_mean
+        else:
+            expected_a_output = input_data[name] + 1
+        torch.testing.assert_close(output[name], expected_a_output)
+
+    assert not set(SHARED_FORCING_NAMES).intersection(set(output))
+    assert not set(RADIATION_FORCING_NAMES).intersection(set(output))

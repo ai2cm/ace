@@ -11,6 +11,7 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
+from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
@@ -47,6 +48,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         detach_radiation: Whether to detach the output of the radiation model before
             passing it to the main model. The radiation outputs returned by
             .step() will not be detached.
+        residual_prediction: Whether to use residual prediction.
     """
 
     builder: ModuleSelector
@@ -63,6 +65,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     detach_radiation: bool = False
+    residual_prediction: bool = False
 
     def __post_init__(self):
         seen_names: Dict[str, str] = {}
@@ -354,6 +357,8 @@ class SeparateRadiationStep(StepABC):
         input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
         output_tensor = wrapper(self.module)(input_tensor)
         output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+        if self._config.residual_prediction:
+            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
         output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})
         if self._corrector is not None:
             output = self._corrector(input, output, next_step_forcing_data)
