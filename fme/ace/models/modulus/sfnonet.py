@@ -523,10 +523,10 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             ifft_handle = th.InverseRealFFT2
 
             # effective image size:
-            self.img_shape_eff = [
+            self.img_shape_eff = (
                 self.img_shape[0] + self.padding[0],
                 self.img_shape[1] + self.padding[1],
-            ]
+            )
             self.img_shape_loc = (
                 self.img_shape_eff[0],
                 self.img_shape_eff[1],
@@ -549,7 +549,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
 
         # use the SHT/FFT to compute the local, downscaled grid dimensions
         self.img_shape_loc = (self.trans_down.nlat, self.trans_down.nlon)
-        self.img_shape_eff = [self.trans_down.nlat, self.trans_down.nlon]
+        self.img_shape_eff = (self.trans_down.nlat, self.trans_down.nlon)
         self.h_loc = self.itrans.nlat
         self.w_loc = self.itrans.nlon
 
