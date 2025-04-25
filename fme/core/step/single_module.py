@@ -202,6 +202,7 @@ class SingleModuleStep(StepABC):
             init_weights: Whether to initialize the weights. Should pass False if
                 the weights are about to be overwritten by a checkpoint.
         """
+        super().__init__()
         n_in_channels = len(config.in_names)
         n_out_channels = len(config.out_names)
         self.in_packer = Packer(config.in_names)

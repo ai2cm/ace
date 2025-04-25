@@ -9,10 +9,13 @@ from typing import Callable, List, Optional, Tuple
 import dacite
 import pytest
 import torch
+import torch._dynamo.exc
 
 import fme
+from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
@@ -128,6 +131,117 @@ def get_single_module_selector(
     )
 
 
+def get_single_module_noise_conditioned_selector(
+    dir: Optional[pathlib.Path] = None,
+) -> StepSelector:
+    normalization = get_network_and_loss_normalization_config(
+        names=[
+            "forcing_shared",
+            "forcing_rad",
+            "diagnostic_main",
+            "diagnostic_rad",
+        ],
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="NoiseConditionedSFNO",
+                    config=dataclasses.asdict(
+                        NoiseConditionedSFNOBuilder(
+                            embed_dim=4,
+                            noise_embed_dim=4,
+                            num_layers=2,
+                        )
+                    ),
+                ),
+                in_names=["forcing_shared", "forcing_rad"],
+                out_names=["diagnostic_main", "diagnostic_rad"],
+                normalization=normalization,
+            ),
+        ),
+    )
+
+
+def get_single_module_with_atmosphere_corrector_selector(
+    dir: Optional[pathlib.Path] = None,
+) -> StepSelector:
+    in_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+    ]
+    out_names = [
+        "air_temperature_0",
+        "air_temperature_1",
+        "air_temperature_2",
+        "air_temperature_3",
+        "air_temperature_4",
+        "air_temperature_5",
+        "specific_total_water_0",
+        "specific_total_water_1",
+        "specific_total_water_2",
+        "specific_total_water_3",
+        "specific_total_water_4",
+        "specific_total_water_5",
+        "PRESsfc",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    normalization = get_network_and_loss_normalization_config(
+        names=list(set(in_names).union(out_names)),
+        dir=dir,
+    )
+    return StepSelector(
+        type="single_module",
+        config=dataclasses.asdict(
+            SingleModuleStepConfig(
+                builder=ModuleSelector(
+                    type="SphericalFourierNeuralOperatorNet",
+                    config={
+                        "scale_factor": 1,
+                        "embed_dim": 4,
+                        "num_layers": 2,
+                    },
+                ),
+                in_names=in_names,
+                out_names=out_names,
+                normalization=normalization,
+                corrector=AtmosphereCorrectorConfig(
+                    conserve_dry_air=True,
+                    zero_global_mean_moisture_advection=True,
+                    moisture_budget_correction="advection_and_precipitation",
+                    force_positive_names=["PRATEsfc"],
+                    total_energy_budget_correction="constant_temperature",
+                ),
+            ),
+        ),
+    )
+
+
 def get_multi_call_selector(
     dir: Optional[pathlib.Path] = None,
 ) -> StepSelector:
@@ -152,8 +266,10 @@ def get_multi_call_selector(
 SEPARATE_RADIATION_CONFIG = get_separate_radiation_config()
 
 SELECTOR_GETTERS = [
+    get_single_module_with_atmosphere_corrector_selector,
     get_separate_radiation_selector,
     get_single_module_selector,
+    get_single_module_noise_conditioned_selector,
     get_multi_call_selector,
 ]
 
@@ -205,7 +321,7 @@ def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> StepABC:
     device = fme.get_device()
     area = torch.ones(img_shape, device=device)
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+        ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
     )
     dataset_info = DatasetInfo(
         img_shape=img_shape,
@@ -274,6 +390,28 @@ def test_step_applies_wrapper(config: StepSelector):
     assert wrapper.call_count == multi_calls * len(step.modules)
     for module in step.modules:
         wrapper.assert_any_call(module)
+
+
+@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+def test_export_step(config: StepSelector, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    torch.manual_seed(0)
+    img_shape = (6, 12)
+    n_samples = 5
+    step = get_step(config, img_shape)
+    input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
+    next_step_input_data = get_tensor_dict(
+        step.next_step_input_names, img_shape, n_samples
+    )
+    unscripted_output = step.step(input_data, next_step_input_data)
+    for name in step.output_names:
+        # informative check for nan values
+        torch.testing.assert_close(unscripted_output[name], unscripted_output[name])
+    exported = step.export(input_data, next_step_input_data)
+    output = exported.module()(input_data, next_step_input_data)
+    for name in step.output_names:
+        torch.testing.assert_close(output[name], unscripted_output[name])
 
 
 @pytest.mark.parametrize(
