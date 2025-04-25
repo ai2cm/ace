@@ -16,12 +16,12 @@ from fme.core.registry.module import ModuleSelector
 from fme.core.timing import GlobalTimer
 
 from ..ace.stepper import SingleModuleStepperConfig
-from .multi_call import MultiCallConfig
+from .multi_call import MultiCallConfig, get_multi_call_name
 
 TEST_CONFIG = MultiCallConfig(
     forcing_name="CO2",
     forcing_multipliers={"_quadrupled_co2": 4, "_halved_co2": 0.5},
-    output_names=["OLR", "ASR"],
+    output_names=["OLR", "ASR", "bar_0", "bar_10"],
 )
 
 
@@ -35,8 +35,12 @@ def test_multi_call_names():
     assert set(TEST_CONFIG.names) == {
         "OLR_quadrupled_co2",
         "ASR_quadrupled_co2",
+        "bar_quadrupled_co2_0",
+        "bar_quadrupled_co2_10",
         "OLR_halved_co2",
         "ASR_halved_co2",
+        "bar_halved_co2_0",
+        "bar_halved_co2_10",
     }
 
 
@@ -55,8 +59,9 @@ def test_multi_call():
         for multiplier_name, multiplier_value in config.forcing_multipliers.items():
             # the _step method in this test module returns predictions equal
             # to the CO2 value in the forcing data, hence this check.
+            multi_call_name = get_multi_call_name(name, multiplier_name)
             torch.testing.assert_close(
-                output[name + multiplier_name],
+                output[multi_call_name],
                 co2_data["CO2"] * multiplier_value,
             )
     torch.testing.assert_close(co2_data["CO2"], torch.full(shape, co2_value))
