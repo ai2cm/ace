@@ -11,6 +11,7 @@ from fme.downscaling.datasets import (
     BatchItem,
     BatchItemDatasetAdapter,
     ClosedInterval,
+    ContiguousDistributedSampler,
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
     LatLonCoordinates,
@@ -18,6 +19,26 @@ from fme.downscaling.datasets import (
     _scale_slice,
     _subset_horizontal,
 )
+
+
+def test_ContiguousDistributedSampler():
+    dataset = list(range(20))
+    world_size = 4
+    samplers = [
+        ContiguousDistributedSampler(
+            dataset,
+            num_replicas=world_size,
+            rank=i,
+        )
+        for i in range(world_size)
+    ]
+    sampled = []
+    for sampler in samplers:
+        rank_batch = list(iter(sampler))
+        # assert sample elements are consecutive integers
+        assert all([b - a == 1 for a, b in zip(rank_batch[:-1], rank_batch[1:])])
+        sampled += rank_batch
+    assert sampled == dataset
 
 
 def random_named_tensor(var_names, shape):
