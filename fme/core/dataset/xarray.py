@@ -5,7 +5,7 @@ import os
 import warnings
 from collections import namedtuple
 from functools import lru_cache
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 from urllib.parse import urlparse
 
 import fsspec
@@ -53,7 +53,7 @@ VariableNames = namedtuple(
 
 
 def _get_vertical_coordinate(
-    ds: xr.Dataset, dtype: Optional[torch.dtype]
+    ds: xr.Dataset, dtype: torch.dtype | None
 ) -> VerticalCoordinate:
     """
     Get vertical coordinate from a dataset.
@@ -186,9 +186,9 @@ class StaticDerivedData:
 
     def __init__(self, coordinates: HorizontalCoordinates):
         self._coords = coordinates
-        self._x: Optional[torch.Tensor] = None
-        self._y: Optional[torch.Tensor] = None
-        self._z: Optional[torch.Tensor] = None
+        self._x: torch.Tensor | None = None
+        self._y: torch.Tensor | None = None
+        self._z: torch.Tensor | None = None
 
     def _get_xyz(self) -> TensorDict:
         if self._x is None or self._y is None or self._z is None:
@@ -310,7 +310,7 @@ def get_raw_paths(path, file_pattern):
     return raw_paths
 
 
-def _get_mask_provider(ds: xr.Dataset, dtype: Optional[torch.dtype]) -> MaskProvider:
+def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvider:
     """
     Get mask provider from a dataset.
 
@@ -425,7 +425,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         logging.info(f"Opening data at {os.path.join(self.path, self.file_pattern)}")
         raw_times = _get_raw_times(self._raw_paths, engine=self.engine)
 
-        self._timestep: Optional[datetime.timedelta]
+        self._timestep: datetime.timedelta | None
         if infer_timestep:
             self._timestep = _get_timestep(np.concatenate(raw_times))
             time_coord = _repeat_and_increment_time(raw_times, n_repeats, self.timestep)

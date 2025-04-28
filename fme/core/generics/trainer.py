@@ -63,7 +63,6 @@ from typing import (
     Generic,
     List,
     Mapping,
-    Optional,
     Protocol,
     TypeVar,
 )
@@ -120,13 +119,13 @@ class TrainConfigProtocol(Protocol):
     def log_train_every_n_batches(self) -> int: ...
 
     @property
-    def segment_epochs(self) -> Optional[int]: ...
+    def segment_epochs(self) -> int | None: ...
 
     @property
-    def checkpoint_save_epochs(self) -> Optional[Slice]: ...
+    def checkpoint_save_epochs(self) -> Slice | None: ...
 
     @property
-    def ema_checkpoint_save_epochs(self) -> Optional[Slice]: ...
+    def ema_checkpoint_save_epochs(self) -> Slice | None: ...
 
     def get_inference_epochs(self) -> List[int]: ...
 
@@ -277,7 +276,7 @@ class Trainer:
             if epoch in inference_epochs:
                 logging.info(f"Starting inference step on epoch {epoch + 1}")
                 inference_logs = self.inference_one_epoch()
-                inference_end: Optional[float] = time.time()
+                inference_end: float | None = time.time()
             else:
                 inference_logs = {}
                 inference_end = None
@@ -475,7 +474,7 @@ class Trainer:
             epoch, self.config.max_epochs, self.config.ema_checkpoint_save_epochs
         )
 
-    def save_all_checkpoints(self, valid_loss: float, inference_error: Optional[float]):
+    def save_all_checkpoints(self, valid_loss: float, inference_error: float | None):
         if self.config.validate_using_ema:
             best_checkpoint_context = self._ema_context
         else:
@@ -560,7 +559,7 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
 
 
 def epoch_checkpoint_enabled(
-    epoch: int, max_epochs: int, save_epochs: Optional[Slice]
+    epoch: int, max_epochs: int, save_epochs: Slice | None
 ) -> bool:
     if save_epochs is None:
         return False

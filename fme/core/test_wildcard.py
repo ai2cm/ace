@@ -1,5 +1,5 @@
 import contextlib
-from typing import List, Optional, Type
+from typing import List, Type
 
 import pytest
 import torch
@@ -65,7 +65,7 @@ def test_apply_by_wildcard(
     include: List[str],
     exclude: List[str],
     expected_applied: List[str],
-    expected_error: Optional[Type[Exception]],
+    expected_error: Type[Exception] | None,
 ):
     model = NestedModule1()
 

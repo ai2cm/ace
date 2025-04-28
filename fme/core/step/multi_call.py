@@ -1,6 +1,6 @@
 import dataclasses
 from copy import copy
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, Tuple, TypeVar
 
 import torch
 
@@ -13,7 +13,7 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def replace_multi_call(
-    selector: StepSelector, multi_call: Optional[MultiCallConfig], state: Dict[str, Any]
+    selector: StepSelector, multi_call: MultiCallConfig | None, state: Dict[str, Any]
 ) -> Tuple[StepSelector, Dict[str, Any]]:
     """
     Replace the multi-call configuration in a StepSelector and ensure the
@@ -75,7 +75,7 @@ class MultiCallStepConfig(StepConfigABC):
     """
 
     wrapped_step: StepSelector
-    config: Optional[MultiCallConfig] = None
+    config: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = True
 
     def __post_init__(self):
@@ -101,7 +101,7 @@ class MultiCallStepConfig(StepConfigABC):
     def build(
         self,
         step_method: StepMethod,
-    ) -> "Optional[MultiCall]":
+    ) -> "MultiCall | None":
         if self.config is None:
             return None
         else:
@@ -121,8 +121,8 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         """
         Get the loss normalizer for the multi-call step.
@@ -184,13 +184,13 @@ class MultiCallStepConfig(StepConfigABC):
         else:
             return self.wrapped_step.loss_names
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self.wrapped_step.replace_ocean(ocean)
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.wrapped_step.get_ocean()
 
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+    def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.config = multi_call
 
     @property
@@ -263,11 +263,11 @@ class MultiCallStep(StepABC):
         )
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         return self._wrapped_step.surface_temperature_name
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         return self._wrapped_step.ocean_fraction_name
 
     def get_regularizer_loss(self) -> torch.Tensor:

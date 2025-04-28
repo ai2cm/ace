@@ -3,17 +3,7 @@ import dataclasses
 import math
 import re
 from datetime import timedelta
-from typing import (
-    Callable,
-    Dict,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from typing import Callable, Dict, List, Literal, Mapping, Tuple, TypeVar, Union
 
 import dacite
 import numpy as np
@@ -65,7 +55,7 @@ class AtmosphericDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.vertical_coordinate, NullVerticalCoordinate):
-            vertical_coord: Optional["HybridSigmaPressureCoordinate"] = None
+            vertical_coord: "HybridSigmaPressureCoordinate" | None = None
         else:
             vertical_coord = self.vertical_coordinate.to(get_device())
         return compute_derived_quantities(
@@ -89,7 +79,7 @@ class OceanDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
-            depth_coord: Optional["DepthCoordinate"] = None
+            depth_coord: "DepthCoordinate" | None = None
         else:
             depth_coord = self.depth_coordinate.to(get_device())
         return compute_ocean_derived_quantities(
@@ -339,7 +329,7 @@ class DepthCoordinate(VerticalCoordinate):
 
     idepth: torch.Tensor
     mask: torch.Tensor
-    surface_mask: Optional[torch.Tensor] = None
+    surface_mask: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -664,7 +654,7 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def area_weights(self) -> Optional[torch.Tensor]:
+    def area_weights(self) -> torch.Tensor | None:
         pass
 
     @property
@@ -699,7 +689,7 @@ class LatLonCoordinates(HorizontalCoordinates):
     loaded_lon_name: str = "lon"
 
     def __post_init__(self):
-        self._area_weights: Optional[torch.Tensor] = None
+        self._area_weights: torch.Tensor | None = None
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):

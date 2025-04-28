@@ -1,7 +1,7 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Optional, Set, Tuple, Union
+from typing import Dict, List, Literal, Mapping, Set, Tuple, Union
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -81,7 +81,7 @@ class DynamicHistogram:
         """
         self._n_times = n_times
         self._n_bins = n_bins
-        self.bin_edges: Optional[np.ndarray] = None
+        self.bin_edges: np.ndarray | None = None
         self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
         self._epsilon: float = EPSILON
 
@@ -174,13 +174,13 @@ class ComparedDynamicHistograms:
     variable plotted on the same axis.
     """
 
-    def __init__(self, n_bins: int, percentiles: Optional[List[float]] = None) -> None:
+    def __init__(self, n_bins: int, percentiles: List[float] | None = None) -> None:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
-        self.target_histograms: Optional[Mapping[str, DynamicHistogram]] = None
-        self.prediction_histograms: Optional[Mapping[str, DynamicHistogram]] = None
-        self._nan_masks: Optional[Mapping[str, Optional[torch.Tensor]]] = None
+        self.target_histograms: Mapping[str, DynamicHistogram] | None = None
+        self.prediction_histograms: Mapping[str, DynamicHistogram] | None = None
+        self._nan_masks: Mapping[str, torch.Tensor] | None = None
         self._time_dim = -2
         self._variables: Set[str] = set()
 
@@ -276,7 +276,7 @@ class ComparedDynamicHistograms:
         return return_dict
 
     def _plot_histogram(
-        self, target_histogram: Optional[_Histogram], prediction_histogram
+        self, target_histogram: _Histogram | None, prediction_histogram
     ) -> matplotlib.figure.Figure:
         fig, ax = plt.subplots()
         for histogram, label, line_style, color in zip(
