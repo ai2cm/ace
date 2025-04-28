@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import dacite
 import torch
@@ -48,7 +48,7 @@ class SingleModuleStepConfig(StepConfigABC):
     in_names: List[str]
     out_names: List[str]
     normalization: NetworkAndLossNormalizationConfig
-    ocean: Optional[OceanConfig] = None
+    ocean: OceanConfig | None = None
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -76,8 +76,8 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         if extra_names is None:
             extra_names = []
@@ -136,7 +136,7 @@ class SingleModuleStepConfig(StepConfigABC):
     def loss_names(self) -> List[str]:
         return self.output_names
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.
 
@@ -145,7 +145,7 @@ class SingleModuleStepConfig(StepConfigABC):
         """
         self.ocean = ocean
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
     @classmethod
@@ -209,7 +209,7 @@ class SingleModuleStep(StepABC):
         self.out_packer = Packer(config.out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self.ocean: Optional[Ocean] = config.ocean.build(
+            self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, timestep
             )
         else:
@@ -241,13 +241,13 @@ class SingleModuleStep(StepABC):
         return self._normalizer
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
         return None
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None

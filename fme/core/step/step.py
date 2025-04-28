@@ -1,19 +1,7 @@
 import abc
 import dataclasses
 import warnings
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Type,
-    TypeVar,
-    cast,
-    final,
-)
+from typing import Any, Callable, ClassVar, Dict, List, Set, Type, TypeVar, cast, final
 
 import torch
 from torch import nn
@@ -85,8 +73,8 @@ class StepConfigABC(abc.ABC):
     @abc.abstractmethod
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         """
         Args:
@@ -100,11 +88,11 @@ class StepConfigABC(abc.ABC):
         """
 
     @abc.abstractmethod
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         pass
 
     @abc.abstractmethod
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         pass
 
     @abc.abstractmethod
@@ -178,19 +166,19 @@ class StepSelector(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         return self._step_config_instance.get_loss_normalizer(
             extra_names=extra_names,
             extra_residual_scaled_names=extra_residual_scaled_names,
         )
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self._step_config_instance.replace_ocean(ocean)
         self.config = dataclasses.asdict(self._step_config_instance)
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self._step_config_instance.get_ocean()
 
     def load(self):
@@ -209,8 +197,8 @@ class StepABC(abc.ABC, nn.Module):
     @final
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         return self.config.get_loss_normalizer(
             extra_names=extra_names,
@@ -268,7 +256,7 @@ class StepABC(abc.ABC, nn.Module):
 
     @property
     @abc.abstractmethod
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         """
         Name of the surface temperature variable, if one is available.
         """
@@ -276,7 +264,7 @@ class StepABC(abc.ABC, nn.Module):
 
     @property
     @abc.abstractmethod
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         """
         Name of the ocean fraction variable, if one is available.
         """

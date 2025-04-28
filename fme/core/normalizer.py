@@ -1,7 +1,7 @@
 import dataclasses
 import pathlib
 from copy import copy
-from typing import Dict, Iterable, List, Mapping, Optional, Union
+from typing import Dict, Iterable, List, Mapping, Union
 
 import fsspec
 import numpy as np
@@ -34,8 +34,8 @@ class NormalizationConfig:
             the denormalized output.
     """
 
-    global_means_path: Optional[Union[str, pathlib.Path]] = None
-    global_stds_path: Optional[Union[str, pathlib.Path]] = None
+    global_means_path: Union[str, pathlib.Path] | None = None
+    global_stds_path: Union[str, pathlib.Path] | None = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
@@ -230,7 +230,7 @@ def get_normalizer(
 
 def load_dict_from_netcdf(
     path: Union[str, pathlib.Path],
-    names: Optional[Iterable[str]],
+    names: Iterable[str] | None,
     defaults: Mapping[str, Union[float, np.ndarray]],
 ) -> Dict[str, float]:
     """
@@ -304,8 +304,8 @@ class NetworkAndLossNormalizationConfig:
     """
 
     network: NormalizationConfig
-    loss: Optional[NormalizationConfig] = None
-    residual: Optional[NormalizationConfig] = None
+    loss: NormalizationConfig | None = None
+    residual: NormalizationConfig | None = None
 
     def __post_init__(self):
         if self.loss is not None and self.residual is not None:

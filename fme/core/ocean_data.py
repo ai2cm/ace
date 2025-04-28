@@ -1,5 +1,5 @@
 from types import MappingProxyType
-from typing import List, Mapping, Optional, Protocol
+from typing import List, Mapping, Protocol
 
 import torch
 
@@ -26,7 +26,7 @@ class HasOceanDepthIntegral(Protocol):
 
     def get_mask_level(self, level: int) -> torch.Tensor: ...
 
-    def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]: ...
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None: ...
 
     def get_idepth(self) -> torch.Tensor: ...
 
@@ -44,7 +44,7 @@ class OceanData:
     def __init__(
         self,
         ocean_data: TensorMapping,
-        depth_coordinate: Optional[HasOceanDepthIntegral] = None,
+        depth_coordinate: HasOceanDepthIntegral | None = None,
         ocean_field_name_prefixes: Mapping[str, List[str]] = OCEAN_FIELD_NAME_PREFIXES,
     ):
         """

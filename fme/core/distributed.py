@@ -1,5 +1,5 @@
 import os
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Union
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -7,8 +7,6 @@ from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import get_device, using_gpu
-
-singleton: Optional["Distributed"] = None
 
 
 class DummyWrapper(torch.nn.Module):
@@ -138,7 +136,7 @@ class Distributed:
             torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
 
-    def gather(self, tensor: torch.Tensor) -> Optional[List[torch.Tensor]]:
+    def gather(self, tensor: torch.Tensor) -> List[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -154,7 +152,7 @@ class Distributed:
             A list of tensors, where the i-th element is the tensor
                 from the i-th process.
         """
-        gather_list: Optional[List[torch.Tensor]] = None
+        gather_list: List[torch.Tensor] | None = None
         if self.rank == 0:
             gather_list = [tensor] + [
                 torch.empty_like(tensor) for _ in range(self.world_size - 1)
@@ -166,7 +164,7 @@ class Distributed:
     def gather_irregular(
         self,
         tensor: torch.Tensor,
-    ) -> Optional[List[torch.Tensor]]:
+    ) -> List[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process. The rank tensors
         may have diferent dimension lengths, but must have the same number of
@@ -219,13 +217,16 @@ class Distributed:
             return DummyWrapper(module)
 
 
+singleton: Distributed | None = None
+
+
 def gather_irregular(
     tensor: torch.Tensor,
     reduce_max: Callable[[torch.Tensor], torch.tensor],
-    gather: Callable[[torch.Tensor], Optional[List[torch.Tensor]]],
+    gather: Callable[[torch.Tensor], List[torch.Tensor] | None],
     is_distributed: bool = False,
     fill_value: Union[float, int] = 0.0,
-) -> Optional[List[torch.Tensor]]:
+) -> List[torch.Tensor] | None:
     """
     Gather a tensor from all processes to the root process. The rank tensors
     may have diferent dimension lengths, but must have the same number of dimensions.

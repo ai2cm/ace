@@ -4,7 +4,7 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Tuple
 
 import dacite
 import pytest
@@ -31,7 +31,7 @@ from .radiation import SeparateRadiationStepConfig
 
 def get_network_and_loss_normalization_config(
     names: List[str],
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
         return NetworkAndLossNormalizationConfig(
@@ -50,7 +50,7 @@ def get_network_and_loss_normalization_config(
 
 
 def get_separate_radiation_config(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> SeparateRadiationStepConfig:
     normalization = get_network_and_loss_normalization_config(
         names=[
@@ -91,7 +91,7 @@ def get_separate_radiation_config(
 
 
 def get_separate_radiation_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     return StepSelector(
         type="separate_radiation",
@@ -100,7 +100,7 @@ def get_separate_radiation_selector(
 
 
 def get_single_module_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     normalization = get_network_and_loss_normalization_config(
         names=[
@@ -132,7 +132,7 @@ def get_single_module_selector(
 
 
 def get_single_module_noise_conditioned_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     normalization = get_network_and_loss_normalization_config(
         names=[
@@ -166,7 +166,7 @@ def get_single_module_noise_conditioned_selector(
 
 
 def get_single_module_with_atmosphere_corrector_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     in_names = [
         "DSWRFtoa",
@@ -243,7 +243,7 @@ def get_single_module_with_atmosphere_corrector_selector(
 
 
 def get_multi_call_selector(
-    dir: Optional[pathlib.Path] = None,
+    dir: pathlib.Path | None = None,
 ) -> StepSelector:
     return StepSelector(
         type="multi_call",
@@ -419,7 +419,7 @@ def test_export_step(config: StepSelector, very_fast_only: bool):
     SELECTOR_GETTERS,
 )
 def test_load_config(
-    get_config: Callable[[Optional[pathlib.Path]], StepSelector],
+    get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
     non_path_config: StepSelector = get_config(
         None
@@ -445,7 +445,7 @@ def test_load_config(
     SELECTOR_GETTERS,
 )
 def test_load_is_required_for_path_config(
-    get_config: Callable[[Optional[pathlib.Path]], StepSelector],
+    get_config: Callable[[pathlib.Path | None], StepSelector],
 ):
     non_path_config: StepSelector = get_config(
         None

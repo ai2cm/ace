@@ -1,7 +1,7 @@
 import asyncio
 import datetime
 import warnings
-from typing import Hashable, List, MutableMapping, Optional, Sequence, Tuple
+from typing import Hashable, List, MutableMapping, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -56,7 +56,7 @@ def infer_horizontal_dimension_names(ds: xr.Dataset) -> List[str]:
 
 def _get_indexers(
     variable: xr.Variable, dims: Sequence[Hashable]
-) -> Tuple[Optional[slice], ...]:
+) -> Tuple[slice | None, ...]:
     """Returns a tuple of indexers for the dimensions provided.
 
     Indexers select all data from dimensions that exist in the variable, and
@@ -66,7 +66,7 @@ def _get_indexers(
     Inspired by similar code in xarray:
     https://github.com/pydata/xarray/blob/1d43672574332615f225089d69f95a9f8d81d912/xarray/core/computation.py#L681-L688
     """
-    indexers: List[Optional[slice]] = []
+    indexers: List[slice | None] = []
     for dim in dims:
         if dim in variable.dims:
             indexers.append(SLICE_NONE)
@@ -155,7 +155,7 @@ def load_series_data_zarr_async(
     names: List[str],
     dims: List[str],
     shape: List[int],
-    fill_nans: Optional[FillNaNsConfig] = None,
+    fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
     loaded = _load_all_variables_zarr_async(path, names, time_slice)
@@ -175,7 +175,7 @@ def load_series_data(
     names: List[str],
     dims: List[str],
     shape: List[int],
-    fill_nans: Optional[FillNaNsConfig] = None,
+    fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
     loaded = _load_all_variables(ds, names, time_slice)
@@ -191,7 +191,7 @@ def load_series_data(
 
 
 def get_horizontal_dimensions(
-    ds: xr.Dataset, dtype: Optional[torch.dtype]
+    ds: xr.Dataset, dtype: torch.dtype | None
 ) -> List[torch.Tensor]:
     hdims = infer_horizontal_dimension_names(ds)
 
