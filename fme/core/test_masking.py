@@ -1,5 +1,4 @@
 import re
-from typing import Optional
 
 import pytest
 import torch
@@ -15,13 +14,13 @@ class _Mask:
 
     def __init__(
         self,
-        mask_2d: Optional[torch.Tensor] = None,
-        mask_3d: Optional[torch.Tensor] = None,
+        mask_2d: torch.Tensor | None = None,
+        mask_3d: torch.Tensor | None = None,
     ):
         self.mask_2d = mask_2d
         self.mask_3d = mask_3d
 
-    def get_mask_tensor_for(self, name) -> Optional[torch.Tensor]:
+    def get_mask_tensor_for(self, name) -> torch.Tensor | None:
         if name == "mask_ignored":
             return None
         match = self.LEVEL_PATTERN.search(name)

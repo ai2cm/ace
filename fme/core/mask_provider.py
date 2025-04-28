@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import torch
 
@@ -33,7 +33,7 @@ class MaskProvider:
 
     """
 
-    def __init__(self, masks: Optional[TensorDict] = None):
+    def __init__(self, masks: TensorDict | None = None):
         self._masks = {} if masks is None else masks
         for key in self._masks:
             if not key.startswith("mask_"):
@@ -47,7 +47,7 @@ class MaskProvider:
     def masks(self) -> TensorMapping:
         return self._masks
 
-    def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         # variable specific
         mask_name = f"mask_{name}"
         if mask_name in self.masks:

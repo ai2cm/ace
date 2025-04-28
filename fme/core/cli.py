@@ -1,13 +1,13 @@
 import argparse
 import os
-from typing import Dict, Optional, Sequence
+from typing import Dict, Sequence
 
 import yaml
 
 from .config import update_dict_with_dotlist
 
 
-def prepare_config(path: str, override: Optional[Sequence[str]] = None) -> Dict:
+def prepare_config(path: str, override: Sequence[str] | None = None) -> Dict:
     """Get config and update with possible dotlist override."""
     with open(path, "r") as f:
         data = yaml.safe_load(f)

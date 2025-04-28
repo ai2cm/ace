@@ -1,7 +1,7 @@
 import contextlib
 import dataclasses
 import itertools
-from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
+from typing import Any, Callable, Iterable, Literal, Mapping, Union
 
 import numpy as np
 import torch
@@ -93,7 +93,7 @@ class Optimization(OptimizationABC):
             raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
         if enable_automatic_mixed_precision:
-            self.gscaler: Optional[torch.amp.GradScaler] = torch.amp.GradScaler("cuda")
+            self.gscaler: torch.amp.GradScaler | None = torch.amp.GradScaler("cuda")
         else:
             self.gscaler = None
         self.scheduler = scheduler.build(self.optimizer, max_epochs)

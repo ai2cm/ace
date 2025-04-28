@@ -2,7 +2,7 @@ import collections
 import contextlib
 import random
 import string
-from typing import Any, Dict, List, Literal, Mapping, Optional
+from typing import Any, Dict, List, Literal, Mapping
 
 from fme.core import wandb
 from fme.core.distributed import Distributed
@@ -14,7 +14,7 @@ class MockWandB:
         self._configured = False
         self._logs: Dict[int, Dict[str, Any]] = collections.defaultdict(dict)
         self._last_step = 0
-        self._id: Optional[str] = None
+        self._id: str | None = None
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
@@ -24,7 +24,7 @@ class MockWandB:
     def init(
         self,
         resumable: bool = False,
-        experiment_dir: Optional[str] = None,
+        experiment_dir: str | None = None,
         **kwargs,
     ):
         if not self._configured:
@@ -49,7 +49,7 @@ class MockWandB:
                 pass
 
     def _wandb_init(
-        self, resume: Literal["must", "never"], id: Optional[str] = None, **kwargs
+        self, resume: Literal["must", "never"], id: str | None = None, **kwargs
     ):
         """
         Mocks the `wandb.init` behavior, specifically around initializing
@@ -72,7 +72,7 @@ class MockWandB:
                     )
             self._id = _mock_wandb_id()
 
-    def get_id(self) -> Optional[str]:
+    def get_id(self) -> str | None:
         return self._id
 
     def set_id(self, id: str):

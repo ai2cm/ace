@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import List, Optional
+from typing import List
 
 import torch
 
@@ -46,7 +46,7 @@ class OceanConfig:
     surface_temperature_name: str
     ocean_fraction_name: str
     interpolate: bool = False
-    slab: Optional[SlabOceanConfig] = None
+    slab: SlabOceanConfig | None = None
 
     def build(
         self,

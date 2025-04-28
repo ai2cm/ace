@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping
 
 import dacite
 import torch
@@ -24,7 +24,7 @@ class SeaIceFractionConfig:
 
     sea_ice_fraction_name: str
     land_fraction_name: str
-    sea_ice_thickness_name: Optional[str] = None
+    sea_ice_thickness_name: str | None = None
     remove_negative_ocean_fraction: bool = True
 
     def __call__(
@@ -53,11 +53,11 @@ class SeaIceFractionConfig:
 @dataclasses.dataclass
 class OceanCorrectorConfig:
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
-    sea_ice_fraction_correction: Optional[SeaIceFractionConfig] = None
+    sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     # NOTE: OceanCorrector.masking is deprecated and kept for backwards
     # compatibility with legacy SingleModuleStepperConfig checkpoints. Please
     # use SingleModuleStepConfig.input_masking instead.
-    masking: Optional[StaticMaskingConfig] = None
+    masking: StaticMaskingConfig | None = None
 
     def __post_init__(self):
         if self.masking is not None and self.masking.mask_value != 0:
@@ -78,7 +78,7 @@ class OceanCorrector(CorrectorABC):
         self,
         config: OceanCorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: Optional[HasOceanDepthIntegral],
+        vertical_coordinate: HasOceanDepthIntegral | None,
         timestep: datetime.timedelta,
     ):
         self._config = config

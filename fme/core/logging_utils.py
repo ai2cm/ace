@@ -2,7 +2,7 @@ import contextlib
 import dataclasses
 import logging
 import os
-from typing import Any, Dict, Mapping, Optional, Union
+from typing import Any, Dict, Mapping, Union
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
@@ -74,8 +74,8 @@ class LoggingConfig:
     def configure_wandb(
         self,
         config: Mapping[str, Any],
-        env_vars: Optional[Mapping[str, Any]] = None,
-        wandb_dir: Optional[str] = DEFAULT_TMP_DIR,
+        env_vars: Mapping[str, Any] | None = None,
+        wandb_dir: str | None = DEFAULT_TMP_DIR,
         resumable: bool = True,
         resume: Any = None,
         **kwargs,
