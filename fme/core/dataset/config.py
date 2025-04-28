@@ -1,6 +1,6 @@
 import dataclasses
 from datetime import timedelta
-from typing import Literal, Mapping, Optional, Union
+from typing import Literal, Mapping, Union
 
 import numpy as np
 import pandas as pd
@@ -27,9 +27,9 @@ class TimeSlice:
        https://docs.xarray.dev/en/latest/user-guide/weather-climate.html#non-standard-calendars-and-dates-outside-the-nanosecond-precision-range
     """  # noqa: E501
 
-    start_time: Optional[str] = None
-    stop_time: Optional[str] = None
-    step: Optional[int] = None
+    start_time: str | None = None
+    stop_time: str | None = None
+    step: int | None = None
 
     def slice(self, time: xr.CFTimeIndex) -> slice:
         return time.slice_indexer(self.start_time, self.stop_time, self.step)
@@ -99,7 +99,7 @@ class RepeatedInterval:
             self.start = pd.Timedelta(self.start)
 
     def get_boolean_mask(
-        self, length: int, timestep: Optional[timedelta] = None
+        self, length: int, timestep: timedelta | None = None
     ) -> np.ndarray:
         """
         Return a boolean mask for the repeated interval.
@@ -242,9 +242,9 @@ class XarrayDataConfig:
         default_factory=Slice
     )
     infer_timestep: bool = True
-    dtype: Optional[str] = "float32"
+    dtype: str | None = "float32"
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
-    fill_nans: Optional[FillNaNsConfig] = None
+    fill_nans: FillNaNsConfig | None = None
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":

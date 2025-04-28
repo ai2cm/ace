@@ -1,5 +1,5 @@
 import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Tuple
 
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.dataset.utils import decode_timestep, encode_timestep
@@ -34,11 +34,11 @@ class DatasetInfo:
 
     def __init__(
         self,
-        img_shape: Optional[Tuple[int, int]] = None,
-        gridded_operations: Optional[GriddedOperations] = None,
-        vertical_coordinate: Optional[VerticalCoordinate] = None,
-        mask_provider: Optional[MaskProvider] = None,
-        timestep: Optional[datetime.timedelta] = None,
+        img_shape: Tuple[int, int] | None = None,
+        gridded_operations: GriddedOperations | None = None,
+        vertical_coordinate: VerticalCoordinate | None = None,
+        mask_provider: MaskProvider | None = None,
+        timestep: datetime.timedelta | None = None,
     ):
         self._img_shape = img_shape
         self._gridded_operations = gridded_operations

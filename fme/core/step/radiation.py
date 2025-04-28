@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import dacite
 import torch
@@ -60,7 +60,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     main_diagnostic_names: List[str]
     normalization: NetworkAndLossNormalizationConfig
     next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
-    ocean: Optional[OceanConfig] = None
+    ocean: OceanConfig | None = None
     corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
@@ -118,8 +118,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ) -> StandardNormalizer:
         if extra_names is None:
             extra_names = []
@@ -221,10 +221,10 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def loss_names(self) -> List[str]:
         return self.output_names
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self.ocean = ocean
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
     def load(self):
@@ -262,7 +262,7 @@ class SeparateRadiationStep(StepABC):
         self.radiation_out_packer = Packer(config.radiation_out_names)
         self._normalizer = normalizer
         if config.ocean is not None:
-            self.ocean: Optional[Ocean] = config.ocean.build(
+            self.ocean: Ocean | None = config.ocean.build(
                 config.input_names,
                 config.output_names,
                 timestep,
@@ -294,13 +294,13 @@ class SeparateRadiationStep(StepABC):
         return self._config
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
         return None
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None

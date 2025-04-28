@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Mapping, NewType, Optional
+from typing import Dict, Mapping, NewType
 
 import torch
 
@@ -28,9 +28,9 @@ class Slice:
         step: Step of the slice.
     """
 
-    start: Optional[int] = None
-    stop: Optional[int] = None
-    step: Optional[int] = None
+    start: int | None = None
+    stop: int | None = None
+    step: int | None = None
 
     @property
     def slice(self) -> slice:

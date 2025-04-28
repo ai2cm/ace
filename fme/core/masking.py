@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import re
-from typing import List, Literal, Optional, Protocol, Union, runtime_checkable
+from typing import List, Literal, Protocol, Union, runtime_checkable
 
 import torch
 
@@ -32,7 +32,7 @@ def replace_on_mask(
 
 @runtime_checkable
 class HasGetMaskTensorFor(Protocol):
-    def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         """Get the mask for a specific variable name."""
         ...
 
@@ -54,15 +54,15 @@ class StaticMaskingConfig:
 
     mask_value: int
     fill_value: Union[Literal["mean"], float] = 0.0
-    exclude_names_and_prefixes: Optional[List[str]] = None
+    exclude_names_and_prefixes: List[str] | None = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
             raise ValueError(
-                "mask_value must be either 0 or 1, but got " f"{self.mask_value}"
+                f"mask_value must be either 0 or 1, but got {self.mask_value}"
             )
 
-    def build(self, mask: HasGetMaskTensorFor, means: Optional[TensorMapping] = None):
+    def build(self, mask: HasGetMaskTensorFor, means: TensorMapping | None = None):
         """
         Build StaticMasking.
 
@@ -95,7 +95,7 @@ class StaticMasking:
         mask_value: int,
         fill_value: Union[float, TensorMapping],
         mask: HasGetMaskTensorFor,
-        exclude_names_and_prefixes: Optional[List[str]] = None,
+        exclude_names_and_prefixes: List[str] | None = None,
     ):
         if isinstance(fill_value, float):
             fill_mapping: TensorMapping = collections.defaultdict(
@@ -108,7 +108,7 @@ class StaticMasking:
         self._mask = mask
         self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
 
-    def _build_regex(self, names_and_prefixes: Optional[List[str]]) -> Optional[str]:
+    def _build_regex(self, names_and_prefixes: List[str] | None) -> str | None:
         if names_and_prefixes:
             regex = []
             for name in names_and_prefixes:

@@ -1,6 +1,5 @@
 import datetime
 import math
-from typing import Optional
 
 import pytest
 import torch
@@ -56,7 +55,7 @@ class _MockDepth:
     def get_mask_level(self, level: int):
         return _MASK.select(-1, level)
 
-    def get_mask_tensor_for(self, name: str) -> Optional[torch.Tensor]:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         if name.endswith("_1"):
             return _MASK.select(-1, 1)
         else:

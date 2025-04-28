@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Callable, Optional, Tuple
+from typing import Callable, Tuple
 
 import dacite
 import numpy as np
@@ -129,9 +129,7 @@ def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     )
     if use_area:
-        area_weights: Optional[torch.Tensor] = 1.0 + torch.rand(
-            size=(size[-2], size[-1])
-        )
+        area_weights: torch.Tensor | None = 1.0 + torch.rand(size=(size[-2], size[-1]))
     else:
         area_weights = None
     if area_weights is not None:

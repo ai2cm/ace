@@ -1,4 +1,4 @@
-from typing import List, Optional, Type
+from typing import List, Type
 
 import numpy as np
 import pytest
@@ -134,7 +134,7 @@ def test_apply_copy_weights_config(
     include: List[str],
     exclude: List[str],
     expected_applied: List[str],
-    expected_error: Optional[Type[Exception]],
+    expected_error: Type[Exception] | None,
 ):
     source_model = NestedModule1()
     dest_model = NestedModule1()

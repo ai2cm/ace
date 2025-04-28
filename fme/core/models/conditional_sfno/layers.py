@@ -16,7 +16,7 @@
 
 import dataclasses
 import math
-from typing import Optional, Tuple
+from typing import Tuple
 
 import torch
 import torch.fft
@@ -50,8 +50,8 @@ class Context:
             three dimensions are (channels, height, width).
     """
 
-    embedding_scalar: Optional[torch.Tensor]
-    embedding_2d: Optional[torch.Tensor]
+    embedding_scalar: torch.Tensor | None
+    embedding_2d: torch.Tensor | None
 
     def __post_init__(self):
         if (
@@ -86,10 +86,10 @@ class ConditionalLayerNorm(nn.Module):
         self.embed_dim_2d = context_config.embed_dim_2d
         self.epsilon = epsilon
         if self.embed_dim_scalar > 0:
-            self.W_scale: Optional[nn.Linear] = nn.Linear(
+            self.W_scale: nn.Linear | None = nn.Linear(
                 self.embed_dim_scalar, self.n_channels
             )
-            self.W_bias: Optional[nn.Linear] = nn.Linear(
+            self.W_bias: nn.Linear | None = nn.Linear(
                 self.embed_dim_scalar, self.n_channels
             )
         else:

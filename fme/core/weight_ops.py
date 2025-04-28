@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional
+from typing import Any, List, Mapping
 
 import torch
 from torch import nn
@@ -94,7 +94,7 @@ def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
 def overwrite_weights(
     from_state: Mapping[str, Any],
     to_module: torch.nn.Module,
-    exclude_parameters: Optional[List[str]] = None,
+    exclude_parameters: List[str] | None = None,
 ):
     """
     Overwrite the weights in to_module with the weights in from_state.

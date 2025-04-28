@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Mapping, Optional, Sequence, Tuple, Union
+from typing import List, Mapping, Sequence, Tuple, Union
 
 import numpy as np
 import xarray as xr
@@ -50,7 +50,7 @@ def get_datasets(
     strict: bool = True,
 ) -> Tuple[List[XarraySubset], DatasetProperties]:
     datasets = []
-    properties: Optional[DatasetProperties] = None
+    properties: DatasetProperties | None = None
     for config in dataset_configs:
         dataset, new_properties = get_xarray_dataset(config, names, n_timesteps)
         datasets.append(dataset)
@@ -126,7 +126,7 @@ def get_merged_datasets(
     strict: bool = True,
 ) -> Tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
-    merged_properties: Optional[DatasetProperties] = None
+    merged_properties: DatasetProperties | None = None
     per_dataset_names = get_per_dataset_names(dataset_configs, names)
     for key, config in dataset_configs.items():
         current_source_datasets, current_source_properties = get_datasets(

@@ -1,7 +1,7 @@
 import datetime
 import unittest.mock
 from collections import namedtuple
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Callable, Iterable, Tuple
 
 import numpy as np
 import pytest
@@ -59,7 +59,7 @@ class MockLoader(torch.utils.data.DataLoader):
         shape: tuple,
         names: Iterable[str],
         n_windows: int,
-        time: Optional[xr.DataArray] = None,
+        time: xr.DataArray | None = None,
     ):
         device = fme.get_device()
         self._data = {n: torch.rand(*shape, device=device) for n in names}
@@ -301,9 +301,7 @@ class PlusOneStepper:
     def __init__(
         self,
         n_ic_timesteps: int,
-        derive_func: Optional[
-            Callable[[TensorMapping, TensorMapping], TensorDict]
-        ] = None,
+        derive_func: Callable[[TensorMapping, TensorMapping], TensorDict] | None = None,
     ):
         self.n_ic_timesteps = n_ic_timesteps
         if derive_func is None:

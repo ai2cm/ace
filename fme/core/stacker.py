@@ -1,5 +1,5 @@
 import re
-from typing import Iterable, List, Mapping, Optional
+from typing import Iterable, List, Mapping
 
 import torch
 
@@ -35,7 +35,7 @@ class Stacker:
 
     def __init__(
         self,
-        prefix_map: Optional[Mapping[str, List[str]]] = None,
+        prefix_map: Mapping[str, List[str]] | None = None,
     ):
         """
         Args:
@@ -44,7 +44,7 @@ class Stacker:
                 and lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"]
                 or ["air_temperature_", "T_"]) found in the data.
         """
-        self._prefix_map: Optional[Mapping[str, List[str]]] = prefix_map
+        self._prefix_map: Mapping[str, List[str]] | None = prefix_map
 
     def infer_prefix_map(self, names: Iterable[str]):
         """

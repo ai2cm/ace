@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Optional, Tuple
+from typing import Callable, Dict, MutableMapping, Tuple
 
 import torch
 
@@ -168,11 +168,11 @@ def windspeed_at_10m(data: AtmosphereData, timestep: datetime.timedelta):
 
 def _compute_derived_variable(
     data: TensorDict,
-    vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None,
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: DerivedVariableFunc,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes a derived variable and adds it to the given data.
 
@@ -218,9 +218,9 @@ def _compute_derived_variable(
 
 def compute_derived_quantities(
     data: TensorDict,
-    vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
+    vertical_coordinate: HasAtmosphereVerticalIntegral | None,
     timestep: datetime.timedelta,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _DERIVED_VARIABLE_REGISTRY:
