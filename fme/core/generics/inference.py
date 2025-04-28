@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Generic, Iterator, Optional, Protocol, Tuple, TypeVar
+from typing import Callable, Generic, Iterator, Protocol, Tuple, TypeVar
 
 import torch
 
@@ -90,8 +90,8 @@ def run_inference(
     predict: PredictFunction[PS, FD, SD],
     data: InferenceDataABC[PS, FD],
     aggregator: InferenceAggregatorABC[PS, SD],
-    writer: Optional[WriterABC[PS, SD]] = None,
-    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
+    writer: WriterABC[PS, SD] | None = None,
+    record_logs: Callable[[InferenceLogs], None] | None = None,
 ):
     """Run extended inference loop given initial condition and forcing data.
 

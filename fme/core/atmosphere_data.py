@@ -1,4 +1,4 @@
-from typing import List, Mapping, Optional, Protocol
+from typing import List, Mapping, Protocol
 
 import torch
 
@@ -65,8 +65,8 @@ class AtmosphereData:
     def __init__(
         self,
         atmosphere_data: TensorMapping,
-        vertical_coordinate: Optional[HasAtmosphereVerticalIntegral] = None,
-        atmosphere_field_name_prefixes: Optional[Mapping[str, List[str]]] = None,
+        vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
+        atmosphere_field_name_prefixes: Mapping[str, List[str]] | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.

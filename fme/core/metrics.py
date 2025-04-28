@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Union
+from typing import Iterable, Union
 
 import numpy as np
 import torch
@@ -34,7 +34,7 @@ def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
 
 def weighted_mean(
     tensor: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
     keepdim: bool = False,
 ) -> torch.Tensor:
@@ -61,7 +61,7 @@ def weighted_mean(
 
 def weighted_std(
     tensor: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Computes the weighted standard deviation across the specified list of dimensions.
@@ -90,7 +90,7 @@ def weighted_std(
 def weighted_mean_bias(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Computes the mean bias across the specified list of dimensions assuming
@@ -115,7 +115,7 @@ def weighted_mean_bias(
 def root_mean_squared_error(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """
@@ -148,7 +148,7 @@ def gradient_magnitude(tensor: torch.Tensor, dim: Dimension = ()) -> torch.Tenso
 
 
 def weighted_mean_gradient_magnitude(
-    tensor: torch.Tensor, weights: Optional[torch.Tensor] = None, dim: Dimension = ()
+    tensor: torch.Tensor, weights: torch.Tensor | None = None, dim: Dimension = ()
 ) -> torch.Tensor:
     """Compute weighted mean of gradient magnitude across the specified dimensions."""
     return weighted_mean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
@@ -157,7 +157,7 @@ def weighted_mean_gradient_magnitude(
 def gradient_magnitude_percent_diff(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     dim: Dimension = (),
 ) -> torch.Tensor:
     """Compute the percent difference of the weighted mean gradient magnitude across
@@ -171,7 +171,7 @@ def gradient_magnitude_percent_diff(
 def rmse_of_time_mean(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     time_dim: Dimension = 0,
     spatial_dims: Dimension = (-2, -1),
 ) -> torch.Tensor:
@@ -199,7 +199,7 @@ def rmse_of_time_mean(
 def time_and_global_mean_bias(
     truth: torch.Tensor,
     predicted: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor | None = None,
     time_dim: Dimension = 0,
     spatial_dims: Dimension = (-2, -1),
 ) -> torch.Tensor:

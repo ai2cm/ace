@@ -1,5 +1,5 @@
 import datetime
-from typing import List, Literal, Optional, Tuple
+from typing import List, Literal, Tuple
 
 import pytest
 import torch
@@ -57,7 +57,7 @@ def get_network_and_loss_normalization_config(
 def get_separate_radiation_config(
     module_name: MODULE_TYPES = "SphericalFourierNeuralOperatorNet",
     norm_mean: float = 0.0,
-    step_config_kwargs: Optional[dict] = None,
+    step_config_kwargs: dict | None = None,
 ) -> SeparateRadiationStepConfig:
     if step_config_kwargs is None:
         step_config_kwargs = {}
@@ -104,7 +104,7 @@ def get_separate_radiation_config(
 def get_separate_radiation_step(
     module_name: MODULE_TYPES = "SphericalFourierNeuralOperatorNet",
     norm_mean: float = 0.0,
-    step_config_kwargs: Optional[dict] = None,
+    step_config_kwargs: dict | None = None,
 ):
     config = get_separate_radiation_config(module_name, norm_mean, step_config_kwargs)
     device = fme.get_device()

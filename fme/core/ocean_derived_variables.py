@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Optional, Tuple
+from typing import Callable, Dict, MutableMapping, Tuple
 
 import torch
 
@@ -35,11 +35,11 @@ def register(metadata: VariableMetadata):
 
 def _compute_ocean_derived_variable(
     data: TensorDict,
-    depth_coordinate: Optional[HasOceanDepthIntegral],
+    depth_coordinate: HasOceanDepthIntegral | None,
     timestep: datetime.timedelta,
     label: str,
     derived_variable_func: OceanDerivedVariableFunc,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes an ocean derived variable and adds it to the given data.
 
@@ -85,9 +85,9 @@ def _compute_ocean_derived_variable(
 
 def compute_ocean_derived_quantities(
     data: TensorDict,
-    depth_coordinate: Optional[HasOceanDepthIntegral],
+    depth_coordinate: HasOceanDepthIntegral | None,
     timestep: datetime.timedelta,
-    forcing_data: Optional[TensorDict] = None,
+    forcing_data: TensorDict | None = None,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _OCEAN_DERIVED_VARIABLE_REGISTRY:

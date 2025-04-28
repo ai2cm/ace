@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Any, Callable, List, Literal, Mapping, Optional, Protocol, Union
+from typing import Any, Callable, List, Literal, Mapping, Protocol, Union
 
 import dacite
 import torch
@@ -120,18 +120,19 @@ class AtmosphereCorrectorConfig:
 
     conserve_dry_air: bool = False
     zero_global_mean_moisture_advection: bool = False
-    moisture_budget_correction: Optional[
+    moisture_budget_correction: (
         Literal[
             "precipitation",
             "evaporation",
             "advection_and_precipitation",
             "advection_and_evaporation",
         ]
-    ] = None
+        | None
+    ) = None
     force_positive_names: List[str] = dataclasses.field(default_factory=list)
-    total_energy_budget_correction: Optional[
-        Union[EnergyBudgetConfig, Literal["constant_temperature"]]
-    ] = None
+    total_energy_budget_correction: (
+        Union[EnergyBudgetConfig, Literal["constant_temperature"]] | None
+    ) = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
@@ -145,7 +146,7 @@ class AtmosphereCorrector(CorrectorABC):
         self,
         config: AtmosphereCorrectorConfig,
         gridded_operations: GriddedOperations,
-        vertical_coordinate: Optional[HasAtmosphereVerticalIntegral],
+        vertical_coordinate: HasAtmosphereVerticalIntegral | None,
         timestep: datetime.timedelta,
     ):
         self._config = config

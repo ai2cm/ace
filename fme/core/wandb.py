@@ -1,14 +1,12 @@
 import logging
 import os
 import time
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping
 
 import numpy as np
 import wandb
 
 from fme.core.distributed import Distributed
-
-singleton: Optional["WandB"] = None
 
 WANDB_RUN_ID_FILE = "wandb_run_id"
 
@@ -120,7 +118,7 @@ class WandB:
     def init(
         self,
         resumable: bool = False,
-        experiment_dir: Optional[str] = None,
+        experiment_dir: str | None = None,
         **kwargs,
     ):
         """
@@ -181,6 +179,9 @@ class WandB:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+
+singleton: WandB | None = None
 
 
 def scale_image(

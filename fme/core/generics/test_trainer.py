@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import os
 import unittest.mock
-from typing import Any, Dict, Optional, Tuple, Type, TypeVar, cast
+from typing import Any, Dict, Tuple, Type, TypeVar, cast
 
 import numpy as np
 import pytest
@@ -115,7 +115,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
 
     def __init__(
         self,
-        state: Optional[Dict[str, Any]] = None,
+        state: Dict[str, Any] | None = None,
     ):
         self._modules = torch.nn.ModuleList([torch.nn.Linear(1, 1, bias=False)])
         self._modules[0].weight.data.fill_(0.0)
@@ -123,7 +123,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
             self._state = state
         else:
             self._state = {}
-        self.loaded_state: Optional[Dict[str, Any]] = None
+        self.loaded_state: Dict[str, Any] | None = None
 
     def get_state(self) -> Dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
@@ -185,9 +185,9 @@ class Config:
     validate_using_ema: bool = True
     log_train_every_n_batches: int = 1
     inference_n_forward_steps: int = 1
-    checkpoint_save_epochs: Optional[Slice] = None
-    ema_checkpoint_save_epochs: Optional[Slice] = None
-    segment_epochs: Optional[int] = None
+    checkpoint_save_epochs: Slice | None = None
+    ema_checkpoint_save_epochs: Slice | None = None
+    segment_epochs: int | None = None
 
     def __post_init__(self):
         self.get_inference_epochs = unittest.mock.MagicMock(
@@ -208,7 +208,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.train_loss}
 
-    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+    def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
 
@@ -222,7 +222,7 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
     def get_logs(self, label: str) -> Dict[str, Any]:
         return {f"{label}/mean/loss": self.validation_loss}
 
-    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+    def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
 
@@ -239,7 +239,7 @@ class InferenceAggregator(InferenceAggregatorABC[PSType, SDType]):
     def get_summary_logs(self) -> InferenceLog:
         return {"time_mean_norm/rmse/channel_mean": self.inference_loss}
 
-    def flush_diagnostics(self, subdir: Optional[str]) -> None:
+    def flush_diagnostics(self, subdir: str | None) -> None:
         pass
 
 
@@ -275,15 +275,15 @@ class AggregatorBuilder(AggregatorBuilderABC[PSType, TrainOutput, SDType]):
 
 def get_trainer(
     tmp_path: str,
-    checkpoint_save_epochs: Optional[Slice] = None,
-    segment_epochs: Optional[int] = None,
+    checkpoint_save_epochs: Slice | None = None,
+    segment_epochs: int | None = None,
     max_epochs: int = 8,
-    checkpoint_dir: Optional[str] = None,
-    stepper_state: Optional[Dict[str, Any]] = None,
-    train_losses: Optional[np.ndarray] = None,
-    validation_losses: Optional[np.ndarray] = None,
-    inference_losses: Optional[np.ndarray] = None,
-    stepper_module_values: Optional[np.ndarray] = None,
+    checkpoint_dir: str | None = None,
+    stepper_state: Dict[str, Any] | None = None,
+    train_losses: np.ndarray | None = None,
+    validation_losses: np.ndarray | None = None,
+    inference_losses: np.ndarray | None = None,
+    stepper_module_values: np.ndarray | None = None,
     ema_decay: float = 0.9999,
     validate_using_ema: bool = True,
 ) -> Tuple[TrainConfigProtocol, Trainer]:
@@ -375,7 +375,7 @@ def get_trainer(
     "checkpoint_save_epochs",
     [None, Slice(start=2, stop=3), Slice(start=1, step=2)],
 )
-def test_trainer(tmp_path: str, checkpoint_save_epochs: Optional[Slice]):
+def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     config, trainer = get_trainer(tmp_path, checkpoint_save_epochs, max_epochs=4)
     trainer.train()
     assert os.path.exists(config.experiment_dir)
@@ -573,7 +573,7 @@ def test_saves_correct_ema_checkpoints(
 )
 def test_saves_correct_non_ema_epoch_checkpoints(
     tmp_path: str,
-    segment_epochs: Optional[int],
+    segment_epochs: int | None,
     best_val_epoch: int,
     best_inference_epoch: int,
 ):

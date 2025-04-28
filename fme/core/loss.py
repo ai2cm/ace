@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Callable, Dict, List, Literal, Mapping, Optional
+from typing import Any, Callable, Dict, List, Literal, Mapping
 
 import torch
 import torch.linalg
@@ -252,7 +252,7 @@ class LossConfig:
 
     type: Literal["LpLoss", "L1", "MSE", "AreaWeightedMSE", "NaN"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
-    global_mean_type: Optional[Literal["LpLoss"]] = None
+    global_mean_type: Literal["LpLoss"] | None = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
         default_factory=lambda: {}
     )
@@ -267,7 +267,7 @@ class LossConfig:
     def build(
         self,
         reduction: Literal["mean", "none"],
-        area_weighted_mean: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        area_weighted_mean: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> Any:
         """
         Args:
@@ -335,7 +335,7 @@ class WeightedMappingLossConfig:
 
     type: Literal["LpLoss", "MSE", "AreaWeightedMSE"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
-    global_mean_type: Optional[Literal["LpLoss"]] = None
+    global_mean_type: Literal["LpLoss"] | None = None
     global_mean_kwargs: Mapping[str, Any] = dataclasses.field(
         default_factory=lambda: {}
     )

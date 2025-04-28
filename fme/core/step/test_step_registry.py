@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import List, Optional
+from typing import List
 
 import torch
 
@@ -90,16 +90,16 @@ class MockStepConfig(StepConfigABC):
     def n_ic_timesteps(self) -> int:
         raise NotImplementedError()
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         raise NotImplementedError()
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return None
 
     def get_loss_normalizer(
         self,
-        extra_names: Optional[List[str]] = None,
-        extra_residual_scaled_names: Optional[List[str]] = None,
+        extra_names: List[str] | None = None,
+        extra_residual_scaled_names: List[str] | None = None,
     ):
         raise NotImplementedError()
 
