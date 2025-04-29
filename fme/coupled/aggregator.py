@@ -144,14 +144,14 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             )
         logs = {**ocean_logs, **atmos_logs}
         loss = self._loss / self._n_batches
-        loss_ocean = self._loss_ocean / self._n_batches
-        loss_atmos = self._loss_atmos / self._n_batches
         logs[f"{label}/mean/loss"] = float(
             self._dist.reduce_mean(loss.detach()).cpu().numpy()
         )
+        loss_ocean = self._loss_ocean / self._n_batches
         logs[f"{label}/mean/loss/ocean"] = float(
             self._dist.reduce_mean(loss_ocean.detach()).cpu().numpy()
         )
+        loss_atmos = self._loss_atmos / self._n_batches
         logs[f"{label}/mean/loss/atmosphere"] = float(
             self._dist.reduce_mean(loss_atmos.detach()).cpu().numpy()
         )
