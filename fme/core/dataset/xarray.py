@@ -24,7 +24,6 @@ from fme.core.coordinates import (
     VerticalCoordinate,
 )
 from fme.core.dataset.properties import DatasetProperties
-from fme.core.device import get_device
 from fme.core.mask_provider import MaskProvider
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict
@@ -635,9 +634,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         for name in self._static_derived_names:
             tensor = self._static_derived_data[name]
             horizontal_dims = [1] * tensor.ndim
-            tensors[name] = tensor.repeat((total_steps, *horizontal_dims)).to(
-                get_device()
-            )
+            tensors[name] = tensor.repeat((total_steps, *horizontal_dims))
 
         # cast to desired dtype
         tensors = {k: v.to(dtype=self.dtype) for k, v in tensors.items()}
