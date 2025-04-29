@@ -502,14 +502,18 @@ class ComponentStepMetrics:
         elif realm == "atmosphere":
             self._atmos[key] = value
 
-    def get_ocean_metrics(self) -> torch.Tensor:
+    def get_ocean_metrics(self) -> TensorDict:
+        if not self._ocean:
+            return {"loss/ocean": torch.tensor(0.0, device=get_device())}
         loss = sum(self._ocean.values())
         return {
             "loss/ocean": loss,
             **self._ocean,
         }
 
-    def get_atmosphere_metrics(self) -> torch.Tensor:
+    def get_atmosphere_metrics(self) -> TensorDict:
+        if not self._atmos:
+            return {"loss/atmosphere": torch.tensor(0.0, device=get_device())}
         loss = sum(self._atmos.values())
         return {
             "loss/atmosphere": loss,

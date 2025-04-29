@@ -4,6 +4,7 @@ from typing import List
 
 import numpy as np
 import pytest
+import torch
 import xarray as xr
 
 from fme.core.testing.wandb import mock_wandb
@@ -248,11 +249,13 @@ def _write_test_yaml_files(
 
 
 @pytest.mark.parametrize(
-    "log_zonal_mean_images",
+    "log_zonal_mean_images,loss_atmos_n_steps",
     [
-        False,
+        (False, 3),
+        (False, 0),
         pytest.param(
             True,
+            1,
             marks=pytest.mark.xfail(
                 reason=(
                     "There is an unresolved bug when logging "
@@ -262,7 +265,9 @@ def _write_test_yaml_files(
         ),
     ],
 )
-def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bool):
+def test_train_and_inference(
+    tmp_path, log_zonal_mean_images, loss_atmos_n_steps, very_fast_only: bool
+):
     """Ensure that coupled training and standalone inference run without errors."""
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
@@ -359,7 +364,7 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
         inline_inference_n_coupled_steps=3,
         inference_n_coupled_steps=6,
         coupled_steps_in_memory=2,
-        loss_atmos_n_steps=3,
+        loss_atmos_n_steps=loss_atmos_n_steps,
     )
 
     with mock_wandb() as wandb:
@@ -375,22 +380,35 @@ def test_train_and_inference(tmp_path, log_zonal_mean_images, very_fast_only: bo
     batch_logs = train_logs[0]
     assert "batch_loss" in batch_logs
     assert "batch_loss/ocean" in batch_logs
-    assert "batch_loss/atmosphere" in batch_logs
     # NOTE: step numbers start at 0
     for i in range(2):
         assert f"batch_loss/ocean_step_{i}" in batch_logs
     # only 2 ocean steps configured
     assert f"batch_loss/ocean_step_2" not in batch_logs
-    for i in range(3):
-        assert f"batch_loss/atmosphere_step_{i}" in batch_logs
-    # atmos loss contributions config with n_steps = 3
-    assert f"batch_loss/atmosphere_step_3" not in batch_logs
+
+    # atmos loss contributions
+    assert "batch_loss/atmosphere" in batch_logs
+    if loss_atmos_n_steps > 0:
+        for i in range(loss_atmos_n_steps):
+            assert f"batch_loss/atmosphere_step_{i}" in batch_logs
+        # atmos loss contributions config with n_steps = 3
+        assert f"batch_loss/atmosphere_step_3" not in batch_logs
+    else:
+        torch.testing.assert_close(
+            batch_logs["batch_loss/atmosphere"],
+            torch.tensor(0.0, device=batch_logs["batch_loss/atmosphere"].device),
+        )
+        for i in range(loss_atmos_n_steps):
+            assert f"batch_loss/atmosphere_step_{i}" not in batch_logs
 
     epoch_logs = train_logs[-1]
     assert "train/mean/loss" in epoch_logs
     assert "val/mean/loss" in epoch_logs
     assert "val/mean/loss/ocean" in epoch_logs
+    # atmos loss contributions
     assert "val/mean/loss/atmosphere" in epoch_logs
+    if loss_atmos_n_steps == 0:
+        assert np.isclose(epoch_logs["val/mean/loss/atmosphere"], 0.0)
     assert "inference/time_mean_norm/rmse/channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/ocean_channel_mean" in epoch_logs
     assert "inference/time_mean_norm/rmse/atmosphere_channel_mean" in epoch_logs
