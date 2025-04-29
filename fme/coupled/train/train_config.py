@@ -150,7 +150,7 @@ class TrainConfig:
         return self.inference.n_coupled_steps
 
     def get_inference_epochs(self) -> List[int]:
-        return list(range(0, self.max_epochs))[self.inference.epochs.slice]
+        return list(range(1, self.max_epochs + 1))[self.inference.epochs.slice]
 
 
 class TrainBuilders:
