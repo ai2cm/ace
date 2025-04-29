@@ -212,7 +212,7 @@ class Trainer:
 
         self.num_batches_seen = 0
         self._start_epoch = 0
-        self._model_epoch = self._start_epoch
+        self._epoch = self._start_epoch
         self.num_batches_seen = 0
         self._best_validation_loss = torch.inf
         self._best_inference_error = torch.inf
@@ -248,7 +248,7 @@ class Trainer:
     def train(self):
         logging.info("Starting Training Loop...")
 
-        self._model_epoch = self._start_epoch
+        self._epoch = self._start_epoch
         inference_epochs = self.config.get_inference_epochs()
         if self.config.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
@@ -256,25 +256,24 @@ class Trainer:
             segment_max_epochs = min(
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
-        # "epoch" describes the loop, self._model_epoch describes model weights
-        # needed so we can describe the loop even after weights are updated
-        for epoch in range(self._start_epoch, segment_max_epochs):
+        while self._epoch < segment_max_epochs:
+            self._epoch += 1
             if self._do_gc_collect:
                 # garbage collect to avoid CUDA error in some contexts
                 # https://github.com/pytorch/pytorch/issues/67978#issuecomment-1661986812  # noqa: E501
                 gc.collect()
-            logging.info(f"Epoch: {epoch + 1}")
-            self.train_data.set_epoch(epoch)
+            logging.info(f"Epoch: {self._epoch}")
+            self.train_data.set_epoch(self._epoch)
 
             start_time = time.time()
-            logging.info(f"Starting training step on epoch {epoch + 1}")
+            logging.info(f"Starting training step on epoch {self._epoch}")
             train_logs = self.train_one_epoch()
             train_end = time.time()
-            logging.info(f"Starting validation step on epoch {epoch + 1}")
+            logging.info(f"Starting validation step on epoch {self._epoch}")
             valid_logs = self.validate_one_epoch()
             valid_end = time.time()
-            if epoch in inference_epochs:
-                logging.info(f"Starting inference step on epoch {epoch + 1}")
+            if self._epoch in inference_epochs:
+                logging.info(f"Starting inference step on epoch {self._epoch}")
                 inference_logs = self.inference_one_epoch()
                 inference_end: float | None = time.time()
             else:
@@ -292,17 +291,17 @@ class Trainer:
 
             if self.dist.is_root():
                 if self.config.save_checkpoint:
-                    logging.info(f"Saving checkpoints for epoch {epoch + 1}")
+                    logging.info(f"Saving checkpoints for epoch {self._epoch}")
                     self.save_all_checkpoints(valid_loss, inference_error)
 
             time_elapsed = time.time() - start_time
-            logging.info(f"Time taken for epoch {epoch + 1} is {time_elapsed} sec")
+            logging.info(f"Time taken for epoch {self._epoch} is {time_elapsed} sec")
             logging.info(f"Train loss: {train_loss}. Valid loss: {valid_loss}")
             if inference_error is not None:
                 logging.info(f"Inference error: {inference_error}")
 
             with self._validation_context():
-                additional_logs = self._end_of_epoch_ops(epoch)
+                additional_logs = self._end_of_epoch_ops(self._epoch)
 
             logging.info("Logging to wandb")
             all_logs = {
@@ -312,7 +311,7 @@ class Trainer:
                 **additional_logs,
                 **{
                     "lr": lr,
-                    "epoch": epoch,
+                    "epoch": self._epoch,
                     "epoch_train_seconds": train_end - start_time,
                     "epoch_validation_seconds": valid_end - train_end,
                     "epoch_total_seconds": time_elapsed,
@@ -374,8 +373,7 @@ class Trainer:
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
                 n_samples_seen_since_logging = 0
-        self._model_epoch += 1
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
         return aggregator.get_logs(label="train")
 
     @contextlib.contextmanager
@@ -419,7 +417,7 @@ class Trainer:
                     batch=stepped,
                 )
         logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
         logging.info("Getting validation aggregator logs")
         return aggregator.get_logs(label="val")
 
@@ -434,7 +432,7 @@ class Trainer:
                 aggregator=aggregator,
             )
         logging.info("Starting flush of reduced diagnostics to disk")
-        aggregator.flush_diagnostics(subdir=f"epoch_{self._model_epoch:04d}")
+        aggregator.flush_diagnostics(subdir=f"epoch_{self._epoch:04d}")
         logging.info("Getting inline inference aggregator logs")
         logs = aggregator.get_summary_logs()
         return {f"inference/{k}": v for k, v in logs.items()}
@@ -447,7 +445,7 @@ class Trainer:
         try:
             data = {
                 "num_batches_seen": self.num_batches_seen,
-                "epoch": self._model_epoch,
+                "epoch": self._epoch,
                 "best_validation_loss": self._best_validation_loss,
                 "best_inference_error": self._best_inference_error,
                 "stepper": self.stepper.get_state(),
@@ -513,13 +511,13 @@ class Trainer:
                 f"Saving latest EMA checkpoint to {self.paths.ema_checkpoint_path}"
             )
             self.save_checkpoint(self.paths.ema_checkpoint_path)
-        if self._epoch_checkpoint_enabled(self._model_epoch):
-            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(self._model_epoch)
+        if self._epoch_checkpoint_enabled(self._epoch):
+            epoch_checkpoint_path = self.paths.epoch_checkpoint_path(self._epoch)
             logging.info(f"Saving epoch checkpoint to {epoch_checkpoint_path}")
             self.save_checkpoint(epoch_checkpoint_path)
-        if self._ema_epoch_checkpoint_enabled(self._model_epoch):
+        if self._ema_epoch_checkpoint_enabled(self._epoch):
             ema_epoch_checkpoint_path = self.paths.ema_epoch_checkpoint_path(
-                self._model_epoch
+                self._epoch
             )
             logging.info(f"Saving EMA epoch checkpoint to {ema_epoch_checkpoint_path}")
             with self._ema_context():

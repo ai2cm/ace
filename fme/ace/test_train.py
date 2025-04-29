@@ -502,14 +502,12 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             tmp_path, nettype, log_to_wandb=True, max_epochs=2, segment_epochs=1
         )
         with mock_wandb() as wandb:
-            train_main(
-                yaml_config=train_config,
+            train_main(yaml_config=train_config)
+            assert (
+                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
             )
             assert (
-                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
-            )
-            assert (
-                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 0
+                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
             )
             assert not mock.called
             # need to persist the id since mock_wandb doesn't
@@ -517,15 +515,13 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
         with mock_wandb() as wandb:
             # set the id so that we can check it matches what's in the experiment dir
             wandb.set_id(id)
-            train_main(
-                yaml_config=train_config,
-            )
+            train_main(yaml_config=train_config)
             mock.assert_called()
             assert (
-                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+                min([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 2
             )
             assert (
-                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 1
+                max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 2
             )
 
 
