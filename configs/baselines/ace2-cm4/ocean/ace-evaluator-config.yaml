@@ -1,0 +1,32 @@
+experiment_dir: /results
+n_forward_steps: 2920
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-cm4
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0311-01-01T00:00:00'
+  dataset:
+    ocean:
+      data_path: /climate-default
+      file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+      engine: zarr
+    atmosphere:
+      data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
+      file_pattern: data.zarr
+      engine: zarr
+    mask_2d:
+      data_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset
+      file_pattern: mask_2d.nc
+  num_data_workers: 1
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+aggregator:
+  log_histograms: true
