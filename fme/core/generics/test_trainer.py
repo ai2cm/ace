@@ -399,13 +399,13 @@ def test_trainer(tmp_path: str, checkpoint_save_epochs: Slice | None):
     train_data = cast(TrainData, trainer.train_data)
     valid_data = cast(TrainData, trainer.valid_data)
     assert train_data.set_epoch_mock.mock_calls == [
-        unittest.mock.call(i) for i in range(config.max_epochs)
+        unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
     assert valid_data.set_epoch_mock.mock_calls == []  # no shuffling
     assert train_data.log_info_mock.called
     assert valid_data.log_info_mock.called
     assert trainer._end_of_epoch_ops.mock_calls == [  # type: ignore
-        unittest.mock.call(i) for i in range(config.max_epochs)
+        unittest.mock.call(i) for i in range(1, config.max_epochs + 1)
     ]
 
 
@@ -429,8 +429,8 @@ def test_segmented_trainer_runs_correct_epochs(tmp_path: str, segment_epochs: in
         assert train_data.set_epoch_mock.mock_calls == [
             unittest.mock.call(i)
             for i in range(
-                i * segment_epochs,
-                min((i + 1) * segment_epochs, config.max_epochs),
+                i * segment_epochs + 1,
+                min((i + 1) * segment_epochs, config.max_epochs) + 1,
             )
         ]
 
@@ -477,7 +477,7 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
         trainer.train()
     train_data = cast(TrainData, trainer.train_data)
     assert train_data.set_epoch_mock.mock_calls == [
-        unittest.mock.call(i) for i in range(calls_before_interrupt)
+        unittest.mock.call(i) for i in range(1, calls_before_interrupt + 1)
     ]
     paths = CheckpointPaths(config.checkpoint_dir)
     assert os.path.exists(paths.latest_checkpoint_path)
@@ -490,7 +490,7 @@ def test_resume_after_interrupted_training(tmp_path: str, interrupt_method: str)
     trainer.train()
     train_data = cast(TrainData, trainer.train_data)
     assert train_data.set_epoch_mock.mock_calls == [
-        unittest.mock.call(i) for i in range(calls_before_interrupt - 1, max_epochs)
+        unittest.mock.call(i) for i in range(calls_before_interrupt, max_epochs + 1)
     ]
     stepper = cast(TrainStepper, trainer.stepper)
     assert stepper.loaded_state is not None
@@ -619,8 +619,8 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         assert train_data.set_epoch_mock.mock_calls == [
             unittest.mock.call(i)
             for i in range(
-                i * segment_epochs_value,
-                min((i + 1) * segment_epochs_value, config.max_epochs),
+                i * segment_epochs_value + 1,
+                min((i + 1) * segment_epochs_value, config.max_epochs) + 1,
             )
         ]
         latest_checkpoint = torch.load(paths.latest_checkpoint_path, weights_only=False)
