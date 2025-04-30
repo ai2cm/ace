@@ -58,7 +58,7 @@ SHIELD_RES ?= c96
 .PHONY: shield_AMIP_dataset
 shield_AMIP_dataset:
 	./compute_dataset.sh \
-	--config configs/shield-amip-ensemble-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
+	--config configs/shield-amip-$(SHIELD_RES)-$(RESOLUTION)-8layer.yaml
 
 .PHONY: shield_AMIP_monthly_netcdfs
 shield_AMIP_monthly_netcdfs:
