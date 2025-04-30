@@ -59,6 +59,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
+        evaluate_before_training: Whether to run validation and inline inference before
+            any training is done.
     """
 
     train_loader: DataLoaderConfig
@@ -81,6 +83,7 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     save_per_epoch_diagnostics: bool = False
+    evaluate_before_training: bool = False
 
     def __post_init__(self):
         if self.n_forward_steps != 1:
@@ -109,7 +112,9 @@ class TrainConfig:
         return os.path.join(self.experiment_dir, "output")
 
     def get_inference_epochs(self) -> List[int]:
-        return list(range(1, self.max_epochs + 1))[self.inference.epochs.slice]
+        start_epoch = 0 if self.evaluate_before_training else 1
+        all_epochs = list(range(start_epoch, self.max_epochs + 1))
+        return all_epochs[self.inference.epochs.slice]
 
 
 class TrainBuilders:
