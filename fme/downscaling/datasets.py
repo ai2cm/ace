@@ -514,6 +514,7 @@ class GriddedData:
     downscale_factor: int
     dims: List[str]
     variable_metadata: Mapping[str, VariableMetadata]
+    all_times: xr.CFTimeIndex
 
     @property
     def loader(self) -> DataLoader[PairedBatchItem]:
@@ -863,6 +864,16 @@ class DataLoaderConfig:
             strict=self.strict_ensemble,
         )
 
+        # n_timesteps is hardcoded to 1 for downscaling, so the sample_start_times
+        # are the full time range for the dataset
+        if dataset_fine.sample_n_times != 1:
+            raise ValueError(
+                "Downscaling data loading should always have n_timesteps=1 "
+                "in model data requirements."
+                f" Got {dataset_fine.sample_n_times} instead."
+            )
+        all_times = dataset_fine.sample_start_times
+
         dataset_fine = self._repeat_if_requested(dataset_fine)
         dataset_coarse = self._repeat_if_requested(dataset_coarse)
 
@@ -939,7 +950,6 @@ class DataLoaderConfig:
         )
 
         example = dataset[0]
-
         common_metadata_keys = set(dataset_fine_subset.variable_metadata).intersection(
             dataset_coarse_subset.variable_metadata
         )
@@ -959,4 +969,5 @@ class DataLoaderConfig:
             example.downscale_factor,
             example.fine.latlon_coordinates.dims,
             variable_metadata,
+            all_times=all_times,
         )
