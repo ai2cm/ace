@@ -127,6 +127,9 @@ class TrainConfigProtocol(Protocol):
     @property
     def ema_checkpoint_save_epochs(self) -> Slice | None: ...
 
+    @property
+    def evaluate_before_training(self) -> bool: ...
+
     def get_inference_epochs(self) -> List[int]: ...
 
 
@@ -256,6 +259,22 @@ class Trainer:
             segment_max_epochs = min(
                 self._start_epoch + self.config.segment_epochs, self.config.max_epochs
             )
+
+        if self.config.evaluate_before_training and self._epoch == 0:
+            logging.info("Starting validation before training")
+            valid_logs = self.validate_one_epoch()
+            if self._epoch in inference_epochs:
+                logging.info("Starting inline inference before training")
+                inference_logs = self.inference_one_epoch()
+            else:
+                inference_logs = {}
+            valid_loss = valid_logs["val/mean/loss"]
+            logging.info(f"Validation loss before training: {valid_loss}")
+            logging.info("Logging to wandb")
+            all_logs = valid_logs | inference_logs | {"epoch": self._epoch}
+            wandb = WandB.get_instance()
+            wandb.log(all_logs, step=self.num_batches_seen)
+
         while self._epoch < segment_max_epochs:
             self._epoch += 1
             if self._do_gc_collect:

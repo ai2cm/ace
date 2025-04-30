@@ -34,9 +34,7 @@ class InlineInferenceConfig:
         n_coupled_steps: number of coupled forward steps to take
         coupled_steps_in_memory: number of coupled forward steps to take before
             re-reading data from disk
-        epochs: epochs on which to run inference, where the first epoch is
-            defined as epoch 0 (unlike in logs which show epochs as starting
-            from 1). By default runs inference every epoch.
+        epochs: epochs on which to run inference. By default runs inference every epoch.
         aggregator: configuration of inline coupled inference aggregator.
     """
 
@@ -105,6 +103,8 @@ class TrainConfig:
             must be run in segments, e.g. due to wall clock limit.
         save_per_epoch_diagnostics: Whether to save per-epoch diagnostics from
             training, validation and inline inference aggregators.
+        evaluate_before_training: Whether to run validation and inline inference before
+            any training is done.
 
     """
 
@@ -128,6 +128,7 @@ class TrainConfig:
     log_train_every_n_batches: int = 100
     segment_epochs: Optional[int] = None
     save_per_epoch_diagnostics: bool = False
+    evaluate_before_training: bool = True
 
     @property
     def n_forward_steps(self) -> int:
@@ -150,7 +151,9 @@ class TrainConfig:
         return self.inference.n_coupled_steps
 
     def get_inference_epochs(self) -> List[int]:
-        return list(range(1, self.max_epochs + 1))[self.inference.epochs.slice]
+        start_epoch = 0 if self.evaluate_before_training else 1
+        all_epochs = list(range(start_epoch, self.max_epochs + 1))
+        return all_epochs[self.inference.epochs.slice]
 
 
 class TrainBuilders:

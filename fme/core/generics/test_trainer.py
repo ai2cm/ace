@@ -27,8 +27,10 @@ from fme.core.generics.trainer import (
     TrainOutputABC,
     TrainStepperABC,
 )
+from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization
 from fme.core.scheduler import SchedulerConfig
+from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice, TensorDict, TensorMapping
 
 
@@ -188,10 +190,12 @@ class Config:
     checkpoint_save_epochs: Slice | None = None
     ema_checkpoint_save_epochs: Slice | None = None
     segment_epochs: int | None = None
+    evaluate_before_training: bool = False
 
     def __post_init__(self):
+        start_epoch = 0 if self.evaluate_before_training else 1
         self.get_inference_epochs = unittest.mock.MagicMock(
-            return_value=[i for i in range(self.max_epochs)]
+            return_value=[i for i in range(start_epoch, self.max_epochs + 1)]
         )
 
 
@@ -286,15 +290,18 @@ def get_trainer(
     stepper_module_values: np.ndarray | None = None,
     ema_decay: float = 0.9999,
     validate_using_ema: bool = True,
+    evaluate_before_training: bool = False,
 ) -> Tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
     if train_losses is None:
         train_losses = np.zeros(max_epochs)
     if validation_losses is None:
-        validation_losses = np.zeros(max_epochs)
+        n_validation_steps = max_epochs + 1 if evaluate_before_training else max_epochs
+        validation_losses = np.zeros(n_validation_steps)
     if inference_losses is None:
-        inference_losses = np.zeros(max_epochs)
+        n_inference_steps = max_epochs + 1 if evaluate_before_training else max_epochs
+        inference_losses = np.zeros(n_inference_steps)
     if stepper_module_values is None:
         stepper_module_values = np.zeros(max_epochs)
     train_data = TrainData()
@@ -350,6 +357,7 @@ def get_trainer(
         segment_epochs=segment_epochs,
         max_epochs=max_epochs,
         validate_using_ema=validate_using_ema,
+        evaluate_before_training=evaluate_before_training,
     )
     aggregator_builder = AggregatorBuilder(
         train_losses=train_losses,
@@ -660,3 +668,47 @@ def test_saves_correct_non_ema_epoch_checkpoints(
         latest_checkpoint["stepper"]["modules"]["0.weight"].cpu().numpy(),
         module_values[-1],
     )
+
+
+def test_evaluate_before_training(tmp_path: str):
+    max_epochs = 2
+    n_batches = TrainData().n_batches
+    train_losses = np.random.rand(max_epochs)
+    val_losses = np.random.rand(max_epochs + 1)
+    inference_errors = np.random.rand(max_epochs + 1)
+    train_loss_name = "train/mean/loss"
+    val_loss_name = "val/mean/loss"
+    inference_error_name = "inference/time_mean_norm/rmse/channel_mean"
+
+    def _get_trainer(train_losses, val_losses, inference_errors):
+        _, trainer = get_trainer(
+            tmp_path,
+            max_epochs=max_epochs,
+            evaluate_before_training=True,
+            train_losses=train_losses,
+            validation_losses=val_losses,
+            inference_losses=inference_errors,
+            segment_epochs=1,
+        )
+        return trainer
+
+    with mock_wandb() as wandb:
+        LoggingConfig(log_to_wandb=True).configure_wandb({"experiment_dir": tmp_path})
+        # run training in two segments to ensure coverage of check that extra validation
+        # really only happens before any training is done.
+        trainer = _get_trainer(train_losses[:1], val_losses[:2], inference_errors[:2])
+        trainer.train()
+        trainer = _get_trainer(train_losses[1:], val_losses[2:], inference_errors[2:])
+        trainer.train()  # job is segmented, so need to call train twice to complete
+        wandb_logs = wandb.get_logs()
+
+        for i in range(max_epochs + 1):
+            # only validate logs at end of each epoch, not per-batch logs
+            logs = wandb_logs[i * n_batches]
+            assert logs["epoch"] == i
+            assert logs[val_loss_name] == val_losses[i]
+            assert logs[inference_error_name] == inference_errors[i]
+            if i == 0:
+                assert train_loss_name not in logs
+            else:
+                assert logs[train_loss_name] == train_losses[i - 1]
