@@ -1,0 +1,85 @@
+runs:
+  2025-04-29-c96-1deg-shield-amip-p2k-dataset: gs://vcm-ml-raw-flexible-retention/2025-04-28-C96-SHiELD-AMIP/regridded-zarrs/gaussian_grid_180_by_360/AMIP-p2K
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/2025-04-29-c96-1deg-shield-amip-p2k-dataset-stats
+  beaker_dataset: 2025-04-29-c96-1deg-shield-amip-p2k-dataset-stats
+  start_date: "1990-01-01"
+  end_date: "2020-12-31"
+  data_type: FV3GFS
+dataset_computation:
+  reference_vertical_coordinate_file: gs://vcm-ml-raw-flexible-retention/2024-03-10-C96-SHiELD-FME-reference/vertical-coordinate-file/fv_core.res.nc
+  vertical_coarsening_indices:
+    - [0, 11]
+    - [11, 21]
+    - [21, 30]
+    - [30, 39]
+    - [39, 49]
+    - [49, 58]
+    - [58, 67]
+    - [67, 79]
+  renaming:
+    specific_humidity_at_two_meters: Q2m
+    air_temperature_at_two_meters: TMP2m
+    eastward_wind_at_ten_meters: UGRD10m
+    northward_wind_at_ten_meters: VGRD10m
+  variable_sources:
+    fluxes_2d.zarr:
+      - PRATEsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - DLWRFsfc
+      - DSWRFsfc
+      - DSWRFtoa
+      - ULWRFsfc
+      - ULWRFtoa
+      - USWRFsfc
+      - USWRFtoa
+      - precipitable_water_path
+      - GRAUPELsfc
+      - ICEsfc
+      - SNOWsfc
+    full_state.zarr:
+      - PRESsfc
+      - HGTsfc
+      - RH500
+      - RH850
+      - TMP500
+      - TMP850
+      - UGRD500
+      - UGRD850
+      - UGRD1000
+      - VGRD500
+      - VGRD850
+      - VGRD1000
+      - h50
+      - h500
+      - h850
+      - h1000
+      - air_temperature_at_two_meters
+      - eastward_wind_at_ten_meters
+      - northward_wind_at_ten_meters
+      - surface_temperature
+      - air_temperature
+      - specific_humidity
+      - cloud_water_mixing_ratio
+      - cloud_ice_mixing_ratio
+      - graupel_mixing_ratio
+      - rain_mixing_ratio
+      - snow_mixing_ratio
+      - northward_wind
+      - eastward_wind
+      - pressure_thickness_of_atmospheric_layer
+      - soil_moisture_0
+      - soil_moisture_1
+      - soil_moisture_2
+      - soil_moisture_3
+      - snow_cover_fraction
+      - specific_humidity_at_two_meters
+      - land_fraction
+      - ocean_fraction
+      - sea_ice_fraction
+    scalar.zarr:
+      - global_mean_co2
+  standard_names:
+    total_frozen_precip_rate: None
