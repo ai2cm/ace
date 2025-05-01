@@ -151,7 +151,7 @@ def test_map_aggregator(n_steps: int):
         }
         aggregator.record_batch(target, prediction)
 
-    _, maps = aggregator._get()
+    _, maps = aggregator._get_metrics_and_maps()
     for var_name in ("x", "y"):
         assert maps[f"maps/full-field/{var_name}"].shape == (
             height,
@@ -224,6 +224,7 @@ def test_aggregator_integration(n_latent_steps, percentiles=[99.999]):
             batch=batch,
         )
         aggregator.get_wandb(prefix="test")
+        aggregator.get_dataset()
 
 
 @pytest.mark.parametrize("valid_shape", [(2, 4, 8), (2, 3, 4, 8)])
