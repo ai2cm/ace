@@ -14,14 +14,16 @@ class DataLoaderConfig:
             to be loaded. This sequence of datasets will be concatenated.
             It could also be a mapping of dataset names to sequences of
             configurations, in which each value in the mapping is a
-            different source of data to be merged. For example,
-            ```yaml
-            dataset:
-              source1:
-                - data_path: ...
-              source2:
-                - data_path: ...
-            ```
+            different source of data to be merged. For example:
+
+            .. code-block:: yaml
+
+                dataset:
+                    source1:
+                    - data_path: ...
+                    source2:
+                    - data_path: ...
+
             If multiple sources contain the same data variable, the version
             from the first source is loaded and other sources are ignored.
         batch_size: Number of samples per batch.
@@ -31,7 +33,7 @@ class DataLoaderConfig:
         strict_ensemble: Whether to enforce that the datasets to be concatened
             have the same dimensions and coordinates.
         augmentation: Configuration for data augmentation.
-    """
+    """  # noqa: D415
 
     dataset: Union[Sequence[XarrayDataConfig], Mapping[str, Sequence[XarrayDataConfig]]]
     batch_size: int
