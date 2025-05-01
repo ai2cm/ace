@@ -27,7 +27,7 @@ data:
     stop: 295.0
   # Note: somewhere between batch-size 16 and 32 causes get OOM errors
   #       for full-extent evaluation
-  batch_size: 16
+  batch_size: 12
   num_data_workers: 2
   strict_ensemble: False
 events:

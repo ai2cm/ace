@@ -2,6 +2,7 @@ from typing import Any, Collection, List, Mapping, Optional, Union
 
 import matplotlib.pyplot as plt
 import torch
+import xarray as xr
 
 from fme.ace.aggregator.plotting import get_cmap_limits, plot_imshow
 from fme.core.dataset.data_typing import VariableMetadata
@@ -329,3 +330,9 @@ class GenerationAggregator:
             ret.update(coarse_comparison.get_wandb(prefix))
         ret.update(self._latent_step_aggregator.get_wandb(prefix))
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Get the dataset output from the underlying aggregator.
+        """
+        return self._agg.get_dataset()

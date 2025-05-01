@@ -5,6 +5,7 @@ from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import xarray as xr
 
 from fme.ace.aggregator.one_step.snapshot import (
     SnapshotAggregator as CoreSnapshotAggregator,
@@ -258,6 +259,13 @@ class ComparedDynamicHistogramsAdapter:
         histograms = self._histograms.get_wandb()
         return {f"{prefix}{self._name}{k}": v for k, v in histograms.items()}
 
+    def get_dataset(self) -> Dict[str, Any]:
+        """
+        Get the histogram dataset.
+        """
+        ds = self._histograms.get_dataset()
+        return xr.Dataset({f"{self._name}{k}": v for k, v in ds.items()})
+
 
 def _compute_zonal_mean_power_spectrum(x):
     if not len(x.shape) == 3:
@@ -345,6 +353,20 @@ class ZonalPowerSpectrumAggregator:
             )
         return ret
 
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Get the zonal power spectrum dataset.
+        """
+        fine, coarse = self.get()
+        fine = {k: v.cpu().numpy() for k, v in fine.items()}
+        coarse = {k: v.cpu().numpy() for k, v in coarse.items()}
+        coords = {"wavenumber": np.arange(len(next(iter(fine.values()))))}
+        data = {}
+        for var_key in fine:
+            data[f"{self._name}coarse.{var_key}"] = (("wavenumber"), coarse[var_key])
+            data[f"{self._name}fine.{var_key}"] = (("wavenumber"), fine[var_key])
+        return xr.Dataset(data, coords=coords)
+
 
 class ZonalPowerSpectrumComparison:
     """
@@ -408,6 +430,15 @@ class ZonalPowerSpectrumComparison:
                 values, prediction[name], coarse[name]
             )
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        ds = self._mean_prediction_aggregator.get_dataset()
+        target = self._mean_target_aggregator.get()
+        target = {k: v.cpu().numpy() for k, v in target.items()}
+        ds = ds.update(
+            {f"{self._name}target.{k}": (("wavenumber"), target[k]) for k in target}
+        )
+        return ds
 
 
 class SnapshotAggregator:
@@ -513,6 +544,10 @@ class MeanMapAggregator:
     def _get(self) -> Tuple[TensorMapping, TensorMapping]:
         target = self._mean_target.get()
         prediction = self._mean_prediction.get()
+        return target, prediction
+
+    def _get_metrics_and_maps(self) -> Tuple[TensorMapping, TensorMapping]:
+        target, prediction = self._get()
 
         def get_relative_mean(target, prediction):
             return torch.log10(torch.abs(prediction / target))
@@ -566,7 +601,7 @@ class MeanMapAggregator:
         prefix = ensure_trailing_slash(prefix)
         ret = {}
         wandb = WandB.get_instance()
-        metrics, maps = self._get()
+        metrics, maps = self._get_metrics_and_maps()
         ret.update({f"{prefix}{k}": v.cpu().numpy() for k, v in metrics.items()})
         for key, data in maps.items():
             if "error" in key:
@@ -581,6 +616,18 @@ class MeanMapAggregator:
             ret[f"{prefix}{key}"] = wandb.Image(fig, caption=caption)
             plt.close(fig)
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Get the time mean maps dataset.
+        """
+        target, prediction = self._get()
+        data = {}
+        for key in prediction:
+            data[f"{self._name}target.{key}"] = target[key].cpu().numpy()
+            data[f"{self._name}prediction.{key}"] = prediction[key].cpu().numpy()
+        ds = xr.Dataset({k: (("lat", "lon"), v) for k, v in data.items()})
+        return ds
 
 
 class RelativeMSEInterpAggregator:
@@ -761,3 +808,16 @@ class Aggregator:
             ret.update(coarse_comparison.get_wandb(prefix))
 
         return ret
+
+    def get_dataset(self) -> xr.Dataset:
+        """
+        Get the dataset from all sub aggregators.
+        """
+        ds = xr.Dataset()
+        for comparison in self._comparisons:
+            if hasattr(comparison, "get_dataset"):
+                ds = ds.merge(comparison.get_dataset())
+        for coarse_comparison in self._coarse_comparisons:
+            if hasattr(coarse_comparison, "get_dataset"):
+                ds = ds.merge(coarse_comparison.get_dataset())
+        return ds

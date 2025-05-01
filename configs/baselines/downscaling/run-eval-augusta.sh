@@ -8,10 +8,10 @@ set -e
 NGPU=8
 
 
-JOB_NAME="eval-conus-downscaling-25km-to-3km-emamodel-v1"  # recommended but not required to change this
-CONFIG_FILENAME="eval-conus-composite-25km-to-3km-augusta.yaml"
+JOB_NAME="eval-conus-downscaling-25km-to-3km-emamodel-v2"  # recommended but not required to change this
+CONFIG_FILENAME="eval-conus-25km-to-3km-augusta.yaml"
 
-EXISTING_RESULTS_DATASET="01JS04B574CGDSB2DHP394XNVX"  # 25km-to-3km https://beaker.allen.ai/orgs/ai2/workspaces/downscaling/work/01JRWXTXCM8NJQ334MK6A3HFVY
+EXISTING_RESULTS_DATASET="01JS04B574CGDSB2DHP394XNVX"  # 25km-to-3km https://beaker.allen.ai/orgs/ai2/workspaces/downscaling/work/01JS04B56S6AS5X96H8AMB7FE7
 
 SCRIPT_PATH=$(echo "$(git rev-parse --show-prefix)" | sed 's:/*$::')
 CONFIG_PATH=$SCRIPT_PATH/$CONFIG_FILENAME
