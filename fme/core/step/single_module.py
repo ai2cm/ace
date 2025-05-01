@@ -282,18 +282,22 @@ class SingleModuleStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
-        input_norm = self.normalizer.normalize(input)
-        input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-        output_tensor = wrapper(self.module)(input_tensor)
-        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-        if self._config.residual_prediction:
-            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
-        output = self.normalizer.denormalize(output_norm)
-        if self._corrector is not None:
-            output = self._corrector(input, output, next_step_input_data)
-        if self.ocean is not None:
-            output = self.ocean(input, output, next_step_input_data)
-        return output
+
+        def network_call(input_norm: TensorDict) -> TensorDict:
+            input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            output_tensor = wrapper(self.module)(input_tensor)
+            return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+
+        return step_with_adjustments(
+            input=input,
+            next_step_input_data=next_step_input_data,
+            network_calls=network_call,
+            normalizer=self.normalizer,
+            corrector=self._corrector,
+            ocean=self.ocean,
+            residual_prediction=self._config.residual_prediction,
+            prognostic_names=self.prognostic_names,
+        )
 
     def get_regularizer_loss(self):
         return torch.tensor(0.0)
@@ -319,3 +323,47 @@ class SingleModuleStep(StepABC):
             # for backwards compatibility with old checkpoints
             del module["module.device_buffer"]
         self.module.load_state_dict(module)
+
+
+def step_with_adjustments(
+    input: TensorMapping,
+    next_step_input_data: TensorMapping,
+    network_calls: Callable[[TensorDict], TensorDict],
+    normalizer: StandardNormalizer,
+    corrector: CorrectorABC,
+    ocean: Ocean | None,
+    residual_prediction: bool,
+    prognostic_names: List[str],
+) -> TensorDict:
+    """
+    Step the model forward one timestep given input data.
+
+    Args:
+        input: Mapping from variable name to tensor of shape
+            [n_batch, n_lat, n_lon] containing denormalized data from the
+            initial timestep. In practice this contains the ML inputs.
+        next_step_input_data: Mapping from variable name to tensor of shape
+            [n_batch, n_lat, n_lon] containing denormalized data from
+            the output timestep. In practice this contains the necessary data
+            at the output timestep for the ocean model and corrector.
+        network_calls: Callable[[TensorMapping], TensorDict] that takes a
+            normalized input and returns a normalized output.
+        normalizer: The normalizer to use.
+        corrector: The corrector to use at the end of each step.
+        ocean: The ocean model to use.
+        residual_prediction: Whether to use residual prediction.
+        prognostic_names: Names of prognostic variables.
+
+    Returns:
+        The denormalized output data at the next time step.
+    """
+    input_norm = normalizer.normalize(input)
+    output_norm = network_calls(input_norm)
+    if residual_prediction:
+        output_norm = add_names(input_norm, output_norm, prognostic_names)
+    output = normalizer.denormalize(output_norm)
+    if corrector is not None:
+        output = corrector(input, output, next_step_input_data)
+    if ocean is not None:
+        output = ocean(input, output, next_step_input_data)
+    return output

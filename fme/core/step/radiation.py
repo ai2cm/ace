@@ -11,13 +11,13 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -338,33 +338,45 @@ class SeparateRadiationStep(StepABC):
         Returns:
             The denormalized output data at the next time step.
         """
-        input_norm = self.normalizer.normalize(input)
-        radiation_input_tensor = self.radiation_in_packer.pack(
-            input_norm, axis=self.CHANNEL_DIM
-        )
-        radiation_output_tensor = wrapper(self.radiation_module)(radiation_input_tensor)
-        radiation_output_norm = self.radiation_out_packer.unpack(
-            radiation_output_tensor, axis=self.CHANNEL_DIM
-        )
-        main_input_data = input_norm.copy()
-        if self._config.detach_radiation:
-            main_input_data = {
-                **input_norm,
-                **{k: v.detach() for k, v in radiation_output_norm.items()},
+
+        def network_calls(input_norm: TensorDict) -> TensorDict:
+            radiation_input_tensor = self.radiation_in_packer.pack(
+                input_norm, axis=self.CHANNEL_DIM
+            )
+            radiation_output_tensor = wrapper(self.radiation_module)(
+                radiation_input_tensor
+            )
+            radiation_output_norm = self.radiation_out_packer.unpack(
+                radiation_output_tensor, axis=self.CHANNEL_DIM
+            )
+            main_input_data = input_norm.copy()
+            if self._config.detach_radiation:
+                main_input_data = {
+                    **input_norm,
+                    **{k: v.detach() for k, v in radiation_output_norm.items()},
+                }
+            else:
+                main_input_data = {**input_norm, **radiation_output_norm}
+            input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
+            output_tensor = wrapper(self.module)(input_tensor)
+            main_output_norm = self.out_packer.unpack(
+                output_tensor, axis=self.CHANNEL_DIM
+            )
+            return {
+                **radiation_output_norm,
+                **main_output_norm,
             }
-        else:
-            main_input_data = {**input_norm, **radiation_output_norm}
-        input_tensor = self.in_packer.pack(main_input_data, axis=self.CHANNEL_DIM)
-        output_tensor = wrapper(self.module)(input_tensor)
-        output_norm = self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
-        if self._config.residual_prediction:
-            output_norm = add_names(input_norm, output_norm, self.prognostic_names)
-        output = self.normalizer.denormalize({**radiation_output_norm, **output_norm})
-        if self._corrector is not None:
-            output = self._corrector(input, output, next_step_forcing_data)
-        if self.ocean is not None:
-            output = self.ocean(input, output, next_step_forcing_data)
-        return output
+
+        return step_with_adjustments(
+            input=input,
+            next_step_input_data=next_step_forcing_data,
+            network_calls=network_calls,
+            normalizer=self.normalizer,
+            corrector=self._corrector,
+            ocean=self.ocean,
+            residual_prediction=self._config.residual_prediction,
+            prognostic_names=self.prognostic_names,
+        )
 
     def get_regularizer_loss(self) -> torch.Tensor:
         return torch.tensor(0.0)
