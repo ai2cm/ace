@@ -11,23 +11,23 @@ from fme.core.typing_ import TensorDict
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
 
 _OCEAN_DERIVED_VARIABLE_REGISTRY: MutableMapping[
-    str, Tuple[OceanDerivedVariableFunc, VariableMetadata]
+    str, Tuple[OceanDerivedVariableFunc, VariableMetadata, bool]
 ] = {}
 
 
 def get_ocean_derived_variable_metadata() -> Dict[str, VariableMetadata]:
     return {
         label: metadata
-        for label, (_, metadata) in _OCEAN_DERIVED_VARIABLE_REGISTRY.items()
+        for label, (_, metadata, _) in _OCEAN_DERIVED_VARIABLE_REGISTRY.items()
     }
 
 
-def register(metadata: VariableMetadata):
+def register(metadata: VariableMetadata, exists_ok: bool = False):
     def decorator(func: OceanDerivedVariableFunc):
         label = func.__name__
         if label in _OCEAN_DERIVED_VARIABLE_REGISTRY:
             raise ValueError(f"Function {label} has already been added to registry.")
-        _OCEAN_DERIVED_VARIABLE_REGISTRY[label] = (func, metadata)
+        _OCEAN_DERIVED_VARIABLE_REGISTRY[label] = (func, metadata, exists_ok)
         return func
 
     return decorator
@@ -40,10 +40,12 @@ def _compute_ocean_derived_variable(
     label: str,
     derived_variable_func: OceanDerivedVariableFunc,
     forcing_data: TensorDict | None = None,
+    exists_ok: bool = False,
 ) -> TensorDict:
     """Computes an ocean derived variable and adds it to the given data.
 
-    The derived variable name must not already exist in the data.
+    By default the derived variable name must not already exist in the data,
+    unless explicitly allowed with exists_ok=True.
 
     If any required input data are not available,
     the derived variable will not be computed.
@@ -57,16 +59,23 @@ def _compute_ocean_derived_variable(
         forcing_data: optional dictionary of forcing data needed for some derived
             variables. If necessary forcing inputs are missing, the derived
             variable will not be computed.
+        exists_ok: Whether or not to allow the label to already exist in data,
+            in which case a copy of the data TensorDict is returned with values
+            unchanged.
 
     Returns:
         A new data dictionary with the derived variable added.
     """
-    if label in data:
+    new_data = data.copy()
+    if label in new_data:
+        if exists_ok:
+            return new_data
         raise ValueError(
             f"Variable {label} already exists. It is not permitted "
-            "to overwrite existing variables with derived variables."
+            "to have derived variables with same name as existing variables "
+            "unless the derived variable is registered with exists_ok=True."
         )
-    new_data = data.copy()
+
     if forcing_data is not None:
         for key, value in forcing_data.items():
             if key not in data:
@@ -92,6 +101,7 @@ def compute_ocean_derived_quantities(
     """Computes all derived quantities from the given data."""
     for label in _OCEAN_DERIVED_VARIABLE_REGISTRY:
         func = _OCEAN_DERIVED_VARIABLE_REGISTRY[label][0]
+        exists_ok = _OCEAN_DERIVED_VARIABLE_REGISTRY[label][2]
         data = _compute_ocean_derived_variable(
             data,
             depth_coordinate,
@@ -99,6 +109,7 @@ def compute_ocean_derived_quantities(
             label,
             func,
             forcing_data=forcing_data,
+            exists_ok=exists_ok,
         )
     return data
 
@@ -110,3 +121,17 @@ def ocean_heat_content(
 ) -> torch.Tensor:
     """Compute the column-integrated ocean heat content."""
     return data.ocean_heat_content
+
+
+@register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)
+def sea_ice_fraction(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Compute the sea ice fraction."""
+    try:
+        return data.sea_ice_fraction
+    except KeyError:
+        land_fraction = data.land_fraction
+        ocean_sea_ice_fraction = data.ocean_sea_ice_fraction
+        return ocean_sea_ice_fraction * (1 - land_fraction)
