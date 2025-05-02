@@ -5,9 +5,12 @@ to turn metric functions that may have different APIs into a common API,
 so that they can be iterated over and called in the same way in a loop.
 """
 
-from typing import Protocol
+from collections import defaultdict
+from typing import Optional, Protocol
 
 import torch
+
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class AreaWeightedFunction(Protocol):
@@ -18,9 +21,9 @@ class AreaWeightedFunction(Protocol):
 
     def __call__(
         self,
-        truth: torch.Tensor,
-        predicted: torch.Tensor,
-    ) -> torch.Tensor: ...
+        truth: TensorMapping,
+        predicted: TensorMapping,
+    ) -> TensorDict: ...
 
 
 class ReducedMetric(Protocol):
@@ -28,13 +31,13 @@ class ReducedMetric(Protocol):
     and then get the total metric at the end.
     """
 
-    def record(self, target: torch.Tensor, gen: torch.Tensor):
+    def record(self, target: TensorMapping, gen: TensorMapping):
         """
         Update metric for a batch of data.
         """
         ...
 
-    def get(self) -> torch.Tensor:
+    def get(self) -> TensorDict:
         """
         Get the total metric value, not divided by number of recorded batches.
         """
@@ -52,21 +55,47 @@ class AreaWeightedReducedMetric:
         compute_metric: AreaWeightedFunction,
     ):
         self._compute_metric = compute_metric
-        self._total = None
+        self._total: Optional[TensorDict] = None
         self._device = device
 
-    def record(self, target: torch.Tensor, gen: torch.Tensor):
+    def _update_total(self, tensors: TensorDict):
+        if self._total is None:
+            self._total = {
+                name: torch.zeros_like(tensor, device=self._device)
+                for name, tensor in tensors.items()
+            }
+        missing_names = set(self._total) - set(tensors)
+        if len(missing_names) > 0:
+            raise ValueError(
+                f"Missing metrics for {missing_names} which were "
+                "present the first time metrics were recorded."
+            )
+        for name, tensor in tensors.items():
+            try:
+                self._total[name] += tensor
+            except KeyError:
+                raise ValueError(
+                    "Attempted to record the area weighted reduced metric for "
+                    f"'{name}' but it was not present the first time metrics "
+                    "were recorded."
+                )
+
+    def record(self, target: TensorMapping, gen: TensorMapping):
         """Add a batch of data to the metric.
 
         Args:
             target: Target data. Should have shape [batch, time, height, width].
             gen: Generated data. Should have shape [batch, time, height, width].
         """
-        new_value = self._compute_metric(target, gen).mean(dim=0)
-        if self._total is None:
-            self._total = torch.zeros_like(new_value, device=self._device)
-        self._total += new_value
+        # Update totals for each variable
+        batch_avgs = {
+            name: tensor.mean(dim=0)
+            for name, tensor in self._compute_metric(target, gen).items()
+        }
+        self._update_total(batch_avgs)
 
-    def get(self) -> torch.Tensor:
+    def get(self) -> TensorDict:
         """Returns the metric."""
+        if self._total is None:
+            return defaultdict(lambda: torch.tensor(torch.nan))
         return self._total
