@@ -15,6 +15,11 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_water_y_velocity": ["vo_"],
         "sea_surface_height_above_geoid": ["zos"],
         "sea_surface_temperature": ["sst"],
+        "sea_ice_fraction": ["sea_ice_fraction"],
+        "sea_ice_thickness": ["sea_ice_thickness"],
+        "sea_ice_volume": ["sea_ice_volume"],
+        "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
+        "land_fraction": ["land_fraction"],
     }
 )
 
@@ -134,3 +139,18 @@ class OceanData:
             * SPECIFIC_HEAT_OF_WATER_CM4
             * DENSITY_OF_WATER_CM4
         )
+
+    @property
+    def sea_ice_fraction(self) -> torch.Tensor:
+        """Returns the sea ice fraction."""
+        return self._get("sea_ice_fraction")
+
+    @property
+    def land_fraction(self) -> torch.Tensor:
+        """Returns the land fraction."""
+        return self._get("land_fraction")
+
+    @property
+    def ocean_sea_ice_fraction(self) -> torch.Tensor:
+        """Returns the sea ice fraction as a proportion of the sea surface."""
+        return self._get("ocean_sea_ice_fraction")
