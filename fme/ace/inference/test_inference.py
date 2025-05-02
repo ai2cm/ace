@@ -96,7 +96,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     in_names = ["prog", "sst", "forcing_var", "DSWRFtoa"]
     out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
     dim_sizes = DimSizes(
         n_time=9,
@@ -213,8 +213,8 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     saved_data = xr.open_dataset(data.data_filename, decode_timedelta=False)
     ops = LatLonCoordinates(
-        lat=torch.as_tensor(saved_data["grid_yt"].values.astype(np.float32)),
-        lon=torch.as_tensor(saved_data["grid_xt"].values.astype(np.float32)),
+        lat=torch.as_tensor(saved_data["lat"].values.astype(np.float32)),
+        lon=torch.as_tensor(saved_data["lon"].values.astype(np.float32)),
     ).gridded_operations
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):

@@ -40,11 +40,12 @@ from fme.core.dataset.xarray import (
 )
 from fme.core.typing_ import Slice
 
-from .utils import as_broadcasted_tensor, infer_horizontal_dimension_names
+from .utils import as_broadcasted_tensor
 
 SLICE_NONE = slice(None)
 MOCK_DATA_FREQ = "3h"
 MOCK_DATA_START_DATE = "2003-03"
+MOCK_DATA_LAT_DIM, MOCK_DATA_LON_DIM = ("lat", "lon")
 
 
 @dataclasses.dataclass
@@ -351,7 +352,7 @@ def _test_monthly_values(
     ds = load_files_without_dask(mock_data.tmpdir.glob(file_pattern), engine=engine)
     target_times = ds["time"][global_idx : global_idx + 2].drop_vars("time")
     xr.testing.assert_equal(time, target_times)
-    lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+    lat_dim, lon_dim = MOCK_DATA_LAT_DIM, MOCK_DATA_LON_DIM
     dims = ("time", str(lat_dim), str(lon_dim))
     shape = (2, ds.sizes[lat_dim], ds.sizes[lon_dim])
     time_slice = slice(global_idx, global_idx + 2)
@@ -455,7 +456,7 @@ def test_XarrayDataset_yearly(mock_yearly_netcdfs, global_idx):
     for n_steps in [3, 50]:
         dataset = XarrayDataset(config, mock_data.var_names.all_names, n_steps)
         assert len(dataset) == len(mock_data.obs_times) - n_steps + 1
-        lon_dim, lat_dim = infer_horizontal_dimension_names(ds)
+        lon_dim, lat_dim = MOCK_DATA_LON_DIM, MOCK_DATA_LAT_DIM
         dims = ("time", lat_dim, lon_dim)
         shape = (n_steps, ds.sizes[lat_dim], ds.sizes[lon_dim])
         time_slice = slice(global_idx, global_idx + n_steps)
@@ -940,3 +941,23 @@ def test__get_vertical_coordinate_depth_with_time_dependent_mask():
     )
     with pytest.raises(ValueError, match="The ocean mask must by time-independent."):
         _get_vertical_coordinate(data, dtype=None)
+
+
+@pytest.mark.parametrize(
+    "kwargs,",
+    [
+        pytest.param({"spatial_dimensions": "xyz"}, id="invalid_spatial_dimensions"),
+        pytest.param(
+            {"engine": "zarr", "file_pattern": "*.nc"},
+            id="engine_file_pattern_mismatch",
+        ),
+        pytest.param(
+            {"n_repeats": 2, "infer_timestep": False}, id="n_repeats_infer_timestep"
+        ),
+        pytest.param({"dtype": "foo"}, id="invalid_dtype"),
+    ],
+)
+def test_invalid_config_field_raises_error(kwargs):
+    """Runs shape and length checks on the dataset."""
+    with pytest.raises(ValueError):
+        XarrayDataConfig(data_path="path", **kwargs)

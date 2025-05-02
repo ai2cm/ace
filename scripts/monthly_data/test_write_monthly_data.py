@@ -32,7 +32,7 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
     all_names = ["a", "b"]
-    horizontal = [DimSize("grid_yt", 8), DimSize("grid_xt", 4)]
+    horizontal = [DimSize("lat", 8), DimSize("lon", 4)]
     dim_sizes = DimSizes(
         n_time=4 * 60,
         horizontal=horizontal,
