@@ -48,7 +48,7 @@ import torch.nn as nn
 import torch.fft
 
 from torch_harmonics.quadrature import legendre_gauss_weights, lobatto_weights, clenshaw_curtiss_weights
-from torch_harmonics.legendre import precompute_legpoly, precompute_dlegpoly
+from torch_harmonics.legendre import _precompute_legpoly
 import torch_harmonics
 
 from fme.core.device import get_device
@@ -107,7 +107,7 @@ class RealSHT(nn.Module):
 
         # combine quadrature weights with the legendre weights
         weights = torch.from_numpy(w)
-        pct = precompute_legpoly(self.mmax, self.lmax, tq, norm=self.norm, csphase=self.csphase)
+        pct = torch.as_tensor(_precompute_legpoly(self.mmax, self.lmax, tq, norm=self.norm, csphase=self.csphase))
         weights = torch.einsum('mlk,k->mlk', pct, weights)
 
         # remember quadrature weights
@@ -186,7 +186,7 @@ class InverseRealSHT(nn.Module):
         # determine the dimensions
         self.mmax = mmax or self.nlon // 2 + 1
 
-        pct = precompute_legpoly(self.mmax, self.lmax, t, norm=self.norm, inverse=True, csphase=self.csphase)
+        pct = torch.as_tensor(_precompute_legpoly(self.mmax, self.lmax, t, norm=self.norm, inverse=True, csphase=self.csphase))
 
         # register buffer
         self.pct = pct.float().to(get_device())
