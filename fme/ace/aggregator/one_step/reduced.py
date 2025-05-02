@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
 import torch
@@ -35,39 +35,25 @@ class MeanAggregator:
         self._gridded_operations = gridded_operations
         self._n_batches = 0
         self._loss = torch.tensor(0.0, device=get_device())
-        self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
         self._target_time = target_time
         self._dist = Distributed.get_instance()
 
-    def _get_variable_metrics(self, gen_data: TensorMapping):
-        if self._variable_metrics is None:
-            self._variable_metrics = {
-                "weighted_rmse": {},
-                "weighted_bias": {},
-                "weighted_grad_mag_percent_diff": {},
-            }
-            device = get_device()
-            for key in gen_data:
-                self._variable_metrics["weighted_rmse"][key] = (
-                    AreaWeightedReducedMetric(
-                        device=device,
-                        compute_metric=self._gridded_operations.area_weighted_rmse,
-                    )
-                )
-                self._variable_metrics["weighted_bias"][key] = (
-                    AreaWeightedReducedMetric(
-                        device=device,
-                        compute_metric=self._gridded_operations.area_weighted_mean_bias,
-                    )
-                )
-                self._variable_metrics["weighted_grad_mag_percent_diff"][key] = (
-                    AreaWeightedReducedMetric(
-                        device=device,
-                        compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff,  # noqa: E501
-                    )
-                )
-
-        return self._variable_metrics
+        device = get_device()
+        self._variable_metrics: Dict[str, ReducedMetric] = {}
+        self._variable_metrics["weighted_rmse"] = AreaWeightedReducedMetric(
+            device=device,
+            compute_metric=self._gridded_operations.area_weighted_rmse_dict,
+        )
+        self._variable_metrics["weighted_bias"] = AreaWeightedReducedMetric(
+            device=device,
+            compute_metric=self._gridded_operations.area_weighted_mean_bias_dict,
+        )
+        self._variable_metrics["weighted_grad_mag_percent_diff"] = (
+            AreaWeightedReducedMetric(
+                device=device,
+                compute_metric=self._gridded_operations.area_weighted_gradient_magnitude_percent_diff_dict,  # noqa: E501
+            )
+        )
 
     @torch.no_grad()
     def record_batch(
@@ -80,31 +66,35 @@ class MeanAggregator:
         i_time_start: int = 0,
     ):
         self._loss += loss
-        variable_metrics = self._get_variable_metrics(gen_data)
         time_dim = 1
         time_len = gen_data[list(gen_data.keys())[0]].shape[time_dim]
         target_time = self._target_time - i_time_start
         if target_time >= 0 and time_len > target_time:
+            target_snapshot = {}
+            gen_snapshot = {}
             for name in gen_data.keys():
-                target = target_data[name].select(dim=time_dim, index=target_time)
-                gen = gen_data[name].select(dim=time_dim, index=target_time)
-                for metric in variable_metrics:
-                    variable_metrics[metric][name].record(
-                        target=target,
-                        gen=gen,
-                    )
+                target_snapshot[name] = target_data[name].select(
+                    dim=time_dim, index=target_time
+                )
+                gen_snapshot[name] = gen_data[name].select(
+                    dim=time_dim, index=target_time
+                )
+            for metric in self._variable_metrics.values():
+                metric.record(
+                    target=target_snapshot,
+                    gen=gen_snapshot,
+                )
             # only increment n_batches if we actually recorded a batch
             self._n_batches += 1
 
     def _get_data(self):
-        if self._variable_metrics is None or self._n_batches == 0:
+        if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
         data: Dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
-        for metric in self._variable_metrics:
-            for key in self._variable_metrics[metric]:
-                data[f"{metric}/{key}"] = (
-                    self._variable_metrics[metric][key].get() / self._n_batches
-                )
+        for name, metric in self._variable_metrics.items():
+            metric_results = metric.get()  # TensorDict: {var_name: metric_data}
+            for key in metric_results:
+                data[f"{name}/{key}"] = metric_results[key] / self._n_batches
         for key in sorted(data.keys()):
             data[key] = float(self._dist.reduce_mean(data[key].detach()).cpu().numpy())
         return data
