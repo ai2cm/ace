@@ -20,5 +20,6 @@ repos:
       exclude: |
         (?x)^(
         .+/conf.py |
-        .+/conftest.py
+        .+/conftest.py |
+        fme/ace/models/makani_fcn2/.*
         )$
