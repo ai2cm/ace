@@ -16,10 +16,8 @@ from xarray.coding.times import CFDatetimeCoder
 
 from fme.core.coordinates import (
     DepthCoordinate,
-    HEALPixCoordinates,
     HorizontalCoordinates,
     HybridSigmaPressureCoordinate,
-    LatLonCoordinates,
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
@@ -32,8 +30,7 @@ from .config import XarrayDataConfig
 from .data_typing import VariableMetadata
 from .utils import (
     as_broadcasted_tensor,
-    get_horizontal_dimensions,
-    infer_horizontal_dimension_names,
+    get_horizontal_coordinates,
     load_series_data,
     load_series_data_zarr_async,
 )
@@ -493,36 +490,12 @@ class XarrayDataset(torch.utils.data.Dataset):
     ) -> Tuple[HorizontalCoordinates, StaticDerivedData]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
-        dims = get_horizontal_dimensions(first_dataset, self.dtype)
 
-        if self.spatial_dimensions == "latlon":
-            lons = dims[0]
-            lats = dims[1]
-            names = infer_horizontal_dimension_names(first_dataset)
-            lon_name = names[0]
-            lat_name = names[1]
-            horizontal_coordinates = LatLonCoordinates(
-                lon=lons,
-                lat=lats,
-                loaded_lat_name=lat_name,
-                loaded_lon_name=lon_name,
-            )
-            static_derived_data = StaticDerivedData(horizontal_coordinates)
-        elif self.spatial_dimensions == "healpix":
-            face = dims[0]
-            height = dims[1]
-            width = dims[2]
-            horizontal_coordinates = HEALPixCoordinates(
-                face=face,
-                height=height,
-                width=width,
-            )
-            static_derived_data = StaticDerivedData(horizontal_coordinates)
-        else:
-            raise ValueError(
-                f"unexpected config.spatial_dimensions {self.spatial_dimensions},"
-                " should be one of 'latlon' or 'healpix'"
-            )
+        horizontal_coordinates = get_horizontal_coordinates(
+            first_dataset, self.spatial_dimensions, self.dtype
+        )
+        static_derived_data = StaticDerivedData(horizontal_coordinates)
+
         coords_sizes = {
             coord_name: len(coord)
             for coord_name, coord in horizontal_coordinates.coords.items()

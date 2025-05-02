@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import warnings
 from typing import Hashable, List, MutableMapping, Sequence, Tuple
 
 import numpy as np
@@ -8,50 +7,10 @@ import torch
 import xarray as xr
 import zarr
 
+from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
 from fme.core.dataset.config import FillNaNsConfig
 
 SLICE_NONE = slice(None)
-
-
-def infer_horizontal_dimension_names(ds: xr.Dataset) -> List[str]:
-    hdims: List[str]
-    if "grid_xt" in ds.variables:
-        hdims = ["grid_xt", "grid_yt"]
-    elif "lon" in ds.variables:
-        hdims = ["lon", "lat"]
-    elif "longitude" in ds.variables:
-        hdims = ["longitude", "latitude"]
-    elif "face" in ds.variables:
-        hdims = ["face", "height", "width"]
-    else:
-        reference_da = None
-        for da in ds.data_vars.values():
-            if len(da.dims) == 3:
-                reference_da = da
-                _, lat_dim, lon_dim = reference_da.dims
-                warnings.warn(
-                    f"Familiar latitude and longitude coordinate names could not be "
-                    f"found in the dataset. Assuming that the trailing two dimensions, "
-                    f"{lat_dim!r} and {lon_dim!r}, represent latitude and longitude "
-                    f"of a lat/lon dataset respectively."
-                )
-                hdims = [lon_dim, lat_dim]
-                break
-            elif len(da.dims) == 4:
-                reference_da = da
-                _, face_dim, height_dim, width_dim = reference_da.dims
-                warnings.warn(
-                    f"Familiar latitude and longitude coordinate names could not be "
-                    f"found in the dataset. Assuming that the trailing three "
-                    f"dimensions, {face_dim!r}, {height_dim!r}, and {width_dim!r}, "
-                    f"represent face, height, and width of a healpix dataset "
-                    f" respectively."
-                )
-                hdims = [face_dim, height_dim, width_dim]
-                break
-        if reference_da is None:
-            raise ValueError("Could not identify dataset's horizontal dimensions.")
-    return hdims
 
 
 def _get_indexers(
@@ -190,19 +149,34 @@ def load_series_data(
     return arrays
 
 
-def get_horizontal_dimensions(
-    ds: xr.Dataset, dtype: torch.dtype | None
-) -> List[torch.Tensor]:
-    hdims = infer_horizontal_dimension_names(ds)
-
-    horizontal_values = []
-    for dim in hdims:
-        if dim in ds:
-            horizontal_values.append(torch.tensor(ds[dim].values, dtype=dtype))
-        else:
-            raise ValueError(f"Expected {dim} in dataset: {ds}.")
-
-    return horizontal_values
+def get_horizontal_coordinates(
+    ds: xr.Dataset, spatial_dimensions: str, dtype: torch.dtype | None
+) -> LatLonCoordinates | HEALPixCoordinates:
+    min_ndim = 3 if spatial_dimensions == "latlon" else 4
+    for da in ds.data_vars.values():
+        if da.ndim >= min_ndim:
+            dim_order = list(da.dims)
+            break
+    if spatial_dimensions == "latlon":
+        lat_name, lon_name = dim_order[-2:]
+        return LatLonCoordinates(
+            lon=torch.tensor(ds[lon_name].values, dtype=dtype),
+            lat=torch.tensor(ds[lat_name].values, dtype=dtype),
+            loaded_lat_name=lat_name,
+            loaded_lon_name=lon_name,
+        )
+    elif spatial_dimensions == "healpix":
+        face_name, height_name, width_name = dim_order[-3:]
+        return HEALPixCoordinates(
+            face=torch.tensor(ds[face_name].values, dtype=dtype),
+            height=torch.tensor(ds[height_name].values, dtype=dtype),
+            width=torch.tensor(ds[width_name].values, dtype=dtype),
+        )
+    else:
+        raise ValueError(
+            f"spatial_dimensions must be either 'latlon' or 'healpix', "
+            f"but got {spatial_dimensions}"
+        )
 
 
 def decode_timestep(microseconds: int) -> datetime.timedelta:
