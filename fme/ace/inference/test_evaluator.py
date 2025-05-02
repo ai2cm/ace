@@ -152,7 +152,7 @@ def test_inference_backwards_compatibility(tmp_path: pathlib.Path):
     out_names = ["var"]
     stepper_path = DIR / "stepper_test_data"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(
         n_time=8,
         horizontal=horizontal,
@@ -195,7 +195,7 @@ def test_inference_plus_one_model(
     out_names = ["var"]
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
         horizontal=horizontal,
@@ -460,7 +460,7 @@ def test_inference_writer_boundaries(
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
 
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
@@ -596,7 +596,7 @@ def test_inference_data_time_coarsening(tmp_path: pathlib.Path):
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
     dim_sizes = DimSizes(
         n_time=9,
@@ -749,7 +749,7 @@ def test_derived_metrics_run_without_errors(
     all_names = list(set(in_names).union(out_names))
     stepper_path = tmp_path / "stepper"
 
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
@@ -853,7 +853,7 @@ def test_inference_override(tmp_path: pathlib.Path):
     stepper_path = tmp_path / "stepper"
     n_forward_steps = 8
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(
         n_time=n_forward_steps + 1,
         horizontal=horizontal,
@@ -942,7 +942,7 @@ def test_inference_timestep_mismatch_error(
     out_names = ["var"]
     stepper_path = tmp_path / "stepper_test_data"
 
-    horizontal = [DimSize("grid_yt", 4), DimSize("grid_xt", 8)]
+    horizontal = [DimSize("lat", 4), DimSize("lon", 8)]
     dim_sizes = DimSizes(n_time=8, horizontal=horizontal, nz_interface=2)
     std = 1.0
     save_plus_one_stepper(
@@ -992,7 +992,7 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
     in_names = ["prog", "forcing_var", "DSWRFtoa"]
     out_names = ["prog", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
-    horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+    horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
     use_prediction_data = False
     n_forward_steps = 2
     dim_sizes = DimSizes(

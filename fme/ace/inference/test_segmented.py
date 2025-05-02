@@ -84,7 +84,7 @@ def test_inference_segmented_entrypoint():
         in_names = ["prog", "forcing_var"]
         out_names = ["prog", "diagnostic_var"]
         stepper_path = tmp_path / "stepper"
-        horizontal = [DimSize("grid_yt", 16), DimSize("grid_xt", 32)]
+        horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
 
         dim_sizes = DimSizes(
             n_time=18,

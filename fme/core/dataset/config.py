@@ -198,7 +198,9 @@ class XarrayDataConfig:
             data that is reasonably continuous across repetitions.
         engine: Backend used in xarray.open_dataset call.
         spatial_dimensions: Specifies the spatial dimensions for the grid, default
-            is lat/lon.
+            is lat/lon. If 'latlon', it is assumed that the last two dimensions are
+            latitude and longitude, respectively. If 'healpix', it is assumed that the
+            last three dimensions are face, height, and width, respectively.
         subset: Slice defining a subset of the XarrayDataset to load. This can
             either be a `Slice` of integer indices or a `TimeSlice` of timestamps.
             This feature is applied directly to the dataset samples. For example,
@@ -268,5 +270,9 @@ class XarrayDataConfig:
                 raise ValueError(f"Invalid dtype '{self.dtype}'")
             if not isinstance(self.torch_dtype, torch.dtype):
                 raise ValueError(f"Invalid dtype '{self.dtype}'")
-
+        if self.spatial_dimensions not in ["latlon", "healpix"]:
+            raise ValueError(
+                f"unexpected spatial_dimensions {self.spatial_dimensions},"
+                " should be one of 'latlon' or 'healpix'"
+            )
         self._default_file_pattern_check()

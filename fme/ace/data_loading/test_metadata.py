@@ -31,7 +31,7 @@ def _save_netcdf(
     dim_sizes=None,
 ):
     if dim_sizes is None:
-        dim_sizes = {"time": 3, "grid_yt": 16, "grid_xt": 32}
+        dim_sizes = {"time": 3, "lat": 16, "lon": 32}
     data_vars = {}
     for name in variable_metadata:
         data = np.random.randn(*list(dim_sizes.values()))
