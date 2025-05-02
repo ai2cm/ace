@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, List, Type, TypeVar
+from typing import Any, Dict, List, Type, TypeVar, final
 
 import torch
 import torch_harmonics
@@ -7,6 +7,7 @@ import torch_harmonics
 from fme.core import metrics
 from fme.core.device import get_device
 from fme.core.tensors import assert_dict_allclose
+from fme.core.typing_ import TensorDict, TensorMapping
 
 
 class GriddedOperations(abc.ABC):
@@ -33,15 +34,50 @@ class GriddedOperations(abc.ABC):
         self, data: torch.Tensor, keepdim: bool = False
     ) -> torch.Tensor: ...
 
+    @final
+    def area_weighted_mean_dict(
+        self, data: TensorMapping, keepdim: bool = False
+    ) -> TensorDict:
+        result = {}
+        for name in data:
+            result[name] = self.area_weighted_mean(
+                data=data[name],
+                keepdim=keepdim,
+            )
+        return result
+
     def area_weighted_mean_bias(
         self, truth: torch.Tensor, predicted: torch.Tensor
     ) -> torch.Tensor:
         return self.area_weighted_mean(predicted - truth)
 
+    @final
+    def area_weighted_mean_bias_dict(
+        self, truth: TensorMapping, predicted: TensorMapping
+    ) -> TensorDict:
+        result = {}
+        for name in truth:
+            result[name] = self.area_weighted_mean_bias(
+                truth=truth[name], predicted=predicted[name]
+            )
+        return result
+
     def area_weighted_rmse(
         self, truth: torch.Tensor, predicted: torch.Tensor
     ) -> torch.Tensor:
         return torch.sqrt(self.area_weighted_mean((predicted - truth) ** 2))
+
+    @final
+    def area_weighted_rmse_dict(
+        self, truth: TensorMapping, predicted: TensorMapping
+    ) -> TensorDict:
+        result = {}
+        for name in truth:
+            result[name] = self.area_weighted_rmse(
+                truth=truth[name],
+                predicted=predicted[name],
+            )
+        return result
 
     def area_weighted_std(self, data: torch.Tensor, keepdim: bool = False):
         return self.area_weighted_mean(
@@ -49,10 +85,33 @@ class GriddedOperations(abc.ABC):
             keepdim=keepdim,
         ).sqrt()
 
+    @final
+    def area_weighted_std_dict(
+        self,
+        data: TensorMapping,
+        keepdim: bool = False,
+    ) -> TensorDict:
+        result = {}
+        for name in data:
+            result[name] = self.area_weighted_std(data=data[name], keepdim=keepdim)
+        return result
+
     @abc.abstractmethod
     def area_weighted_gradient_magnitude_percent_diff(
         self, truth: torch.Tensor, predicted: torch.Tensor
-    ): ...
+    ) -> torch.Tensor: ...
+
+    @final
+    def area_weighted_gradient_magnitude_percent_diff_dict(
+        self, truth: TensorMapping, predicted: TensorMapping
+    ) -> TensorDict:
+        result = {}
+        for name in truth:
+            result[name] = self.area_weighted_gradient_magnitude_percent_diff(
+                truth=truth[name],
+                predicted=predicted[name],
+            )
+        return result
 
     @abc.abstractmethod
     def regional_area_weighted_mean(
@@ -61,6 +120,22 @@ class GriddedOperations(abc.ABC):
         regional_weights: torch.Tensor,
         keepdim: bool = False,
     ) -> torch.Tensor: ...
+
+    @final
+    def regional_area_weighted_mean_dict(
+        self,
+        data: TensorMapping,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+    ) -> TensorDict:
+        result = {}
+        for name in data:
+            result[name] = self.regional_area_weighted_mean(
+                data=data[name],
+                regional_weights=regional_weights,
+                keepdim=keepdim,
+            )
+        return result
 
     @abc.abstractmethod
     def get_real_sht(
@@ -165,13 +240,16 @@ class LatLonOperations(GriddedOperations):
 
     def area_weighted_gradient_magnitude_percent_diff(
         self, truth: torch.Tensor, predicted: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         if predicted.device == torch.device("cpu"):
             area_weights = self._cpu_area
         else:
             area_weights = self._device_area
         return metrics.gradient_magnitude_percent_diff(
-            truth, predicted, weights=area_weights, dim=self.HORIZONTAL_DIMS
+            truth,
+            predicted,
+            weights=area_weights,
+            dim=self.HORIZONTAL_DIMS,
         )
 
     def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
@@ -189,17 +267,18 @@ class HEALPixOperations(GriddedOperations):
     def area_weighted_mean(
         self, data: torch.Tensor, keepdim: bool = False
     ) -> torch.Tensor:
+        # For HEALPix, area weights are uniform, so mean is sufficient
         return data.mean(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
 
     def area_weighted_gradient_magnitude_percent_diff(
         self, truth: torch.Tensor, predicted: torch.Tensor
-    ):
+    ) -> torch.Tensor:
         return metrics.gradient_magnitude_percent_diff(
             truth, predicted, weights=None, dim=self.HORIZONTAL_DIMS
         )
 
     def regional_area_weighted_mean(
-        self, data: torch.Tensor, weights: torch.Tensor, keepdim: bool = False
+        self, data: torch.Tensor, regional_weights: torch.Tensor, keepdim: bool = False
     ) -> torch.Tensor:
         raise NotImplementedError(
             "Regional area weighted mean is not implemented for HEALPix."
