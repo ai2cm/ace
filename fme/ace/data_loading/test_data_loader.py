@@ -89,7 +89,7 @@ def _create_dataset_on_disk(
     filename="data.nc",
 ) -> pathlib.Path:
     if data_dim_sizes is None:
-        data_dim_sizes = {"time": n_times, "grid_yt": 16, "grid_xt": 32}
+        data_dim_sizes = {"time": n_times, "lat": 16, "lon": 32}
     seed = 0
     np.random.seed(seed)
     mask_name = "mask"
