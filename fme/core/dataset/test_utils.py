@@ -181,9 +181,9 @@ def test__broadcast_array_to_tensor_with_broadcast():
 
 def test__broadcast_array_to_tensor_raises_assertion_error():
     arr = np.zeros((1, 2))
-    with pytest.raises(AssertionError, match="must be 1D"):
+    with pytest.raises(ValueError, match="must be 1D"):
         _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (1, 2, 3))
 
     arr = np.zeros(3)
-    with pytest.raises(AssertionError, match="matching time dimension"):
+    with pytest.raises(ValueError, match="matching time dimension"):
         _broadcast_array_to_tensor(arr, (TIME_DIM, LAT_DIM, LON_DIM), (4, 2, 3))

@@ -24,6 +24,13 @@ class XarrayConcat(torch.utils.data.Dataset):
         assert len(self._dataset) == len(sample_start_times)
         self._sample_n_times = datasets[0].sample_n_times
 
+        for dataset in datasets[1:]:
+            if dataset.dims != datasets[0].dims:
+                raise ValueError(
+                    "Datasets being concatenated do not have the same dimensions: "
+                    f"{dataset.dims} != {datasets[0].dims}"
+                )
+
     def __len__(self):
         return len(self._dataset)
 
