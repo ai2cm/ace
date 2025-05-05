@@ -1,5 +1,5 @@
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Dict, Mapping
 
 import numpy as np
 import torch
@@ -43,8 +43,8 @@ class PairedVideoDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):

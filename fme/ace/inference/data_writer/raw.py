@@ -1,6 +1,6 @@
 import datetime
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence
 
 import cftime
 import numpy as np
@@ -35,7 +35,7 @@ class PairedRawDataWriter:
         self,
         path: str,
         n_initial_conditions: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
@@ -58,8 +58,8 @@ class PairedRawDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -89,7 +89,7 @@ class RawDataWriter:
         path: str,
         label: str,
         n_initial_conditions: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
@@ -126,7 +126,7 @@ class RawDataWriter:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):

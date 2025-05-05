@@ -1,5 +1,4 @@
 import datetime
-from typing import List
 
 import pytest
 import torch
@@ -235,7 +234,7 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
     ],
 )
 def test_assert_compatible_with_incompatible_dataset_info(
-    a: DatasetInfo, b: DatasetInfo, msgs: List[str]
+    a: DatasetInfo, b: DatasetInfo, msgs: list[str]
 ):
     with pytest.raises(IncompatibleDatasetInfo) as exc_info:
         a.assert_compatible_with(b)

@@ -1,4 +1,5 @@
-from typing import Any, Collection, List, Mapping, Optional, Union
+from collections.abc import Collection, Mapping
+from typing import Any
 
 import matplotlib.pyplot as plt
 import torch
@@ -69,7 +70,7 @@ class RelativeCRPSInterpAggregator:
         self._include_positional_comparisons = include_positional_comparisons
 
     def _interpolate(
-        self, data: TensorMapping, keys: Optional[Collection[str]] = None
+        self, data: TensorMapping, keys: Collection[str] | None = None
     ) -> TensorMapping:
         # Expect CRPS coarse to have sample dimension, so no adjustment needed
         keys = keys if keys is not None else data.keys()
@@ -137,14 +138,14 @@ class LatentStepAggregator:
     """
 
     def __init__(self, name: str = "") -> None:
-        self._latent_steps: List[torch.Tensor] = []
+        self._latent_steps: list[torch.Tensor] = []
         self._name = ensure_trailing_slash(name)
 
     @torch.no_grad()
-    def record_batch(self, latent_steps: List[torch.Tensor]) -> None:
+    def record_batch(self, latent_steps: list[torch.Tensor]) -> None:
         self._latent_steps = latent_steps
 
-    def _get(self) -> List[Any]:
+    def _get(self) -> list[Any]:
         if len(self._latent_steps) == 0:
             return []
 
@@ -186,7 +187,7 @@ class SplitMapAndMetricLogs:
 
     def __init__(
         self,
-        agg: Union[MeanComparison, SumComparison],
+        agg: MeanComparison | SumComparison,
         name: str,
         include_positional_comparisons: bool = True,
     ) -> None:
@@ -253,12 +254,12 @@ class GenerationAggregator:
 
     def __init__(
         self,
-        dims: List[str],
+        dims: list[str],
         downscale_factor: int,
         n_histogram_bins: int = 300,
-        percentiles: Optional[List[float]] = None,
-        ssim_kwargs: Optional[Mapping[str, Any]] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        percentiles: list[float] | None = None,
+        ssim_kwargs: Mapping[str, Any] | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
     ) -> None:
         self._agg = Aggregator(
@@ -278,7 +279,7 @@ class GenerationAggregator:
             ),
         ]
 
-        self._probabilistic_coarse_comparisons: List[_CoarseComparisonAggregator] = [
+        self._probabilistic_coarse_comparisons: list[_CoarseComparisonAggregator] = [
             RelativeCRPSInterpAggregator(
                 downscale_factor,
                 name="relative_crps_bicubic",

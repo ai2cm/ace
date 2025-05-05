@@ -1,6 +1,5 @@
 import dataclasses
 import unittest.mock
-from typing import List
 
 import pytest
 import torch
@@ -207,8 +206,8 @@ def test_loss_normalizer_uses_extra_stats_names(include_multi_call_in_loss: bool
     }
 
     def _get_loss_normalizer(
-        extra_names: List[str] | None,
-        extra_residual_scaled_names: List[str] | None,
+        extra_names: list[str] | None,
+        extra_residual_scaled_names: list[str] | None,
     ):
         base_names = ["a", "b", "c", "d"]
         if extra_names is None:

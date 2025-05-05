@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import logging
-from typing import Tuple, Union
 
 import numpy as np
 import pytest
@@ -770,8 +769,8 @@ def test_UNetDecoder_reset():
 
 
 def compare_output(
-    output_1: Union[th.Tensor, Tuple[th.Tensor, ...]],
-    output_2: Union[th.Tensor, Tuple[th.Tensor, ...]],
+    output_1: th.Tensor | tuple[th.Tensor, ...],
+    output_2: th.Tensor | tuple[th.Tensor, ...],
     rtol: float = 1e-5,
     atol: float = 1e-5,
 ) -> bool:
@@ -804,7 +803,7 @@ def compare_output(
             else:
                 if not out_1 == out_2:
                     return False
-    elif isinstance(output_1, (list, tuple)) and isinstance(output_2, (list, tuple)):
+    elif isinstance(output_1, list | tuple) and isinstance(output_2, list | tuple):
         if len(output_1) != len(output_2):
             print(
                 f"Length mismatch: output_1 {len(output_1)}, output_2 {len(output_2)}"

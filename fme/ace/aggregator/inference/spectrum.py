@@ -1,7 +1,6 @@
 import logging
 import warnings
 from collections import defaultdict
-from typing import Dict, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import torch
@@ -19,8 +18,8 @@ class SphericalPowerSpectrumAggregator:
 
     def __init__(self, nlat: int, nlon: int, grid: str = "legendre-gauss"):
         self._real_sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).to(get_device())
-        self._power_spectrum: Dict[str, torch.Tensor] = {}
-        self._counts: Dict[str, int] = defaultdict(int)
+        self._power_spectrum: dict[str, torch.Tensor] = {}
+        self._counts: dict[str, int] = defaultdict(int)
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
@@ -40,7 +39,7 @@ class SphericalPowerSpectrumAggregator:
                 self._power_spectrum[name] = weighted_average
             self._counts[name] += new_count
 
-    def get_mean(self) -> Dict[str, torch.Tensor]:
+    def get_mean(self) -> dict[str, torch.Tensor]:
         dist = Distributed.get_instance()
         logs = {}
         sorted_names = sorted(list(self._power_spectrum))
@@ -80,7 +79,7 @@ class PairedSphericalPowerSpectrumAggregator:
         self._target_aggregator.record_batch(target_data)
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, plt.Figure]:
+    def get_logs(self, label: str) -> dict[str, plt.Figure]:
         logs = {}
         gen_spectrum = self._gen_aggregator.get_mean()
         target_spectrum = self._target_aggregator.get_mean()
@@ -110,9 +109,9 @@ class PairedSphericalPowerSpectrumAggregator:
 
 
 def _get_spectrum_metrics(
-    gen_spectrum: Dict[str, torch.Tensor],
-    target_spectrum: Dict[str, torch.Tensor],
-) -> Dict[str, float]:
+    gen_spectrum: dict[str, torch.Tensor],
+    target_spectrum: dict[str, torch.Tensor],
+) -> dict[str, float]:
     """
     Compute metrics for the spectrum.
 
@@ -152,7 +151,7 @@ def get_smallest_scale_power_bias(
 def get_positive_and_negative_power_bias(
     gen_spectrum: torch.Tensor,
     target_spectrum: torch.Tensor,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """
     Compute the positive and negative power bias for the spectrum,
     normalized by the target spectrum.
@@ -164,7 +163,7 @@ def get_positive_and_negative_power_bias(
 
 
 def _plot_spectrum_pair(
-    prediction: torch.tensor, target: Optional[torch.tensor]
+    prediction: torch.Tensor, target: torch.Tensor | None
 ) -> plt.Figure:
     fig, ax = plt.subplots()
     ax.plot(prediction, "--", label="prediction", color="C1")

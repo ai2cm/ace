@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, Callable, List, Mapping, Optional
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 from torch import nn
@@ -27,8 +28,8 @@ class FrozenParameterConfig:
         exclude: list of parameter names to ignore
     """
 
-    include: List[str] = dataclasses.field(default_factory=list)
-    exclude: List[str] = dataclasses.field(default_factory=list)
+    include: list[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for pattern in self.include:
@@ -71,7 +72,7 @@ class ParameterClassification:
         frozen_parameters: configuration for freezing parameters in the built model
     """
 
-    exclude: List[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] = dataclasses.field(default_factory=list)
     frozen: FrozenParameterConfig = dataclasses.field(
         default_factory=lambda: FrozenParameterConfig(exclude=["*"])
     )
@@ -104,12 +105,12 @@ class ParameterInitializationConfig:
         frozen_parameters: deprecated, kept for backwards compatibility
     """
 
-    weights_path: Optional[str] = None
-    parameters: List[ParameterClassification] = dataclasses.field(default_factory=list)
+    weights_path: str | None = None
+    parameters: list[ParameterClassification] = dataclasses.field(default_factory=list)
     alpha: float = 0.0
     beta: float = 0.0
-    exclude_parameters: Optional[List[str]] = None
-    frozen_parameters: Optional[FrozenParameterConfig] = None
+    exclude_parameters: list[str] | None = None
+    frozen_parameters: FrozenParameterConfig | None = None
 
     def __post_init__(self):
         if self.exclude_parameters is not None or self.frozen_parameters is not None:
@@ -123,16 +124,16 @@ class ParameterInitializationConfig:
             frozen = self.frozen_parameters or FrozenParameterConfig(exclude=["*"])
             self.parameters = [ParameterClassification(exclude=exclude, frozen=frozen)]
 
-    def _filled_parameters(self, n_modules: int) -> List[ParameterClassification]:
+    def _filled_parameters(self, n_modules: int) -> list[ParameterClassification]:
         return self.parameters + [
             ParameterClassification() for _ in range(n_modules - len(self.parameters))
         ]
 
     def apply(
         self,
-        modules: List[nn.Module],
+        modules: list[nn.Module],
         init_weights: bool,
-        load_weights: Callable[[str], List[Mapping[str, Any]]],
+        load_weights: Callable[[str], list[Mapping[str, Any]]],
     ) -> RegularizerFunction:
         """
         Apply the weight initialization to a module.
@@ -223,8 +224,8 @@ class ParameterInitializationConfig:
         return regularizer
 
     def get_base_weights(
-        self, load_weights: Callable[[str], List[torch.nn.Module]]
-    ) -> Optional[List[Mapping[str, Any]]]:
+        self, load_weights: Callable[[str], list[torch.nn.Module]]
+    ) -> list[Mapping[str, Any]] | None:
         """
         If a weights_path is provided, return the model base weights used for
         initialization.

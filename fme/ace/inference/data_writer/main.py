@@ -1,8 +1,8 @@
 import dataclasses
 import datetime
 import warnings
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import List, Mapping, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -18,15 +18,15 @@ from .raw import PairedRawDataWriter, RawDataWriter
 from .time_coarsen import PairedTimeCoarsen, TimeCoarsen, TimeCoarsenConfig
 from .video import PairedVideoDataWriter
 
-PairedSubwriter = Union[
-    PairedRawDataWriter,
-    PairedVideoDataWriter,
-    PairedHistogramDataWriter,
-    PairedTimeCoarsen,
-    PairedMonthlyDataWriter,
-]
+PairedSubwriter = (
+    PairedRawDataWriter
+    | PairedVideoDataWriter
+    | PairedHistogramDataWriter
+    | PairedTimeCoarsen
+    | PairedMonthlyDataWriter
+)
 
-Subwriter = Union[MonthlyDataWriter, RawDataWriter, TimeCoarsen]
+Subwriter = MonthlyDataWriter | RawDataWriter | TimeCoarsen
 
 
 @dataclasses.dataclass
@@ -50,9 +50,9 @@ class DataWriterConfig:
     log_extended_video_netcdfs: bool = False
     save_prediction_files: bool = True
     save_monthly_files: bool = True
-    names: Optional[Sequence[str]] = None
+    names: Sequence[str] | None = None
     save_histogram_files: bool = False
-    time_coarsen: Optional[TimeCoarsenConfig] = None
+    time_coarsen: TimeCoarsenConfig | None = None
 
     def __post_init__(self):
         if (
@@ -139,9 +139,9 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         enable_video_netcdfs: bool,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         enable_histogram_netcdfs: bool,
-        time_coarsen: Optional[TimeCoarsenConfig] = None,
+        time_coarsen: TimeCoarsenConfig | None = None,
     ):
         """
         Args:
@@ -162,7 +162,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
-        self._writers: List[PairedSubwriter] = []
+        self._writers: list[PairedSubwriter] = []
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
@@ -327,8 +327,8 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         timestep: datetime.timedelta,
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
-        save_names: Optional[Sequence[str]],
-        time_coarsen: Optional[TimeCoarsenConfig] = None,
+        save_names: Sequence[str] | None,
+        time_coarsen: TimeCoarsenConfig | None = None,
     ):
         """
         Args:
@@ -346,7 +346,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                 and monthly netCDF files.
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
-        self._writers: List[Subwriter] = []
+        self._writers: list[Subwriter] = []
         if "face" in coords:
             # TODO: handle writing HEALPix data
             # https://github.com/ai2cm/full-model/issues/1089

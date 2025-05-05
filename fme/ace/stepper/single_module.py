@@ -2,19 +2,8 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    List,
-    Literal,
-    Mapping,
-    Optional,
-    Tuple,
-    Union,
-    cast,
-)
+from collections.abc import Callable, Generator, Mapping
+from typing import Any, Literal, cast
 
 import dacite
 import dacite.exceptions
@@ -90,23 +79,23 @@ class SingleModuleStepperConfig:
     """
 
     builder: ModuleSelector
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: NormalizationConfig
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    ocean: Optional[OceanConfig] = None
+    ocean: OceanConfig | None = None
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+    corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
-    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
-    loss_normalization: Optional[NormalizationConfig] = None
-    residual_normalization: Optional[NormalizationConfig] = None
-    multi_call: Optional[MultiCallConfig] = None
+    next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    loss_normalization: NormalizationConfig | None = None
+    residual_normalization: NormalizationConfig | None = None
+    multi_call: MultiCallConfig | None = None
     include_multi_call_in_loss: bool = False
     crps_training: bool = False
     residual_prediction: bool = False
@@ -174,7 +163,7 @@ class SingleModuleStepperConfig:
         self.load()
         return dataclasses.asdict(self)
 
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
         """
         If the model is being initialized from another model's weights for fine-tuning,
         returns those weights. Otherwise, returns None.
@@ -212,7 +201,7 @@ class SingleModuleStepperConfig:
             init_weights=init_weights,
         )
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
     @classmethod
@@ -223,11 +212,11 @@ class SingleModuleStepperConfig:
         )
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self.in_names
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.out_names
 
     @property
@@ -250,24 +239,24 @@ class SingleModuleStepperConfig:
         return list(set(self.in_names).union(self.out_names).union(extra_names))
 
     @property
-    def input_only_names(self) -> List[str]:
+    def input_only_names(self) -> list[str]:
         """Names of variables which are inputs only."""
         return list(set(self.all_names) - set(self.out_names))
 
     @property
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).intersection(self.in_names))
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         extra_names = []
         if self.multi_call is not None:
             extra_names.extend(self.multi_call.names)
         return list(set(self.out_names).union(extra_names))
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         """Names of variables which are outputs only."""
         extra_names = []
         if self.multi_call is not None:
@@ -276,7 +265,7 @@ class SingleModuleStepperConfig:
         return list(set(out_names).difference(self.in_names))
 
     @classmethod
-    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         _unsupported_key_defaults = {
             "conserve_dry_air": False,
             "optimization": None,
@@ -356,8 +345,8 @@ class SingleModuleStepperConfig:
 
     def _to_step_config(
         self,
-        normalizer: Optional[StandardNormalizer] = None,
-        loss_normalizer: Optional[StandardNormalizer] = None,
+        normalizer: StandardNormalizer | None = None,
+        loss_normalizer: StandardNormalizer | None = None,
     ) -> StepSelector:
         return StepSelector(
             type="multi_call",
@@ -380,18 +369,18 @@ class SingleModuleStepperConfig:
 
     def _to_single_module_step_config(
         self,
-        normalizer: Optional[StandardNormalizer] = None,
-        loss_normalizer: Optional[StandardNormalizer] = None,
+        normalizer: StandardNormalizer | None = None,
+        loss_normalizer: StandardNormalizer | None = None,
     ) -> "SingleModuleStepConfig":
         if normalizer is not None:
             normalization = normalizer.get_normalization_config()
         else:
             normalization = self.normalization
         if loss_normalizer is not None:
-            loss_normalization: Optional[NormalizationConfig] = (
+            loss_normalization: NormalizationConfig | None = (
                 loss_normalizer.get_normalization_config()
             )
-            residual_normalization: Optional[NormalizationConfig] = None
+            residual_normalization: NormalizationConfig | None = None
         else:
             loss_normalization = self.loss_normalization
             residual_normalization = self.residual_normalization
@@ -411,16 +400,16 @@ class SingleModuleStepperConfig:
             residual_prediction=self.residual_prediction,
         )
 
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+    def replace_multi_call(self, multi_call: MultiCallConfig | None):
         self.multi_call = multi_call
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self.ocean = ocean
 
 
-def _load_weights(path: str) -> List[Mapping[str, Any]]:
+def _load_weights(path: str) -> list[Mapping[str, Any]]:
     stepper = load_stepper(path)
-    return_weights: List[Mapping[str, Any]] = []
+    return_weights: list[Mapping[str, Any]] = []
     for module in stepper.modules:
         return_weights.append(module.state_dict())
     return return_weights
@@ -466,7 +455,7 @@ class ExistingStepperConfig:
             n_forward_steps
         )
 
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
         return self._stepper_config.get_base_weights()
 
     def get_stepper(
@@ -599,7 +588,7 @@ class TrainOutput(TrainOutputABC):
 def crps_loss(
     gen_norm_step: TensorDict,
     target_norm_step: TensorDict,
-    names: List[str],
+    names: list[str],
 ) -> torch.Tensor:
     """
     Compute the CRPS loss for a single timestep.
@@ -625,7 +614,7 @@ def crps_loss(
 
 
 def stack_list_of_tensor_dicts(
-    dict_list: List[TensorDict],
+    dict_list: list[TensorDict],
     time_dim: int,
 ) -> TensorDict:
     keys = next(iter(dict_list)).keys()
@@ -636,10 +625,10 @@ def stack_list_of_tensor_dicts(
 
 
 def process_ensemble_prediction_generator_list(
-    output_list: List[EnsembleTensorDict],
+    output_list: list[EnsembleTensorDict],
 ) -> EnsembleTensorDict:
     output_timeseries = stack_list_of_tensor_dicts(
-        cast(List[TensorDict], output_list), time_dim=2
+        cast(list[TensorDict], output_list), time_dim=2
     )
     return EnsembleTensorDict(
         {k: v for k, v in output_timeseries.items()},
@@ -647,9 +636,9 @@ def process_ensemble_prediction_generator_list(
 
 
 def process_prediction_generator_list(
-    output_list: List[TensorDict],
+    output_list: list[TensorDict],
     time: xr.DataArray,
-    horizontal_dims: Optional[List[str]] = None,
+    horizontal_dims: list[str] | None = None,
 ) -> BatchData:
     output_timeseries = stack_list_of_tensor_dicts(output_list, time_dim=1)
     return BatchData.new_on_device(
@@ -680,7 +669,7 @@ class StepperConfig:
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    input_masking: Optional[StaticMaskingConfig] = None
+    input_masking: StaticMaskingConfig | None = None
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -701,7 +690,7 @@ class StepperConfig:
         )
 
     @property
-    def input_only_names(self) -> List[str]:
+    def input_only_names(self) -> list[str]:
         return list(set(self.input_names) - set(self.output_names))
 
     def get_forcing_window_data_requirements(
@@ -805,17 +794,17 @@ class StepperConfig:
         return self.step.loss_names
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         """Names of variables which are required as inputs."""
         return self.step.input_names
 
     @property
-    def all_names(self) -> List[str]:
+    def all_names(self) -> list[str]:
         """Names of all variables."""
         return list(set(self.input_names + self.output_names))
 
     @property
-    def next_step_forcing_names(self) -> List[str]:
+    def next_step_forcing_names(self) -> list[str]:
         """
         Names of variables which are given as inputs but taken from the output timestep.
 
@@ -824,29 +813,29 @@ class StepperConfig:
         return self.step.get_next_step_forcing_names()
 
     @property
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         """Names of variables which both inputs and outputs."""
         return self.step.prognostic_names
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         """Names of variables which are outputs only."""
         return self.step.output_names
 
     @classmethod
-    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
         return state_copy
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         self.step.replace_ocean(ocean)
 
-    def get_ocean(self) -> Optional[OceanConfig]:
+    def get_ocean(self) -> OceanConfig | None:
         return self.step.get_ocean()
 
     def replace_multi_call(
-        self, multi_call: Optional[MultiCallConfig], state: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, multi_call: MultiCallConfig | None, state: dict[str, Any]
+    ) -> dict[str, Any]:
         """Replace the multi-call configuration of self.step and ensure the
         associated state can be loaded as a multi-call step.
 
@@ -869,7 +858,7 @@ class StepperConfig:
         self.step, new_state = replace_multi_call(self.step, multi_call, state)
         return new_state
 
-    def get_base_weights(self) -> Optional[List[Mapping[str, Any]]]:
+    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
         """
         If the model is being initialized from another model's weights for fine-tuning,
         returns those weights. Otherwise, returns None.
@@ -935,10 +924,10 @@ class Stepper(
                 normalizer=loss_normalizer,
             )
 
-        self._loss_normalizer: Optional[StandardNormalizer] = None
+        self._loss_normalizer: StandardNormalizer | None = None
 
         self._get_loss_obj = get_loss_obj
-        self._loss_obj: Optional[WeightedMappingLoss] = None
+        self._loss_obj: WeightedMappingLoss | None = None
 
         self._l2_sp_tuning_regularizer = config.parameter_init.apply(
             step.modules, init_weights=init_weights, load_weights=_load_weights
@@ -980,11 +969,11 @@ class Stepper(
         return self._derive_func
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         return self._step_obj.surface_temperature_name
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         return self._step_obj.ocean_fraction_name
 
     @property
@@ -1000,7 +989,7 @@ class Stepper(
         """
         return self.loss_obj.effective_loss_scaling
 
-    def replace_multi_call(self, multi_call: Optional[MultiCallConfig]):
+    def replace_multi_call(self, multi_call: MultiCallConfig | None):
         """
         Replace the MultiCall object with a new one. Note this is only
         meant to be used at inference time and may result in the loss
@@ -1011,14 +1000,14 @@ class Stepper(
         """
         state = self._step_obj.get_state()
         new_state = self._config.replace_multi_call(multi_call, state)
-        new_stepper: "Stepper" = self._config.get_stepper(
+        new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
             init_weights=False,
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
 
-    def replace_ocean(self, ocean: Optional[OceanConfig]):
+    def replace_ocean(self, ocean: OceanConfig | None):
         """
         Replace the ocean model with a new one.
 
@@ -1026,7 +1015,7 @@ class Stepper(
             ocean: The new ocean model configuration or None.
         """
         self._config.replace_ocean(ocean)
-        new_stepper: "Stepper" = self._config.get_stepper(
+        new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
             init_weights=False,
         )
@@ -1034,15 +1023,15 @@ class Stepper(
         self._step_obj = new_stepper._step_obj
 
     @property
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return self._step_obj.prognostic_names
 
     @property
-    def out_names(self) -> List[str]:
+    def out_names(self) -> list[str]:
         return self._step_obj.output_names
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self._step_obj.loss_names
 
     @property
@@ -1118,7 +1107,7 @@ class Stepper(
         )
 
     @property
-    def _input_only_names(self) -> List[str]:
+    def _input_only_names(self) -> list[str]:
         return list(
             set(self._step_obj.input_names).difference(set(self._step_obj.output_names))
         )
@@ -1167,7 +1156,7 @@ class Stepper(
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData, PrognosticState]:
+    ) -> tuple[BatchData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -1234,7 +1223,7 @@ class Stepper(
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[PairedData, PrognosticState]:
+    ) -> tuple[PairedData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -1313,7 +1302,7 @@ class Stepper(
             The loss metrics, the generated data, the normalized generated data,
                 and the normalized batch data.
         """
-        metrics: Dict[str, float] = {}
+        metrics: dict[str, float] = {}
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         target_data = self.get_forward_data(data, compute_derived_variables=False)
 
@@ -1357,9 +1346,9 @@ class Stepper(
         data: BatchData,
         target_data: BatchData,
         optimization: OptimizationABC,
-        metrics: Dict[str, float],
+        metrics: dict[str, float],
         use_crps: bool = False,
-    ) -> List[EnsembleTensorDict]:
+    ) -> list[EnsembleTensorDict]:
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
@@ -1381,7 +1370,7 @@ class Stepper(
             n_forward_steps,
             optimization,
         )
-        output_list: List[EnsembleTensorDict] = []
+        output_list: list[EnsembleTensorDict] = []
         for step, gen_step in enumerate(output_generator):
             gen_step = unfold_ensemble_dim(gen_step, n_ensemble=n_ensemble)
             output_list.append(gen_step)
@@ -1414,7 +1403,7 @@ class Stepper(
             "step": self._step_obj.get_state(),
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """
         Load the state of the stepper.
 
@@ -1492,7 +1481,7 @@ class Stepper(
 
 
 def get_serialized_stepper_vertical_coordinate(
-    state: Dict[str, Any],
+    state: dict[str, Any],
 ) -> VerticalCoordinate:
     if "vertical_coordinate" in state:
         return dacite.from_dict(
@@ -1533,7 +1522,7 @@ class StepperOverrideConfig:
 
 def load_stepper_config(
     checkpoint_path: str | pathlib.Path,
-    override_config: Optional[StepperOverrideConfig] = None,
+    override_config: StepperOverrideConfig | None = None,
 ) -> StepperConfig:
     """Load a stepper configuration, optionally overriding certain aspects.
 
@@ -1551,7 +1540,7 @@ def load_stepper_config(
 
 def load_stepper(
     checkpoint_path: str | pathlib.Path,
-    override_config: Optional[StepperOverrideConfig] = None,
+    override_config: StepperOverrideConfig | None = None,
 ) -> Stepper:
     """Load a stepper, optionally overriding certain aspects.
 

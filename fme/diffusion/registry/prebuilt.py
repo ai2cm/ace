@@ -1,5 +1,4 @@
 import dataclasses
-from typing import Tuple
 
 from torch import nn
 
@@ -21,7 +20,7 @@ class PreBuiltBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
     ) -> nn.Module:
         return self.module

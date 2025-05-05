@@ -1,8 +1,8 @@
 import dataclasses
 import logging
 import os
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
-from typing import Callable, Mapping, Optional, Sequence
 
 import dacite
 import torch
@@ -103,9 +103,9 @@ class CoupledAggregatorBuilder(
         output_dir: str,
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
-        ocean_loss_scaling: Optional[TensorMapping] = None,
-        atmosphere_loss_scaling: Optional[TensorMapping] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        ocean_loss_scaling: TensorMapping | None = None,
+        atmosphere_loss_scaling: TensorMapping | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
@@ -169,14 +169,14 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     )
     trainer = build_trainer(builders, config)
     trainer.train()
-    logging.info("DONE ---- rank %d" % dist.rank)
+    logging.info(f"DONE ---- rank {dist.rank}")
 
 
 def run_train_from_config(config: TrainConfig):
     run_train(TrainBuilders(config), config)
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     data = prepare_config(yaml_config, override=override_dotlist)
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,

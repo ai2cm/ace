@@ -13,7 +13,7 @@ DEVICE = fme.get_device()
 
 class AddBias(torch.nn.Module):
     def __init__(self):
-        super(AddBias, self).__init__()
+        super().__init__()
         self.bias = torch.nn.Parameter(torch.tensor(1.0))
 
     def forward(self, x):

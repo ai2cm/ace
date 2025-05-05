@@ -1,8 +1,9 @@
 import argparse
 import dataclasses
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, List, Literal, Mapping, Optional, Union
+from typing import Any, Literal
 
 import dacite
 import torch
@@ -42,8 +43,8 @@ from fme.downscaling.typing_ import FineResCoarseResPair
 class InterpolateModelConfig:
     mode: Literal["bicubic", "nearest"]
     downscale_factor: int
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
 
     def build(
         self,
@@ -83,12 +84,12 @@ class InterpolateModelConfig:
 
 @dataclasses.dataclass
 class _CheckpointModelConfigSelector:
-    wrapper: Union[DownscalingModelConfig, DiffusionModelConfig]
+    wrapper: DownscalingModelConfig | DiffusionModelConfig
 
     @classmethod
     def from_state(
         cls, state: Mapping[str, Any]
-    ) -> Union[DownscalingModelConfig, DiffusionModelConfig]:
+    ) -> DownscalingModelConfig | DiffusionModelConfig:
         return dacite.from_dict(
             data={"wrapper": state}, data_class=cls, config=dacite.Config(strict=True)
         ).wrapper
@@ -112,7 +113,7 @@ class CheckpointModelConfig:
 
     def build(
         self,
-    ) -> Union[Model, DiffusionModel]:
+    ) -> Model | DiffusionModel:
         model = _CheckpointModelConfigSelector.from_state(
             self._checkpoint["model"]["config"]
         ).build(
@@ -140,7 +141,7 @@ class Evaluator:
     def __init__(
         self,
         data: GriddedData,
-        model: Union[Model, DiffusionModel, PatchPredictor],
+        model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
         patch_data: bool = False,
@@ -201,7 +202,7 @@ class EventEvaluator:
         self,
         event_name: str,
         data: GriddedData,
-        model: Union[Model, DiffusionModel, PatchPredictor],
+        model: Model | DiffusionModel | PatchPredictor,
         experiment_dir: str,
         n_samples: int,
     ) -> None:
@@ -313,7 +314,7 @@ class EvaluatorConfig:
     logging: LoggingConfig
     n_samples: int = 4
     patch: MultipatchConfig = dataclasses.field(default_factory=MultipatchConfig)
-    events: Optional[List[EventConfig]] = None
+    events: list[EventConfig] | None = None
 
     def configure_logging(self, log_filename: str):
         self.logging.configure_logging(self.experiment_dir, log_filename)
@@ -331,7 +332,7 @@ class EvaluatorConfig:
         )
 
         model = self.model.build()
-        evaluator_model: Union[Model, DiffusionModel, PatchPredictor]
+        evaluator_model: Model | DiffusionModel | PatchPredictor
         if self.patch.divide_evaluation and self.patch.composite_prediction:
             evaluator_model = PatchPredictor(
                 model,
@@ -359,7 +360,7 @@ class EvaluatorConfig:
         event_config: EventConfig,
     ) -> EventEvaluator:
         model = self.model.build()
-        evaluator_model: Union[Model, DiffusionModel, PatchPredictor]
+        evaluator_model: Model | DiffusionModel | PatchPredictor
 
         dataset = event_config.get_gridded_data(
             base_data_config=self.data, requirements=self.model.data_requirements
@@ -384,7 +385,7 @@ class EvaluatorConfig:
             n_samples=event_config.n_samples,
         )
 
-    def build(self) -> List[Union[Evaluator, EventEvaluator]]:
+    def build(self) -> list[Evaluator | EventEvaluator]:
         default_evaluator = self._build_default_evaluator()
         event_evaluators = []
         for event_config in self.events or []:
@@ -394,7 +395,7 @@ class EvaluatorConfig:
 
 
 def main(config_path: str):
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
 
     evaluator_config: EvaluatorConfig = dacite.from_dict(

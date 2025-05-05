@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from typing import Callable, Tuple
+from collections.abc import Callable
 
 import dacite
 import numpy as np
@@ -118,7 +118,7 @@ def test_force_no_global_mean_moisture_advection():
         pytest.param((3, 12, 2, 3, 3), False, id="healpix"),
     ],
 )
-def test_force_conserve_dry_air(size: Tuple[int, ...], use_area: bool):
+def test_force_conserve_dry_air(size: tuple[int, ...], use_area: bool):
     torch.random.manual_seed(0)
     data = {
         "PRESsfc": 10.0 + torch.rand(size=size),
@@ -183,7 +183,7 @@ def test_force_conserve_moisture(
     dataset: str,
     global_only: bool,
     terms_to_modify,
-    size: Tuple[int, ...],
+    size: tuple[int, ...],
     use_area: bool,
 ):
     torch.random.manual_seed(0)

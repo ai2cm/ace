@@ -1,22 +1,8 @@
 """Contains code relating to loading (fine, coarse) examples for downscaling."""
 
 import dataclasses
-from typing import (
-    Callable,
-    Dict,
-    Generic,
-    Iterable,
-    Iterator,
-    List,
-    Mapping,
-    Optional,
-    Self,
-    Sequence,
-    Sized,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence, Sized
+from typing import Generic, Self, TypeVar
 
 import torch
 import torch.utils.data
@@ -82,7 +68,7 @@ class BatchedLatLonCoordinates:
 
     lat: torch.Tensor
     lon: torch.Tensor
-    dims: List[str] = dataclasses.field(default_factory=lambda: ["batch", "lat", "lon"])
+    dims: list[str] = dataclasses.field(default_factory=lambda: ["batch", "lat", "lon"])
 
     def __post_init__(self):
         self._validate()
@@ -143,7 +129,7 @@ class BatchItem:
     data: TensorMapping
     time: xr.DataArray
     latlon_coordinates: LatLonCoordinates
-    topography: Optional[torch.Tensor] = None
+    topography: torch.Tensor | None = None
 
     def _validate(self):
         for key, value in self.data.items():
@@ -176,7 +162,7 @@ class BatchItem:
         return iter([self.data, self.time, self.latlon_coordinates, self.topography])
 
     @property
-    def horizontal_shape(self) -> Tuple[int, int]:
+    def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
     def to_device(self) -> "BatchItem":
@@ -223,7 +209,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         properties: DatasetProperties,
         lat_interval: ClosedInterval,
         lon_interval: ClosedInterval,
-        topography: Optional[torch.Tensor] = None,
+        topography: torch.Tensor | None = None,
     ):
         self.dataset = dataset
         self._properties = properties
@@ -256,24 +242,16 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         ):
             lon_max = coords.lon.max()
             raise NotImplementedError(
-                (
-                    "lon wraparound not implemented, received lon_max {} but "
-                    "expected lon_max > {}".format(
-                        lon_max, self.lon_interval.stop - 360.0
-                    )
-                )
+                f"lon wraparound not implemented, received lon_max {lon_max} but "
+                f"expected lon_max > {self.lon_interval.stop - 360.0}"
             )
         if (self.lon_interval.start != -float("inf")) and (
             torch.any(coords.lon > self.lon_interval.start + 360.0)
         ):
             lon_min = coords.lon.min()
             raise NotImplementedError(
-                (
-                    "lon wraparound not implemented, received lon_min {} but "
-                    "expected lon_min < {}".format(
-                        lon_min, self.lon_interval.start + 360.0
-                    )
-                )
+                f"lon wraparound not implemented, received lon_min {lon_min} but "
+                f"expected lon_min < {self.lon_interval.start + 360.0}"
             )
 
         assert lats.numel() > 0, "No latitudes found in the specified range."
@@ -307,7 +285,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             self._topography = None
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
@@ -323,7 +301,7 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
         return self._latlon_coordinates
 
     @property
-    def subset_topography(self) -> Optional[torch.Tensor]:
+    def subset_topography(self) -> torch.Tensor | None:
         return self._topography
 
     def __len__(self):
@@ -349,10 +327,10 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
 
     def __init__(
         self,
-        dataset: Union[HorizontalSubsetDataset, XarrayConcat],
+        dataset: HorizontalSubsetDataset | XarrayConcat,
         coordinates: LatLonCoordinates,
-        topography: Optional[torch.Tensor] = None,
-        properties: Optional[DatasetProperties] = None,
+        topography: torch.Tensor | None = None,
+        properties: DatasetProperties | None = None,
     ):
         self._dataset = dataset
         self._coordinates = coordinates
@@ -378,7 +356,7 @@ class BatchItemDatasetAdapter(torch.utils.data.Dataset):
         return BatchItem(fields, time.squeeze(), self._coordinates, self._topography)
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         if self._properties is None:
             raise ValueError("Properties not set for this dataset.")
         return self._properties.variable_metadata
@@ -510,9 +488,9 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
 @dataclasses.dataclass
 class GriddedData:
     _loader: torch.utils.data.DataLoader
-    coarse_shape: Tuple[int, int]
+    coarse_shape: tuple[int, int]
     downscale_factor: int
-    dims: List[str]
+    dims: list[str]
     variable_metadata: Mapping[str, VariableMetadata]
     all_times: xr.CFTimeIndex
 
@@ -566,7 +544,7 @@ class BatchData:
     data: TensorMapping
     time: xr.DataArray
     latlon_coordinates: BatchedLatLonCoordinates
-    topography: Optional[torch.Tensor] = None
+    topography: torch.Tensor | None = None
 
     def _validate(self):
         leading_dim = None
@@ -596,7 +574,7 @@ class BatchData:
         self._horizontal_shape = self[0].horizontal_shape
 
     @property
-    def horizontal_shape(self) -> Tuple[int, int]:
+    def horizontal_shape(self) -> tuple[int, int]:
         return self._horizontal_shape
 
     @classmethod
@@ -845,7 +823,7 @@ class DataLoaderConfig:
         self,
         train: bool,
         requirements: DataRequirements,
-        dist: Optional[Distributed] = None,
+        dist: Distributed | None = None,
     ) -> GriddedData:
         if dist is None:
             dist = Distributed.get_instance()
@@ -918,7 +896,7 @@ class DataLoaderConfig:
             dataset_coarse_subset,
         )
 
-        sampler: Optional[DistributedSampler]
+        sampler: DistributedSampler | None
         if dist.is_distributed():
             if train:
                 sampler = DistributedSampler(dataset, shuffle=train)

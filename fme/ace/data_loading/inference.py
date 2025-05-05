@@ -1,7 +1,7 @@
 import dataclasses
 import logging
+from collections.abc import Mapping, Sequence
 from math import ceil
-from typing import Mapping, Optional, Sequence, Union
 
 import cftime
 import numpy as np
@@ -122,13 +122,11 @@ class InferenceDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: Union[XarrayDataConfig, Mapping[str, XarrayDataConfig]]
-    start_indices: Union[
-        InferenceInitialConditionIndices, ExplicitIndices, TimestampList
-    ]
+    dataset: XarrayDataConfig | Mapping[str, XarrayDataConfig]
+    start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
-    perturbations: Optional[SSTPerturbation] = None
-    persistence_names: Optional[Sequence[str]] = None
+    perturbations: SSTPerturbation | None = None
+    persistence_names: Sequence[str] | None = None
 
     def __post_init__(self):
         if isinstance(self.dataset, XarrayDataConfig):
@@ -173,10 +171,10 @@ class ForcingDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: Union[XarrayDataConfig, Mapping[str, XarrayDataConfig]]
+    dataset: XarrayDataConfig | Mapping[str, XarrayDataConfig]
     num_data_workers: int = 0
-    perturbations: Optional[SSTPerturbation] = None
-    persistence_names: Optional[Sequence[str]] = None
+    perturbations: SSTPerturbation | None = None
+    persistence_names: Sequence[str] | None = None
 
     def __post_init__(self):
         if isinstance(self.dataset, XarrayDataConfig):
@@ -203,8 +201,8 @@ class InferenceDataset(torch.utils.data.Dataset):
         config: InferenceDataLoaderConfig,
         total_forward_steps: int,
         requirements: DataRequirements,
-        surface_temperature_name: Optional[str] = None,
-        ocean_fraction_name: Optional[str] = None,
+        surface_temperature_name: str | None = None,
+        ocean_fraction_name: str | None = None,
     ):
         if isinstance(config.dataset, XarrayDataConfig):
             dataset = XarrayDataset(
@@ -243,7 +241,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 SST perturbations require an ocean configuration."
             )
 
-        self._persistence_data: Optional[BatchData] = None
+        self._persistence_data: BatchData | None = None
         if config.persistence_names is not None:
             first_sample = self._get_batch_data(0)
             self._persistence_data = first_sample.subset_names(

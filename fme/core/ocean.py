@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-from typing import List
 
 import torch
 
@@ -25,7 +24,7 @@ class SlabOceanConfig:
     q_flux_name: str
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return [self.mixed_layer_depth_name, self.q_flux_name]
 
 
@@ -50,8 +49,8 @@ class OceanConfig:
 
     def build(
         self,
-        in_names: List[str],
-        out_names: List[str],
+        in_names: list[str],
+        out_names: list[str],
         timestep: datetime.timedelta,
     ) -> "Ocean":
         if not (
@@ -65,7 +64,7 @@ class OceanConfig:
         return Ocean(config=self, timestep=timestep)
 
     @property
-    def forcing_names(self) -> List[str]:
+    def forcing_names(self) -> list[str]:
         names = [self.ocean_fraction_name]
         if self.slab is None:
             names.append(self.surface_temperature_name)
@@ -138,7 +137,7 @@ class Ocean:
         )
 
     @property
-    def forcing_names(self) -> List[str]:
+    def forcing_names(self) -> list[str]:
         """These are the variables required from the forcing data."""
         return self._forcing_names
 

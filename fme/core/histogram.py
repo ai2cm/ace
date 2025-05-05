@@ -1,7 +1,8 @@
 import collections
 import logging
 from collections import namedtuple
-from typing import Dict, List, Literal, Mapping, Set, Tuple, Union
+from collections.abc import Mapping
+from typing import Literal
 
 import matplotlib.figure
 import matplotlib.pyplot as plt
@@ -17,7 +18,7 @@ EPSILON = 1.0e-6
 
 def trim_zero_bins(
     counts: np.ndarray, bin_edges: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Trim bins with zero counts from the edges of the histogram.
 
@@ -174,7 +175,7 @@ class ComparedDynamicHistograms:
     variable plotted on the same axis.
     """
 
-    def __init__(self, n_bins: int, percentiles: List[float] | None = None) -> None:
+    def __init__(self, n_bins: int, percentiles: list[float] | None = None) -> None:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
@@ -182,7 +183,7 @@ class ComparedDynamicHistograms:
         self.prediction_histograms: Mapping[str, DynamicHistogram] | None = None
         self._nan_masks: Mapping[str, torch.Tensor] | None = None
         self._time_dim = -2
-        self._variables: Set[str] = set()
+        self._variables: set[str] = set()
 
     def _check_overlapping_keys(self, target: TensorMapping, prediction: TensorMapping):
         if not self._variables:
@@ -255,10 +256,10 @@ class ComparedDynamicHistograms:
 
     def _get_histograms(
         self,
-    ) -> Dict[str, Dict[Literal["target", "prediction"], _Histogram]]:
+    ) -> dict[str, dict[Literal["target", "prediction"], _Histogram]]:
         if self.target_histograms is None or self.prediction_histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return_dict: Dict[str, Dict[Literal["target", "prediction"], _Histogram]] = (
+        return_dict: dict[str, dict[Literal["target", "prediction"], _Histogram]] = (
             collections.defaultdict(dict)
         )
         for k in self.target_histograms:
@@ -302,8 +303,8 @@ class ComparedDynamicHistograms:
         plt.tight_layout()
         return fig
 
-    def get_wandb(self) -> Dict[str, float]:
-        return_dict: Dict[str, Union[matplotlib.figure.Figure, float]] = {}
+    def get_wandb(self) -> dict[str, float]:
+        return_dict: dict[str, matplotlib.figure.Figure | float] = {}
 
         for field_name, histograms in self._get_histograms().items():
             target = histograms.get("target")

@@ -5,7 +5,6 @@ import logging
 import os
 import time
 import warnings
-from typing import Optional, Union
 
 import dacite
 import torch
@@ -79,7 +78,7 @@ def restore_checkpoint(trainer: "Trainer") -> None:
 class Trainer:
     def __init__(
         self,
-        model: Union[Model, DiffusionModel],
+        model: Model | DiffusionModel,
         optimization: Optimization,
         train_data: GriddedData,
         validation_data: GriddedData,
@@ -116,8 +115,8 @@ class Trainer:
                 os.makedirs(self.config.checkpoint_dir)
 
         self.best_valid_loss = float("inf")
-        self.epoch_checkpoint_path: Optional[str] = None
-        self.best_checkpoint_path: Optional[str] = None
+        self.epoch_checkpoint_path: str | None = None
+        self.best_checkpoint_path: str | None = None
         if self.config.checkpoint_dir is not None:
             self.epoch_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "latest.ckpt"
@@ -334,7 +333,7 @@ class Trainer:
 
 @dataclasses.dataclass
 class TrainerConfig:
-    model: Union[DownscalingModelConfig, DiffusionModelConfig]
+    model: DownscalingModelConfig | DiffusionModelConfig
     optimization: OptimizationConfig
     train_data: DataLoaderConfig
     validation_data: DataLoaderConfig
@@ -345,10 +344,10 @@ class TrainerConfig:
     ema: EMAConfig = dataclasses.field(default_factory=EMAConfig)
     validate_using_ema: bool = False
     generate_n_samples: int = 1
-    segment_epochs: Optional[int] = None
+    segment_epochs: int | None = None
     validate_interval: int = 1
-    coarse_patch_extent_lat: Optional[int] = None
-    coarse_patch_extent_lon: Optional[int] = None
+    coarse_patch_extent_lat: int | None = None
+    coarse_patch_extent_lon: int | None = None
 
     def __post_init__(self):
         if (
@@ -426,7 +425,7 @@ def _get_crps(metrics, prefix="generation/metrics/crps"):
 
 
 def main(config_path: str):
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f)
 
     train_config: TrainerConfig = dacite.from_dict(

@@ -22,7 +22,7 @@ class UNetDiffusionModule(torch.nn.Module):
         self,
         unet: torch.nn.Module,
     ):
-        super(UNetDiffusionModule, self).__init__()
+        super().__init__()
         self.unet = unet.to(get_device())
 
     def forward(

@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, List, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 from torch import nn
@@ -30,8 +31,8 @@ class CopyWeightsConfig:
         exclude: list of wildcard patterns to exclude from overwriting
     """
 
-    include: List[str] = dataclasses.field(default_factory=list)
-    exclude: List[str] = dataclasses.field(default_factory=list)
+    include: list[str] = dataclasses.field(default_factory=list)
+    exclude: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         for pattern in self.include:
@@ -48,7 +49,7 @@ class CopyWeightsConfig:
                 )
 
     @torch.no_grad()
-    def apply(self, weights: List[Mapping[str, Any]], modules: List[nn.Module]):
+    def apply(self, weights: list[Mapping[str, Any]], modules: list[nn.Module]):
         """
         Apply base weights to modules according to the include/exclude lists
         of this instance.
@@ -94,7 +95,7 @@ def strip_leading_module(state_dict: Mapping[str, Any]) -> Mapping[str, Any]:
 def overwrite_weights(
     from_state: Mapping[str, Any],
     to_module: torch.nn.Module,
-    exclude_parameters: List[str] | None = None,
+    exclude_parameters: list[str] | None = None,
 ):
     """
     Overwrite the weights in to_module with the weights in from_state.

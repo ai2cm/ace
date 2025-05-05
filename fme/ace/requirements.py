@@ -1,5 +1,4 @@
 import dataclasses
-from typing import List
 
 
 @dataclasses.dataclass
@@ -12,7 +11,7 @@ class PrognosticStateDataRequirements:
         n_timesteps: Number of consecutive timesteps that must be stored.
     """
 
-    names: List[str]
+    names: list[str]
     n_timesteps: int
 
 
@@ -26,5 +25,5 @@ class DataRequirements:
         n_timesteps: Number of timesteps to load in each batch window.
     """
 
-    names: List[str]
+    names: list[str]
     n_timesteps: int

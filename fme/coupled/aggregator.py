@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import os
 import warnings
-from typing import Callable, Dict, Mapping, Optional, Union
+from collections.abc import Callable, Mapping
 
 import torch
 import xarray as xr
@@ -40,7 +40,7 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
         self._n_batches += 1
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, torch.Tensor]:
+    def get_logs(self, label: str) -> dict[str, torch.Tensor]:
         logs = {f"{label}/mean/loss": self._loss / self._n_batches}
         dist = Distributed.get_instance()
         for key in sorted(logs.keys()):
@@ -48,7 +48,7 @@ class TrainAggregator(AggregatorABC[CoupledTrainOutput]):
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str]):
+    def flush_diagnostics(self, subdir: str | None):
         pass
 
 
@@ -64,10 +64,10 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self,
         horizontal_coordinates: HorizontalCoordinates,
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        ocean_loss_scaling: Optional[TensorMapping] = None,
-        atmosphere_loss_scaling: Optional[TensorMapping] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        ocean_loss_scaling: TensorMapping | None = None,
+        atmosphere_loss_scaling: TensorMapping | None = None,
     ):
         """
         Args:
@@ -158,7 +158,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         return logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         """
         Flushes diagnostics to netCDF files, in separate directories for ocean and
         atmosphere.
@@ -196,8 +196,8 @@ class InferenceEvaluatorAggregatorConfig:
     log_seasonal_means: bool = False
     log_global_mean_time_series: bool = True
     log_global_mean_norm_time_series: bool = True
-    monthly_reference_data: Optional[str] = None
-    time_mean_reference_data: Optional[str] = None
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
 
     def build(
         self,
@@ -210,8 +210,8 @@ class InferenceEvaluatorAggregatorConfig:
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ) -> "InferenceEvaluatorAggregator":
         if self.monthly_reference_data is None:
             monthly_reference_data = None
@@ -319,7 +319,7 @@ def _combine_logs(
 
 class InferenceEvaluatorAggregator(
     InferenceAggregatorABC[
-        Union[CoupledPairedData, CoupledPrognosticState],
+        CoupledPairedData | CoupledPrognosticState,
         CoupledPairedData,
     ]
 ):
@@ -334,17 +334,17 @@ class InferenceEvaluatorAggregator(
         ocean_normalize: Callable[[TensorMapping], TensorDict],
         atmosphere_normalize: Callable[[TensorMapping], TensorDict],
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
+        output_dir: str | None = None,
         log_video: bool = False,
         enable_extended_videos: bool = False,
         log_zonal_mean_images: bool = False,
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        monthly_reference_data: Optional[xr.Dataset] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        monthly_reference_data: xr.Dataset | None = None,
         log_histograms: bool = False,
-        time_mean_reference_data: Optional[xr.Dataset] = None,
+        time_mean_reference_data: xr.Dataset | None = None,
     ):
         self._record_ocean_step_20 = n_timesteps_ocean >= 20
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
@@ -402,8 +402,8 @@ class InferenceEvaluatorAggregator(
             ),
         }
         self._coords = horizontal_coordinates.coords
-        self._num_channels_ocean: Optional[int] = None
-        self._num_channels_atmos: Optional[int] = None
+        self._num_channels_ocean: int | None = None
+        self._num_channels_atmos: int | None = None
 
     @property
     def ocean(self) -> InferenceEvaluatorAggregator_:
@@ -430,7 +430,7 @@ class InferenceEvaluatorAggregator(
     @torch.no_grad()
     def record_initial_condition(
         self,
-        initial_condition: Union[CoupledPairedData, CoupledPrognosticState],
+        initial_condition: CoupledPairedData | CoupledPrognosticState,
     ) -> InferenceLogs:
         """
         Record the initial condition.
@@ -475,7 +475,7 @@ class InferenceEvaluatorAggregator(
         }
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         """
         Flushes diagnostics to netCDF files, in separate directories for ocean and
         atmosphere.

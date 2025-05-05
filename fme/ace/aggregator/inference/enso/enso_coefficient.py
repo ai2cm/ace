@@ -1,5 +1,6 @@
 import datetime
-from typing import Any, Dict, List, Literal, Mapping, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any, Literal
 
 import cftime
 import matplotlib.pyplot as plt
@@ -21,7 +22,7 @@ OVERLAP_THRESHOLD = 0.9
 
 
 def index_data_array(
-    index_data: List[Tuple[Tuple[int, int, int], float]], calendar: str
+    index_data: list[tuple[tuple[int, int, int], float]], calendar: str
 ) -> xr.DataArray:
     """Convert a list of (time, index) tuples to an xarray DataArray.
 
@@ -88,12 +89,10 @@ class EnsoCoefficientEvaluatorAggregator:
         n_forward_timesteps: int,
         timestep: datetime.timedelta,
         gridded_operations: GriddedOperations,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
-        self._sample_index_series: List[Optional[xr.DataArray]] = (
-            get_sample_index_series(
-                self.enso_index, initial_time, n_forward_timesteps, timestep
-            )
+        self._sample_index_series: list[xr.DataArray | None] = get_sample_index_series(
+            self.enso_index, initial_time, n_forward_timesteps, timestep
         )
         self._ops = gridded_operations
         if variable_metadata is not None:
@@ -101,9 +100,9 @@ class EnsoCoefficientEvaluatorAggregator:
         else:
             self._variable_metadata = {}
         n_samples = len(self._sample_index_series)
-        self._target_covariances: List[TensorDict] = [{} for _ in range(n_samples)]
-        self._gen_covariances: List[TensorDict] = [{} for _ in range(n_samples)]
-        self._index_variance: List[torch.Tensor] = [
+        self._target_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
+        self._gen_covariances: list[TensorDict] = [{} for _ in range(n_samples)]
+        self._index_variance: list[torch.Tensor] = [
             torch.tensor(0.0, dtype=torch.float32, device=get_device())
             for _ in range(n_samples)
         ]
@@ -165,7 +164,7 @@ class EnsoCoefficientEvaluatorAggregator:
 
     def _compute_coefficients(
         self, which: Literal["target", "gen"]
-    ) -> List[TensorDict]:
+    ) -> list[TensorDict]:
         """Compute the coefficients of the target or generated data regressed
         against the ENSO index for each spatial grid cell for each sample.
         """
@@ -173,7 +172,7 @@ class EnsoCoefficientEvaluatorAggregator:
             covariances = self._target_covariances
         elif which == "gen":
             covariances = self._gen_covariances
-        coefficients: List[TensorDict] = [{} for _ in range(len(covariances))]
+        coefficients: list[TensorDict] = [{} for _ in range(len(covariances))]
         for i_sample in range(len(self._index_variance)):
             if self._sample_index_series[i_sample] is not None:
                 for name, covariance in covariances[i_sample].items():
@@ -182,7 +181,7 @@ class EnsoCoefficientEvaluatorAggregator:
                     ).to(device=get_device())
         return coefficients
 
-    def _get_coefficients(self) -> Tuple[Optional[TensorDict], Optional[TensorDict]]:
+    def _get_coefficients(self) -> tuple[TensorDict | None, TensorDict | None]:
         dist = Distributed.get_instance()
         target_coefficients = self._compute_coefficients("target")
         gen_coefficients = self._compute_coefficients("gen")
@@ -240,7 +239,7 @@ class EnsoCoefficientEvaluatorAggregator:
         return reduced_target_coefficients, reduced_gen_coefficients
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         target_coefficients, gen_coefficients = self._get_coefficients()
         if target_coefficients is None or gen_coefficients is None:
             return {}  # only the root process returns logs
@@ -291,7 +290,7 @@ class EnsoCoefficientEvaluatorAggregator:
                     f"coefficient_difference_map/{name}": coefficient_difference_map,
                 }
             )
-        logs: Dict[str, Any] = {}
+        logs: dict[str, Any] = {}
         if len(label) > 0:
             label = label + "/"
         logs.update({f"{label}{name}": images[name] for name in images.keys()})
@@ -321,7 +320,7 @@ class EnsoCoefficientEvaluatorAggregator:
         ).expand_dims({"source": ["prediction"]})
         return xr.concat([target_coefficients_ds, gen_coefficients_ds], dim="source")
 
-    def _get_var_attrs(self, name: str) -> Dict[str, str]:
+    def _get_var_attrs(self, name: str) -> dict[str, str]:
         if name in self._variable_metadata:
             attrs_name = self._variable_metadata[name].long_name
             attrs_units = self._variable_metadata[name].units
@@ -340,7 +339,7 @@ def get_sample_index_series(
     n_forward_timesteps: int,
     timestep: datetime.timedelta,
     overlap_threshold: float = OVERLAP_THRESHOLD,
-) -> List[Optional[xr.DataArray]]:
+) -> list[xr.DataArray | None]:
     """Get a zero-mean index series for each sample, based on the time that
     sample will run for.
 
@@ -361,7 +360,7 @@ def get_sample_index_series(
         index_data = index_data.convert_calendar(
             calendar=data_calendar, dim="time", use_cftime=True
         )
-    sample_index_series: List[Optional[xr.DataArray]] = []
+    sample_index_series: list[xr.DataArray | None] = []
     for initial_time_sample in initial_time:
         duration = n_forward_timesteps * timestep
         end_time = initial_time_sample + duration
@@ -430,9 +429,7 @@ def data_index_covariance(
     return (data * index_values_broadcast).sum(dim=index_dim)
 
 
-def reduce_data(
-    dist: Distributed, rank_tensor_dict: TensorDict
-) -> Optional[TensorDict]:
+def reduce_data(dist: Distributed, rank_tensor_dict: TensorDict) -> TensorDict | None:
     """Reduce tensor dicts across distributed processes by taking the mean.
 
     Args:

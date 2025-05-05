@@ -1,6 +1,9 @@
 import abc
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Tuple, Type
+from collections.abc import Callable, Mapping
+
+# we use Type to distinguish from type attr of ModuleSelector
+from typing import Any, ClassVar, Type  # noqa: UP035
 
 import dacite
 from torch import nn
@@ -23,7 +26,7 @@ class ModuleConfig(abc.ABC):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
     ) -> nn.Module:
         """
@@ -84,14 +87,14 @@ class ModuleSelector:
     @classmethod
     def register(
         cls, type_name: str
-    ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:
+    ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:  # noqa: UP006
         return cls.registry.register(type_name)
 
     def build(
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
     ) -> nn.Module:
         """

@@ -1,6 +1,6 @@
 import abc
 import logging
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.inference.data_writer import PairedDataWriter
@@ -31,8 +31,8 @@ def run_dataset_comparison(
     prediction_data: InferenceDataABC[PrognosticState, BatchData],
     target_data: InferenceDataABC[PrognosticState, BatchData],
     deriver: DeriverABC,
-    writer: Optional[Union[PairedDataWriter, NullDataWriter]] = None,
-    record_logs: Optional[Callable[[InferenceLogs], None]] = None,
+    writer: PairedDataWriter | NullDataWriter | None = None,
+    record_logs: Callable[[InferenceLogs], None] | None = None,
 ):
     if record_logs is None:
         record_logs = get_record_to_wandb(label="inference")

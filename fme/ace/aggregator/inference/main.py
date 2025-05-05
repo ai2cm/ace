@@ -2,7 +2,8 @@ import dataclasses
 import datetime
 import logging
 import warnings
-from typing import Callable, Dict, List, Mapping, Optional, Protocol, Sequence, Union
+from collections.abc import Callable, Mapping, Sequence
+from typing import Protocol
 
 import torch
 import xarray as xr
@@ -133,8 +134,8 @@ class InferenceEvaluatorAggregatorConfig:
     log_seasonal_means: bool = False
     log_global_mean_time_series: bool = True
     log_global_mean_norm_time_series: bool = True
-    monthly_reference_data: Optional[str] = None
-    time_mean_reference_data: Optional[str] = None
+    monthly_reference_data: str | None = None
+    time_mean_reference_data: str | None = None
 
     def build(
         self,
@@ -143,10 +144,10 @@ class InferenceEvaluatorAggregatorConfig:
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
-        output_dir: Optional[str] = None,
+        output_dir: str | None = None,
         record_step_20: bool = False,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        channel_mean_names: Optional[Sequence[str]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
     ) -> "InferenceEvaluatorAggregator":
         if save_diagnostics and output_dir is None:
@@ -200,10 +201,7 @@ class InferenceEvaluatorAggregatorConfig:
 
 
 class InferenceEvaluatorAggregator(
-    InferenceAggregatorABC[
-        Union[PairedData, PrognosticState],
-        PairedData,
-    ]
+    InferenceAggregatorABC[PairedData | PrognosticState, PairedData]
 ):
     """
     Aggregates statistics for inference comparing a generated and target series.
@@ -219,7 +217,7 @@ class InferenceEvaluatorAggregator(
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
-        output_dir: Optional[str] = None,
+        output_dir: str | None = None,
         record_step_20: bool = False,
         log_video: bool = False,
         enable_extended_videos: bool = False,
@@ -227,11 +225,11 @@ class InferenceEvaluatorAggregator(
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        monthly_reference_data: Optional[xr.Dataset] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        monthly_reference_data: xr.Dataset | None = None,
         log_histograms: bool = False,
-        time_mean_reference_data: Optional[xr.Dataset] = None,
-        channel_mean_names: Optional[Sequence[str]] = None,
+        time_mean_reference_data: xr.Dataset | None = None,
+        channel_mean_names: Sequence[str] | None = None,
         log_nino34_index: bool = True,
         save_diagnostics: bool = True,
     ):
@@ -267,8 +265,8 @@ class InferenceEvaluatorAggregator(
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._channel_mean_names = channel_mean_names
-        self._aggregators: Dict[str, _EvaluatorAggregator] = {}
-        self._time_dependent_aggregators: Dict[
+        self._aggregators: dict[str, _EvaluatorAggregator] = {}
+        self._time_dependent_aggregators: dict[
             str, _TimeDependentEvaluatorAggregator
         ] = {}
         self._save_diagnostics = save_diagnostics
@@ -425,7 +423,7 @@ class InferenceEvaluatorAggregator(
 
     def record_initial_condition(
         self,
-        initial_condition: Union[PairedData, PrognosticState],
+        initial_condition: PairedData | PrognosticState,
     ) -> InferenceLogs:
         if self._n_timesteps_seen != 0:
             raise RuntimeError(
@@ -499,7 +497,7 @@ class InferenceEvaluatorAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
             reduced_diagnostics = get_reduced_diagnostics(
                 sub_aggregators=(self._aggregators | self._time_dependent_aggregators),
@@ -516,8 +514,8 @@ class InferenceEvaluatorAggregator(
 
 
 def to_inference_logs(
-    log: Mapping[str, Union[Table, float, int]],
-) -> List[Dict[str, Union[float, int]]]:
+    log: Mapping[str, Table | float | int],
+) -> list[dict[str, float | int]]:
     # we have a dictionary which contains WandB tables
     # which we will convert to a list of dictionaries, one for each
     # row in the tables. Any scalar values will be reported in the last
@@ -526,7 +524,7 @@ def to_inference_logs(
     for val in log.values():
         if isinstance(val, Table):
             n_rows = max(n_rows, len(val.data))
-    logs: List[Dict[str, Union[float, int]]] = []
+    logs: list[dict[str, float | int]] = []
     for i in range(max(1, n_rows)):  # need at least one for non-series values
         logs.append({})
     for key, val in log.items():
@@ -540,7 +538,7 @@ def to_inference_logs(
     return logs
 
 
-def table_to_logs(table: Table) -> List[Dict[str, Union[float, int]]]:
+def table_to_logs(table: Table) -> list[dict[str, float | int]]:
     """
     Converts a WandB table into a list of dictionaries.
     """
@@ -560,7 +558,7 @@ class InferenceAggregatorConfig:
         log_global_mean_time_series: Whether to log global mean time series metrics.
     """
 
-    time_mean_reference_data: Optional[str] = None
+    time_mean_reference_data: str | None = None
     log_global_mean_time_series: bool = True
 
     def build(
@@ -569,7 +567,7 @@ class InferenceAggregatorConfig:
         n_timesteps: int,
         timestep: datetime.timedelta,
         output_dir: str,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
             time_means = xr.open_dataset(
@@ -608,9 +606,9 @@ class InferenceAggregator(
         n_timesteps: int,
         timestep: datetime.timedelta,
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        time_mean_reference_data: Optional[xr.Dataset] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        time_mean_reference_data: xr.Dataset | None = None,
         log_global_mean_time_series: bool = True,
     ):
         """
@@ -631,7 +629,7 @@ class InferenceAggregator(
         self._coords = horizontal_coordinates.coords
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
-        aggregators: Dict[str, _Aggregator] = {}
+        aggregators: dict[str, _Aggregator] = {}
         gridded_operations = horizontal_coordinates.gridded_operations
         if log_global_mean_time_series:
             aggregators["mean"] = SingleTargetMeanAggregator(
@@ -743,7 +741,7 @@ class InferenceAggregator(
         return logs
 
     @torch.no_grad()
-    def _get_inference_logs(self) -> List[Dict[str, Union[float, int]]]:
+    def _get_inference_logs(self) -> list[dict[str, float | int]]:
         """
         Returns a list of logs to report to WandB.
 
@@ -769,7 +767,7 @@ class InferenceAggregator(
         return to_inference_logs(logs)
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
             reduced_diagnostics = get_reduced_diagnostics(
                 sub_aggregators=self._aggregators,

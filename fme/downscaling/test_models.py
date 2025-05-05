@@ -1,5 +1,4 @@
 import os
-from typing import Tuple, Type, Union
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,10 +26,10 @@ class LinearDownscaling(torch.nn.Module):
     def __init__(
         self,
         factor: int,
-        fine_img_shape: Tuple[int, int],
+        fine_img_shape: tuple[int, int],
         n_channels: int = 1,
     ):
-        super(LinearDownscaling, self).__init__()
+        super().__init__()
         self.img_shape = fine_img_shape
         self.n_channels = n_channels
         height, width = fine_img_shape
@@ -53,7 +52,7 @@ class LinearDownscaling(torch.nn.Module):
 
 class DummyModule(torch.nn.Module):
     def __init__(self):
-        super(DummyModule, self).__init__()
+        super().__init__()
 
     def forward(self, x):
         return x
@@ -329,8 +328,8 @@ def test_model_error_cases(model_config):
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
 
-    model_class: Union[Type[DownscalingModelConfig], Type[DiffusionModelConfig]]
-    selector: Union[Type[ModuleRegistrySelector], Type[DiffusionModuleRegistrySelector]]
+    model_class: type[DownscalingModelConfig] | type[DiffusionModelConfig]
+    selector: type[ModuleRegistrySelector] | type[DiffusionModuleRegistrySelector]
     if model_config == "deterministic":
         model_class = DownscalingModelConfig
         selector = ModuleRegistrySelector

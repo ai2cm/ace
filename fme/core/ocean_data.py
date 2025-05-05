@@ -1,5 +1,6 @@
+from collections.abc import Mapping
 from types import MappingProxyType
-from typing import List, Mapping, Protocol
+from typing import Protocol
 
 import torch
 
@@ -50,7 +51,7 @@ class OceanData:
         self,
         ocean_data: TensorMapping,
         depth_coordinate: HasOceanDepthIntegral | None = None,
-        ocean_field_name_prefixes: Mapping[str, List[str]] = OCEAN_FIELD_NAME_PREFIXES,
+        ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
     ):
         """
         Initializes the instance based on the provided data and prefixes.

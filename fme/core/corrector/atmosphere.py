@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import warnings
-from typing import Any, Callable, List, Literal, Mapping, Protocol, Union
+from collections.abc import Callable, Mapping
+from typing import Any, Literal, Protocol
 
 import dacite
 import torch
@@ -129,9 +130,9 @@ class AtmosphereCorrectorConfig:
         ]
         | None
     ) = None
-    force_positive_names: List[str] = dataclasses.field(default_factory=list)
+    force_positive_names: list[str] = dataclasses.field(default_factory=list)
     total_energy_budget_correction: (
-        Union[EnergyBudgetConfig, Literal["constant_temperature"]] | None
+        EnergyBudgetConfig | Literal["constant_temperature"] | None
     ) = None
 
     @classmethod

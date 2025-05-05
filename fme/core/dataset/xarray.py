@@ -5,7 +5,6 @@ import os
 import warnings
 from collections import namedtuple
 from functools import lru_cache
-from typing import Dict, List, Tuple
 from urllib.parse import urlparse
 
 import fsspec
@@ -130,7 +129,7 @@ def _get_vertical_coordinate(
     return coordinate
 
 
-def _get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
+def _get_raw_times(paths: list[str], engine: str) -> list[np.ndarray]:
     times = []
     for path in paths:
         with _open_xr_dataset(path, engine=engine) as ds:
@@ -139,8 +138,8 @@ def _get_raw_times(paths: List[str], engine: str) -> List[np.ndarray]:
 
 
 def _repeat_and_increment_time(
-    raw_times: List[np.ndarray], n_repeats: int, timestep: datetime.timedelta
-) -> List[np.ndarray]:
+    raw_times: list[np.ndarray], n_repeats: int, timestep: datetime.timedelta
+) -> list[np.ndarray]:
     """Repeats and increments a collection of arrays of evenly spaced times."""
     n_timesteps = sum(len(times) for times in raw_times)
     timespan = timestep * n_timesteps
@@ -154,7 +153,7 @@ def _repeat_and_increment_time(
     return repeated_and_incremented_time
 
 
-def _get_cumulative_timesteps(time: List[np.ndarray]) -> np.ndarray:
+def _get_cumulative_timesteps(time: list[np.ndarray]) -> np.ndarray:
     """Returns a list of cumulative timesteps for each item in a time coordinate."""
     num_timesteps_per_file = [0]
     for time_coord in time:
@@ -162,7 +161,7 @@ def _get_cumulative_timesteps(time: List[np.ndarray]) -> np.ndarray:
     return np.array(num_timesteps_per_file).cumsum()
 
 
-def _get_file_local_index(index: int, start_indices: np.ndarray) -> Tuple[int, int]:
+def _get_file_local_index(index: int, start_indices: np.ndarray) -> tuple[int, int]:
     """
     Return a tuple of the index of the file containing the time point at `index`
     and the index of the time point within that file.
@@ -319,7 +318,7 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
         dtype: Data type of the returned tensors. If None, the dtype is not
             changed from the original in ds.
     """
-    masks: Dict[str, torch.Tensor] = {
+    masks: dict[str, torch.Tensor] = {
         name: torch.as_tensor(ds[name].values, dtype=dtype)
         for name in ds.data_vars
         if "mask_" in name
@@ -340,7 +339,7 @@ class XarrayDataset(torch.utils.data.Dataset):
     provide three samples: (t0, t1, t2), (t1, t2, t3), and (t2, t3, t4).
     """
 
-    def __init__(self, config: XarrayDataConfig, names: List[str], n_timesteps: int):
+    def __init__(self, config: XarrayDataConfig, names: list[str], n_timesteps: int):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
         self.path = config.data_path
@@ -487,7 +486,7 @@ class XarrayDataset(torch.utils.data.Dataset):
 
     def configure_horizontal_coordinates(
         self, first_dataset
-    ) -> Tuple[HorizontalCoordinates, StaticDerivedData]:
+    ) -> tuple[HorizontalCoordinates, StaticDerivedData]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
 
@@ -526,7 +525,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         """Return cftime index corresponding to start time of each sample."""
         return self._sample_start_times
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         """Return a sample of data spanning the timesteps
         [idx, idx + self.sample_n_times).
 
@@ -542,7 +541,7 @@ class XarrayDataset(torch.utils.data.Dataset):
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> Tuple[TensorDict, xr.DataArray]:
+    ) -> tuple[TensorDict, xr.DataArray]:
         input_file_idx, input_local_idx = _get_file_local_index(
             time_slice.start, self.start_indices
         )
@@ -551,7 +550,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         )
 
         # get the sequence of observations
-        arrays: Dict[str, List[torch.Tensor]] = {}
+        arrays: dict[str, list[torch.Tensor]] = {}
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):

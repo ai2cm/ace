@@ -1,7 +1,7 @@
 import datetime
 import unittest.mock
 from collections import namedtuple
-from typing import Callable, Iterable, Tuple
+from collections.abc import Callable, Iterable
 
 import numpy as np
 import pytest
@@ -33,7 +33,7 @@ SphericalData = namedtuple("SphericalData", ["data", "area_weights", "vertical_c
 
 
 def get_data(
-    names: Iterable[str], shape: Tuple[int, int, int, int, int]
+    names: Iterable[str], shape: tuple[int, int, int, int, int]
 ) -> SphericalData:
     data = {}
     n_lat = shape[2]
@@ -321,7 +321,7 @@ class PlusOneStepper:
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData, PrognosticState]:
+    ) -> tuple[BatchData, PrognosticState]:
         ic_state = initial_condition.as_batch_data()
         n_forward_steps = forcing.time.shape[1] - self.n_ic_timesteps
         out_tensor = torch.zeros(

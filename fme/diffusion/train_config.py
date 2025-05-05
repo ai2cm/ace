@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import os
-from typing import Any, Callable, List, Mapping, Optional, Tuple
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 
@@ -78,10 +79,10 @@ class TrainConfig:
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
-    checkpoint_save_epochs: Optional[Slice] = None
-    ema_checkpoint_save_epochs: Optional[Slice] = None
+    checkpoint_save_epochs: Slice | None = None
+    ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    segment_epochs: Optional[int] = None
+    segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     evaluate_before_training: bool = False
 
@@ -111,7 +112,7 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
-    def get_inference_epochs(self) -> List[int]:
+    def get_inference_epochs(self) -> list[int]:
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
         return all_epochs[self.inference.epochs.slice]
@@ -167,7 +168,7 @@ class TrainBuilders:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
@@ -183,7 +184,7 @@ class TrainBuilders:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: List[torch.nn.Module]
+        self, modules: list[torch.nn.Module]
     ) -> EndOfBatchCallback:
         base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:

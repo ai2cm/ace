@@ -1,5 +1,5 @@
 import abc
-from typing import Dict, Mapping, Optional
+from collections.abc import Mapping
 
 import torch
 import xarray as xr
@@ -21,7 +21,7 @@ def get_one_step_ensemble_aggregator(
     gridded_operations: GriddedOperations,
     target_time: int = 1,
     log_mean_maps: bool = True,
-    metadata: Optional[Mapping[str, VariableMetadata]] = None,
+    metadata: Mapping[str, VariableMetadata] | None = None,
 ) -> "SelectStepEnsembleAggregator":
     return SelectStepEnsembleAggregator(
         aggregator=_EnsembleAggregator(
@@ -115,7 +115,7 @@ class _EnsembleAggregator:
         self,
         gridded_operations: GriddedOperations,
         log_mean_maps: bool = True,
-        metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         """
         Args:
@@ -126,7 +126,7 @@ class _EnsembleAggregator:
         """
         self._gridded_operations = gridded_operations
         self._n_batches = 0
-        self._variable_metrics: Optional[Dict[str, Dict[str, ReducedMetric]]] = None
+        self._variable_metrics: dict[str, dict[str, ReducedMetric]] | None = None
         self._dist = Distributed.get_instance()
         self._log_mean_maps = log_mean_maps
         self._metadata = metadata
@@ -177,7 +177,7 @@ class _EnsembleAggregator:
     def _get_data(self):
         if self._variable_metrics is None or self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: Dict[str, torch.Tensor] = {}
+        data: dict[str, torch.Tensor] = {}
         for metric in sorted(self._variable_metrics):
             for key in sorted(self._variable_metrics[metric]):
                 metric_value = self._dist.reduce_mean(

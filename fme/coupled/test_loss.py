@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Generator, List, Optional, Tuple
+from collections.abc import Callable, Generator
 from unittest.mock import Mock
 
 import pytest
@@ -12,7 +12,7 @@ from .stepper import ComponentStepPrediction, CoupledStepperTrainLoss
 
 def step_and_target_gen(
     n_atmos_per_ocean=2,
-) -> Generator[Tuple[ComponentStepPrediction, TensorMapping], None, None]:
+) -> Generator[tuple[ComponentStepPrediction, TensorMapping], None, None]:
     torch.manual_seed(0)
     atmos_step = 0
     ocean_step = 0
@@ -39,7 +39,7 @@ def step_and_target_gen(
 
 
 @pytest.fixture(scope="module")
-def steps_thru_atmos_7() -> List[Tuple[ComponentStepPrediction, TensorMapping]]:
+def steps_thru_atmos_7() -> list[tuple[ComponentStepPrediction, TensorMapping]]:
     """
     Fixture to generate a sequence of steps and targets
     """
@@ -70,7 +70,7 @@ class _StepLoss(StepLossABC):
 
 
 def assert_tensor_dicts_close(
-    x: Dict[str, Optional[torch.Tensor]], y: Dict[str, Optional[torch.Tensor]]
+    x: dict[str, torch.Tensor | None], y: dict[str, torch.Tensor | None]
 ):
     assert x.keys() == y.keys()
     for key in x.keys():
@@ -127,7 +127,7 @@ def test_loss_contributions(steps_thru_atmos_7):
         atmosphere_loss=atmosphere_loss,
     )
     metrics = {}
-    expected_metrics: Dict[str, Optional[torch.Tensor]] = {}
+    expected_metrics: dict[str, torch.Tensor | None] = {}
     for prediction, target_data in steps_thru_atmos_7:
         label = f"{prediction.realm}_{prediction.step}"
         metrics[label] = loss_obj(prediction, target_data)

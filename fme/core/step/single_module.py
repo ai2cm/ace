@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable, Dict, List, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 import dacite
 import torch
@@ -45,14 +46,14 @@ class SingleModuleStepConfig(StepConfigABC):
     """
 
     builder: ModuleSelector
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     ocean: OceanConfig | None = None
-    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+    corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
-    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
+    next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     crps_training: bool = False
     residual_prediction: bool = False
 
@@ -76,8 +77,8 @@ class SingleModuleStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         if extra_names is None:
             extra_names = []
@@ -101,7 +102,7 @@ class SingleModuleStepConfig(StepConfigABC):
         return list(set(self.in_names).union(self.out_names))
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         """
         Names of variables required as inputs to `step`,
         either in `input` or `next_step_input_data`.
@@ -111,21 +112,21 @@ class SingleModuleStepConfig(StepConfigABC):
         else:
             return list(set(self.in_names).union(self.ocean.forcing_names))
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         """Names of input-only variables which come from the output timestep."""
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         """Names of variables which are outputs only."""
         return list(set(self.out_names).difference(self.in_names))
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.out_names
 
     @property
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
         input_only_names = set(self.input_names).difference(self.output_names)
         if self.ocean is None:
@@ -133,7 +134,7 @@ class SingleModuleStepConfig(StepConfigABC):
         return list(input_only_names.union(self.ocean.forcing_names))
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self.output_names
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -149,7 +150,7 @@ class SingleModuleStepConfig(StepConfigABC):
         return self.ocean
 
     @classmethod
-    def _remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
         return state_copy
 
@@ -187,7 +188,7 @@ class SingleModuleStep(StepABC):
     def __init__(
         self,
         config: SingleModuleStepConfig,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -311,7 +312,7 @@ class SingleModuleStep(StepABC):
             "module": self.module.state_dict(),
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """
         Load the state of the stepper.
 
@@ -333,7 +334,7 @@ def step_with_adjustments(
     corrector: CorrectorABC,
     ocean: Ocean | None,
     residual_prediction: bool,
-    prognostic_names: List[str],
+    prognostic_names: list[str],
 ) -> TensorDict:
     """
     Step the model forward one timestep given input data.

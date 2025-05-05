@@ -1,8 +1,9 @@
 import abc
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
+from typing import Any, ClassVar
 
 import cftime
 import numpy as np
@@ -31,9 +32,9 @@ class Region(abc.ABC):
 class LatLonRegion(Region):
     lat: torch.Tensor
     lon: torch.Tensor
-    lat_bounds: Tuple[float, float]
-    lon_bounds: Tuple[float, float]
-    horizontal_dims: ClassVar[Tuple[int, int]] = (LAT_DIM, LON_DIM)
+    lat_bounds: tuple[float, float]
+    lon_bounds: tuple[float, float]
+    horizontal_dims: ClassVar[tuple[int, int]] = (LAT_DIM, LON_DIM)
 
     def __post_init__(self):
         lat_mask = (
@@ -106,9 +107,9 @@ class RegionalIndexAggregator:
         self._regional_mean = regional_mean
         self._running_mean_n_months = running_mean_n_months
         self._raw_indices: TensorDict = {}
-        self._raw_index_times: Optional[xr.DataArray] = None
-        self._calendar: Optional[str] = None
-        self._already_logged: List[str] = []
+        self._raw_index_times: xr.DataArray | None = None
+        self._calendar: str | None = None
+        self._already_logged: list[str] = []
 
     def record_batch(self, time: xr.DataArray, data: TensorMapping) -> None:
         for sst_name in self.sea_surface_temperature_names:
@@ -160,7 +161,7 @@ class RegionalIndexAggregator:
 
     def _get_gathered_index(
         self, index: torch.Tensor, years: torch.Tensor, months: torch.Tensor
-    ) -> Optional[xr.DataArray]:
+    ) -> xr.DataArray | None:
         dist = Distributed.get_instance()
         if dist.world_size > 1:
             gathered_index, gathered_years, gathered_months = (
@@ -182,9 +183,9 @@ class RegionalIndexAggregator:
 
     def _to_index_data_array(
         self,
-        indices: List[torch.Tensor],
-        years: List[torch.Tensor],
-        months: List[torch.Tensor],
+        indices: list[torch.Tensor],
+        years: list[torch.Tensor],
+        months: list[torch.Tensor],
     ) -> xr.DataArray:
         index_data_arrays = []
         for index, year, month in zip(indices, years, months):
@@ -208,7 +209,7 @@ class RegionalIndexAggregator:
             )
         return xr.concat(index_data_arrays, dim="sample")
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         indices = self.get_indices()
         plots = {}
         for sst_name in self.sea_surface_temperature_names:
@@ -275,7 +276,7 @@ class PairedRegionalIndexAggregator:
         self._target_aggregator.record_batch(time=time, data=target_data)
         self._prediction_aggregator.record_batch(time=time, data=gen_data)
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         target_indices = self._target_aggregator.get_indices()
         prediction_indices = self._prediction_aggregator.get_indices()
         plots = {}
@@ -415,7 +416,7 @@ def running_monthly_mean(
     n_months: int,
     time_dim: int = TIME_DIM,
     sample_dim: int = SAMPLE_DIM,
-) -> Tuple[torch.Tensor, UniqueMonths]:
+) -> tuple[torch.Tensor, UniqueMonths]:
     """Compute an n-month running mean of the input data.
 
     First compute the monthly mean of the data, then compute the running mean.

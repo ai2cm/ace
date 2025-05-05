@@ -1,5 +1,6 @@
 from collections import defaultdict
-from typing import Any, Dict, List, Mapping, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 import cartopy.crs as ccrs
 import matplotlib.pyplot as plt
@@ -39,7 +40,7 @@ def _plot_spatial(data: torch.Tensor, coords: LatLonCoordinates, **kwargs):
     return fig
 
 
-def _get_cmap_and_limits(data: torch.Tensor) -> Tuple[str, float, float]:
+def _get_cmap_and_limits(data: torch.Tensor) -> tuple[str, float, float]:
     """
     Returns the colormap and limits for the data.
     """
@@ -78,7 +79,7 @@ class SampleAggregator:
         self._target = target
         self._coarse = coarse
         self._num_plot_samples = num_plot_samples
-        self._samples: Dict[str, List[torch.Tensor]] = defaultdict(list)
+        self._samples: dict[str, list[torch.Tensor]] = defaultdict(list)
         self._latlon_coordinates = latlon_coordinates
         self._sample_dim = 1
         self._dist = Distributed.get_instance()
@@ -100,7 +101,7 @@ class SampleAggregator:
 
     def _get_sample_plots(
         self, samples: torch.Tensor, key: str, **plot_kwargs
-    ) -> List[Any]:
+    ) -> list[Any]:
         # batch, sample, lat, lon
         samples = samples[0, : self._num_plot_samples]
         if not plot_kwargs:

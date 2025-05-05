@@ -1,6 +1,5 @@
 import dataclasses
 from math import ceil
-from typing import Union
 
 import torch
 
@@ -40,9 +39,7 @@ class InferenceDataLoaderConfig:
     """
 
     dataset: CoupledDatasetConfig
-    start_indices: Union[
-        InferenceInitialConditionIndices, ExplicitIndices, TimestampList
-    ]
+    start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
 
     def __post_init__(self):
