@@ -1,5 +1,6 @@
 from collections import namedtuple
-from typing import Iterable, List, Literal, Optional
+from collections.abc import Iterable
+from typing import Literal
 from unittest.mock import Mock
 
 import numpy as np
@@ -423,8 +424,8 @@ def get_data(
 
 
 def get_coupled_data(
-    ocean_names: List[str],
-    atmosphere_names: List[str],
+    ocean_names: list[str],
+    atmosphere_names: list[str],
     n_forward_times_ocean: int,
     n_forward_times_atmosphere: int,
     n_samples: int,
@@ -458,18 +459,18 @@ class TimesTwo(torch.nn.Module):
 
 
 def get_stepper_config(
-    ocean_in_names: List[str],
-    ocean_out_names: List[str],
-    atmosphere_in_names: List[str],
-    atmosphere_out_names: List[str],
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmosphere_in_names: list[str],
+    atmosphere_out_names: list[str],
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
-    ocean_builder: Optional[ModuleSelector] = None,
-    atmosphere_builder: Optional[ModuleSelector] = None,
+    ocean_builder: ModuleSelector | None = None,
+    atmosphere_builder: ModuleSelector | None = None,
     ocean_timedelta: str = "2D",
     atmosphere_timedelta: str = "1D",
-    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None,
+    ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
 ):
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
@@ -531,18 +532,18 @@ def get_stepper_config(
 
 
 def get_stepper_and_batch(
-    ocean_in_names: List[str],
-    ocean_out_names: List[str],
-    atmosphere_in_names: List[str],
-    atmosphere_out_names: List[str],
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmosphere_in_names: list[str],
+    atmosphere_out_names: list[str],
     n_forward_times_ocean: int,
     n_forward_times_atmosphere: int,
     n_samples: int,
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",
     ocean_fraction_name: str = "ocean_fraction",
-    ocean_builder: Optional[ModuleSelector] = None,
-    atmosphere_builder: Optional[ModuleSelector] = None,
+    ocean_builder: ModuleSelector | None = None,
+    atmosphere_builder: ModuleSelector | None = None,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)

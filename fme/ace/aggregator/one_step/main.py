@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 import torch
 
@@ -28,9 +28,9 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
         self,
         horizontal_coordinates: HorizontalCoordinates,
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        loss_scaling: Optional[TensorMapping] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
     ):
@@ -107,7 +107,7 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
             return deterministic_logs
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         self._deterministic_aggregator.flush_diagnostics(subdir)
 
 
@@ -128,9 +128,9 @@ class OneStepAggregatorConfig:
         self,
         horizontal_coordinates: HorizontalCoordinates,
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        loss_scaling: Optional[TensorMapping] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        loss_scaling: TensorMapping | None = None,
     ):
         return OneStepAggregator(
             horizontal_coordinates=horizontal_coordinates,

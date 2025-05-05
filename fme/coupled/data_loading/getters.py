@@ -1,6 +1,6 @@
 import logging
 import warnings
-from typing import List, Optional, Sequence, Tuple, Union
+from collections.abc import Sequence
 
 import torch
 from torch.utils.data.distributed import DistributedSampler
@@ -31,10 +31,10 @@ from fme.coupled.requirements import (
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: List[str]):
+    def __init__(self, horizontal_dims: list[str]):
         self.horizontal_dims = horizontal_dims
 
-    def __call__(self, samples: List[CoupledDatasetItem]) -> CoupledBatchData:
+    def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
             horizontal_dims=self.horizontal_dims,
@@ -43,7 +43,7 @@ class CollateFn:
 
 def get_dataset(
     config: CoupledDatasetConfig, requirements: CoupledDataRequirements
-) -> Tuple[CoupledDataset, CoupledDatasetProperties]:
+) -> tuple[CoupledDataset, CoupledDatasetProperties]:
     ocean_reqs = requirements.ocean_requirements
     atmosphere_reqs = requirements.atmosphere_requirements
     ocean, ocean_properties = get_xarray_dataset(
@@ -68,9 +68,9 @@ def get_datasets(
     configs: Sequence[CoupledDatasetConfig],
     requirements: CoupledDataRequirements,
     strict: bool = True,
-) -> Tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
+) -> tuple[torch.utils.data.ConcatDataset[CoupledDataset], CoupledDatasetProperties]:
     datasets = []
-    properties: Optional[CoupledDatasetProperties] = None
+    properties: CoupledDatasetProperties | None = None
     for coupled_data_config in configs:
         ds, prop = get_dataset(coupled_data_config, requirements)
         datasets.append(ds)
@@ -159,9 +159,7 @@ def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_coupled_steps: int,
     window_requirements: CoupledDataRequirements,
-    initial_condition: Union[
-        CoupledPrognosticState, CoupledPrognosticStateDataRequirements
-    ],
+    initial_condition: CoupledPrognosticState | CoupledPrognosticStateDataRequirements,
 ) -> InferenceGriddedData:
     dataset = InferenceDataset(
         config,

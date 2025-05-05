@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Dict, List, Literal, Mapping, Optional, Union
+from collections.abc import Mapping
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import torch
@@ -61,8 +62,8 @@ class TimeMeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         target: Literal["norm", "denorm"] = "denorm",
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        reference_means: Optional[xr.Dataset] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        reference_means: xr.Dataset | None = None,
     ):
         """
         Args:
@@ -81,15 +82,15 @@ class TimeMeanAggregator:
         else:
             self._variable_metadata = variable_metadata
         # Dictionaries of tensors of shape [n_lat, n_lon] represnting time means
-        self._data: Optional[TensorDict] = None
+        self._data: TensorDict | None = None
         self._n_timesteps = 0
-        self._n_samples: Optional[int] = None
+        self._n_samples: int | None = None
         self._reference_means = reference_means
         self._reference_validated = False
 
     @staticmethod
     def _add_or_initialize_time_mean(
-        maybe_dict: Optional[TensorDict],
+        maybe_dict: TensorDict | None,
         new_data: TensorMapping,
         ignore_initial: bool = False,
     ) -> TensorDict:
@@ -143,8 +144,8 @@ class TimeMeanAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Union[float, Image]]:
-        logs: Dict[str, Union[float, Image]] = {}
+    def get_logs(self, label: str) -> dict[str, float | Image]:
+        logs: dict[str, float | Image] = {}
         data = self.get_data()
         gen_map_key = "gen_map"
         wandb = WandB.get_instance()
@@ -234,11 +235,11 @@ class TimeMeanEvaluatorAggregator:
     def __init__(
         self,
         ops: GriddedOperations,
-        horizontal_dims: List[str],
+        horizontal_dims: list[str],
         target: Literal["norm", "denorm"] = "denorm",
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        reference_means: Optional[xr.Dataset] = None,
-        channel_mean_names: Optional[List[str]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        reference_means: xr.Dataset | None = None,
+        channel_mean_names: list[str] | None = None,
     ):
         """
         Args:
@@ -288,7 +289,7 @@ class TimeMeanEvaluatorAggregator:
         self._target_agg.record_batch(target_data, i_time_start)
         self._gen_agg.record_batch(gen_data, i_time_start)
 
-    def _get_target_gen_pairs(self) -> List[_TargetGenPair]:
+    def _get_target_gen_pairs(self) -> list[_TargetGenPair]:
         target_data = self._target_agg.get_data()
         gen_data = self._gen_agg.get_data()
 
@@ -305,7 +306,7 @@ class TimeMeanEvaluatorAggregator:
         return ret
 
     @torch.no_grad()
-    def get_logs(self, label: str) -> Dict[str, Union[float, torch.Tensor, Image]]:
+    def get_logs(self, label: str) -> dict[str, float | torch.Tensor | Image]:
         logs = self._gen_agg.get_logs("")
         preds = self._get_target_gen_pairs()
         bias_map_key = "bias_map"

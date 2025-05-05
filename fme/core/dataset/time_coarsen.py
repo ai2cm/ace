@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, List, Literal, Protocol, Tuple
+from typing import Literal, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -11,8 +11,8 @@ from fme.core.typing_ import TensorDict
 @dataclasses.dataclass
 class TimeCoarsenConfig:
     factor: int
-    snapshot_names: List[str]
-    window_names: List[str]
+    snapshot_names: list[str]
+    window_names: list[str]
     window_coarsen_type: Literal["mean"] = "mean"
 
 
@@ -27,7 +27,7 @@ class Dataset(Protocol):
     def __len__(self):
         pass
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         pass
 
     @property
@@ -53,9 +53,9 @@ class TimeCoarsenDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         raw_data, raw_time = self.dataset[idx]
-        coarsened_data: Dict[str, torch.Tensor] = {}
+        coarsened_data: dict[str, torch.Tensor] = {}
         n_pooled_timesteps = (
             raw_time.shape[0] // self._config.factor
         ) * self._config.factor

@@ -6,7 +6,6 @@ import argparse
 import dataclasses
 import logging
 import time
-from typing import List
 
 import dacite
 import yaml
@@ -23,7 +22,7 @@ class BenchmarkConfig:
     """Configuration for benchmarking data loading."""
 
     loader: DataLoaderConfig
-    names: List[str]
+    names: list[str]
     n_timesteps: int
     train: bool = True
     sleep: float = 0.1
@@ -70,7 +69,7 @@ def main():
     parser.add_argument("config", help="Path to the configuration file.")
     args = parser.parse_args()
 
-    with open(args.config, "r") as f:
+    with open(args.config) as f:
         config = dacite.from_dict(BenchmarkConfig, yaml.safe_load(f))
 
     logging.basicConfig(level=logging.INFO)

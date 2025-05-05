@@ -1,5 +1,5 @@
 import datetime
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.dataset.utils import decode_timestep, encode_timestep
@@ -34,7 +34,7 @@ class DatasetInfo:
 
     def __init__(
         self,
-        img_shape: Tuple[int, int] | None = None,
+        img_shape: tuple[int, int] | None = None,
         gridded_operations: GriddedOperations | None = None,
         vertical_coordinate: VerticalCoordinate | None = None,
         mask_provider: MaskProvider | None = None,
@@ -69,16 +69,13 @@ class DatasetInfo:
         issues = []
         if self._img_shape != other._img_shape:
             issues.append(
-                "img_shape is not compatible, {} != {}".format(
-                    self._img_shape, other._img_shape
-                )
+                f"img_shape is not compatible, {self._img_shape} != {other._img_shape}"
             )
         if self._gridded_operations is not None:
             if self._gridded_operations != other._gridded_operations:
                 issues.append(
-                    "gridded_operations is not compatible, {} != {}".format(
-                        self._gridded_operations, other._gridded_operations
-                    )
+                    f"gridded_operations is not compatible, "
+                    f"{self._gridded_operations} != {other._gridded_operations}"
                 )
         if (
             self._vertical_coordinate is not None
@@ -86,23 +83,19 @@ class DatasetInfo:
         ):
             if self._vertical_coordinate != other._vertical_coordinate:
                 issues.append(
-                    "vertical_coordinate is not compatible, {} != {}".format(
-                        self._vertical_coordinate, other._vertical_coordinate
-                    )
+                    f"vertical_coordinate is not compatible, "
+                    f"{self._vertical_coordinate} != {other._vertical_coordinate}"
                 )
         if self._mask_provider is not None and other._mask_provider is not None:
             if self._mask_provider != other._mask_provider:
                 issues.append(
-                    "mask_provider is not compatible, {} != {}".format(
-                        self._mask_provider, other._mask_provider
-                    )
+                    f"mask_provider is not compatible, "
+                    f"{self._mask_provider} != {other._mask_provider}"
                 )
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
-                    "timestep is not compatible, {} != {}".format(
-                        self._timestep, other._timestep
-                    )
+                    f"timestep is not compatible, {self._timestep} != {other._timestep}"
                 )
         if issues:
             raise IncompatibleDatasetInfo(
@@ -111,7 +104,7 @@ class DatasetInfo:
             )
 
     @property
-    def img_shape(self) -> Tuple[int, int]:
+    def img_shape(self) -> tuple[int, int]:
         if self._img_shape is None:
             raise MissingDatasetInfo("img_shape")
         return self._img_shape
@@ -146,7 +139,7 @@ class DatasetInfo:
             raise MissingDatasetInfo("timestep")
         return self._timestep
 
-    def to_state(self) -> Dict[str, Any]:
+    def to_state(self) -> dict[str, Any]:
         if self._gridded_operations is None:
             gridded_operations = None
         else:
@@ -172,7 +165,7 @@ class DatasetInfo:
         }
 
     @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "DatasetInfo":
+    def from_state(cls, state: dict[str, Any]) -> "DatasetInfo":
         if state.get("img_shape") is not None:
             img_shape = state["img_shape"]
         else:

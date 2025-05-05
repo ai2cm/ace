@@ -3,7 +3,7 @@ import dataclasses
 import itertools
 import os
 import unittest.mock
-from typing import Any, Dict, Tuple, Type, TypeVar, cast
+from typing import Any, TypeVar, cast
 
 import numpy as np
 import pytest
@@ -51,7 +51,7 @@ class SDType:
 
 
 class TrainOutput(TrainOutputABC):
-    def get_metrics(self) -> Dict[str, torch.Tensor]:
+    def get_metrics(self) -> dict[str, torch.Tensor]:
         return {}
 
 
@@ -117,7 +117,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
 
     def __init__(
         self,
-        state: Dict[str, Any] | None = None,
+        state: dict[str, Any] | None = None,
     ):
         self._modules = torch.nn.ModuleList([torch.nn.Linear(1, 1, bias=False)])
         self._modules[0].weight.data.fill_(0.0)
@@ -125,18 +125,18 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
             self._state = state
         else:
             self._state = {}
-        self.loaded_state: Dict[str, Any] | None = None
+        self.loaded_state: dict[str, Any] | None = None
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         return {**self._state, "modules": self._modules.state_dict()}
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         self._state = state
         self.loaded_state = state
         self._modules.load_state_dict(state["modules"])
 
     @classmethod
-    def from_state(cls: Type[SelfType], state: Dict[str, Any]) -> SelfType:
+    def from_state(cls: type[SelfType], state: dict[str, Any]) -> SelfType:
         ret = cls()
         ret.load_state(state)
         return ret
@@ -157,7 +157,7 @@ class TrainStepper(TrainStepperABC[PSType, BDType, FDType, SDType, TrainOutput])
         initial_condition: PSType,
         forcing: FDType,
         compute_derived_variables: bool = False,
-    ) -> Tuple[SDType, PSType]:
+    ) -> tuple[SDType, PSType]:
         return SDType(), PSType()
 
     def train_on_batch(
@@ -209,7 +209,7 @@ class TrainAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput) -> None:
         pass
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         return {f"{label}/mean/loss": self.train_loss}
 
     def flush_diagnostics(self, subdir: str | None) -> None:
@@ -223,7 +223,7 @@ class ValidationAggregator(AggregatorABC[TrainOutput]):
     def record_batch(self, batch: TrainOutput) -> None:
         pass
 
-    def get_logs(self, label: str) -> Dict[str, Any]:
+    def get_logs(self, label: str) -> dict[str, Any]:
         return {f"{label}/mean/loss": self.validation_loss}
 
     def flush_diagnostics(self, subdir: str | None) -> None:
@@ -283,7 +283,7 @@ def get_trainer(
     segment_epochs: int | None = None,
     max_epochs: int = 8,
     checkpoint_dir: str | None = None,
-    stepper_state: Dict[str, Any] | None = None,
+    stepper_state: dict[str, Any] | None = None,
     train_losses: np.ndarray | None = None,
     validation_losses: np.ndarray | None = None,
     inference_losses: np.ndarray | None = None,
@@ -291,7 +291,7 @@ def get_trainer(
     ema_decay: float = 0.9999,
     validate_using_ema: bool = True,
     evaluate_before_training: bool = False,
-) -> Tuple[TrainConfigProtocol, Trainer]:
+) -> tuple[TrainConfigProtocol, Trainer]:
     if checkpoint_dir is None:
         checkpoint_dir = os.path.join(tmp_path, "checkpoints")
     if train_losses is None:

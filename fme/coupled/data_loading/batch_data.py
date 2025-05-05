@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Callable, List, Sequence, TypeVar
+from collections.abc import Callable, Sequence
+from typing import TypeVar
 
 import numpy as np
 
@@ -76,7 +77,7 @@ class CoupledBatchData:
     def collate_fn(
         cls,
         samples: Sequence[CoupledDatasetItem],
-        horizontal_dims: List[str],
+        horizontal_dims: list[str],
         sample_dim_name: str = "sample",
     ) -> "CoupledBatchData":
         """

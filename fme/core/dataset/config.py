@@ -1,6 +1,7 @@
 import dataclasses
+from collections.abc import Mapping
 from datetime import timedelta
-from typing import Literal, Mapping, Union
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -79,9 +80,9 @@ class RepeatedInterval:
         >>> fme.ace.RepeatedInterval(interval_length="1d", block_length="7d", start="2d")  # doctest: +IGNORE_OUTPUT
     """  # noqa: E501
 
-    interval_length: Union[int, str]
-    start: Union[int, str]
-    block_length: Union[int, str]
+    interval_length: int | str
+    start: int | str
+    block_length: int | str
 
     def __post_init__(self):
         types = {type(self.interval_length), type(self.block_length), type(self.start)}
@@ -240,7 +241,7 @@ class XarrayDataConfig:
     n_repeats: int = 1
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
     spatial_dimensions: Literal["healpix", "latlon"] = "latlon"
-    subset: Union[Slice, TimeSlice, RepeatedInterval] = dataclasses.field(
+    subset: Slice | TimeSlice | RepeatedInterval = dataclasses.field(
         default_factory=Slice
     )
     infer_timestep: bool = True

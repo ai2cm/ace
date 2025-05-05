@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, List, Mapping, Optional
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import torch
@@ -52,14 +53,14 @@ class Samudra(torch.nn.Module):
         self,
         input_channels: int,
         output_channels: int,
-        ch_width: List[int] = dataclasses.field(
+        ch_width: list[int] = dataclasses.field(
             default_factory=lambda: [200, 250, 300, 400]
         ),
-        dilation: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8]),
-        n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1]),
+        dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8]),
+        n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1]),
         pad: str = "circular",
-        norm: Optional[str] = "instance",
-        norm_kwargs: Optional[Mapping[str, Any]] = None,
+        norm: str | None = "instance",
+        norm_kwargs: Mapping[str, Any] | None = None,
     ):
         super().__init__()
 

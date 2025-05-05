@@ -4,7 +4,7 @@ import pathlib
 import tempfile
 import unittest
 import unittest.mock
-from typing import Callable, List, Tuple
+from collections.abc import Callable
 
 import dacite
 import pytest
@@ -30,7 +30,7 @@ from .radiation import SeparateRadiationStepConfig
 
 
 def get_network_and_loss_normalization_config(
-    names: List[str],
+    names: list[str],
     dir: pathlib.Path | None = None,
 ) -> NetworkAndLossNormalizationConfig:
     if dir is None:
@@ -304,7 +304,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
-    names: List[str], img_shape: Tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, ...], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -317,7 +317,7 @@ def get_tensor_dict(
     return data_dict
 
 
-def get_step(selector: StepSelector, img_shape: Tuple[int, int]) -> StepABC:
+def get_step(selector: StepSelector, img_shape: tuple[int, int]) -> StepABC:
     device = fme.get_device()
     area = torch.ones(img_shape, device=device)
     vertical_coordinate = HybridSigmaPressureCoordinate(

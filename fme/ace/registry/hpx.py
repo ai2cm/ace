@@ -1,5 +1,4 @@
 import dataclasses
-from typing import Tuple
 
 import torch.nn as nn
 
@@ -46,7 +45,7 @@ class HEALPixRecUNetBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
     ) -> nn.Module:
         """
         Builds the HEALPixRecUNet model.

@@ -1,7 +1,7 @@
 import collections
 import dataclasses
 import re
-from typing import List, Literal, Protocol, Union, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 import torch
 
@@ -53,8 +53,8 @@ class StaticMaskingConfig:
     """
 
     mask_value: int
-    fill_value: Union[Literal["mean"], float] = 0.0
-    exclude_names_and_prefixes: List[str] | None = None
+    fill_value: Literal["mean"] | float = 0.0
+    exclude_names_and_prefixes: list[str] | None = None
 
     def __post_init__(self):
         if self.mask_value not in [0, 1]:
@@ -93,9 +93,9 @@ class StaticMasking:
     def __init__(
         self,
         mask_value: int,
-        fill_value: Union[float, TensorMapping],
+        fill_value: float | TensorMapping,
         mask: HasGetMaskTensorFor,
-        exclude_names_and_prefixes: List[str] | None = None,
+        exclude_names_and_prefixes: list[str] | None = None,
     ):
         if isinstance(fill_value, float):
             fill_mapping: TensorMapping = collections.defaultdict(
@@ -108,7 +108,7 @@ class StaticMasking:
         self._mask = mask
         self._exclude_regex = self._build_regex(exclude_names_and_prefixes)
 
-    def _build_regex(self, names_and_prefixes: List[str] | None) -> str | None:
+    def _build_regex(self, names_and_prefixes: list[str] | None) -> str | None:
         if names_and_prefixes:
             regex = []
             for name in names_and_prefixes:

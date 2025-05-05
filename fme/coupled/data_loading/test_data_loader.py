@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import pathlib
 import re
-from typing import List, Literal
+from typing import Literal
 
 import cftime
 import numpy as np
@@ -110,7 +110,7 @@ class MockCoupledData:
         return len(self.atmosphere["time"])
 
     @property
-    def img_shape(self) -> List[int]:
+    def img_shape(self) -> list[int]:
         return list(self.ocean[next(iter(self.ocean.data_vars))].shape[-2:])
 
 
@@ -118,8 +118,8 @@ def create_coupled_data_on_disk(
     data_dir: pathlib.Path,
     n_forward_times_ocean: int,
     n_forward_times_atmosphere: int,
-    ocean_names: List[str],
-    atmosphere_names: List[str],
+    ocean_names: list[str],
+    atmosphere_names: list[str],
     atmosphere_start_time_offset_from_ocean: bool,
     n_levels_ocean: int = 2,
     n_levels_atmosphere: int = 2,

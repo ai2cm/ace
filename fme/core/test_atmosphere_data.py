@@ -1,5 +1,3 @@
-from typing import Tuple
-
 import pytest
 import torch
 
@@ -125,7 +123,7 @@ def test_net_surface_energy_flux(has_frozen_precipitation):
     shape = (n_samples, n_time_steps, nlat, nlon)
 
     def _get_data(
-        shape: Tuple[int, ...], has_frozen_precipitation: bool
+        shape: tuple[int, ...], has_frozen_precipitation: bool
     ) -> AtmosphereData:
         ones = torch.ones(shape)
         surface_pressure = {"PRESsfc": ones}
@@ -163,7 +161,7 @@ def test_net_energy_flux_into_atmosphere():
     n_samples, n_time_steps, nlat, nlon = 2, 3, 4, 8
     shape = (n_samples, n_time_steps, nlat, nlon)
 
-    def _get_data(shape: Tuple[int, ...]) -> AtmosphereData:
+    def _get_data(shape: tuple[int, ...]) -> AtmosphereData:
         ones = torch.ones(shape, dtype=torch.float32)
         surface_pressure = {"PRESsfc": ones}
         energy_fluxes = {
@@ -202,7 +200,7 @@ def test_frozen_precipitation_rate(fields, expected_sum):
     n_samples, n_time_steps, nlat, nlon = 2, 3, 4, 8
     shape = (n_samples, n_time_steps, nlat, nlon)
 
-    def _get_data(shape: Tuple[int, ...]) -> AtmosphereData:
+    def _get_data(shape: tuple[int, ...]) -> AtmosphereData:
         ones = torch.ones(shape)
         surface_pressure = {"PRESsfc": ones}
         frozen_precipitation = {}

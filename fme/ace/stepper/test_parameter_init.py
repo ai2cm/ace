@@ -3,7 +3,6 @@
 import copy
 import datetime
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import pytest
@@ -190,7 +189,7 @@ def test_builder_with_weights_sfno_init(
 
 
 def get_config(
-    loaded_shape: Tuple[int, int],
+    loaded_shape: tuple[int, int],
     extra_built_layer: bool,
     tmpdir: Path,
 ):

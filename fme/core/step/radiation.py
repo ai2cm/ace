@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import logging
-from typing import Any, Callable, Dict, List, Tuple, Union
+from collections.abc import Callable
+from typing import Any
 
 import dacite
 import torch
@@ -53,22 +54,22 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     builder: ModuleSelector
     radiation_builder: ModuleSelector
-    main_prognostic_names: List[str]
-    shared_forcing_names: List[str]
-    radiation_only_forcing_names: List[str]
-    radiation_diagnostic_names: List[str]
-    main_diagnostic_names: List[str]
+    main_prognostic_names: list[str]
+    shared_forcing_names: list[str]
+    radiation_only_forcing_names: list[str]
+    radiation_diagnostic_names: list[str]
+    main_diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
-    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
+    next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
     ocean: OceanConfig | None = None
-    corrector: Union[AtmosphereCorrectorConfig, CorrectorSelector] = dataclasses.field(
+    corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     detach_radiation: bool = False
     residual_prediction: bool = False
 
     def __post_init__(self):
-        seen_names: Dict[str, str] = {}
+        seen_names: dict[str, str] = {}
         for name_list, label in (
             (self.main_prognostic_names, "main_prognostic_names"),
             (self.shared_forcing_names, "shared_forcing_names"),
@@ -118,8 +119,8 @@ class SeparateRadiationStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         if extra_names is None:
             extra_names = []
@@ -137,7 +138,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def _normalize_names(self) -> List[str]:
+    def _normalize_names(self) -> list[str]:
         """Names of variables which require normalization. I.e. inputs/outputs."""
         all_names = set()
         for names in (
@@ -151,22 +152,22 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return list(all_names)
 
     @property
-    def _forcing_names(self) -> List[str]:
+    def _forcing_names(self) -> list[str]:
         return list(
             set(self.shared_forcing_names).union(self.radiation_only_forcing_names)
         )
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         return self.next_step_forcing_names
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         return list(
             set(self.main_diagnostic_names).union(self.radiation_diagnostic_names)
         )
 
     @property
-    def radiation_in_names(self) -> List[str]:
+    def radiation_in_names(self) -> list[str]:
         return (
             self.main_prognostic_names
             + self.shared_forcing_names
@@ -174,11 +175,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def radiation_out_names(self) -> List[str]:
+    def radiation_out_names(self) -> list[str]:
         return self.radiation_diagnostic_names
 
     @property
-    def main_in_names(self) -> List[str]:
+    def main_in_names(self) -> list[str]:
         return (
             self.main_prognostic_names
             + self.shared_forcing_names
@@ -186,11 +187,11 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def main_out_names(self) -> List[str]:
+    def main_out_names(self) -> list[str]:
         return self.main_prognostic_names + self.main_diagnostic_names
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         ml_in_names = (
             self.main_prognostic_names
             + self.shared_forcing_names
@@ -202,7 +203,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
             return list(set(ml_in_names).union(self.ocean.forcing_names))
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return (
             self.main_prognostic_names
             + self.main_diagnostic_names
@@ -210,7 +211,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         )
 
     @property
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         """Names of variables provided in next_step_input_data."""
         input_only_names = set(self.input_names).difference(self.output_names)
         if self.ocean is None:
@@ -218,7 +219,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
         return list(input_only_names.union(self.ocean.forcing_names))
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self.output_names
 
     def replace_ocean(self, ocean: OceanConfig | None):
@@ -242,7 +243,7 @@ class SeparateRadiationStep(StepABC):
     def __init__(
         self,
         config: SeparateRadiationStepConfig,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
         timestep: datetime.timedelta,
@@ -391,7 +392,7 @@ class SeparateRadiationStep(StepABC):
             "radiation_module": self.radiation_module.state_dict(),
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """
         Load the state of the ML modules.
 

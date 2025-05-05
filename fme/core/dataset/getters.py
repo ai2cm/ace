@@ -1,5 +1,5 @@
 import warnings
-from typing import List, Mapping, Sequence, Tuple, Union
+from collections.abc import Mapping, Sequence
 
 import numpy as np
 import xarray as xr
@@ -14,8 +14,8 @@ from fme.core.typing_ import Slice
 
 
 def _as_index_selection(
-    subset: Union[Slice, TimeSlice, RepeatedInterval], dataset: XarrayDataset
-) -> Union[slice, np.ndarray]:
+    subset: Slice | TimeSlice | RepeatedInterval, dataset: XarrayDataset
+) -> slice | np.ndarray:
     """Converts a subset defined either as a Slice or TimeSlice into an index slice
     based on time coordinate in provided dataset.
     """
@@ -34,8 +34,8 @@ def _as_index_selection(
 
 
 def get_xarray_dataset(
-    config: XarrayDataConfig, names: List[str], n_timesteps: int
-) -> Tuple["XarraySubset", DatasetProperties]:
+    config: XarrayDataConfig, names: list[str], n_timesteps: int
+) -> tuple["XarraySubset", DatasetProperties]:
     dataset = XarrayDataset(config, names, n_timesteps)
     properties = dataset.properties
     index_slice = _as_index_selection(config.subset, dataset)
@@ -45,10 +45,10 @@ def get_xarray_dataset(
 
 def get_datasets(
     dataset_configs: Sequence[XarrayDataConfig],
-    names: List[str],
+    names: list[str],
     n_timesteps: int,
     strict: bool = True,
-) -> Tuple[List[XarraySubset], DatasetProperties]:
+) -> tuple[list[XarraySubset], DatasetProperties]:
     datasets = []
     properties: DatasetProperties | None = None
     for config in dataset_configs:
@@ -73,10 +73,10 @@ def get_datasets(
 
 def get_dataset(
     dataset_configs: Sequence[XarrayDataConfig],
-    names: List[str],
+    names: list[str],
     n_timesteps: int,
     strict: bool = True,
-) -> Tuple[XarrayConcat, DatasetProperties]:
+) -> tuple[XarrayConcat, DatasetProperties]:
     datasets, properties = get_datasets(
         dataset_configs, names, n_timesteps, strict=strict
     )
@@ -100,9 +100,9 @@ def _infer_available_variables(config: XarrayDataConfig):
 
 
 def get_per_dataset_names(
-    dataset_configs: Mapping[str, Union[XarrayDataConfig, Sequence[XarrayDataConfig]]],
-    names: List[str],
-) -> Mapping[str, List[str]]:
+    dataset_configs: Mapping[str, XarrayDataConfig | Sequence[XarrayDataConfig]],
+    names: list[str],
+) -> Mapping[str, list[str]]:
     merged_required_names = names.copy()
     per_dataset_names = {}
     for key, config in dataset_configs.items():
@@ -121,10 +121,10 @@ def get_per_dataset_names(
 
 def get_merged_datasets(
     dataset_configs: Mapping[str, Sequence[XarrayDataConfig]],
-    names: List[str],
+    names: list[str],
     n_timesteps: int,
     strict: bool = True,
-) -> Tuple[MergedXarrayDataset, DatasetProperties]:
+) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
     per_dataset_names = get_per_dataset_names(dataset_configs, names)

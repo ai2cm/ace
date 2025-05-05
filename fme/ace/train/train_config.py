@@ -1,6 +1,5 @@
 import dataclasses
 import os
-from typing import List, Optional, Union
 
 import torch
 
@@ -108,7 +107,7 @@ class TrainConfig:
 
     train_loader: DataLoaderConfig
     validation_loader: DataLoaderConfig
-    stepper: Union[SingleModuleStepperConfig, ExistingStepperConfig, StepperConfig]
+    stepper: SingleModuleStepperConfig | ExistingStepperConfig | StepperConfig
     optimization: OptimizationConfig
     logging: LoggingConfig
     max_epochs: int
@@ -116,15 +115,15 @@ class TrainConfig:
     experiment_dir: str
     inference: InlineInferenceConfig
     n_forward_steps: int
-    copy_weights_after_batch: List[CopyWeightsConfig] = dataclasses.field(
+    copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
     )
     ema: EMAConfig = dataclasses.field(default_factory=lambda: EMAConfig())
     validate_using_ema: bool = False
-    checkpoint_save_epochs: Optional[Slice] = None
-    ema_checkpoint_save_epochs: Optional[Slice] = None
+    checkpoint_save_epochs: Slice | None = None
+    ema_checkpoint_save_epochs: Slice | None = None
     log_train_every_n_batches: int = 100
-    segment_epochs: Optional[int] = None
+    segment_epochs: int | None = None
     save_per_epoch_diagnostics: bool = False
     validation_aggregator: OneStepAggregatorConfig = dataclasses.field(
         default_factory=lambda: OneStepAggregatorConfig()
@@ -153,7 +152,7 @@ class TrainConfig:
         """
         return os.path.join(self.experiment_dir, "output")
 
-    def get_inference_epochs(self) -> List[int]:
+    def get_inference_epochs(self) -> list[int]:
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
         return all_epochs[self.inference.epochs.slice]
@@ -219,7 +218,7 @@ class TrainBuilders:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: List[torch.nn.Module]
+        self, modules: list[torch.nn.Module]
     ) -> EndOfBatchCallback:
         base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:

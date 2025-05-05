@@ -2,8 +2,9 @@ import abc
 import dataclasses
 import math
 import re
+from collections.abc import Callable, Mapping
 from datetime import timedelta
-from typing import Callable, Dict, List, Literal, Mapping, Tuple, TypeVar, Union
+from typing import Literal, TypeVar
 
 import dacite
 import numpy as np
@@ -55,7 +56,7 @@ class AtmosphericDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.vertical_coordinate, NullVerticalCoordinate):
-            vertical_coord: "HybridSigmaPressureCoordinate" | None = None
+            vertical_coord: HybridSigmaPressureCoordinate | None = None
         else:
             vertical_coord = self.vertical_coordinate.to(get_device())
         return compute_derived_quantities(
@@ -79,7 +80,7 @@ class OceanDeriveFn(DeriveFnABC):
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
-            depth_coord: "DepthCoordinate" | None = None
+            depth_coord: DepthCoordinate | None = None
         else:
             depth_coord = self.depth_coordinate.to(get_device())
         return compute_ocean_derived_quantities(
@@ -120,7 +121,7 @@ class VerticalCoordinate(abc.ABC):
     @abc.abstractmethod
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
@@ -136,7 +137,7 @@ class VerticalCoordinate(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         pass
 
     @abc.abstractmethod
@@ -191,7 +192,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> AtmosphereCorrector:
@@ -231,7 +232,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         return self.bk
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {"ak": self.ak.cpu().numpy(), "bk": self.bk.cpu().numpy()}
 
     @property
@@ -374,7 +375,7 @@ class DepthCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> OceanCorrector:
@@ -424,7 +425,7 @@ class DepthCoordinate(VerticalCoordinate):
         return self.idepth.device
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {"idepth": self.idepth.cpu().numpy()}
 
     def to(self, device: str) -> "DepthCoordinate":
@@ -498,7 +499,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def build_corrector(
         self,
-        config: Union[AtmosphereCorrectorConfig, CorrectorSelector],
+        config: AtmosphereCorrectorConfig | CorrectorSelector,
         gridded_operations: GriddedOperations,
         timestep: timedelta,
     ) -> CorrectorABC:
@@ -552,7 +553,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
         return {}
 
     @property
-    def coords(self) -> Dict[str, np.ndarray]:
+    def coords(self) -> dict[str, np.ndarray]:
         return {}
 
 
@@ -613,30 +614,30 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         pass
 
     @property
     @abc.abstractmethod
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         """Names of model horizontal dimensions."""
         pass
 
     @property
     @abc.abstractmethod
-    def loaded_dims(self) -> List[str]:
+    def loaded_dims(self) -> list[str]:
         """Names of horizontal dimensions as loaded from training dataset."""
         pass
 
     @property
     @abc.abstractmethod
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         """Sizes of horizontal dimensions as loaded from training dataset."""
         pass
 
     @property
     @abc.abstractmethod
-    def loaded_default_sizes(self) -> List[DimSize]:
+    def loaded_default_sizes(self) -> list[DimSize]:
         """Default sizes of horizontal data dimensions, used by testing code."""
         pass
 
@@ -664,7 +665,7 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Meshgrids of latitudes and longitudes, respectively."""
         pass
 
@@ -734,7 +735,7 @@ class LatLonCoordinates(HorizontalCoordinates):
         }
 
     @property
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         lats, lons = np.broadcast_arrays(
             self.coords["lat"][:, None], self.coords["lon"][None, :]
         )
@@ -744,22 +745,22 @@ class LatLonCoordinates(HorizontalCoordinates):
         return self.lat
 
     @property
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         return ["lat", "lon"]
 
     @property
-    def loaded_dims(self) -> List[str]:
+    def loaded_dims(self) -> list[str]:
         return [self.loaded_lat_name, self.loaded_lon_name]
 
     @property
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         return [
             DimSize(self.loaded_lat_name, len(self.lat)),
             DimSize(self.loaded_lon_name, len(self.lon)),
         ]
 
     @property
-    def loaded_default_sizes(self) -> List[DimSize]:
+    def loaded_default_sizes(self) -> list[DimSize]:
         return [DimSize(self.loaded_lat_name, 16), DimSize(self.loaded_lon_name, 32)]
 
     @property
@@ -777,7 +778,7 @@ class LatLonCoordinates(HorizontalCoordinates):
         return LatLonOperations(self.area_weights)
 
     @property
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         return torch.meshgrid(self.lat, self.lon, indexing="ij")
 
 
@@ -831,7 +832,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         }
 
     @property
-    def xyz(self) -> Tuple[float, float, float]:
+    def xyz(self) -> tuple[float, float, float]:
         level = int(math.log2(len(self.width)))
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
@@ -842,15 +843,15 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return x, y, z
 
     @property
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         return ["face", "height", "width"]
 
     @property
-    def loaded_dims(self) -> List[str]:
+    def loaded_dims(self) -> list[str]:
         return self.dims
 
     @property
-    def loaded_sizes(self) -> List[DimSize]:
+    def loaded_sizes(self) -> list[DimSize]:
         return [
             DimSize("face", len(self.face)),
             DimSize("height", len(self.width)),
@@ -858,7 +859,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         ]
 
     @property
-    def loaded_default_sizes(cls) -> List[DimSize]:
+    def loaded_default_sizes(cls) -> list[DimSize]:
         return [
             DimSize("face", 12),
             DimSize("height", 16),
@@ -886,7 +887,7 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return HEALPixOperations()
 
     @property
-    def meshgrid(self) -> Tuple[torch.Tensor, torch.Tensor]:
+    def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         # We'll return a 3D (face, width, height) tensor representing the lat-lon
         # coordinates of this grid.
         level = int(math.log2(len(self.width)))

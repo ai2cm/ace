@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from fme.ace.models.makani.sfnonet import (
     SphericalFourierNeuralOperatorNet as MakaniSFNO,
@@ -32,7 +32,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
-    factorization: Optional[str] = None
+    factorization: str | None = None
     separable: bool = False
     complex_network: bool = True
     complex_activation: str = "real"
@@ -44,7 +44,7 @@ class SphericalFourierNeuralOperatorBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
     ):
         sfno_net = SphericalFourierNeuralOperatorNet(
             params=self,
@@ -78,7 +78,7 @@ class SFNO_V0_1_0(ModuleConfig):
     pos_embed: Literal["none", "direct", "frequency"] = "direct"
     big_skip: bool = True
     rank: float = 1.0
-    factorization: Optional[str] = None
+    factorization: str | None = None
     separable: bool = False
     complex_activation: str = "real"
     spectral_layers: int = 1
@@ -89,7 +89,7 @@ class SFNO_V0_1_0(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
     ):
         return MakaniSFNO(
             inp_chans=n_in_channels,

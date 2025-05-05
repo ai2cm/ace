@@ -2,7 +2,7 @@ import dataclasses
 import logging
 import os
 import pathlib
-from typing import Optional, Sequence, Union
+from collections.abc import Sequence
 
 import dacite
 import torch
@@ -66,7 +66,7 @@ class StandaloneComponentCheckpointsConfig:
     ocean: StandaloneComponentConfig
     atmosphere: StandaloneComponentConfig
     sst_name: str = "sst"
-    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None
+    ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
 
     def load_stepper_config(self) -> CoupledStepperConfig:
         return CoupledStepperConfig(
@@ -82,7 +82,7 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
-    def _load_sst_mask(self) -> Optional[torch.Tensor]:
+    def _load_sst_mask(self) -> torch.Tensor | None:
         ocean_ckpt = torch.load(
             self.ocean.path, map_location=fme.get_device(), weights_only=False
         )
@@ -187,7 +187,7 @@ class InferenceEvaluatorConfig:
 
     experiment_dir: str
     n_coupled_steps: int
-    checkpoint_path: Union[str, StandaloneComponentCheckpointsConfig]
+    checkpoint_path: str | StandaloneComponentCheckpointsConfig
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
     coupled_steps_in_memory: int = 1
@@ -202,7 +202,7 @@ class InferenceEvaluatorConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -252,7 +252,7 @@ class InferenceEvaluatorConfig:
         )
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,

@@ -1,6 +1,7 @@
 import dataclasses
 import logging
-from typing import Callable, Dict, Mapping, Optional, Protocol
+from collections.abc import Callable, Mapping
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -55,9 +56,9 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self,
         horizontal_coordinates: HorizontalCoordinates,
         save_diagnostics: bool = True,
-        output_dir: Optional[str] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        loss_scaling: Optional[TensorMapping] = None,
+        output_dir: str | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
     ):
@@ -77,7 +78,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         self._output_dir = output_dir
         self._save_diagnostics = save_diagnostics
         self._coords = horizontal_coordinates.coords
-        self._aggregators: Dict[str, _Aggregator] = {
+        self._aggregators: dict[str, _Aggregator] = {
             "mean": MeanAggregator(horizontal_coordinates.gridded_operations),
         }
         if horizontal_coordinates.area_weights is not None:
@@ -161,7 +162,7 @@ class OneStepDeterministicAggregator(AggregatorABC[DeterministicTrainOutput]):
         return fractional_contribs
 
     @torch.no_grad()
-    def flush_diagnostics(self, subdir: Optional[str] = None):
+    def flush_diagnostics(self, subdir: str | None = None):
         if self._save_diagnostics:
             reduced_diagnostics = get_reduced_diagnostics(
                 sub_aggregators=self._aggregators,

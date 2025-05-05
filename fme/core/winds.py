@@ -1,11 +1,9 @@
-from typing import Tuple
-
 import numpy as np
 
 
 def u_v_to_x_y_z_wind(
     u: np.ndarray, v: np.ndarray, lat: np.ndarray, lon: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Converts u and v wind components to x, y, z wind components.
 

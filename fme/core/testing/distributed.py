@@ -1,5 +1,4 @@
 import contextlib
-from typing import List
 
 import torch
 
@@ -34,10 +33,10 @@ class MockDistributed:
     def is_distributed(self) -> bool:
         return True
 
-    def gather(self, tensor: torch.Tensor) -> List[torch.Tensor]:
+    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor]:
         return [tensor for i in range(self.world_size)]
 
-    def gather_irregular(self, tensor: torch.Tensor) -> List[torch.Tensor] | None:
+    def gather_irregular(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         """
         Note this uses the actual implementation but mocks the underlying
         distributed calls.

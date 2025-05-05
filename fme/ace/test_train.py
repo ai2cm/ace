@@ -558,7 +558,7 @@ def test_resume_two_workers(tmp_path, nettype, skip_slow: bool, tmpdir: pathlib.
 
 def _create_fine_tuning_config(path_to_train_config_yaml: str, path_to_checkpoint: str):
     # TODO(gideond) rename to "overwrite" or something of that nature
-    with open(path_to_train_config_yaml, "r") as config_file:
+    with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
         config_data["stepper"] = {"checkpoint_path": path_to_checkpoint}
         current_experiment_dir = config_data["experiment_dir"]
@@ -593,7 +593,7 @@ def test_fine_tuning(tmp_path, nettype, very_fast_only: bool):
 def _create_copy_weights_after_batch_config(
     path_to_train_config_yaml: str, path_to_checkpoint: str, experiment_dir: str
 ):
-    with open(path_to_train_config_yaml, "r") as config_file:
+    with open(path_to_train_config_yaml) as config_file:
         config_data = yaml.safe_load(config_file)
         config_data["stepper"]["parameter_init"] = {"weights_path": path_to_checkpoint}
         config_data["copy_weights_after_batch"] = [{"include": ["*"], "exclude": []}]

@@ -1,15 +1,6 @@
 import dataclasses
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    TypeVar,
-)
+from collections.abc import Callable, Collection, Sequence
+from typing import Any, TypeVar
 
 import numpy as np
 import torch
@@ -67,12 +58,12 @@ class BatchData:
 
     data: TensorMapping
     time: xr.DataArray
-    horizontal_dims: List[str] = dataclasses.field(
+    horizontal_dims: list[str] = dataclasses.field(
         default_factory=lambda: ["lat", "lon"]
     )
 
     @property
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         return ["sample", "time"] + self.horizontal_dims
 
     @property
@@ -87,7 +78,7 @@ class BatchData:
         )
 
     @classmethod
-    def _get_kwargs(cls, horizontal_dims: Optional[List[str]]) -> Dict[str, Any]:
+    def _get_kwargs(cls, horizontal_dims: list[str] | None) -> dict[str, Any]:
         if horizontal_dims is None:
             kwargs = {}
         else:
@@ -99,7 +90,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        horizontal_dims: Optional[List[str]] = None,
+        horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
         _check_device(data, torch.device("cpu"))
         kwargs = cls._get_kwargs(horizontal_dims)
@@ -114,7 +105,7 @@ class BatchData:
         cls,
         data: TensorMapping,
         time: xr.DataArray,
-        horizontal_dims: Optional[List[str]] = None,
+        horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
         """
         Move the data to the current global device specified by get_device().
@@ -144,9 +135,9 @@ class BatchData:
     @classmethod
     def from_sample_tuples(
         cls,
-        samples: Sequence[Tuple[TensorMapping, xr.DataArray]],
+        samples: Sequence[tuple[TensorMapping, xr.DataArray]],
         sample_dim_name: str = "sample",
-        horizontal_dims: Optional[List[str]] = None,
+        horizontal_dims: list[str] | None = None,
     ) -> "BatchData":
         sample_data, sample_times = zip(*samples)
         batch_data = default_collate(sample_data)

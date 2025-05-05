@@ -1,7 +1,7 @@
 import datetime
+from collections.abc import Iterable, Mapping, Sequence
 from math import ceil
 from pathlib import Path
-from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
 import cftime
 import numpy as np
@@ -44,7 +44,7 @@ class PairedMonthlyDataWriter:
         n_samples: int,
         n_timesteps: int,
         timestep: datetime.timedelta,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
@@ -70,8 +70,8 @@ class PairedMonthlyDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -100,7 +100,7 @@ class MonthlyDataWriter:
         label: str,
         n_samples: int,
         n_months: int,
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
     ):
@@ -151,7 +151,7 @@ class MonthlyDataWriter:
         years: np.ndarray,
         months: np.ndarray,
         calendar: str,
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         reference_date = cftime.datetime(1970, 1, 1, calendar=calendar)
         if self._init_years[0] == -1:
             self._init_years[:] = years
@@ -200,7 +200,7 @@ class MonthlyDataWriter:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):

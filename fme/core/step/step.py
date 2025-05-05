@@ -1,7 +1,10 @@
 import abc
 import dataclasses
 import warnings
-from typing import Any, Callable, ClassVar, Dict, List, Set, Type, TypeVar, cast, final
+from collections.abc import Callable
+
+# we use Type to distinguish from type attr of StepSelector
+from typing import Any, ClassVar, Type, TypeVar, cast, final  # noqa: UP035
 
 import torch
 from torch import nn
@@ -34,12 +37,12 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         pass
 
     @property
     @abc.abstractmethod
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         """
         Names of variables output by the step.
         """
@@ -47,7 +50,7 @@ class StepConfigABC(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -55,26 +58,26 @@ class StepConfigABC(abc.ABC):
 
     @property
     @final
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return list(set(self.input_names).intersection(self.output_names))
 
     @property
     @abc.abstractmethod
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         """
         Names of variables to be included in the loss function.
         """
         pass
 
     @abc.abstractmethod
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         pass
 
     @abc.abstractmethod
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         """
         Args:
@@ -109,7 +112,7 @@ T = TypeVar("T", bound=StepConfigABC)
 @dataclasses.dataclass
 class StepSelector(StepConfigABC):
     type: str
-    config: Dict[str, Any]
+    config: dict[str, Any]
     registry: ClassVar[Registry] = Registry()
 
     def __post_init__(self):
@@ -122,7 +125,7 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.n_ic_timesteps
 
     @classmethod
-    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:
+    def register(cls, name: str) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
         return cls.registry.register(name)
 
     def get_step(
@@ -132,33 +135,33 @@ class StepSelector(StepConfigABC):
         return self._step_config_instance.get_step(dataset_info)
 
     @classmethod
-    def get_available_types(cls) -> Set[str]:
+    def get_available_types(cls) -> set[str]:
         """This class method is used to expose all available types of Steps."""
         return set(cls(type="", config={}).registry._types.keys())
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         return self._step_config_instance.get_next_step_forcing_names()
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self._step_config_instance.input_names
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         """
         Names of variables output by the step.
         """
         return self._step_config_instance.output_names
 
     @property
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
         return self._step_config_instance.next_step_input_names
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         """
         Names of variables to be included in the loss function.
         """
@@ -166,8 +169,8 @@ class StepSelector(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         return self._step_config_instance.get_loss_normalizer(
             extra_names=extra_names,
@@ -197,8 +200,8 @@ class StepABC(abc.ABC, nn.Module):
     @final
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         return self.config.get_loss_normalizer(
             extra_names=extra_names,
@@ -212,22 +215,22 @@ class StepABC(abc.ABC, nn.Module):
 
     @property
     @final
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self.config.input_names
 
     @property
     @final
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.config.output_names
 
     @property
     @final
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return self.config.prognostic_names
 
     @property
     @final
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self.config.loss_names
 
     @property
@@ -242,7 +245,7 @@ class StepABC(abc.ABC, nn.Module):
 
     @property
     @final
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         """
         Names of variables required in next_step_input_data for .step.
         """
@@ -250,7 +253,7 @@ class StepABC(abc.ABC, nn.Module):
 
     @property
     @final
-    def next_step_forcing_names(self) -> List[str]:
+    def next_step_forcing_names(self) -> list[str]:
         """Names of input variables which come from the output timestep."""
         return self.config.get_next_step_forcing_names()
 
@@ -325,7 +328,7 @@ class StepABC(abc.ABC, nn.Module):
             return torch.export.export(self, (input, next_step_input_data))
 
     @abc.abstractmethod
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """
         Returns:
             The state of the step object as expected by load_state,
@@ -334,7 +337,7 @@ class StepABC(abc.ABC, nn.Module):
         pass
 
     @abc.abstractmethod
-    def load_state(self, state: Dict[str, Any]):
+    def load_state(self, state: dict[str, Any]):
         """
         Load the state of the step object.
         """

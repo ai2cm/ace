@@ -1,5 +1,5 @@
 import datetime
-from typing import List, Literal, Tuple
+from typing import Literal
 
 import pytest
 import torch
@@ -29,7 +29,7 @@ class AddOne(torch.nn.Module):
 
 
 def get_tensor_dict(
-    names: List[str], img_shape: Tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, ...], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -43,7 +43,7 @@ def get_tensor_dict(
 
 
 def get_network_and_loss_normalization_config(
-    names: List[str],
+    names: list[str],
     norm_mean: float = 0.0,
 ) -> NetworkAndLossNormalizationConfig:
     return NetworkAndLossNormalizationConfig(

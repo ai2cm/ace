@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Mapping, Optional, Tuple
+from collections.abc import Mapping
 
 import numpy as np
 import torch
@@ -32,9 +32,9 @@ class _ErrorVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._mse_data: Optional[TensorDict] = None
-        self._min_err_data: Optional[TensorDict] = None
-        self._max_err_data: Optional[TensorDict] = None
+        self._mse_data: TensorDict | None = None
+        self._min_err_data: TensorDict | None = None
+        self._max_err_data: TensorDict | None = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -113,8 +113,8 @@ class _MeanVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._target_data: Optional[TensorDict] = None
-        self._gen_data: Optional[TensorDict] = None
+        self._target_data: TensorDict | None = None
+        self._gen_data: TensorDict | None = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -151,7 +151,7 @@ class _MeanVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[TensorDict, TensorDict]:
+    def get(self) -> tuple[TensorDict, TensorDict]:
         if self._gen_data is None or self._target_data is None:
             raise RuntimeError("No data recorded")
         target_data = {}
@@ -173,10 +173,10 @@ class _VarianceVideoData:
     """
 
     def __init__(self, n_timesteps: int):
-        self._target_means: Optional[TensorDict] = None
-        self._gen_means: Optional[TensorDict] = None
-        self._target_squares: Optional[TensorDict] = None
-        self._gen_squares: Optional[TensorDict] = None
+        self._target_means: TensorDict | None = None
+        self._gen_means: TensorDict | None = None
+        self._target_squares: TensorDict | None = None
+        self._gen_squares: TensorDict | None = None
         self._n_timesteps = n_timesteps
         self._n_batches = torch.zeros([n_timesteps], dtype=torch.int32).cpu()
         self._dist = Distributed.get_instance()
@@ -223,7 +223,7 @@ class _VarianceVideoData:
         self._n_batches[time_slice] += 1
 
     @torch.no_grad()
-    def get(self) -> Tuple[TensorDict, TensorDict]:
+    def get(self) -> tuple[TensorDict, TensorDict]:
         if (
             self._gen_means is None
             or self._target_means is None
@@ -271,9 +271,9 @@ def _initialize_video_from_batch(
 class _MaybePairedVideoData:
     caption: str
     gen: torch.Tensor
-    units: Optional[str]
-    long_name: Optional[str]
-    target: Optional[torch.Tensor] = None
+    units: str | None
+    long_name: str | None
+    target: torch.Tensor | None = None
 
     def make_video(self):
         return _make_video(
@@ -290,7 +290,7 @@ class VideoAggregator:
         self,
         n_timesteps: int,
         enable_extended_videos: bool,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         """
         Args:
@@ -306,10 +306,10 @@ class VideoAggregator:
             self._variable_metadata = variable_metadata
         self._mean_data = _MeanVideoData(n_timesteps=n_timesteps)
         if enable_extended_videos:
-            self._error_data: Optional[_ErrorVideoData] = _ErrorVideoData(
+            self._error_data: _ErrorVideoData | None = _ErrorVideoData(
                 n_timesteps=n_timesteps
             )
-            self._variance_data: Optional[_VarianceVideoData] = _VarianceVideoData(
+            self._variance_data: _VarianceVideoData | None = _VarianceVideoData(
                 n_timesteps=n_timesteps
             )
             self._enable_extended_videos = True
@@ -323,8 +323,8 @@ class VideoAggregator:
         self,
         target_data: TensorMapping,
         gen_data: TensorMapping,
-        target_data_norm: Optional[TensorMapping] = None,
-        gen_data_norm: Optional[TensorMapping] = None,
+        target_data_norm: TensorMapping | None = None,
+        gen_data_norm: TensorMapping | None = None,
         i_time_start: int = 0,
     ):
         del target_data_norm, gen_data_norm  # intentionally unused
@@ -371,13 +371,13 @@ class VideoAggregator:
         gen_data, target_data = self._mean_data.get()
         video_data = {}
 
-        def get_units(name: str) -> Optional[str]:
+        def get_units(name: str) -> str | None:
             if name in self._variable_metadata:
                 return self._variable_metadata[name].units
             else:
                 return None
 
-        def get_long_name(name: str) -> Optional[str]:
+        def get_long_name(name: str) -> str | None:
             if name in self._variable_metadata:
                 return self._variable_metadata[name].long_name
             else:
@@ -488,7 +488,7 @@ class VideoAggregator:
 def _make_video(
     caption: str,
     gen: torch.Tensor,
-    target: Optional[torch.Tensor] = None,
+    target: torch.Tensor | None = None,
 ):
     if target is None:
         video_data = np.expand_dims(gen.cpu().numpy(), axis=1)

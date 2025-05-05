@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from fme.core.wandb import Image, WandB
 
 
-def get_cmap_limits(data: np.ndarray, diverging=False) -> Tuple[float, float]:
+def get_cmap_limits(data: np.ndarray, diverging=False) -> tuple[float, float]:
     vmin = np.nanmin(data)
     vmax = np.nanmax(data)
     if diverging:
@@ -20,9 +20,9 @@ def get_cmap_limits(data: np.ndarray, diverging=False) -> Tuple[float, float]:
 
 def plot_imshow(
     data: np.ndarray,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
-    cmap: Optional[Union[str, Colormap]] = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
+    cmap: str | Colormap | None = None,
     flip_lat: bool = True,
     use_colorbar: bool = True,
 ) -> Figure:
@@ -98,9 +98,9 @@ def fold_if_healpix_data(data: np.ndarray, fill_value: float) -> np.ndarray:
 
 
 def plot_paneled_data(
-    data: List[List[np.ndarray]],
+    data: list[list[np.ndarray]],
     diverging: bool,
-    caption: Optional[str] = None,
+    caption: str | None = None,
 ) -> Image:
     """Plot a list of 2D data arrays in a paneled plot."""
     if diverging:
@@ -137,7 +137,7 @@ def plot_paneled_data(
     return wandb_image
 
 
-def _stitch_data_panels(data: List[List[np.ndarray]], fill_value) -> np.ndarray:
+def _stitch_data_panels(data: list[list[np.ndarray]], fill_value) -> np.ndarray:
     for row in data:
         if len(row) != len(data[0]):
             raise ValueError("All rows must have the same number of panels.")

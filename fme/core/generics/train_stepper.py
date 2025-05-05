@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, Generic, Type, TypeVar
+from typing import Any, Generic, TypeVar
 
 from torch import nn
 
@@ -40,16 +40,16 @@ class TrainStepperABC(abc.ABC, Generic[PS, BD, FD, SD, TO]):
         pass
 
     @abc.abstractmethod
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         pass
 
     @abc.abstractmethod
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         pass
 
     @classmethod
     @abc.abstractmethod
-    def from_state(cls: Type[SelfType], state: Dict[str, Any]) -> SelfType:
+    def from_state(cls: type[SelfType], state: dict[str, Any]) -> SelfType:
         pass
 
     @property

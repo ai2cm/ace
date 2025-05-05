@@ -6,7 +6,6 @@ import os
 import pathlib
 import tempfile
 import unittest.mock
-from typing import List
 
 import cftime
 import numpy as np
@@ -43,11 +42,11 @@ class PlusOne(torch.nn.Module):
 
 def save_stepper(
     path: pathlib.Path,
-    in_names: List[str],
-    out_names: List[str],
+    in_names: list[str],
+    out_names: list[str],
     mean: float,
     std: float,
-    data_shape: List[int],
+    data_shape: list[int],
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))

@@ -3,7 +3,8 @@ import datetime
 import os
 import pathlib
 from collections import namedtuple
-from typing import Dict, Iterable, List, Literal, Mapping, Optional, Tuple, Union
+from collections.abc import Iterable, Mapping
+from typing import Literal
 from unittest.mock import patch
 
 import cftime
@@ -487,15 +488,15 @@ def _setup_and_train_on_batch(
     data: BatchData,
     in_names,
     out_names,
-    ocean_config: Optional[OceanConfig],
-    optimization_config: Optional[OptimizationConfig],
+    ocean_config: OceanConfig | None,
+    optimization_config: OptimizationConfig | None,
     stepper_config_kwargs,
 ):
     """Sets up the requisite classes to run train_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
 
     if optimization_config is None:
-        optimization: Union[NullOptimization, Optimization] = NullOptimization()
+        optimization: NullOptimization | Optimization = NullOptimization()
     else:
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
@@ -775,7 +776,7 @@ def test_stepper_corrector(
     budget_residual = budget_residual.cpu().numpy()
     if terms_to_modify is not None:
         if global_only:
-            mean_axis: Tuple[int, ...] = (0,)
+            mean_axis: tuple[int, ...] = (0,)
         else:
             mean_axis = (0, 2, 3)
         # first assert on timeseries, easier to look at
@@ -818,9 +819,9 @@ def test_stepper_corrector(
 
 
 def _get_stepper(
-    in_names: List[str],
-    out_names: List[str],
-    ocean_config: Optional[OceanConfig] = None,
+    in_names: list[str],
+    out_names: list[str],
+    ocean_config: OceanConfig | None = None,
     module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
     norm_mean: float = 0.0,
     **kwargs,
@@ -837,7 +838,7 @@ def _get_stepper(
         class ChannelSum(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.last_input: Optional[torch.Tensor] = None
+                self.last_input: torch.Tensor | None = None
 
             def forward(self, x):
                 self.last_input = x
@@ -943,8 +944,8 @@ def test_step_with_prescribed_ocean():
 
 
 def get_data_for_predict(
-    n_steps, forcing_names: List[str]
-) -> Tuple[PrognosticState, BatchData]:
+    n_steps, forcing_names: list[str]
+) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
     input_data = BatchData.new_on_device(
         data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},
@@ -1180,12 +1181,12 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
 )
 def test_load_stepper_and_load_stepper_config(
     tmp_path: pathlib.Path,
-    serialized_ocean_config: Optional[OceanConfig],
-    serialized_multi_call_config: Optional[MultiCallConfig],
+    serialized_ocean_config: OceanConfig | None,
+    serialized_multi_call_config: MultiCallConfig | None,
     overriding_ocean_config: Literal["keep"] | OceanConfig | None,
     overriding_multi_call_config: Literal["keep"] | MultiCallConfig | None,
-    expected_ocean_config: Optional[OceanConfig],
-    expected_multi_call_config: Optional[MultiCallConfig],
+    expected_ocean_config: OceanConfig | None,
+    expected_multi_call_config: MultiCallConfig | None,
 ):
     in_names = ["co2", "var", "a", "b"]
     fluxes = ["ULWRFtoa"]
@@ -1249,7 +1250,7 @@ def test_load_stepper_and_load_stepper_config(
 
 def get_regression_stepper_and_data(
     crps_training: bool = False,
-) -> Tuple[Stepper, BatchData]:
+) -> tuple[Stepper, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_forward_steps = 2
@@ -1375,7 +1376,7 @@ def test_stepper_predict_regression():
 
 def get_predict_output_tensor_dict(
     output: BatchData, next_state: PrognosticState
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return flatten_dict(
         {
             "output": output.data,
@@ -1386,7 +1387,7 @@ def get_predict_output_tensor_dict(
 
 def get_train_outputs_tensor_dict(
     step_1: TrainOutput, step_2: TrainOutput
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return flatten_dict(
         {
             "step_1": _get_train_output_tensor_dict(step_1),
@@ -1397,7 +1398,7 @@ def get_train_outputs_tensor_dict(
 
 def flatten_dict(
     d: Mapping[str, Mapping[str, torch.Tensor]],
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return_dict = {}
     for k, v in d.items():
         for k2, v2 in v.items():
@@ -1405,7 +1406,7 @@ def flatten_dict(
     return return_dict
 
 
-def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
+def _get_train_output_tensor_dict(data: TrainOutput) -> dict[str, torch.Tensor]:
     return_dict = {}
     for k, v in data.metrics.items():
         return_dict[f"metrics.{k}"] = v
@@ -1463,7 +1464,7 @@ def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True)
     area = torch.ones(img_shape, device=DEVICE)
     gridded_operations = LatLonOperations(area)
     timestep = datetime.timedelta(hours=6)
-    mask_provider: Optional[MaskProvider] = None
+    mask_provider: MaskProvider | None = None
     if dataset_info_has_mask_provider:
         mask_provider = MaskProvider()
     return config.get_stepper(

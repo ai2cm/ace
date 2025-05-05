@@ -1,11 +1,11 @@
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
 
 from .typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 
-def assert_dict_allclose(a: Dict[str, Any], b: Dict[str, Any]):
+def assert_dict_allclose(a: dict[str, Any], b: dict[str, Any]):
     """
     Check if two (possibly nested) dictionaries which may contain tensors are close.
 
@@ -88,7 +88,7 @@ def fold_sized_ensemble_dim(d: EnsembleTensorDict, n_ensemble: int) -> TensorDic
     return EnsembleTensorDict(reshaped)
 
 
-def fold_ensemble_dim(d: EnsembleTensorDict) -> Tuple[TensorDict, int]:
+def fold_ensemble_dim(d: EnsembleTensorDict) -> tuple[TensorDict, int]:
     """
     Take a tensor dict with an explicit ensemble dimension and fold it into a
     batch/sample dimension.

@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-from typing import List
 
 import torch
 
@@ -57,25 +56,25 @@ class MockStep(StepABC):
 @StepSelector.register("mock")
 @dataclasses.dataclass
 class MockStepConfig(StepConfigABC):
-    in_names: List[str] = dataclasses.field(default_factory=list)
-    out_names: List[str] = dataclasses.field(default_factory=list)
+    in_names: list[str] = dataclasses.field(default_factory=list)
+    out_names: list[str] = dataclasses.field(default_factory=list)
 
     def get_step(self, dataset_info: DatasetInfo):
         return MockStep(self, dataset_info)
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         return list(set(self.out_names).difference(self.in_names))
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         return []
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self.in_names
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.out_names
 
     @property
@@ -83,7 +82,7 @@ class MockStepConfig(StepConfigABC):
         raise NotImplementedError()
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         return self.out_names
 
     @property
@@ -98,8 +97,8 @@ class MockStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ):
         raise NotImplementedError()
 
