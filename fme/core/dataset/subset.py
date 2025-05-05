@@ -15,6 +15,7 @@ class XarraySubset(torch.utils.data.Dataset):
         self._dataset = torch.utils.data.Subset(dataset, indices)
         self._sample_start_times = dataset.sample_start_times[indices]
         self._sample_n_times = dataset.sample_n_times
+        self.dims = dataset.dims
 
     def __len__(self):
         return len(self._dataset)
