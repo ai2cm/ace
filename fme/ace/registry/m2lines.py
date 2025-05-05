@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, List, Mapping, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 from fme.ace.models.ocean.m2lines.samudra import Samudra
 from fme.ace.registry.registry import ModuleConfig, ModuleSelector
@@ -12,11 +13,11 @@ class SamudraBuilder(ModuleConfig):
     Configuration for the M2Lines Samudra architecture.
     """
 
-    ch_width: List[int] = dataclasses.field(
+    ch_width: list[int] = dataclasses.field(
         default_factory=lambda: [200, 250, 300, 400]
     )
-    n_layers: List[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
-    dilation: List[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
+    n_layers: list[int] = dataclasses.field(default_factory=lambda: [1, 1, 1, 1])
+    dilation: list[int] = dataclasses.field(default_factory=lambda: [1, 2, 4, 8])
     pad: str = "circular"
     norm: str = "instance"
     norm_kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
@@ -31,7 +32,7 @@ class SamudraBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
     ):
         return Samudra(
             input_channels=n_in_channels,

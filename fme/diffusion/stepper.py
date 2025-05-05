@@ -2,8 +2,9 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+from collections.abc import Callable, Mapping
 from copy import copy
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any
 
 import dacite
 import torch
@@ -66,19 +67,19 @@ class DiffusionStepperConfig:
     """
 
     builder: ModuleSelector
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: NormalizationConfig
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
-    ocean: Optional[OceanConfig] = None
+    ocean: OceanConfig | None = None
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
-    next_step_forcing_names: List[str] = dataclasses.field(default_factory=list)
-    loss_normalization: Optional[NormalizationConfig] = None
-    residual_normalization: Optional[NormalizationConfig] = None
+    next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
+    loss_normalization: NormalizationConfig | None = None
+    residual_normalization: NormalizationConfig | None = None
     p_mean: float = 0.0
     p_std: float = 1.0
     S_churn: float = 0.0
@@ -149,7 +150,7 @@ class DiffusionStepperConfig:
 
     def get_base_weights(
         self,
-    ) -> Optional[List[Mapping[str, Any]]]:
+    ) -> list[Mapping[str, Any]] | None:
         """
         If the model is being initialized from another model's weights for fine-tuning,
         returns those weights. Otherwise, returns None.
@@ -160,7 +161,7 @@ class DiffusionStepperConfig:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
@@ -198,22 +199,22 @@ class DiffusionStepperConfig:
         return list(set(self.in_names).union(self.out_names))
 
     @property
-    def forcing_names(self) -> List[str]:
+    def forcing_names(self) -> list[str]:
         """Names of variables which are inputs only."""
         return list(set(self.in_names) - set(self.out_names))
 
     @property
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).intersection(self.in_names))
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         """Names of variables which both inputs and outputs."""
         return list(set(self.out_names).difference(self.in_names))
 
     @classmethod
-    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         _unsupported_key_defaults = {
             "conserve_dry_air": False,
             "optimization": None,
@@ -262,9 +263,9 @@ class DiffusionStepperConfig:
         return state_copy
 
 
-def _load_weights(path: str) -> List[Mapping[str, Any]]:
+def _load_weights(path: str) -> list[Mapping[str, Any]]:
     stepper = load_stepper(path)
-    return_weights: List[Mapping[str, Any]] = []
+    return_weights: list[Mapping[str, Any]] = []
     for module in stepper.modules:
         return_weights.append(strip_leading_module(module.state_dict()))
     return return_weights
@@ -459,7 +460,7 @@ class DiffusionStepper(
     def __init__(
         self,
         config: DiffusionStepperConfig,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
@@ -484,7 +485,7 @@ class DiffusionStepper(
         self.out_packer = Packer(config.out_names)
         self.normalizer = config.normalization.build(config.normalize_names)
         if config.ocean is not None:
-            self.ocean: Optional[Ocean] = config.ocean.build(
+            self.ocean: Ocean | None = config.ocean.build(
                 config.in_names, config.out_names, timestep
             )
         else:
@@ -563,13 +564,13 @@ class DiffusionStepper(
         return self._timestep
 
     @property
-    def surface_temperature_name(self) -> Optional[str]:
+    def surface_temperature_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.surface_temperature_name
         return None
 
     @property
-    def ocean_fraction_name(self) -> Optional[str]:
+    def ocean_fraction_name(self) -> str | None:
         if self._config.ocean is not None:
             return self._config.ocean.ocean_fraction_name
         return None
@@ -598,18 +599,18 @@ class DiffusionStepper(
         self.ocean = ocean
 
     @property
-    def forcing_names(self) -> List[str]:
+    def forcing_names(self) -> list[str]:
         """Names of variables which are inputs only."""
         return self._config.forcing_names
 
     @property
-    def prognostic_names(self) -> List[str]:
+    def prognostic_names(self) -> list[str]:
         return sorted(
             list(set(self.out_packer.names).intersection(self.in_packer.names))
         )
 
     @property
-    def diagnostic_names(self) -> List[str]:
+    def diagnostic_names(self) -> list[str]:
         return sorted(list(set(self.out_packer.names).difference(self.in_packer.names)))
 
     @property
@@ -732,7 +733,7 @@ class DiffusionStepper(
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[BatchData, PrognosticState]:
+    ) -> tuple[BatchData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -786,7 +787,7 @@ class DiffusionStepper(
         initial_condition: PrognosticState,
         forcing: BatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[PairedData, PrognosticState]:
+    ) -> tuple[PairedData, PrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
 
@@ -831,7 +832,7 @@ class DiffusionStepper(
                 )
         return data.remove_initial_condition(self.n_ic_timesteps)
 
-    def _forcing_names(self) -> List[str]:
+    def _forcing_names(self) -> list[str]:
         if self.ocean is None:
             return self._config.forcing_names
         return list(set(self._config.forcing_names).union(self.ocean.forcing_names))
@@ -841,7 +842,7 @@ class DiffusionStepper(
         input: TensorMapping,
         target: TensorMapping,
         next_step_forcing_data: TensorMapping,
-    ) -> Tuple[torch.Tensor, TensorMapping]:
+    ) -> tuple[torch.Tensor, TensorMapping]:
         input_norm = self.normalizer.normalize(input)
         input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
         target_norm = self.normalizer.normalize(target)
@@ -907,7 +908,7 @@ class DiffusionStepper(
                 and the normalized batch data.
         """
         loss = torch.tensor(0.0, device=get_device())
-        metrics: Dict[str, float] = {}
+        metrics: dict[str, float] = {}
 
         optimization.set_mode(self.modules)
         with optimization.autocast():
@@ -973,7 +974,7 @@ class DiffusionStepper(
             "loss_normalizer": self.loss_normalizer.get_state(),
         }
 
-    def load_state(self, state: Dict[str, Any]) -> None:
+    def load_state(self, state: dict[str, Any]) -> None:
         """
         Load the state of the stepper.
 

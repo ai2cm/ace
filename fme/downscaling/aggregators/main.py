@@ -1,6 +1,7 @@
 """Contains classes for aggregating evaluation metrics and various statistics."""
 
-from typing import Any, Collection, Dict, List, Mapping, Optional, Tuple
+from collections.abc import Collection, Mapping
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -62,7 +63,7 @@ class Mean:
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
-        self._sum: Optional[TensorMapping] = None
+        self._sum: TensorMapping | None = None
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
@@ -118,7 +119,7 @@ class SumComparison:
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric)
-        self._sum: Optional[TensorMapping] = None
+        self._sum: TensorMapping | None = None
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
         self._count = 0
@@ -171,11 +172,11 @@ class MeanComparison:
 
     def __init__(
         self,
-        metric: Optional[ComparisonInputFunc] = None,
+        metric: ComparisonInputFunc | None = None,
         name: str = "",
     ) -> None:
         self._mapped_metric = map_tensor_mapping(metric) if metric is not None else None
-        self._sum: Optional[TensorMapping] = None
+        self._sum: TensorMapping | None = None
         self._count: int = 0
         self._add = map_tensor_mapping(torch.add)
         self._dist = Distributed.get_instance()
@@ -186,7 +187,7 @@ class MeanComparison:
         self,
         target: TensorMapping,
         prediction: TensorMapping,
-        dynamic_metric: Optional[ComparisonInputFunc] = None,
+        dynamic_metric: ComparisonInputFunc | None = None,
     ) -> None:
         """
         Record the metric for the current target and prediction batch.
@@ -259,7 +260,7 @@ class ComparedDynamicHistogramsAdapter:
         histograms = self._histograms.get_wandb()
         return {f"{prefix}{self._name}{k}": v for k, v in histograms.items()}
 
-    def get_dataset(self) -> Dict[str, Any]:
+    def get_dataset(self) -> dict[str, Any]:
         """
         Get the histogram dataset.
         """
@@ -296,7 +297,7 @@ class ZonalPowerSpectrumAggregator:
         self.downscale_factor = downscale_factor
 
     def _interpolate(
-        self, data: TensorMapping, keys: Optional[Collection[str]] = None
+        self, data: TensorMapping, keys: Collection[str] | None = None
     ) -> TensorMapping:
         # interpolate expects 4D input (batch, channel, height, width)
         # for 2D - bicubic interpolation, so we need to expand below
@@ -321,7 +322,7 @@ class ZonalPowerSpectrumAggregator:
             self._interpolate(coarse, keys=list(prediction.keys()))
         )
 
-    def get(self) -> Tuple[TensorMapping, TensorMapping]:
+    def get(self) -> tuple[TensorMapping, TensorMapping]:
         """
         Get the mean zonal power spectrum tensors for the fine and coarse data.
         """
@@ -451,8 +452,8 @@ class SnapshotAggregator:
 
     def __init__(
         self,
-        dims: List[str],
-        variable_metadata: Optional[Mapping[str, VariableMetadata]],
+        dims: list[str],
+        variable_metadata: Mapping[str, VariableMetadata] | None,
         name: str = "",
     ) -> None:
         self._snapshot_aggregator = CoreSnapshotAggregator(dims, variable_metadata)
@@ -514,7 +515,7 @@ class MeanMapAggregator:
 
     def __init__(
         self,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         gap_width: int = 4,
         name: str = "",
     ):
@@ -541,12 +542,12 @@ class MeanMapAggregator:
         self._mean_target.record_batch(target)
         self._mean_prediction.record_batch(prediction)
 
-    def _get(self) -> Tuple[TensorMapping, TensorMapping]:
+    def _get(self) -> tuple[TensorMapping, TensorMapping]:
         target = self._mean_target.get()
         prediction = self._mean_prediction.get()
         return target, prediction
 
-    def _get_metrics_and_maps(self) -> Tuple[TensorMapping, TensorMapping]:
+    def _get_metrics_and_maps(self) -> tuple[TensorMapping, TensorMapping]:
         target, prediction = self._get()
 
         def get_relative_mean(target, prediction):
@@ -647,7 +648,7 @@ class RelativeMSEInterpAggregator:
         self._name = ensure_trailing_slash(name)
 
     def _interpolate(
-        self, data: TensorMapping, keys: Optional[Collection[str]] = None
+        self, data: TensorMapping, keys: Collection[str] | None = None
     ) -> TensorMapping:
         channel_dim = -3
         keys = keys if keys is not None else data.keys()
@@ -709,12 +710,12 @@ class Aggregator:
 
     def __init__(
         self,
-        dims: List[str],
+        dims: list[str],
         downscale_factor: int,
         n_histogram_bins: int = 300,
-        percentiles: Optional[List[float]] = None,
-        ssim_kwargs: Optional[Mapping[str, Any]] = None,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        percentiles: list[float] | None = None,
+        ssim_kwargs: Mapping[str, Any] | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         include_positional_comparisons: bool = True,
     ) -> None:
         self.downscale_factor = downscale_factor
@@ -723,7 +724,7 @@ class Aggregator:
             ssim_kwargs = {}
 
         # Folded samples into batch dimension
-        self._comparisons: List[_ComparisonAggregator] = [
+        self._comparisons: list[_ComparisonAggregator] = [
             MeanComparison(metrics.root_mean_squared_error, name="metrics/rmse"),
             SnapshotAggregator(dims, variable_metadata, name="snapshot"),
             ComparedDynamicHistogramsAdapter(
@@ -733,12 +734,12 @@ class Aggregator:
                 name="histogram",
             ),
         ]
-        self._area_weighted: List[_DynamicMetricComparisonAggregator] = [
+        self._area_weighted: list[_DynamicMetricComparisonAggregator] = [
             MeanComparison(name="metrics/area_weighted_rmse"),
         ]
 
         # Includes coarse input ontop of target/prediction
-        self._coarse_comparisons: List[_CoarseComparisonAggregator] = [
+        self._coarse_comparisons: list[_CoarseComparisonAggregator] = [
             RelativeMSEInterpAggregator(
                 downscale_factor, name="metrics/relative_mse_bicubic"
             ),
@@ -800,7 +801,7 @@ class Aggregator:
         """
         prefix = ensure_trailing_slash(prefix)
 
-        ret: Dict[str, Any] = {}
+        ret: dict[str, Any] = {}
         ret.update(self.loss.get_wandb(prefix))
         for comparison in self._comparisons:
             ret.update(comparison.get_wandb(prefix))

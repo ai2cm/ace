@@ -50,5 +50,5 @@ def test_seasonal_aggregator():
         )
     logs = agg.get_logs(label="test")
     for name, value in logs.items():
-        if isinstance(value, (float, np.ndarray)):
+        if isinstance(value, float | np.ndarray):
             assert not np.isnan(value), f"{name} is nan"

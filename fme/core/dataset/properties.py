@@ -1,5 +1,4 @@
 import datetime
-from typing import Dict
 
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
@@ -10,7 +9,7 @@ from fme.core.mask_provider import MaskProvider
 class DatasetProperties:
     def __init__(
         self,
-        variable_metadata: Dict[str, VariableMetadata],
+        variable_metadata: dict[str, VariableMetadata],
         vertical_coordinate: VerticalCoordinate,
         horizontal_coordinates: HorizontalCoordinates,
         mask_provider: MaskProvider,

@@ -6,7 +6,7 @@ so that they can be iterated over and called in the same way in a loop.
 """
 
 from collections import defaultdict
-from typing import Optional, Protocol
+from typing import Protocol
 
 import torch
 
@@ -55,7 +55,7 @@ class AreaWeightedReducedMetric:
         compute_metric: AreaWeightedFunction,
     ):
         self._compute_metric = compute_metric
-        self._total: Optional[TensorDict] = None
+        self._total: TensorDict | None = None
         self._device = device
 
     def _update_total(self, tensors: TensorDict):

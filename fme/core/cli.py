@@ -1,21 +1,21 @@
 import argparse
 import os
-from typing import Dict, Sequence
+from collections.abc import Sequence
 
 import yaml
 
 from .config import update_dict_with_dotlist
 
 
-def prepare_config(path: str, override: Sequence[str] | None = None) -> Dict:
+def prepare_config(path: str, override: Sequence[str] | None = None) -> dict:
     """Get config and update with possible dotlist override."""
-    with open(path, "r") as f:
+    with open(path) as f:
         data = yaml.safe_load(f)
     data = update_dict_with_dotlist(data, override)
     return data
 
 
-def prepare_directory(path: str, config_data: Dict):
+def prepare_directory(path: str, config_data: dict):
     """Create experiment directory and dump config_data to it."""
     if not os.path.isdir(path):
         os.makedirs(path, exist_ok=True)

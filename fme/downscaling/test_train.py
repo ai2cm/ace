@@ -3,8 +3,8 @@ import os
 import pathlib
 import subprocess
 import unittest.mock
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Dict, Sequence, Tuple
 from unittest.mock import MagicMock
 
 import cftime
@@ -49,7 +49,7 @@ def test_trainer(tmp_path):
 
 
 def create_test_data_on_disk(
-    filename: Path, dim_sizes, variable_names, coords_override: Dict[str, xr.DataArray]
+    filename: Path, dim_sizes, variable_names, coords_override: dict[str, xr.DataArray]
 ) -> Path:
     data_vars = {}
     for name in variable_names:
@@ -83,7 +83,7 @@ def create_test_data_on_disk(
 
 
 def data_paths_helper(tmp_path) -> FineResCoarseResPair[str]:
-    dim_sizes = FineResCoarseResPair[Dict[str, int]](
+    dim_sizes = FineResCoarseResPair[dict[str, int]](
         fine={"time": NUM_TIMESTEPS, "lat": 16, "lon": 16},
         coarse={"time": NUM_TIMESTEPS, "lat": 8, "lon": 8},
     )
@@ -135,14 +135,14 @@ def stats_data_paths(tmp_path):
 def _create_config_dict(
     train_paths: FineResCoarseResPair[str],
     valid_paths: FineResCoarseResPair[str],
-    stats_paths: Tuple[Path],
+    stats_paths: tuple[Path],
     tmp_path: Path,
 ):
     # load from file containing all test default values
     file_path = (
         f"{os.path.dirname(os.path.abspath(__file__))}/configs/test_train_config.yaml"
     )
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         config = yaml.safe_load(file)
 
     experiment_dir = tmp_path / "output"
@@ -166,7 +166,7 @@ def _create_config_dict(
     return config
 
 
-def _update_model_type(trainer_config: Dict, module_type: str):
+def _update_model_type(trainer_config: dict, module_type: str):
     """Inplace update of trainer_config model type"""
 
     if "diffusion" in module_type:
@@ -188,7 +188,7 @@ def _update_model_type(trainer_config: Dict, module_type: str):
 
 
 def _update_in_out_names(
-    trainer_config: Dict, in_names: Sequence[str], out_names: Sequence[str]
+    trainer_config: dict, in_names: Sequence[str], out_names: Sequence[str]
 ):
     """Inplace update of trainer_config input and output variables"""
     trainer_config["model"]["in_names"] = in_names
@@ -197,7 +197,7 @@ def _update_in_out_names(
 
 
 def _store_config(
-    tmp_path: Path, trainer_config: Dict, filename: str = "train-config.yaml"
+    tmp_path: Path, trainer_config: dict, filename: str = "train-config.yaml"
 ) -> str:
     outpath = tmp_path / filename
     with open(outpath, "w") as f:

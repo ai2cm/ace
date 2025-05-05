@@ -1,7 +1,6 @@
 import abc
 import dataclasses
 import re
-from typing import List
 
 import torch
 
@@ -22,7 +21,7 @@ class AugmentationConfig:
     """
 
     rotate_probability: float = 0.0
-    additional_directional_names: List[str] = dataclasses.field(default_factory=list)
+    additional_directional_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if not 0.0 <= self.rotate_probability <= 1.0:
@@ -77,7 +76,7 @@ class RotateModifier(BatchModifierABC):
     def __init__(
         self,
         rotate_probability: float,
-        additional_directional_names: List[str],
+        additional_directional_names: list[str],
     ):
         self.rotate_probability = rotate_probability
         self.additional_directional_names = additional_directional_names

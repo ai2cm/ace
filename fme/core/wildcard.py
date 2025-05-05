@@ -1,5 +1,5 @@
 import re
-from typing import Callable, List
+from collections.abc import Callable
 
 from torch import nn
 
@@ -20,8 +20,8 @@ def wildcard_match(pattern: str, name: str) -> bool:
 def apply_by_wildcard(
     model: nn.Module,
     func: Callable[[nn.Module, str], None],
-    include: List[str],
-    exclude: List[str],
+    include: list[str],
+    exclude: list[str],
 ):
     missing_parameters = []
     for name in model.state_dict().keys():

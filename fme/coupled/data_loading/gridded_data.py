@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Dict, Literal, Optional, Union
+from typing import Literal
 
 import torch
 
@@ -24,7 +24,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self,
         loader: DataLoader[CoupledBatchData],
         properties: CoupledDatasetProperties,
-        sampler: Optional[torch.utils.data.Sampler] = None,
+        sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
@@ -40,7 +40,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self._loader = loader
         self._properties = properties.to_device()
         self._sampler = sampler
-        self._batch_size: Optional[int] = None
+        self._batch_size: int | None = None
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
@@ -50,7 +50,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return SizedMap(to_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
@@ -126,14 +126,13 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
     def __init__(
         self,
         loader: DataLoader[CoupledBatchData],
-        initial_condition: Union[
-            CoupledPrognosticState, CoupledPrognosticStateDataRequirements
-        ],
+        initial_condition: CoupledPrognosticState
+        | CoupledPrognosticStateDataRequirements,
         properties: CoupledDatasetProperties,
     ):
         self._loader = loader
         self._properties = properties.to_device()
-        self._n_initial_conditions: Optional[int] = None
+        self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, CoupledPrognosticStateDataRequirements):
             self._initial_condition: CoupledPrognosticState = get_initial_condition(
                 loader, initial_condition
@@ -161,7 +160,7 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return SizedMap(on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property

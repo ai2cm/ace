@@ -1,4 +1,5 @@
-from typing import Any, Callable, Mapping, Optional, Protocol, TypeAlias
+from collections.abc import Callable, Mapping
+from typing import Any, Protocol, TypeAlias
 
 import torch
 
@@ -29,7 +30,7 @@ class _DynamicMetricComparisonAggregator(Protocol):
         self,
         target: TensorMapping,
         prediction: TensorMapping,
-        dynamic_metric: Optional[ComparisonInputFunc] = None,
+        dynamic_metric: ComparisonInputFunc | None = None,
     ) -> None: ...
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]: ...

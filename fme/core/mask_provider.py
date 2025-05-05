@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
@@ -97,9 +97,9 @@ class MaskProvider:
     def __repr__(self) -> str:
         return f"MaskProvider(\n    masks={self.masks}\n)"
 
-    def to_state(self) -> Dict[str, Any]:
+    def to_state(self) -> dict[str, Any]:
         return {"masks": self.masks}
 
     @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "MaskProvider":
+    def from_state(cls, state: dict[str, Any]) -> "MaskProvider":
         return cls(masks=state["masks"])

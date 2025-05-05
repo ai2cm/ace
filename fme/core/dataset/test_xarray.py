@@ -3,7 +3,7 @@
 import dataclasses
 import datetime
 from collections import namedtuple
-from typing import Dict, Iterable, List, Union
+from collections.abc import Iterable
 
 import cftime
 import numpy as np
@@ -61,7 +61,7 @@ class VariableNames:
         return return_value
 
     @property
-    def all_names(self) -> List[str]:
+    def all_names(self) -> list[str]:
         return self._concat(
             self.time_dependent_names,
             self.time_invariant_names,
@@ -69,7 +69,7 @@ class VariableNames:
         )
 
     @property
-    def spatial_resolved_names(self) -> List[str]:
+    def spatial_resolved_names(self) -> list[str]:
         return self._concat(self.time_dependent_names, self.time_invariant_names)
 
 
@@ -132,7 +132,7 @@ def _get_data(
             inclusive="left",
             use_cftime=True,
         )
-        data_vars: Dict[str, Union[float, xr.DataArray]] = {**ak, **bk}
+        data_vars: dict[str, float | xr.DataArray] = {**ak, **bk}
         for var_name in var_names:
             data = np.random.randn(len(time), n_lat, n_lon).astype(np.float32)
             if with_nans:

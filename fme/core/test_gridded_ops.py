@@ -1,4 +1,4 @@
-from typing import Any, Dict, Type
+from typing import Any
 
 import pytest
 import torch
@@ -27,8 +27,8 @@ from fme.core.typing_ import TensorMapping
     ],
 )
 def test_gridded_operations_from_state(
-    state: Dict[str, Any],
-    expected_class: Type[GriddedOperations],
+    state: dict[str, Any],
+    expected_class: type[GriddedOperations],
 ):
     ops = GriddedOperations.from_state(state)
     assert isinstance(ops, expected_class)

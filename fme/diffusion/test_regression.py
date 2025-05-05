@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import os
 from collections import namedtuple
-from typing import Dict, Mapping, Tuple
+from collections.abc import Mapping
 
 import numpy as np
 import pytest
@@ -33,7 +33,7 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_train_outputs_tensor_dict(
     step_1: TrainOutput, step_2: TrainOutput
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return flatten_dict(
         {
             "step_1": _get_train_output_tensor_dict(step_1),
@@ -44,7 +44,7 @@ def get_train_outputs_tensor_dict(
 
 def flatten_dict(
     d: Mapping[str, Mapping[str, torch.Tensor]],
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return_dict = {}
     for k, v in d.items():
         for k2, v2 in v.items():
@@ -52,7 +52,7 @@ def flatten_dict(
     return return_dict
 
 
-def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
+def _get_train_output_tensor_dict(data: TrainOutput) -> dict[str, torch.Tensor]:
     return_dict = {}
     for k, v in data.metrics.items():
         return_dict[f"metrics.{k}"] = v
@@ -65,7 +65,7 @@ def _get_train_output_tensor_dict(data: TrainOutput) -> Dict[str, torch.Tensor]:
 
 def get_predict_output_tensor_dict(
     output: BatchData, next_state: PrognosticState
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     return flatten_dict(
         {
             "output": output.data,
@@ -76,7 +76,7 @@ def get_predict_output_tensor_dict(
 
 def get_regression_stepper_and_data(
     n_forward_steps: int = 1,
-) -> Tuple[DiffusionStepper, BatchData]:
+) -> tuple[DiffusionStepper, BatchData]:
     in_names = ["a", "b"]
     out_names = ["b", "c"]
     n_samples = 3

@@ -1,12 +1,10 @@
-from typing import List
-
 from fme.core.typing_ import TensorDict, TensorMapping
 
 from ..models import ModelOutputs
 
 
 def _check_all_datasets_compatible_sample_dim(
-    tensor_datasets: List[TensorMapping], sample_dim: int = 1
+    tensor_datasets: list[TensorMapping], sample_dim: int = 1
 ) -> int:
     """
     Check that all fields in all datasets have a sample dimension of either 1 or the
@@ -60,8 +58,8 @@ def _check_batch_dims_for_recording(
 
 
 def _fold_sample_dim(
-    tensor_datasets: List[TensorMapping], sample_dim: int = 1
-) -> List[TensorDict]:
+    tensor_datasets: list[TensorMapping], sample_dim: int = 1
+) -> list[TensorDict]:
     """
     Takes data with a [batch, sample, y, x] dimension and returns a list of
     dictionaries with a [batch, y, x] dimension.

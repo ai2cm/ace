@@ -2,7 +2,8 @@ import contextlib
 import dataclasses
 import logging
 import os
-from typing import Any, Dict, Mapping, Union
+from collections.abc import Mapping
+from typing import Any
 
 from fme.core.distributed import Distributed
 from fme.core.wandb import WandB
@@ -43,7 +44,7 @@ class LoggingConfig:
     log_to_file: bool = True
     log_to_wandb: bool = True
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    level: Union[str, int] = logging.INFO
+    level: str | int = logging.INFO
 
     def __post_init__(self):
         self._dist = Distributed.get_instance()
@@ -115,7 +116,7 @@ def log_versions():
     logging.info("----------------------------------------")
 
 
-def retrieve_env_vars(names=ENV_VAR_NAMES) -> Dict[str, str]:
+def retrieve_env_vars(names=ENV_VAR_NAMES) -> dict[str, str]:
     """Return a dictionary of specific environmental variables."""
     output = {}
     for name in names:

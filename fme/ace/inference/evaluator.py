@@ -1,7 +1,7 @@
 import dataclasses
 import logging
 import os
-from typing import Callable, Optional, Sequence
+from collections.abc import Callable, Sequence
 
 import dacite
 import torch
@@ -84,7 +84,7 @@ class InferenceEvaluatorConfig:
     checkpoint_path: str
     logging: LoggingConfig
     loader: InferenceDataLoaderConfig
-    prediction_loader: Optional[InferenceDataLoaderConfig] = None
+    prediction_loader: InferenceDataLoaderConfig | None = None
     forward_steps_in_memory: int = 1
     data_writer: DataWriterConfig = dataclasses.field(
         default_factory=lambda: DataWriterConfig()
@@ -92,7 +92,7 @@ class InferenceEvaluatorConfig:
     aggregator: InferenceEvaluatorAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceEvaluatorAggregatorConfig()
     )
-    stepper_override: Optional[StepperOverrideConfig] = None
+    stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
@@ -107,7 +107,7 @@ class InferenceEvaluatorConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -134,7 +134,7 @@ class InferenceEvaluatorConfig:
         )
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(
         data_class=InferenceEvaluatorConfig,

@@ -1,6 +1,6 @@
 import logging
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Sequence
 
 import torch
 import xarray as xr
@@ -10,14 +10,14 @@ from fme.core.histogram import DynamicHistogram
 
 
 class _HistogramAggregator:
-    def __init__(self, n_times: int, names: Optional[Sequence[str]] = None):
-        self._histograms: Optional[Mapping[str, DynamicHistogram]] = None
+    def __init__(self, n_times: int, names: Sequence[str] | None = None):
+        self._histograms: Mapping[str, DynamicHistogram] | None = None
         self._n_times = n_times
         self._names = names
 
     def record_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         i_time_start: int,
     ):
         if self._histograms is None:
@@ -74,7 +74,7 @@ class PairedHistogramDataWriter:
         path: str,
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
     ):
         self._target_writer = HistogramDataWriter(
             path=path,
@@ -93,8 +93,8 @@ class PairedHistogramDataWriter:
 
     def append_batch(
         self,
-        target: Dict[str, torch.Tensor],
-        prediction: Dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
+        prediction: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):
@@ -125,7 +125,7 @@ class HistogramDataWriter:
         n_timesteps: int,
         filename: str,
         variable_metadata: Mapping[str, VariableMetadata],
-        save_names: Optional[Sequence[str]],
+        save_names: Sequence[str] | None,
     ):
         """
         Args:
@@ -142,7 +142,7 @@ class HistogramDataWriter:
 
     def append_batch(
         self,
-        data: Dict[str, torch.Tensor],
+        data: dict[str, torch.Tensor],
         start_timestep: int,
         batch_time: xr.DataArray,
     ):

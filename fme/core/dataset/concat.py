@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple, Union
+from collections.abc import Sequence
 
 import torch
 import xarray as xr
@@ -9,7 +9,7 @@ from fme.core.typing_ import TensorDict
 
 
 class XarrayConcat(torch.utils.data.Dataset):
-    def __init__(self, datasets: Sequence[Union[XarrayDataset, XarraySubset]]):
+    def __init__(self, datasets: Sequence[XarrayDataset | XarraySubset]):
         self._dataset = torch.utils.data.ConcatDataset(datasets)
         sample_start_times = datasets[0].sample_start_times
         for dataset in datasets[1:]:
@@ -27,7 +27,7 @@ class XarrayConcat(torch.utils.data.Dataset):
     def __len__(self):
         return len(self._dataset)
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         return self._dataset[idx]
 
     @property

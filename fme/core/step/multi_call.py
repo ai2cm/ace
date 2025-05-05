@@ -1,6 +1,7 @@
 import dataclasses
+from collections.abc import Callable
 from copy import copy
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
+from typing import Any, TypeVar
 
 import torch
 
@@ -13,8 +14,8 @@ from fme.core.typing_ import TensorDict, TensorMapping
 
 
 def replace_multi_call(
-    selector: StepSelector, multi_call: MultiCallConfig | None, state: Dict[str, Any]
-) -> Tuple[StepSelector, Dict[str, Any]]:
+    selector: StepSelector, multi_call: MultiCallConfig | None, state: dict[str, Any]
+) -> tuple[StepSelector, dict[str, Any]]:
     """
     Replace the multi-call configuration in a StepSelector and ensure the
     associated state can be loaded as a multi-call step.
@@ -39,7 +40,7 @@ def replace_multi_call(
     """
     state_copy = state.copy()
     if selector.type == "multi_call":
-        wrapped_selector_dict: Dict[str, Any] = selector.config["wrapped_step"]
+        wrapped_selector_dict: dict[str, Any] = selector.config["wrapped_step"]
         include_multi_call_in_loss = selector.config.get(
             "include_multi_call_in_loss", True
         )
@@ -121,8 +122,8 @@ class MultiCallStepConfig(StepConfigABC):
 
     def get_loss_normalizer(
         self,
-        extra_names: List[str] | None = None,
-        extra_residual_scaled_names: List[str] | None = None,
+        extra_names: list[str] | None = None,
+        extra_residual_scaled_names: list[str] | None = None,
     ) -> StandardNormalizer:
         """
         Get the loss normalizer for the multi-call step.
@@ -157,28 +158,28 @@ class MultiCallStepConfig(StepConfigABC):
         )
 
     @property
-    def _multi_call_outputs(self) -> List[str]:
+    def _multi_call_outputs(self) -> list[str]:
         if self.config is None:
             return []
         return self.config.names
 
     @property
-    def input_names(self) -> List[str]:
+    def input_names(self) -> list[str]:
         return self.wrapped_step.input_names
 
-    def get_next_step_forcing_names(self) -> List[str]:
+    def get_next_step_forcing_names(self) -> list[str]:
         return self.wrapped_step.get_next_step_forcing_names()
 
     @property
-    def output_names(self) -> List[str]:
+    def output_names(self) -> list[str]:
         return self.wrapped_step.output_names + self._multi_call_outputs
 
     @property
-    def next_step_input_names(self) -> List[str]:
+    def next_step_input_names(self) -> list[str]:
         return self.wrapped_step.next_step_input_names
 
     @property
-    def loss_names(self) -> List[str]:
+    def loss_names(self) -> list[str]:
         if self.include_multi_call_in_loss:
             return self.wrapped_step.loss_names + self._multi_call_outputs
         else:
@@ -291,7 +292,7 @@ class MultiCallStep(StepABC):
             state = {**multi_called_outputs, **state}
         return state
 
-    def get_state(self) -> Dict[str, Any]:
+    def get_state(self) -> dict[str, Any]:
         """
         Get the ML model state of the multi-call step.
 
@@ -302,7 +303,7 @@ class MultiCallStep(StepABC):
             "wrapped_step": self._wrapped_step.get_state(),
         }
 
-    def load_state(self, state: Dict[str, Any]):
+    def load_state(self, state: dict[str, Any]):
         """
         Load the ML model state of the multi-call step.
 

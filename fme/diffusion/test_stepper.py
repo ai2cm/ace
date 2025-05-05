@@ -1,6 +1,7 @@
 import datetime
 from collections import namedtuple
-from typing import Iterable, List, Literal, Optional, Tuple, Union
+from collections.abc import Iterable
+from typing import Literal
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -268,14 +269,14 @@ def _setup_and_train_on_batch(
     data: TensorDict,
     in_names,
     out_names,
-    ocean_config: Optional[OceanConfig],
-    optimization_config: Optional[OptimizationConfig],
+    ocean_config: OceanConfig | None,
+    optimization_config: OptimizationConfig | None,
 ):
     """Sets up the requisite classes to run train_on_batch."""
     module = ReturnZerosModule(len(in_names), len(out_names))
 
     if optimization_config is None:
-        optimization: Union[NullOptimization, Optimization] = NullOptimization()
+        optimization: NullOptimization | Optimization = NullOptimization()
     else:
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
@@ -345,9 +346,9 @@ class Multiply(torch.nn.Module):
 
 
 def _get_stepper(
-    in_names: List[str],
-    out_names: List[str],
-    ocean_config: Optional[OceanConfig] = None,
+    in_names: list[str],
+    out_names: list[str],
+    ocean_config: OceanConfig | None = None,
     module_name: Literal["PassThrough"] = "PassThrough",
     **kwargs,
 ):
@@ -415,8 +416,8 @@ def test_step_with_prescribed_ocean():
 
 
 def get_data_for_predict(
-    n_steps, forcing_names: List[str]
-) -> Tuple[PrognosticState, BatchData]:
+    n_steps, forcing_names: list[str]
+) -> tuple[PrognosticState, BatchData]:
     n_samples = 3
     input_data = BatchData.new_on_device(
         data={"a": torch.rand(n_samples, 1, 5, 5).to(DEVICE)},

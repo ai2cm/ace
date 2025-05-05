@@ -1,7 +1,6 @@
 import dataclasses
 import inspect
 import pathlib
-from typing import List
 
 import pytest
 import torch
@@ -52,11 +51,11 @@ def test_standalone_checkpoints_config_init_args():
 
 def save_coupled_stepper(
     base_dir: pathlib.Path,
-    ocean_in_names: List[str],
-    ocean_out_names: List[str],
-    atmos_in_names: List[str],
-    atmos_out_names: List[str],
-    data_shape: List[int],
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
+    data_shape: list[int],
     nz_interface: int = 7,
     sst_name_in_ocean_data: str = "sst",
     sfc_temp_name_in_atmosphere_data: str = "surface_temperature",

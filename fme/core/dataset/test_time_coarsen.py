@@ -1,5 +1,3 @@
-from typing import List, Tuple
-
 import pytest
 import torch
 import xarray as xr
@@ -10,7 +8,7 @@ from fme.core.typing_ import TensorDict
 
 
 class BasicDataset(torch.utils.data.Dataset):
-    def __init__(self, samples: List[Tuple[TensorDict, xr.DataArray]]):
+    def __init__(self, samples: list[tuple[TensorDict, xr.DataArray]]):
         if len(samples) == 0:
             raise ValueError("At least one sample is required")
         if len(set(len(sample[1]) for sample in samples)) != 1:
@@ -20,7 +18,7 @@ class BasicDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.samples)
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         return self.samples[idx]
 
     @property
@@ -35,7 +33,7 @@ class BasicDataset(torch.utils.data.Dataset):
         return self.samples[0][1].shape[0]
 
 
-def get_sample(names: List[str], n_timesteps: int) -> Tuple[TensorDict, xr.DataArray]:
+def get_sample(names: list[str], n_timesteps: int) -> tuple[TensorDict, xr.DataArray]:
     n_lat = 8
     n_lon = 16
     data = {name: torch.randn(n_timesteps, n_lat, n_lon) for name in names}

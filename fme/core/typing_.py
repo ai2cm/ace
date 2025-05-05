@@ -1,10 +1,11 @@
 import dataclasses
-from typing import Dict, Mapping, NewType
+from collections.abc import Mapping
+from typing import NewType
 
 import torch
 
 TensorMapping = Mapping[str, torch.Tensor]
-TensorDict = Dict[str, torch.Tensor]
+TensorDict = dict[str, torch.Tensor]
 EnsembleTensorDict = NewType("EnsembleTensorDict", TensorDict)
 EnsembleTensorDict.__doc__ = """
 A dictionary of tensors with an explicit ensemble (sample) dimension, where

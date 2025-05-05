@@ -1,5 +1,5 @@
 import abc
-from typing import Any, Dict, List, Type, TypeVar, final
+from typing import Any, TypeVar, final
 
 import torch
 import torch_harmonics
@@ -143,21 +143,21 @@ class GriddedOperations(abc.ABC):
         grid: str = "legendre-gauss",
     ) -> torch_harmonics.RealSHT: ...
 
-    def to_state(self) -> Dict[str, Any]:
+    def to_state(self) -> dict[str, Any]:
         return {
             "type": self.__class__.__name__,
             "state": self.get_initialization_kwargs(),
         }
 
     @abc.abstractmethod
-    def get_initialization_kwargs(self) -> Dict[str, Any]:
+    def get_initialization_kwargs(self) -> dict[str, Any]:
         """
         Get the keyword arguments needed to initialize the instance.
         """
         ...
 
     @classmethod
-    def from_state(cls, state: Dict[str, Any]) -> "GriddedOperations":
+    def from_state(cls, state: dict[str, Any]) -> "GriddedOperations":
         """
         Given a dictionary with a "type" key and a "state" key, return
         the GriddedOperations it describes.
@@ -190,7 +190,7 @@ class GriddedOperations(abc.ABC):
 T = TypeVar("T")
 
 
-def get_all_subclasses(cls: Type[T]) -> List[Type[T]]:
+def get_all_subclasses(cls: type[T]) -> list[type[T]]:
     """
     Gets all subclasses of a given class, including their subclasses etc.
     """
@@ -257,7 +257,7 @@ class LatLonOperations(GriddedOperations):
             self._cpu_area.shape[-2], self._cpu_area.shape[-1], grid=grid
         ).to(get_device())
 
-    def get_initialization_kwargs(self) -> Dict[str, Any]:
+    def get_initialization_kwargs(self) -> dict[str, Any]:
         return {"area_weights": self._cpu_area}
 
 
@@ -287,5 +287,5 @@ class HEALPixOperations(GriddedOperations):
     def get_real_sht(self, grid: str = "legendre-gauss") -> torch_harmonics.RealSHT:
         raise NotImplementedError("SHT is not implemented for HEALPix.")
 
-    def get_initialization_kwargs(self) -> Dict[str, Any]:
+    def get_initialization_kwargs(self) -> dict[str, Any]:
         return {}

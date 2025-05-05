@@ -1,7 +1,8 @@
 import logging
 import os
 import time
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import wandb
@@ -251,7 +252,7 @@ def init_wandb_with_resumption(
             f.write(wandb_id())
     else:
         # resuming
-        with open(os.path.join(experiment_dir, wandb_run_id_file), "r") as f:
+        with open(os.path.join(experiment_dir, wandb_run_id_file)) as f:
             wandb_run_id = f.read().strip()
         kwargs.update({"resume": "must", "id": wandb_run_id})
         wandb_init(**kwargs)

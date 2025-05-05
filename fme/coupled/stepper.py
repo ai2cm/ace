@@ -1,18 +1,8 @@
 import dataclasses
 import datetime
 import logging
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    Literal,
-    Optional,
-    Tuple,
-    Union,
-)
+from collections.abc import Callable, Generator, Iterable
+from typing import Any, Literal
 
 import dacite
 import numpy as np
@@ -71,7 +61,7 @@ class ComponentConfig:
     """
 
     timedelta: str
-    stepper: Union[StepperConfig, SingleModuleStepperConfig]
+    stepper: StepperConfig | SingleModuleStepperConfig
     loss_contributions: LossContributionsConfig = dataclasses.field(
         default_factory=lambda: LossContributionsConfig()
     )
@@ -149,7 +139,7 @@ class CoupledStepperConfig:
     ocean: ComponentConfig
     atmosphere: ComponentConfig
     sst_name: str = "sst"
-    ocean_fraction_prediction: Optional[CoupledOceanFractionConfig] = None
+    ocean_fraction_prediction: CoupledOceanFractionConfig | None = None
 
     def __post_init__(self):
         self._validate_component_configs()
@@ -239,22 +229,22 @@ class CoupledStepperConfig:
         return self._atmosphere_ocean_config.surface_temperature_name
 
     @property
-    def ocean_next_step_forcing_names(self) -> List[str]:
+    def ocean_next_step_forcing_names(self) -> list[str]:
         """Ocean next-step forcings."""
         return self.ocean.stepper.next_step_forcing_names
 
     @property
-    def ocean_forcing_exogenous_names(self) -> List[str]:
+    def ocean_forcing_exogenous_names(self) -> list[str]:
         """Ocean forcing variables that are not outputs of the atmosphere."""
         return self._ocean_forcing_exogenous_names
 
     @property
-    def atmosphere_forcing_exogenous_names(self) -> List[str]:
+    def atmosphere_forcing_exogenous_names(self) -> list[str]:
         """Atmosphere forcing variables that are not outputs of the ocean."""
         return self._atmosphere_forcing_exogenous_names
 
     @property
-    def shared_forcing_exogenous_names(self) -> List[str]:
+    def shared_forcing_exogenous_names(self) -> list[str]:
         """Exogenous forcing variables shared by both components. Must be
         present in the atmosphere data on disk. If time-varying, the ocean
         receives the atmosphere data forcings averaged over its step window.
@@ -263,12 +253,12 @@ class CoupledStepperConfig:
         return self._shared_forcing_exogenous_names
 
     @property
-    def atmosphere_to_ocean_forcing_names(self) -> List[str]:
+    def atmosphere_to_ocean_forcing_names(self) -> list[str]:
         """Ocean forcing variables that are outputs of the atmosphere."""
         return self._atmosphere_to_ocean_forcing_names
 
     @property
-    def ocean_to_atmosphere_forcing_names(self) -> List[str]:
+    def ocean_to_atmosphere_forcing_names(self) -> list[str]:
         """Atmosphere forcing variables that are outputs of the ocean."""
         return self._ocean_to_atmosphere_forcing_names
 
@@ -425,7 +415,7 @@ class CoupledStepperConfig:
 
     def get_stepper(
         self,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         gridded_operations: GriddedOperations,
         vertical_coordinate: CoupledVerticalCoordinate,
     ):
@@ -484,7 +474,7 @@ class CoupledStepperConfig:
         )
 
     @classmethod
-    def remove_deprecated_keys(cls, state: Dict[str, Any]) -> Dict[str, Any]:
+    def remove_deprecated_keys(cls, state: dict[str, Any]) -> dict[str, Any]:
         state_copy = state.copy()
         if "sst_mask_name" in state_copy:
             del state_copy["sst_mask_name"]
@@ -638,7 +628,7 @@ class CoupledStepperTrainLoss:
         self,
         prediction: ComponentStepPrediction,
         target_data: TensorMapping,
-    ) -> Optional[torch.Tensor]:
+    ) -> torch.Tensor | None:
         loss_obj = self._loss_objs[prediction.realm]
         if loss_obj.step_is_optimized(prediction.step):
             return loss_obj(prediction, target_data)
@@ -661,7 +651,7 @@ class CoupledStepper(
         config: CoupledStepperConfig,
         ocean: Stepper,
         atmosphere: Stepper,
-        sst_mask: Optional[torch.Tensor] = None,
+        sst_mask: torch.Tensor | None = None,
     ):
         """
         Args:
@@ -724,7 +714,7 @@ class CoupledStepper(
             "ocean_state": self.ocean.get_state(),
         }
 
-    def load_state(self, state: Dict[str, Any]):
+    def load_state(self, state: dict[str, Any]):
         self.atmosphere.load_state(state["atmosphere_state"])
         self.ocean.load_state(state["ocean_state"])
 
@@ -738,23 +728,23 @@ class CoupledStepper(
         return self._config.n_inner_steps
 
     @property
-    def _ocean_forcing_exogenous_names(self) -> List[str]:
+    def _ocean_forcing_exogenous_names(self) -> list[str]:
         return self._config.ocean_forcing_exogenous_names
 
     @property
-    def _atmosphere_forcing_exogenous_names(self) -> List[str]:
+    def _atmosphere_forcing_exogenous_names(self) -> list[str]:
         return self._config.atmosphere_forcing_exogenous_names
 
     @property
-    def _shared_forcing_exogenous_names(self) -> List[str]:
+    def _shared_forcing_exogenous_names(self) -> list[str]:
         return self._config.shared_forcing_exogenous_names
 
     @property
-    def _atmosphere_to_ocean_forcing_names(self) -> List[str]:
+    def _atmosphere_to_ocean_forcing_names(self) -> list[str]:
         return self._config.atmosphere_to_ocean_forcing_names
 
     @property
-    def _ocean_to_atmosphere_forcing_names(self) -> List[str]:
+    def _ocean_to_atmosphere_forcing_names(self) -> list[str]:
         return self._config.ocean_to_atmosphere_forcing_names
 
     def _forcings_from_ocean_with_ocean_fraction(
@@ -1018,7 +1008,7 @@ class CoupledStepper(
 
     def _process_prediction_generator_list(
         self,
-        output_list: List[ComponentStepPrediction],
+        output_list: list[ComponentStepPrediction],
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
@@ -1038,7 +1028,7 @@ class CoupledStepper(
         initial_condition: CoupledPrognosticState,
         forcing: CoupledBatchData,
         compute_derived_variables: bool = False,
-    ) -> Tuple[CoupledPairedData, CoupledPrognosticState]:
+    ) -> tuple[CoupledPairedData, CoupledPrognosticState]:
         """
         Predict multiple steps forward given initial condition and reference data.
         """

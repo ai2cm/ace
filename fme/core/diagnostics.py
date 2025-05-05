@@ -1,5 +1,6 @@
 import os
-from typing import Mapping, Protocol
+from collections.abc import Mapping
+from typing import Protocol
 
 import numpy as np
 import xarray as xr

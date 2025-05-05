@@ -1,4 +1,4 @@
-from typing import Sequence, Tuple, Union
+from collections.abc import Sequence
 
 import xarray as xr
 
@@ -10,9 +10,7 @@ from fme.core.typing_ import TensorDict
 
 
 class MergedXarrayDataset:
-    def __init__(
-        self, datasets: Sequence[Union[XarrayDataset, XarraySubset, XarrayConcat]]
-    ):
+    def __init__(self, datasets: Sequence[XarrayDataset | XarraySubset | XarrayConcat]):
         self.datasets = datasets
 
         combined_names = [
@@ -40,7 +38,7 @@ class MergedXarrayDataset:
                          must have the same number of steps per sample item."
                 )
 
-    def __getitem__(self, idx: int) -> Tuple[TensorDict, xr.DataArray]:
+    def __getitem__(self, idx: int) -> tuple[TensorDict, xr.DataArray]:
         tensors = {}
         for dataset in self.datasets:
             ds_tensors, time = dataset[idx]
@@ -52,7 +50,7 @@ class MergedXarrayDataset:
 
     def get_sample_by_time_slice(
         self, time_slice: slice
-    ) -> Tuple[TensorDict, xr.DataArray]:
+    ) -> tuple[TensorDict, xr.DataArray]:
         tensors: TensorDict = {}
         for dataset in self.datasets:
             ds_tensors, time = dataset.get_sample_by_time_slice(time_slice)

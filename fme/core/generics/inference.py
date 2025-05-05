@@ -1,5 +1,6 @@
 import logging
-from typing import Callable, Generic, Iterator, Protocol, Tuple, TypeVar
+from collections.abc import Callable, Iterator
+from typing import Generic, Protocol, TypeVar
 
 import torch
 
@@ -20,7 +21,7 @@ class PredictFunction(Protocol, Generic[PS, FD, SD]):
         initial_condition: PS,
         forcing: FD,
         compute_derived_variables: bool = False,
-    ) -> Tuple[SD, PS]: ...
+    ) -> tuple[SD, PS]: ...
 
 
 class Looper(Generic[PS, FD, SD]):

@@ -1,6 +1,6 @@
 """Pure functions, e.g. metrics and math functions that are useful for downscaling."""
 
-from typing import Callable, Collection, Tuple
+from collections.abc import Callable, Collection
 
 import torch
 
@@ -78,7 +78,7 @@ def min_max_normalization(
 
 def _normalize_tensors(
     x: torch.Tensor, y: torch.Tensor
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     min_ = torch.min(x.min(), y.min())
     max_ = torch.max(x.max(), y.max())
     return min_max_normalization(x, min_, max_), min_max_normalization(x, min_, max_)

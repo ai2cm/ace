@@ -51,8 +51,8 @@
 import dataclasses
 import logging
 import os
+from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
-from typing import Callable, Dict, Mapping, Optional, Sequence
 
 import dacite
 import torch
@@ -148,9 +148,9 @@ class AggregatorBuilder(
         n_timesteps: int,
         output_dir: str,
         normalize: Callable[[TensorMapping], TensorDict],
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
-        loss_scaling: Optional[Dict[str, torch.Tensor]] = None,
-        channel_mean_names: Optional[Sequence[str]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        loss_scaling: dict[str, torch.Tensor] | None = None,
+        channel_mean_names: Sequence[str] | None = None,
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
@@ -216,10 +216,10 @@ def run_train(builders: TrainBuilders, config: TrainConfig):
     )
     trainer = build_trainer(builders, config)
     trainer.train()
-    logging.info("DONE ---- rank %d" % dist.rank)
+    logging.info(f"DONE ---- rank {dist.rank}")
 
 
-def main(yaml_config: str, override_dotlist: Optional[Sequence[str]] = None):
+def main(yaml_config: str, override_dotlist: Sequence[str] | None = None):
     data = prepare_config(yaml_config, override_dotlist)
     train_config: TrainConfig = dacite.from_dict(
         data_class=TrainConfig,

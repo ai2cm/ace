@@ -1,7 +1,7 @@
 import dataclasses
 import random
+from collections.abc import Generator
 from itertools import product
-from typing import Generator, List, Tuple, Union
 
 import torch
 from torch.utils.data import DataLoader
@@ -60,13 +60,13 @@ def _get_patch_slices(full_coords_size: int, patch_slice: slice):
 
 
 def get_patches(
-    yx_extents: Tuple[int, int],
-    yx_patch_extents: Tuple[int, int],
+    yx_extents: tuple[int, int],
+    yx_patch_extents: tuple[int, int],
     overlap: int,
     drop_partial_patches: bool = True,
     y_offset: int = 0,
     x_offset: int = 0,
-) -> List[Patch]:
+) -> list[Patch]:
     """
     Generate a list of patches for the given extents and patch size.
 
@@ -106,7 +106,7 @@ def get_patches(
 
 
 def generate_patched_data(
-    data: BatchData, patches: List[Patch]
+    data: BatchData, patches: list[Patch]
 ) -> Generator[BatchData, None, None]:
     """
     Generate patches from the given data and patches.
@@ -119,8 +119,8 @@ def generate_patched_data(
 
 def paired_patch_generator_from_batch(
     batch: PairedBatchData,
-    coarse_patches: List[Patch],
-    fine_patches: List[Patch],
+    coarse_patches: list[Patch],
+    fine_patches: list[Patch],
 ) -> Generator[PairedBatchData, None, None]:
     """
     Generate patches from paired fine/coarse data.
@@ -148,8 +148,8 @@ def _random_offset(full_size, patch_size):
 
 def paired_patch_generator_from_loader(
     loader: DataLoader[PairedBatchItem],
-    coarse_yx_extent: Tuple[int, int],
-    coarse_yx_patch_extents: Tuple[int, int],
+    coarse_yx_extent: tuple[int, int],
+    coarse_yx_patch_extents: tuple[int, int],
     downscale_factor: int,
     coarse_overlap: int = 0,
     drop_partial_patches: bool = True,
@@ -198,15 +198,14 @@ def paired_patch_generator_from_loader(
             y_offset=coarse_y_random_offset * downscale_factor,
             x_offset=coarse_x_random_offset * downscale_factor,
         )
-        for patch_data in paired_patch_generator_from_batch(
+        yield from paired_patch_generator_from_batch(
             batch,
             coarse_patches=coarse_patches,
             fine_patches=fine_patches,
-        ):
-            yield patch_data
+        )
 
 
-def _get_full_extent_from_patches(patches: List[Patch]) -> Tuple[int, int]:
+def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:
     # input patches should have int start/stop values
     y_max = max(patch.input_slice.y.stop for patch in patches)
     x_max = max(patch.input_slice.x.stop for patch in patches)
@@ -214,7 +213,7 @@ def _get_full_extent_from_patches(patches: List[Patch]) -> Tuple[int, int]:
 
 
 def composite_patch_predictions(
-    predictions: List[TensorDict], patches: List[Patch]
+    predictions: list[TensorDict], patches: list[Patch]
 ) -> TensorDict:
     """
     Take the predictions from patches and combine them into a single
@@ -274,8 +273,8 @@ class PatchPredictor:
 
     def __init__(
         self,
-        model: Union[DiffusionModel, Model],
-        coarse_extent: Tuple[int, int],
+        model: DiffusionModel | Model,
+        coarse_extent: tuple[int, int],
         coarse_horizontal_overlap: int = 1,
     ):
         """
@@ -341,7 +340,7 @@ class PatchPredictor:
         return outputs
 
 
-def _divide_into_slices(full_size: int, patch_size: int, overlap: int) -> List[slice]:
+def _divide_into_slices(full_size: int, patch_size: int, overlap: int) -> list[slice]:
     # Size covered by N patches = patch_size * N - (N-1)*overlap
     # The end of the last slice might extend past the end of full_size,
     # this is ok as it is adjusted during runtime to avoid out of bounds

@@ -1,4 +1,4 @@
-from typing import Dict, List, Mapping
+from collections.abc import Mapping
 
 import cftime
 import fsspec
@@ -29,10 +29,10 @@ def insert_into_zarr(
 
 def initialize_zarr(
     path: str,
-    vars: List[str],
+    vars: list[str],
     dim_sizes: tuple,
     chunks: Mapping[str, int],
-    coords: Dict[str, np.ndarray],
+    coords: dict[str, np.ndarray],
     dim_names: tuple,
     dtype="f4",
 ):
@@ -87,9 +87,9 @@ class ZarrWriter:
         self,
         path: str,
         dims: tuple,
-        coords: Dict[str, np.ndarray],
-        data_vars: List[str],
-        chunks: Dict[str, int] | None = None,
+        coords: dict[str, np.ndarray],
+        data_vars: list[str],
+        chunks: dict[str, int] | None = None,
     ):
         """
         Initialize the ZarrWriter with the specified parameters.

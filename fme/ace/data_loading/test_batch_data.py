@@ -1,5 +1,3 @@
-from typing import List
-
 import numpy as np
 import pytest
 import torch
@@ -14,10 +12,10 @@ def assert_metadata_equal(a: BatchData, b: BatchData):
 
 
 def get_batch_data(
-    names: List[str],
+    names: list[str],
     n_samples: int,
     n_times: int,
-    horizontal_dims: List[str],
+    horizontal_dims: list[str],
     n_lat: int = 8,
     n_lon: int = 16,
 ):
@@ -41,7 +39,7 @@ def get_batch_data(
     ],
 )
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
-def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps: int):
+def test_get_start(names: list[str], prognostic_names: list[str], n_ic_timesteps: int):
     n_samples = 2
     n_times = 5
     n_lat = 8
@@ -76,7 +74,7 @@ def test_get_start(names: List[str], prognostic_names: List[str], n_ic_timesteps
     ],
 )
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
-def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: int):
+def test_get_end(names: list[str], prognostic_names: list[str], n_ic_timesteps: int):
     n_samples = 2
     n_times = 5
     n_lat = 8
@@ -110,7 +108,7 @@ def test_get_end(names: List[str], prognostic_names: List[str], n_ic_timesteps: 
     ],
 )
 @pytest.mark.parametrize("n_ic_timesteps", [1, 2])
-def test_prepend(names: List[str], prepend_names: List[str], n_ic_timesteps: int):
+def test_prepend(names: list[str], prepend_names: list[str], n_ic_timesteps: int):
     n_samples = 2
     n_times = 5
     n_lat = 8

@@ -1,5 +1,8 @@
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Type, TypeVar
+from collections.abc import Callable, Mapping
+
+# we use Type to distinguish from type attr of CorrectorSelector
+from typing import Any, ClassVar, Type, TypeVar  # noqa: UP035
 
 from .registry import Registry
 
@@ -44,7 +47,7 @@ class CorrectorSelector:
             raise ValueError("CorrectorSelector.registry should not be set manually")
 
     @classmethod
-    def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:
+    def register(cls, type_name) -> Callable[[Type[T]], Type[T]]:  # noqa: UP006
         return cls.registry.register(type_name)
 
     @classmethod

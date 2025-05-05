@@ -1,6 +1,7 @@
 import dataclasses
 import logging
-from typing import Any, List, Mapping, Optional, Tuple, Union
+from collections.abc import Mapping
+from typing import Any
 
 import dacite
 import torch
@@ -27,7 +28,7 @@ class ModelOutputs:
     prediction: TensorDict
     target: TensorDict
     loss: torch.Tensor
-    latent_steps: List[torch.Tensor] = dataclasses.field(default_factory=list)
+    latent_steps: list[torch.Tensor] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -36,7 +37,7 @@ class PairedNormalizationConfig:
     coarse: NormalizationConfig
 
     def build(
-        self, in_names: List[str], out_names: List[str]
+        self, in_names: list[str], out_names: list[str]
     ) -> FineResCoarseResPair[StandardNormalizer]:
         return FineResCoarseResPair[StandardNormalizer](
             coarse=self.coarse.build(list(set(in_names).union(out_names))),
@@ -57,8 +58,8 @@ class PairedNormalizationConfig:
 class DownscalingModelConfig:
     module: ModuleRegistrySelector
     loss: LossConfig
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: PairedNormalizationConfig
     use_fine_topography: bool = False
 
@@ -72,7 +73,7 @@ class DownscalingModelConfig:
 
     def build(
         self,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
@@ -123,7 +124,7 @@ class Model:
         module: torch.nn.Module,
         normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         config: DownscalingModelConfig,
     ) -> None:
@@ -150,7 +151,7 @@ class Model:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        optimization: Union[Optimization, NullOptimization],
+        optimization: Optimization | NullOptimization,
     ) -> ModelOutputs:
         return self._run_on_batch(batch, optimization)
 
@@ -171,7 +172,7 @@ class Model:
     def _run_on_batch(
         self,
         batch: PairedBatchData,
-        optimizer: Union[Optimization, NullOptimization],
+        optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
 
@@ -255,8 +256,8 @@ class DiffusionModelConfig:
 
     module: DiffusionModuleRegistrySelector
     loss: LossConfig
-    in_names: List[str]
-    out_names: List[str]
+    in_names: list[str]
+    out_names: list[str]
     normalization: PairedNormalizationConfig
     p_mean: float
     p_std: float
@@ -277,7 +278,7 @@ class DiffusionModelConfig:
 
     def build(
         self,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
@@ -401,7 +402,7 @@ class DiffusionModel:
         module: torch.nn.Module,
         normalizer: FineResCoarseResPair[StandardNormalizer],
         loss: torch.nn.Module,
-        coarse_shape: Tuple[int, int],
+        coarse_shape: tuple[int, int],
         downscale_factor: int,
         sigma_data: float,
     ) -> None:
@@ -437,7 +438,7 @@ class DiffusionModel:
         return torch.nn.ModuleList([self.module])
 
     def _get_input_from_coarse(
-        self, coarse: TensorMapping, topography: Optional[torch.Tensor]
+        self, coarse: TensorMapping, topography: torch.Tensor | None
     ) -> torch.Tensor:
         inputs = filter_tensor_mapping(coarse, self.in_packer.names)
         normalized = self.in_packer.pack(
@@ -462,7 +463,7 @@ class DiffusionModel:
     def train_on_batch(
         self,
         batch: PairedBatchData,
-        optimizer: Union[Optimization, NullOptimization],
+        optimizer: Optimization | NullOptimization,
     ) -> ModelOutputs:
         """Performs a denoising training step on a batch of data."""
         coarse, fine = batch.coarse.data, batch.fine.data

@@ -2,7 +2,6 @@ import contextlib
 import logging
 import time
 import warnings
-from typing import Dict
 
 import numpy as np
 
@@ -70,7 +69,7 @@ class GlobalTimer:
         singleton = None
 
     def __init__(self):
-        self._timers: Dict[str, CumulativeTimer] = {}
+        self._timers: dict[str, CumulativeTimer] = {}
         self._active = False
         self._current_category: str | None = None
 
@@ -157,7 +156,7 @@ class GlobalTimer:
         else:
             return np.nan
 
-    def get_durations(self) -> Dict[str, float]:
+    def get_durations(self) -> dict[str, float]:
         return {category: timer.duration for category, timer in self._timers.items()}
 
     def log_durations(self):

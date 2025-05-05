@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.distributed import Distributed
@@ -39,7 +39,7 @@ class CoupledDataLoaderConfig:
     dataset: Sequence[CoupledDatasetConfig]
     batch_size: int
     num_data_workers: int = 1
-    prefetch_factor: Optional[int] = None
+    prefetch_factor: int | None = None
     strict_ensemble: bool = True
 
     def __post_init__(self):

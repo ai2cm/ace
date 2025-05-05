@@ -1,5 +1,6 @@
 import dataclasses
-from typing import Any, Callable, Dict, List, Literal, Mapping
+from collections.abc import Callable, Mapping
+from typing import Any, Literal
 
 import torch
 import torch.linalg
@@ -12,7 +13,7 @@ from fme.core.typing_ import TensorDict
 
 class NaNLoss(torch.nn.Module):
     def __init__(self):
-        super(NaNLoss, self).__init__()
+        super().__init__()
 
     def forward(self, input, target, batch_weights):
         return torch.tensor(torch.nan)
@@ -22,8 +23,8 @@ class WeightedMappingLoss:
     def __init__(
         self,
         loss: torch.nn.Module,
-        weights: Dict[str, float],
-        out_names: List[str],
+        weights: dict[str, float],
+        out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ):
@@ -77,11 +78,11 @@ class WeightedMappingLoss:
 
         return self.loss(predict_tensors, target_tensors, batch_weights[:, None])
 
-    def get_normalizer_state(self) -> Dict[str, float]:
+    def get_normalizer_state(self) -> dict[str, float]:
         return self.normalizer.get_state()
 
     @property
-    def effective_loss_scaling(self) -> Dict[str, float]:
+    def effective_loss_scaling(self) -> dict[str, float]:
         custom_weights = dict(zip(self.packer.names, self._weight_tensor.flatten()))
         loss_normalizer_stds = self.normalizer.stds
         return {
@@ -90,8 +91,8 @@ class WeightedMappingLoss:
 
 
 def _construct_weight_tensor(
-    weights: Dict[str, float],
-    out_names: List[str],
+    weights: dict[str, float],
+    out_names: list[str],
     n_dim: int = 4,
     channel_dim: int = -3,
 ) -> torch.Tensor:
@@ -118,7 +119,7 @@ def _construct_weight_tensor(
 
 class AreaWeightedMSELoss(torch.nn.Module):
     def __init__(self, area_weighted_mean: Callable[[torch.Tensor], torch.Tensor]):
-        super(AreaWeightedMSELoss, self).__init__()
+        super().__init__()
         self._area_weighted_mean = area_weighted_mean
 
     def forward(self, x, y, weights):
@@ -217,7 +218,7 @@ class WeightedMappingLossConfig:
 
     type: Literal["MSE", "AreaWeightedMSE", "NaN"] = "MSE"
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=lambda: {})
-    weights: Dict[str, float] = dataclasses.field(default_factory=lambda: {})
+    weights: dict[str, float] = dataclasses.field(default_factory=lambda: {})
 
     def __post_init__(self):
         self.loss_config = LossConfig(
@@ -228,7 +229,7 @@ class WeightedMappingLossConfig:
     def build(
         self,
         area_weighted_mean: Callable[[torch.Tensor], torch.Tensor],
-        out_names: List[str],
+        out_names: list[str],
         normalizer: StandardNormalizer,
         channel_dim: int = -3,
     ) -> Any:

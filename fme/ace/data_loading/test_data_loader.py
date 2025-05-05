@@ -4,7 +4,6 @@ data (e.g. netCDF files)."""
 import math
 import os
 import pathlib
-from typing import List
 
 import cftime
 import numpy as np
@@ -110,7 +109,7 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
 
     # Create a dataset for each ensemble member. We assume that each member
     # corresponds to an initial condition.
-    netcdfs: List[pathlib.Path] = []
+    netcdfs: list[pathlib.Path] = []
     for i in range(num_ensemble_members):
         ic_path = tmp_path / f"ic{i}"
         ic_path.mkdir()
@@ -140,7 +139,7 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
 
     # Create a dataset for each ensemble member. We assume that each member
     # corresponds to an initial condition.
-    netcdfs: List[pathlib.Path] = []
+    netcdfs: list[pathlib.Path] = []
     for i in range(num_ensemble_members):
         ic_path = tmp_path / f"ic{i}"
         ic_path.mkdir()

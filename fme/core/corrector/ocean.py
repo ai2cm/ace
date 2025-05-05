@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
-from typing import Any, List, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import dacite
 import torch
@@ -52,7 +53,7 @@ class SeaIceFractionConfig:
 @CorrectorSelector.register("ocean_corrector")
 @dataclasses.dataclass
 class OceanCorrectorConfig:
-    force_positive_names: List[str] = dataclasses.field(default_factory=list)
+    force_positive_names: list[str] = dataclasses.field(default_factory=list)
     sea_ice_fraction_correction: SeaIceFractionConfig | None = None
     # NOTE: OceanCorrector.masking is deprecated and kept for backwards
     # compatibility with legacy SingleModuleStepperConfig checkpoints. Please

@@ -1,6 +1,7 @@
 import os
 import unittest.mock
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 import yaml
@@ -36,7 +37,7 @@ def create_evaluator_config(tmp_path, model: Mapping[str, Any], n_samples: int):
     file_path = f"{this_file}/configs/test_evaluator_config.yaml"
     experiment_dir = tmp_path / "output"
     experiment_dir.mkdir()
-    with open(file_path, "r") as file:
+    with open(file_path) as file:
         config = yaml.safe_load(file)
     config["data"]["fine"] = [{"data_path": str(paths.fine)}]
     config["data"]["coarse"] = [{"data_path": str(paths.coarse)}]
@@ -160,7 +161,7 @@ def test_evaluator_runs(
     trainer_model_config = get_trainer_model_config(model_type)
 
     if "checkpoint_path" in evaluator_model_config:
-        with open(evaluator_config_path, "r") as file:
+        with open(evaluator_config_path) as file:
             config = yaml.safe_load(file)
 
         data_loader_config = DataLoaderConfig(

@@ -1,6 +1,5 @@
 import datetime
 from contextlib import contextmanager
-from typing import Type
 
 import numpy as np
 import pytest
@@ -15,7 +14,7 @@ from .enso_coefficient import OVERLAP_THRESHOLD, EnsoCoefficientEvaluatorAggrega
 
 @contextmanager
 def change_aggregator_enso_index(
-    aggregator: Type[EnsoCoefficientEvaluatorAggregator], new_index: xr.DataArray
+    aggregator: type[EnsoCoefficientEvaluatorAggregator], new_index: xr.DataArray
 ):
     """
     Temporarily change the class attribute enso index for testing purposes.

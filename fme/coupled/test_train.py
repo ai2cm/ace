@@ -1,6 +1,5 @@
 import os
 import tempfile
-from typing import List
 
 import numpy as np
 import pytest
@@ -180,10 +179,10 @@ loader:
 def _write_test_yaml_files(
     tmp_path,
     mock_coupled_data,
-    ocean_in_names: List[str],
-    ocean_out_names: List[str],
-    atmos_in_names: List[str],
-    atmos_out_names: List[str],
+    ocean_in_names: list[str],
+    ocean_out_names: list[str],
+    atmos_in_names: list[str],
+    atmos_out_names: list[str],
     ocean_sfc_temp_name: str,
     ocean_sfc_mask_name: str,
     sea_ice_frac_name: str,

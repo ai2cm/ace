@@ -1,20 +1,7 @@
 import datetime
 import logging
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Generic,
-    Iterable,
-    Iterator,
-    Literal,
-    Mapping,
-    Optional,
-    Sized,
-    Tuple,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sized
+from typing import Any, Generic, Literal, TypeVar
 
 import numpy as np
 import torch
@@ -47,7 +34,7 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
         return map(self._func, self._iterable)
 
 
-def get_img_shape(loader: DataLoader[BatchData]) -> Tuple[int, int]:
+def get_img_shape(loader: DataLoader[BatchData]) -> tuple[int, int]:
     img_shape = None
     for batch in loader:
         shapes = {k: v.shape for k, v in batch.data.items()}
@@ -75,7 +62,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         loader: DataLoader[BatchData],
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
-        sampler: Optional[torch.utils.data.Sampler] = None,
+        sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
@@ -104,7 +91,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._mask_provider = self._properties.mask_provider
         self._sampler = sampler
         self._modifier = modifier
-        self._batch_size: Optional[int] = None
+        self._batch_size: int | None = None
         self._img_shape = get_img_shape(self._loader)
 
     @property
@@ -115,7 +102,7 @@ class GriddedData(GriddedDataABC[BatchData]):
         return SizedMap(modify_and_on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property
@@ -204,7 +191,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def __init__(
         self,
         loader: DataLoader[BatchData],
-        initial_condition: Union[PrognosticState, PrognosticStateDataRequirements],
+        initial_condition: PrognosticState | PrognosticStateDataRequirements,
         properties: DatasetProperties,
     ):
         """
@@ -226,7 +213,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         """
         self._loader = loader
         self._properties = properties.to_device()
-        self._n_initial_conditions: Optional[int] = None
+        self._n_initial_conditions: int | None = None
         if isinstance(initial_condition, PrognosticStateDataRequirements):
             self._initial_condition: PrognosticState = get_initial_condition(
                 loader, initial_condition
@@ -243,7 +230,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return SizedMap(on_device, self._loader)
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property

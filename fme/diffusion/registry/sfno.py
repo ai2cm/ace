@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from fme.core.models.conditional_sfno.sfnonet import ContextConfig
 from fme.core.models.conditional_sfno.sfnonet import (
@@ -32,7 +32,7 @@ class ConditionalSFNOBuilder(ModuleConfig):
     pos_embed: bool = True
     big_skip: bool = True
     rank: float = 1.0
-    factorization: Optional[str] = None
+    factorization: str | None = None
     separable: bool = False
     complex_network: bool = True
     complex_activation: str = "real"
@@ -44,7 +44,7 @@ class ConditionalSFNOBuilder(ModuleConfig):
         self,
         n_in_channels: int,
         n_out_channels: int,
-        img_shape: Tuple[int, int],
+        img_shape: tuple[int, int],
         n_sigma_embedding_channels: int,
     ):
         sfno_net = ConditionalSFNO(

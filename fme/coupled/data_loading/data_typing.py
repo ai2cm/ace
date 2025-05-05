@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-from typing import Dict, Tuple
 
 import numpy as np
 import torch
@@ -22,16 +21,16 @@ class CoupledCoords:
     Convenience wrapper for the coords in dict format.
     """
 
-    ocean_vertical: Dict[str, np.ndarray]
-    atmosphere_vertical: Dict[str, np.ndarray]
-    horizontal: Dict[str, np.ndarray]
+    ocean_vertical: dict[str, np.ndarray]
+    atmosphere_vertical: dict[str, np.ndarray]
+    horizontal: dict[str, np.ndarray]
 
     @property
-    def ocean(self) -> Dict[str, np.ndarray]:
+    def ocean(self) -> dict[str, np.ndarray]:
         return {**self.ocean_vertical, **self.horizontal}
 
     @property
-    def atmosphere(self) -> Dict[str, np.ndarray]:
+    def atmosphere(self) -> dict[str, np.ndarray]:
         return {**self.atmosphere_vertical, **self.horizontal}
 
 
@@ -80,8 +79,8 @@ class CoupledDatasetProperties:
         return self.atmosphere.horizontal_coordinates
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
-        metadata: Dict[str, VariableMetadata] = {}
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
+        metadata: dict[str, VariableMetadata] = {}
         metadata.update(self.ocean.variable_metadata)
         metadata.update(self.atmosphere.variable_metadata)
         return metadata
@@ -128,8 +127,8 @@ class CoupledDatasetProperties:
 
 @dataclasses.dataclass
 class CoupledDatasetItem:
-    ocean: Tuple[TensorDict, xr.DataArray]
-    atmosphere: Tuple[TensorDict, xr.DataArray]
+    ocean: tuple[TensorDict, xr.DataArray]
+    atmosphere: tuple[TensorDict, xr.DataArray]
 
 
 class CoupledDataset(torch.utils.data.Dataset):
@@ -169,7 +168,7 @@ class CoupledDataset(torch.utils.data.Dataset):
         self._n_steps_fast = n_steps_fast
 
     @property
-    def variable_metadata(self) -> Dict[str, VariableMetadata]:
+    def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 
     @property

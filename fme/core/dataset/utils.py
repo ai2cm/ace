@@ -1,6 +1,6 @@
 import asyncio
 import datetime
-from typing import Hashable, List, MutableMapping, Sequence, Tuple
+from collections.abc import Hashable, MutableMapping, Sequence
 
 import numpy as np
 import torch
@@ -15,7 +15,7 @@ SLICE_NONE = slice(None)
 
 def _get_indexers(
     variable: xr.Variable, dims: Sequence[Hashable]
-) -> Tuple[slice | None, ...]:
+) -> tuple[slice | None, ...]:
     """Returns a tuple of indexers for the dimensions provided.
 
     Indexers select all data from dimensions that exist in the variable, and
@@ -25,7 +25,7 @@ def _get_indexers(
     Inspired by similar code in xarray:
     https://github.com/pydata/xarray/blob/1d43672574332615f225089d69f95a9f8d81d912/xarray/core/computation.py#L681-L688
     """
-    indexers: List[slice | None] = []
+    indexers: list[slice | None] = []
     for dim in dims:
         if dim in variable.dims:
             indexers.append(SLICE_NONE)
@@ -111,9 +111,9 @@ def load_series_data_zarr_async(
     idx: int,
     n_steps: int,
     path: str,
-    names: List[str],
-    dims: List[str],
-    shape: List[int],
+    names: list[str],
+    dims: list[str],
+    shape: list[int],
     fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
@@ -131,9 +131,9 @@ def load_series_data(
     idx: int,
     n_steps: int,
     ds: xr.Dataset,
-    names: List[str],
-    dims: List[str],
-    shape: List[int],
+    names: list[str],
+    dims: list[str],
+    shape: list[int],
     fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)

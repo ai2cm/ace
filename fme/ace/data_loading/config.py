@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Mapping, Optional, Sequence, Union
+from collections.abc import Mapping, Sequence
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
 from fme.core.dataset.config import XarrayDataConfig
@@ -35,10 +35,10 @@ class DataLoaderConfig:
         augmentation: Configuration for data augmentation.
     """  # noqa: D415
 
-    dataset: Union[Sequence[XarrayDataConfig], Mapping[str, Sequence[XarrayDataConfig]]]
+    dataset: Sequence[XarrayDataConfig] | Mapping[str, Sequence[XarrayDataConfig]]
     batch_size: int
     num_data_workers: int = 0
-    prefetch_factor: Optional[int] = None
+    prefetch_factor: int | None = None
     strict_ensemble: bool = True
     augmentation: AugmentationConfig = dataclasses.field(
         default_factory=lambda: AugmentationConfig()

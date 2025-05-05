@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import os
-from typing import Mapping
+from collections.abc import Mapping
 
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
 from fme.core.dataset.data_typing import VariableMetadata
