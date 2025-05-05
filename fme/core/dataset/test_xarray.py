@@ -89,6 +89,7 @@ def _get_data(
     with_nans=False,
     var_names=["foo", "bar"],
     write_extra_vars=True,
+    add_ensemble_dim=False,
 ) -> MockData:
     """Constructs an xarray dataset and saves to disk in netcdf format."""
     obs_times = xr.date_range(
@@ -110,9 +111,14 @@ def _get_data(
     obs_delta = obs_times[1] - obs_times[0]
     n_levels = 2
     n_lat, n_lon = 4, 8
+    n_sample = 3
+
+    non_time_dims = ("sample", "lat", "lon") if add_ensemble_dim else ("lat", "lon")
+    non_time_shape = (n_sample, n_lat, n_lon) if add_ensemble_dim else (n_lat, n_lon)
+
     constant_var = xr.DataArray(
-        np.random.randn(n_lat, n_lon).astype(np.float32),
-        dims=("lat", "lon"),
+        np.random.randn(*non_time_shape).astype(np.float32),
+        dims=non_time_dims,
     )
     constant_scalar_var = xr.DataArray(1.0).astype(np.float32)
     ak = {f"ak_{i}": float(i) for i in range(n_levels)}
@@ -134,10 +140,10 @@ def _get_data(
         )
         data_vars: dict[str, float | xr.DataArray] = {**ak, **bk}
         for var_name in var_names:
-            data = np.random.randn(len(time), n_lat, n_lon).astype(np.float32)
+            data = np.random.randn(len(time), *non_time_shape).astype(np.float32)
             if with_nans:
                 data[0, :, 0] = np.nan
-            data_vars[var_name] = xr.DataArray(data, dims=("time", "lat", "lon"))
+            data_vars[var_name] = xr.DataArray(data, dims=("time", *non_time_dims))
 
         data_varying_scalar = np.random.randn(len(time)).astype(np.float32)
         if with_nans:
@@ -155,6 +161,16 @@ def _get_data(
             "lat": xr.DataArray(np.arange(n_lat, dtype=np.float32), dims=("lat",)),
             "lon": xr.DataArray(np.arange(n_lon, dtype=np.float32), dims=("lon",)),
         }
+        if add_ensemble_dim:
+            coords["sample"] = xr.DataArray(
+                np.arange(n_sample, dtype=np.float32), dims=("sample",)
+            )
+            # variable without the ensemble dimension is useful for checking
+            # broadcast behavior
+            data_vars["var_no_ensemble_dim"] = xr.DataArray(
+                np.random.randn(len(time), n_lat, n_lon).astype(np.float32),
+                dims=("time", "lat", "lon"),
+            )
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords)
         filename = tmpdir / f"{first.strftime('%Y%m%d%H')}.nc"
@@ -189,6 +205,7 @@ def get_mock_monthly_netcdfs(
     end_date="2003-06",
     var_names=["foo", "bar"],
     write_extra_vars=True,
+    add_ensemble_dim=False,
 ) -> MockData:
     return _get_data(
         tmp_path_factory,
@@ -201,6 +218,7 @@ def get_mock_monthly_netcdfs(
         with_nans=with_nans,
         var_names=var_names,
         write_extra_vars=write_extra_vars,
+        add_ensemble_dim=add_ensemble_dim,
     )
 
 
@@ -230,6 +248,35 @@ def mock_monthly_netcdfs_another_source_diff_time(tmp_path_factory) -> MockData:
 @pytest.fixture(scope="session")
 def mock_monthly_netcdfs_with_nans(tmp_path_factory) -> MockData:
     return get_mock_monthly_netcdfs(tmp_path_factory, "month_with_nans", with_nans=True)
+
+
+@pytest.fixture(scope="session")
+def mock_monthly_netcdfs_ensemble_dim(tmp_path_factory) -> MockData:
+    return get_mock_monthly_netcdfs(
+        tmp_path_factory,
+        "month_with_ensemble_dim",
+        add_ensemble_dim=True,
+        var_names=["foo", "bar", "var_no_ensemble_dim"],
+    )
+
+
+@pytest.fixture(scope="session")
+def mock_monthly_zarr_ensemble_dim(
+    tmp_path_factory, mock_monthly_netcdfs_ensemble_dim
+) -> MockData:
+    zarr_parent = tmp_path_factory.mktemp("zarr")
+    filename = "data.zarr"
+    data = load_files_without_dask(
+        mock_monthly_netcdfs_ensemble_dim.tmpdir.glob("*.nc")
+    )
+    data.to_zarr(zarr_parent / filename)
+    return MockData(
+        zarr_parent,
+        mock_monthly_netcdfs_ensemble_dim.obs_times,
+        mock_monthly_netcdfs_ensemble_dim.start_times,
+        mock_monthly_netcdfs_ensemble_dim.start_indices,
+        mock_monthly_netcdfs_ensemble_dim.var_names,
+    )
 
 
 def load_files_without_dask(files, engine="netcdf4") -> xr.Dataset:
@@ -961,3 +1008,71 @@ def test_invalid_config_field_raises_error(kwargs):
     """Runs shape and length checks on the dataset."""
     with pytest.raises(ValueError):
         XarrayDataConfig(data_path="path", **kwargs)
+
+
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
+    ],
+)
+def test_dataset_with_nonspacetime_dim(
+    mock_data_fixture, engine, file_pattern, request
+):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        dtype="bfloat16",
+        engine=engine,
+        file_pattern=file_pattern,
+    )
+    # Omit the test variable that has mismatch dimensions
+    vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
+    dataset = XarrayDataset(config, vars, 2)
+    data, _ = dataset[0]
+    assert len(data["foo"].shape) == 4
+    assert dataset.dims == ["time", "sample", "lat", "lon"]
+
+
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
+    ],
+)
+def test_dataset_raise_error_on_dim_mismatch(
+    mock_data_fixture, engine, file_pattern, request
+):
+    # Should raise error when trying to broadcast variable that is missing
+    # ensemble 'sample' dim
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        dtype="bfloat16",
+        engine=engine,
+        file_pattern=file_pattern,
+    )
+    dataset = XarrayDataset(config, mock_data.var_names.all_names, 2)
+    with pytest.raises(ValueError):
+        dataset[0]
+
+
+def test_xarray_raise_error_on_concat_dim_mismatch(
+    mock_monthly_netcdfs, mock_monthly_netcdfs_ensemble_dim
+):
+    mock_data: MockData = mock_monthly_netcdfs
+    mock_data_ensemble: MockData = mock_monthly_netcdfs_ensemble_dim
+    n_timesteps = 5
+    names = mock_data.var_names.all_names + ["x"]
+    config1 = XarrayDataConfig(
+        data_path=mock_data.tmpdir, subset=TimeSlice("2003-03-01", "2003-03-31")
+    )
+
+    config2 = XarrayDataConfig(
+        data_path=mock_data_ensemble.tmpdir,
+        subset=TimeSlice("2003-05-01", "2003-05-31"),
+    )
+    with pytest.raises(ValueError):
+        get_dataset([config1, config2], names, n_timesteps)

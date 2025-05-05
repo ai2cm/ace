@@ -59,8 +59,10 @@ def _broadcast_array_to_tensor(
     """
     tensor = torch.as_tensor(array)
     if len(array.shape) != len(shape):
-        assert array.shape[0] == shape[0], "Must have matching time dimension"
-        assert len(array.shape) == 1, "If broadcasting, array must be 1D"
+        if array.shape[0] != shape[0]:
+            raise ValueError("Must have matching time dimension")
+        if len(array.shape) != 1:
+            raise ValueError("If broadcasting, array must be 1D")
         # insert new singleton dimensions for missing spatial dimensions
         n_spatial_dims = len(dims) - 1
         tensor = tensor[(...,) + (None,) * n_spatial_dims]
@@ -122,8 +124,8 @@ def load_series_data_zarr_async(
         for k, v in loaded.items():
             loaded[k] = np.nan_to_num(v, nan=fill_nans.value)
     arrays = {}
-    for n in names:
-        arrays[n] = _broadcast_array_to_tensor(loaded[n], dims, shape)
+    for name in names:
+        arrays[name] = _broadcast_array_to_tensor(loaded[name], dims, shape)
     return arrays
 
 
@@ -145,6 +147,11 @@ def load_series_data(
     arrays = {}
     for n in names:
         variable = loaded[n].variable
+        if len(variable.shape) != len(shape):
+            if variable.shape[0] != shape[0]:
+                raise ValueError("Must have matching time dimension")
+            if len(variable.shape) != 1:
+                raise ValueError("If broadcasting, array must be 1D")
         arrays[n] = as_broadcasted_tensor(variable, dims, shape)
     return arrays
 
@@ -185,3 +192,19 @@ def decode_timestep(microseconds: int) -> datetime.timedelta:
 
 def encode_timestep(timedelta: datetime.timedelta) -> int:
     return timedelta // datetime.timedelta(microseconds=1)
+
+
+def get_nonspacetime_dimensions(
+    ds: xr.Dataset, horizontal_dims: list[str]
+) -> list[str]:
+    """Get all dimensions that are not time or horizontal dimensions."""
+    nonspacetime_dims: list[str] = []
+    dim_order: list[str] = []
+
+    for da in ds.data_vars.values():
+        if da.ndim >= len(horizontal_dims) + 1 and da.ndim > len(dim_order):
+            dim_order = list(da.dims)
+    for dim in dim_order:
+        if dim not in horizontal_dims and dim != "time":
+            nonspacetime_dims.append(dim)
+    return nonspacetime_dims
