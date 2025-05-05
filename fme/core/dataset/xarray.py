@@ -30,6 +30,7 @@ from .data_typing import VariableMetadata
 from .utils import (
     as_broadcasted_tensor,
     get_horizontal_coordinates,
+    get_nonspacetime_dimensions,
     load_series_data,
     load_series_data_zarr_async,
 )
@@ -373,13 +374,25 @@ class XarrayDataset(torch.utils.data.Dataset):
             self._time_invariant_names,
             self._static_derived_names,
         ) = self._group_variable_names_by_time_type()
-        self._shape_excluding_time = [
-            first_dataset.sizes[dim] for dim in self._horizontal_coordinates.loaded_dims
-        ]
-        self._dims = ["time"] + self._horizontal_coordinates.loaded_dims
+
         self._vertical_coordinate = _get_vertical_coordinate(first_dataset, self.dtype)
         self._mask_provider = _get_mask_provider(first_dataset, self.dtype)
         self.overwrite = config.overwrite
+
+        self._nonspacetime_dims = get_nonspacetime_dimensions(
+            first_dataset, self._horizontal_coordinates.loaded_dims
+        )
+        self._shape_excluding_time = [
+            first_dataset.sizes[dim]
+            for dim in (
+                self._nonspacetime_dims + self._horizontal_coordinates.loaded_dims
+            )
+        ]
+        self.dims = (
+            ["time"]
+            + self._nonspacetime_dims
+            + self._horizontal_coordinates.loaded_dims
+        )
 
     @property
     def properties(self) -> DatasetProperties:
@@ -566,7 +579,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                     n_steps=n_steps,
                     path=self.full_paths[file_idx],
                     names=self._time_dependent_names,
-                    dims=self._dims,
+                    dims=self.dims,
                     shape=shape,
                     fill_nans=self.fill_nans,
                 )
@@ -576,7 +589,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                     n_steps=n_steps,
                     ds=ds,
                     names=self._time_dependent_names,
-                    dims=self._dims,
+                    dims=self.dims,
                     shape=shape,
                     fill_nans=self.fill_nans,
                 )
@@ -598,7 +611,7 @@ class XarrayDataset(torch.utils.data.Dataset):
                 variable = ds[name].variable
                 if self.fill_nans is not None:
                     variable = variable.fillna(self.fill_nans.value)
-                tensors[name] = as_broadcasted_tensor(variable, self._dims, shape)
+                tensors[name] = as_broadcasted_tensor(variable, self.dims, shape)
             ds.close()
             del ds
 
