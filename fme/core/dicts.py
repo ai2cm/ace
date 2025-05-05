@@ -1,7 +1,8 @@
-from typing import Any, Dict, List, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 
-def to_flat_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
+def to_flat_dict(d: Mapping[str, Any]) -> dict[str, Any]:
     """
     Converts any nested dictionaries to a flat version with
     the nested keys joined with a '.', e.g., {a: {b: 1}} ->
@@ -19,12 +20,12 @@ def to_flat_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
     return new_flat
 
 
-def to_nested_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
+def to_nested_dict(d: Mapping[str, Any]) -> dict[str, Any]:
     """
     Converts a flat dictionary with '.' joined keys back into
     a nested dictionary, e.g., {a.b: 1} -> {a: {b: 1}}.
     """
-    new_config: Dict[str, Any] = {}
+    new_config: dict[str, Any] = {}
 
     for k, v in d.items():
         if "." in k:
@@ -40,8 +41,8 @@ def to_nested_dict(d: Mapping[str, Any]) -> Dict[str, Any]:
 
 
 def add_names(
-    left: Mapping[str, Any], right: Mapping[str, Any], names: List[str]
-) -> Dict[str, Any]:
+    left: Mapping[str, Any], right: Mapping[str, Any], names: list[str]
+) -> dict[str, Any]:
     """Add the 'names' from left dict to the right dict and return result.
 
     Args:

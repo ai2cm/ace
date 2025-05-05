@@ -1,14 +1,14 @@
-from typing import Iterable, Union
+from collections.abc import Iterable
+from typing import TypeAlias
 
 import numpy as np
 import torch
 import torch_harmonics
-from typing_extensions import TypeAlias
 
 from fme.core.constants import GRAVITY, LATENT_HEAT_OF_FREEZING
 
-Dimension: TypeAlias = Union[int, Iterable[int]]
-Array: TypeAlias = Union[np.ndarray, torch.Tensor]
+Dimension: TypeAlias = int | Iterable[int]
+Array: TypeAlias = np.ndarray | torch.Tensor
 
 
 def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:

@@ -1,5 +1,5 @@
 import logging
-from typing import List, Mapping, Optional, Sequence, Union
+from collections.abc import Mapping, Sequence
 
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: List[str]):
+    def __init__(self, horizontal_dims: list[str]):
         self.horizontal_dims = horizontal_dims
 
     def __call__(self, samples):
@@ -119,9 +119,9 @@ def get_inference_data(
     config: InferenceDataLoaderConfig,
     total_forward_steps: int,
     window_requirements: DataRequirements,
-    initial_condition: Union[PrognosticState, PrognosticStateDataRequirements],
-    surface_temperature_name: Optional[str] = None,
-    ocean_fraction_name: Optional[str] = None,
+    initial_condition: PrognosticState | PrognosticStateDataRequirements,
+    surface_temperature_name: str | None = None,
+    ocean_fraction_name: str | None = None,
 ) -> InferenceGriddedData:
     """
     Args:
@@ -184,8 +184,8 @@ def get_forcing_data(
     total_forward_steps: int,
     window_requirements: DataRequirements,
     initial_condition: PrognosticState,
-    surface_temperature_name: Optional[str] = None,
-    ocean_fraction_name: Optional[str] = None,
+    surface_temperature_name: str | None = None,
+    ocean_fraction_name: str | None = None,
 ) -> InferenceGriddedData:
     """Return a GriddedData loader for forcing data based on the initial condition.
     This function determines the start indices for the forcing data based on the initial

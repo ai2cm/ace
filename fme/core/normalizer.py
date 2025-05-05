@@ -1,7 +1,7 @@
 import dataclasses
 import pathlib
+from collections.abc import Iterable, Mapping
 from copy import copy
-from typing import Dict, Iterable, List, Mapping, Union
 
 import fsspec
 import numpy as np
@@ -34,8 +34,8 @@ class NormalizationConfig:
             the denormalized output.
     """
 
-    global_means_path: Union[str, pathlib.Path] | None = None
-    global_stds_path: Union[str, pathlib.Path] | None = None
+    global_means_path: str | pathlib.Path | None = None
+    global_stds_path: str | pathlib.Path | None = None
     means: Mapping[str, float] = dataclasses.field(default_factory=dict)
     stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
@@ -81,7 +81,7 @@ class NormalizationConfig:
             self.global_means_path = None
             self.global_stds_path = None
 
-    def build(self, names: List[str]):
+    def build(self, names: list[str]):
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -215,7 +215,7 @@ def _denormalize(
 
 
 def get_normalizer(
-    global_means_path, global_stds_path, names: List[str], **normalizer_kwargs
+    global_means_path, global_stds_path, names: list[str], **normalizer_kwargs
 ) -> StandardNormalizer:
     means = load_dict_from_netcdf(
         global_means_path, names, defaults={"x": 0.0, "y": 0.0, "z": 0.0}
@@ -229,10 +229,10 @@ def get_normalizer(
 
 
 def load_dict_from_netcdf(
-    path: Union[str, pathlib.Path],
+    path: str | pathlib.Path,
     names: Iterable[str] | None,
-    defaults: Mapping[str, Union[float, np.ndarray]],
-) -> Dict[str, float]:
+    defaults: Mapping[str, float | np.ndarray],
+) -> dict[str, float]:
     """
     Load a dictionary of scalar variables from a netCDF file.
 
@@ -311,13 +311,13 @@ class NetworkAndLossNormalizationConfig:
         if self.loss is not None and self.residual is not None:
             raise ValueError("Cannot provide both loss and residual normalization.")
 
-    def get_network_normalizer(self, names: List[str]) -> StandardNormalizer:
+    def get_network_normalizer(self, names: list[str]) -> StandardNormalizer:
         return self.network.build(names=names)
 
     def get_loss_normalizer(
         self,
-        names: List[str],
-        residual_scaled_names: List[str],
+        names: list[str],
+        residual_scaled_names: list[str],
     ) -> StandardNormalizer:
         if self.loss is not None:
             return self.loss.build(names=names)

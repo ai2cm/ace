@@ -1,5 +1,6 @@
 import abc
-from typing import Generic, Iterable, Protocol, Sized, TypeVar
+from collections.abc import Iterable, Sized
+from typing import Generic, Protocol, TypeVar
 
 T = TypeVar("T", covariant=True)
 

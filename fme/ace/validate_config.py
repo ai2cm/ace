@@ -49,7 +49,7 @@ if __name__ == "__main__":
     else:
         config_type = args.config_type
 
-    with open(args.path, "r") as f:
+    with open(args.path) as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
 
     config_data = update_dict_with_dotlist(config_data, args.override)

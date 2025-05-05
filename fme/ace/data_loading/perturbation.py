@@ -1,6 +1,9 @@
 import abc
 import dataclasses
-from typing import Any, Callable, ClassVar, Mapping, Tuple, Type
+from collections.abc import Callable, Mapping
+
+# we use Type to distinguish from type attr of PerturbationSelector
+from typing import Any, ClassVar, Type  # noqa: UP035
 
 import dacite
 import numpy as np
@@ -48,7 +51,7 @@ class PerturbationSelector:
     @classmethod
     def register(
         cls, type_name
-    ) -> Callable[[Type[PerturbationConfig]], Type[PerturbationConfig]]:
+    ) -> Callable[[Type[PerturbationConfig]], Type[PerturbationConfig]]:  # noqa: UP006
         return cls.registry.register(type_name)
 
     def build(self) -> PerturbationConfig:
@@ -134,7 +137,7 @@ class GreensFunctionConfig(PerturbationConfig):
     def _wrap_longitude_discontinuity(
         self,
         lon: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Assume longitude is in the range [0, 360) degrees.
         If the patch crosses the discontinuity at 0/360 degrees,

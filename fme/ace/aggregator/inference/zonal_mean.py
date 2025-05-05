@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Dict, Mapping, Optional
+from collections.abc import Mapping
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,9 +20,9 @@ class _RawData:
     datum: torch.Tensor
     caption: str
     metadata: VariableMetadata
-    vmin: Optional[float] = None
-    vmax: Optional[float] = None
-    cmap: Optional[str] = None
+    vmin: float | None = None
+    vmax: float | None = None
+    cmap: str | None = None
 
     def get_image(self) -> Image:
         # images are y, x from upper left corner
@@ -61,7 +61,7 @@ class ZonalMeanAggregator:
     def __init__(
         self,
         n_timesteps: int,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         """
         Args:
@@ -76,8 +76,8 @@ class ZonalMeanAggregator:
         else:
             self._variable_metadata = variable_metadata
 
-        self._target_data: Optional[TensorDict] = None
-        self._gen_data: Optional[TensorDict] = None
+        self._target_data: TensorDict | None = None
+        self._gen_data: TensorDict | None = None
         self._n_batches = torch.zeros(
             n_timesteps, dtype=torch.int32, device=get_device()
         )[None, :, None]  # sample, time, lat
@@ -111,11 +111,11 @@ class ZonalMeanAggregator:
                 self._gen_data[name][:, time_slice, :] += tensor.mean(dim=lon_dim)
         self._n_batches[:, time_slice, :] += 1
 
-    def _get_data(self) -> Dict[str, _RawData]:
+    def _get_data(self) -> dict[str, _RawData]:
         if self._gen_data is None or self._target_data is None:
             raise RuntimeError("No data recorded")
         sample_dim = 0
-        data: Dict[str, _RawData] = {}
+        data: dict[str, _RawData] = {}
         sorted_names = sorted(list(self._gen_data.keys()))
         for name in sorted_names:
             gen = (
@@ -155,7 +155,7 @@ class ZonalMeanAggregator:
 
         return data
 
-    def get_logs(self, label: str) -> Dict[str, Image]:
+    def get_logs(self, label: str) -> dict[str, Image]:
         logs = {}
         data = self._get_data()
         for key, datum in data.items():

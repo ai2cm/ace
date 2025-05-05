@@ -1,12 +1,12 @@
 import re
-from typing import Iterable, List, Mapping
+from collections.abc import Iterable, Mapping
 
 import torch
 
 from fme.core.typing_ import TensorMapping
 
 
-def unstack(tensor: torch.Tensor, names: List[str], dim: int = -1) -> TensorMapping:
+def unstack(tensor: torch.Tensor, names: list[str], dim: int = -1) -> TensorMapping:
     """Unstack a 3D variable to a dictionary of 2D variables.
 
     Args:
@@ -35,7 +35,7 @@ class Stacker:
 
     def __init__(
         self,
-        prefix_map: Mapping[str, List[str]] | None = None,
+        prefix_map: Mapping[str, list[str]] | None = None,
     ):
         """
         Args:
@@ -44,7 +44,7 @@ class Stacker:
                 and lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"]
                 or ["air_temperature_", "T_"]) found in the data.
         """
-        self._prefix_map: Mapping[str, List[str]] | None = prefix_map
+        self._prefix_map: Mapping[str, list[str]] | None = prefix_map
 
     def infer_prefix_map(self, names: Iterable[str]):
         """
@@ -72,7 +72,7 @@ class Stacker:
         return self._prefix_map is not None
 
     @property
-    def prefix_map(self) -> Mapping[str, List[str]]:
+    def prefix_map(self) -> Mapping[str, list[str]]:
         """Mapping which defines the correspondence between an arbitrary set of
         "standard" names (e.g., "surface_pressure" or "air_temperature") and
         lists of possible names or prefix variants (e.g., ["PRESsfc", "PS"] or
@@ -86,10 +86,10 @@ class Stacker:
         return self._prefix_map
 
     @property
-    def standard_names(self) -> List[str]:
+    def standard_names(self) -> list[str]:
         return list(self.prefix_map.keys())
 
-    def get_all_level_names(self, standard_name: str, data: TensorMapping) -> List[str]:
+    def get_all_level_names(self, standard_name: str, data: TensorMapping) -> list[str]:
         """Get the names of all variables in the data that match one of the
         prefixes associated with the given standard name. If the standard name
         corresponds to a 3D variable, returns all vertical level names in their
@@ -137,7 +137,7 @@ class Stacker:
             f"among the data names {list(data.keys())}."
         )
 
-    def _natural_sort_names(self, prefix: str, data: TensorMapping) -> List[str]:
+    def _natural_sort_names(self, prefix: str, data: TensorMapping) -> list[str]:
         names = [field_name for field_name in data if field_name.startswith(prefix)]
 
         levels = []

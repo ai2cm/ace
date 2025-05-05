@@ -1,5 +1,3 @@
-from typing import Dict
-
 import numpy as np
 import torch
 import xarray as xr
@@ -39,7 +37,7 @@ class MeanAggregator:
         self._dist = Distributed.get_instance()
 
         device = get_device()
-        self._variable_metrics: Dict[str, ReducedMetric] = {}
+        self._variable_metrics: dict[str, ReducedMetric] = {}
         self._variable_metrics["weighted_rmse"] = AreaWeightedReducedMetric(
             device=device,
             compute_metric=self._gridded_operations.area_weighted_rmse_dict,
@@ -90,7 +88,7 @@ class MeanAggregator:
     def _get_data(self):
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: Dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
+        data: dict[str, torch.Tensor] = {"loss": self._loss / self._n_batches}
         for name, metric in self._variable_metrics.items():
             metric_results = metric.get()  # TensorDict: {var_name: metric_data}
             for key in metric_results:

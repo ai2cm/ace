@@ -2,7 +2,8 @@ import copy
 import dataclasses
 import logging
 import os
-from typing import Literal, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import Literal
 
 import dacite
 import torch
@@ -39,7 +40,7 @@ from fme.core.timing import GlobalTimer
 
 from .evaluator import validate_time_coarsen_config
 
-StartIndices = Union[InferenceInitialConditionIndices, ExplicitIndices, TimestampList]
+StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
 
 @dataclasses.dataclass
@@ -63,7 +64,7 @@ class InitialConditionConfig:
 
     path: str
     engine: Literal["netcdf4", "h5netcdf", "zarr"] = "netcdf4"
-    start_indices: Optional[StartIndices] = None
+    start_indices: StartIndices | None = None
 
     def get_dataset(self) -> xr.Dataset:
         ds = xr.open_dataset(
@@ -170,7 +171,7 @@ class InferenceConfig:
     aggregator: InferenceAggregatorConfig = dataclasses.field(
         default_factory=lambda: InferenceAggregatorConfig()
     )
-    stepper_override: Optional[StepperOverrideConfig] = None
+    stepper_override: StepperOverrideConfig | None = None
     allow_incompatible_dataset: bool = False
 
     def __post_init__(self):
@@ -185,7 +186,7 @@ class InferenceConfig:
         self.logging.configure_logging(self.experiment_dir, log_filename)
 
     def configure_wandb(
-        self, env_vars: Optional[dict] = None, resumable: bool = False, **kwargs
+        self, env_vars: dict | None = None, resumable: bool = False, **kwargs
     ):
         config = to_flat_dict(dataclasses.asdict(self))
         self.logging.configure_wandb(
@@ -215,8 +216,8 @@ class InferenceConfig:
 
 def main(
     yaml_config: str,
-    segments: Optional[int] = None,
-    override_dotlist: Optional[Sequence[str]] = None,
+    segments: int | None = None,
+    override_dotlist: Sequence[str] | None = None,
 ):
     config_data = prepare_config(yaml_config, override=override_dotlist)
     config = dacite.from_dict(

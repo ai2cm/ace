@@ -1,7 +1,8 @@
 import dataclasses
 import datetime
 import pathlib
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from collections.abc import Iterable, Sequence
+from typing import Any
 
 import cftime
 import numpy as np
@@ -31,19 +32,19 @@ def _coord_value(
 @dataclasses.dataclass
 class DimSizes:
     n_time: int
-    horizontal: List[DimSize]
+    horizontal: list[DimSize]
     nz_interface: int
 
     @property
-    def shape_nd(self) -> List[int]:
+    def shape_nd(self) -> list[int]:
         return [self.n_time] + [dim.size for dim in self.horizontal]
 
     @property
-    def dims_nd(self) -> List[str]:
+    def dims_nd(self) -> list[str]:
         return ["time"] + [dim.name for dim in self.horizontal]
 
     @property
-    def shape_vertical_interface(self) -> Tuple[int]:
+    def shape_vertical_interface(self) -> tuple[int]:
         return (self.nz_interface,)
 
     @property
@@ -62,9 +63,9 @@ class DimSizes:
 def save_nd_netcdf(
     filename,
     dim_sizes: DimSizes,
-    variable_names: List[str],
+    variable_names: list[str],
     timestep_days: float,
-    time_varying_values: Optional[List[float]] = None,
+    time_varying_values: list[float] | None = None,
     save_vertical_coordinate: bool = True,
 ):
     """
@@ -94,7 +95,7 @@ def save_nd_netcdf(
 
 def save_scalar_netcdf(
     filename,
-    variable_names: List[str],
+    variable_names: list[str],
 ):
     ds = get_scalar_dataset(variable_names)
     ds.to_netcdf(filename, format="NETCDF4_CLASSIC")
@@ -103,7 +104,7 @@ def save_scalar_netcdf(
 @dataclasses.dataclass
 class StatsData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
 
     def __post_init__(self):
         save_scalar_netcdf(
@@ -127,10 +128,10 @@ class StatsData:
 @dataclasses.dataclass
 class FV3GFSData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
     dim_sizes: DimSizes
     timestep_days: float
-    time_varying_values: Optional[List[float]] = None
+    time_varying_values: list[float] | None = None
     num_data_workers: int = 0
     save_vertical_coordinate: bool = True
 
@@ -178,7 +179,7 @@ class FV3GFSData:
 @dataclasses.dataclass
 class MonthlyReferenceData:
     path: pathlib.Path
-    names: List[str]
+    names: list[str]
     dim_sizes: DimSizes
     n_ensemble: int
 
@@ -282,7 +283,7 @@ def get_nd_dataset(
 
 def get_scalar_dataset(
     variable_names: Iterable[str],
-    fill_value: Optional[float] = None,
+    fill_value: float | None = None,
 ):
     data_vars = {}
     for name in variable_names:

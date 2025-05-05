@@ -1,6 +1,7 @@
 import dataclasses
 from collections import defaultdict
-from typing import Dict, List, Literal, Mapping, Optional, Protocol
+from collections.abc import Mapping
+from typing import Literal, Protocol
 
 import numpy as np
 import torch
@@ -174,7 +175,7 @@ class MeanAggregator:
         gridded_operations: GriddedOperations,
         target: Literal["norm", "denorm"],
         n_timesteps: int,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._gridded_operations = gridded_operations
         # Store one metric object per metric type (e.g., rmse, bias)
@@ -187,7 +188,7 @@ class MeanAggregator:
         else:
             self._variable_metadata = variable_metadata
 
-        self._variable_metrics: Dict[str, MeanMetric] = {}
+        self._variable_metrics: dict[str, MeanMetric] = {}
         device = get_device()
 
         self._variable_metrics["weighted_rmse"] = AreaWeightedReducedMetric(
@@ -266,11 +267,11 @@ class MeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: Optional[slice] = None) -> List[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: List[_SeriesData] = []
+        data: list[_SeriesData] = []
         for name, metric in self._variable_metrics.items():
             metric_results = metric.get()  # TensorDict: {var_name: metric_series}
             sorted_keys = sorted(list(metric_results.keys()))
@@ -287,7 +288,7 @@ class MeanAggregator:
         return data
 
     @torch.no_grad()
-    def get_logs(self, label: str, step_slice: Optional[slice] = None):
+    def get_logs(self, label: str, step_slice: slice | None = None):
         """
         Returns logs as can be reported to WandB.
 
@@ -296,7 +297,7 @@ class MeanAggregator:
             step_slice: Slice of forecast steps to log.
         """
         logs = {}
-        series_data: Dict[str, np.ndarray] = {
+        series_data: dict[str, np.ndarray] = {
             datum.get_wandb_key(): datum.data
             for datum in self._get_series_data(step_slice)
         }
@@ -328,7 +329,7 @@ class MeanAggregator:
         return xr.Dataset(data_vars=data_vars, coords=coords)
 
 
-def data_to_table(data: Dict[str, np.ndarray], init_step: int = 0) -> Table:
+def data_to_table(data: dict[str, np.ndarray], init_step: int = 0) -> Table:
     """
     Convert a dictionary of 1-dimensional timeseries data to a wandb Table.
 
@@ -404,7 +405,7 @@ class SingleTargetMeanAggregator:
         self,
         gridded_operations: GriddedOperations,
         n_timesteps: int,
-        variable_metadata: Optional[Mapping[str, VariableMetadata]] = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._ops = gridded_operations
         self._n_timesteps = n_timesteps
@@ -415,7 +416,7 @@ class SingleTargetMeanAggregator:
         else:
             self._variable_metadata = variable_metadata
 
-        self._variable_metrics: Dict[str, SingleTargetMeanMetric] = {}
+        self._variable_metrics: dict[str, SingleTargetMeanMetric] = {}
         device = get_device()
 
         self._variable_metrics["weighted_mean_gen"] = (
@@ -451,11 +452,11 @@ class SingleTargetMeanAggregator:
             )
         self._n_batches += 1
 
-    def _get_series_data(self, step_slice: Optional[slice] = None) -> List[_SeriesData]:
+    def _get_series_data(self, step_slice: slice | None = None) -> list[_SeriesData]:
         """Converts internally stored variable_metrics to a list."""
         if self._n_batches == 0:
             raise ValueError("No batches have been recorded.")
-        data: List[_SeriesData] = []
+        data: list[_SeriesData] = []
         for name, metric in self._variable_metrics.items():
             metric_results = metric.get()  # TensorDict: {var_name: metric_series}
             sorted_keys = sorted(list(metric_results.keys()))
@@ -472,7 +473,7 @@ class SingleTargetMeanAggregator:
         return data
 
     @torch.no_grad()
-    def get_logs(self, label: str, step_slice: Optional[slice] = None):
+    def get_logs(self, label: str, step_slice: slice | None = None):
         """
         Returns logs as can be reported to WandB.
 
@@ -481,7 +482,7 @@ class SingleTargetMeanAggregator:
             step_slice: Slice of forecast steps to log.
         """
         logs = {}
-        series_data: Dict[str, np.ndarray] = {
+        series_data: dict[str, np.ndarray] = {
             datum.get_wandb_key(): datum.data
             for datum in self._get_series_data(step_slice)
         }

@@ -1,5 +1,4 @@
 from datetime import timedelta
-from typing import Tuple
 
 import cftime
 import pytest
@@ -51,7 +50,7 @@ def _get_windowed_data(
 
 
 def _get_windowed_times(
-    start_time: Tuple[int, ...],
+    start_time: tuple[int, ...],
     n_samples: int,
     n_times: int,
     i_start: int = 0,

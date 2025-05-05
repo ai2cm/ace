@@ -55,17 +55,8 @@ import logging
 import os
 import time
 import uuid
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    Generic,
-    List,
-    Mapping,
-    Protocol,
-    TypeVar,
-)
+from collections.abc import Callable, Mapping
+from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
 import torch
 
@@ -95,7 +86,7 @@ def null_end_of_epoch_callback(epoch: int) -> Mapping[str, Any]:
 
 
 class TrainConfigProtocol(Protocol):
-    __dataclass_fields__: ClassVar[Dict[str, Any]]
+    __dataclass_fields__: ClassVar[dict[str, Any]]
 
     @property
     def experiment_dir(self) -> str: ...
@@ -130,7 +121,7 @@ class TrainConfigProtocol(Protocol):
     @property
     def evaluate_before_training(self) -> bool: ...
 
-    def get_inference_epochs(self) -> List[int]: ...
+    def get_inference_epochs(self) -> list[int]: ...
 
 
 PS = TypeVar("PS", contravariant=True)  # prognostic state

@@ -3,7 +3,7 @@ import datetime
 import os
 import pathlib
 import tempfile
-from typing import Iterable, List, Optional
+from collections.abc import Iterable
 
 import dacite
 import numpy as np
@@ -55,16 +55,16 @@ class PlusOne(torch.nn.Module):
 
 def save_plus_one_stepper(
     path: pathlib.Path,
-    in_names: List[str],
-    out_names: List[str],
+    in_names: list[str],
+    out_names: list[str],
     mean: float,
     std: float,
-    data_shape: List[int],
-    normalization_names: Optional[Iterable[str]] = None,
+    data_shape: list[int],
+    normalization_names: Iterable[str] | None = None,
     timestep: datetime.timedelta = TIMESTEP,
     nz_interface: int = 7,
     ocean=None,
-    multi_call: Optional[MultiCallConfig] = None,
+    multi_call: MultiCallConfig | None = None,
 ):
     if multi_call is None:
         all_names = list(set(in_names).union(out_names))
@@ -115,9 +115,7 @@ def save_plus_one_stepper(
         std_filename.unlink()
 
 
-def validate_stepper_ocean(
-    stepper: Stepper, expected_ocean_config: Optional[OceanConfig]
-):
+def validate_stepper_ocean(stepper: Stepper, expected_ocean_config: OceanConfig | None):
     assert isinstance(stepper._step_obj, MultiCallStep)
     assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
     assert stepper._step_obj._wrapped_step._config.ocean == expected_ocean_config
@@ -136,7 +134,7 @@ def validate_stepper_ocean(
 
 
 def validate_stepper_multi_call(
-    stepper: Stepper, expected_multi_call_config: Optional[MultiCallConfig]
+    stepper: Stepper, expected_multi_call_config: MultiCallConfig | None
 ):
     assert isinstance(stepper._step_obj, MultiCallStep)
     assert isinstance(stepper._step_obj._wrapped_step, SingleModuleStep)
@@ -238,7 +236,7 @@ def inference_helper(
     stepper_path,
     timestep: datetime.timedelta,
     save_monthly_files: bool = True,
-    derived_names: List[str] = [],
+    derived_names: list[str] = [],
     allow_incompatible_dataset_info: bool = True,  # stepper checkpoint has arbitrary info  # noqa: E501
 ):
     time_varying_values = [float(i) for i in range(dim_sizes.n_time)]
@@ -671,9 +669,9 @@ def test_compute_derived_quantities(has_required_fields):
     def _make_data():
         vars = ["a"]
         if has_required_fields:
-            additional_fields = [
-                "specific_total_water_{}".format(i) for i in range(nz)
-            ] + ["PRESsfc"]
+            additional_fields = [f"specific_total_water_{i}" for i in range(nz)] + [
+                "PRESsfc"
+            ]
             vars += additional_fields
         return {
             var: torch.randn(
@@ -911,8 +909,8 @@ def test_inference_override(tmp_path: pathlib.Path):
 
 def validate_stepper_config(
     stepper_config: StepperConfig,
-    expected_ocean_config: Optional[OceanConfig],
-    expected_multi_call_config: Optional[MultiCallConfig],
+    expected_ocean_config: OceanConfig | None,
+    expected_multi_call_config: MultiCallConfig | None,
 ):
     assert isinstance(stepper_config.step._step_config_instance, MultiCallStepConfig)
     assert isinstance(

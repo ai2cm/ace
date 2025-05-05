@@ -1,4 +1,5 @@
-from typing import List, Mapping, Protocol
+from collections.abc import Mapping
+from typing import Protocol
 
 import torch
 
@@ -66,7 +67,7 @@ class AtmosphereData:
         self,
         atmosphere_data: TensorMapping,
         vertical_coordinate: HasAtmosphereVerticalIntegral | None = None,
-        atmosphere_field_name_prefixes: Mapping[str, List[str]] | None = None,
+        atmosphere_field_name_prefixes: Mapping[str, list[str]] | None = None,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -371,7 +372,7 @@ def compute_layer_thickness(
 
 
 def _height_at_interface(
-    layer_thickness: torch.tensor, surface_height: torch.tensor
+    layer_thickness: torch.Tensor, surface_height: torch.Tensor
 ) -> torch.Tensor:
     """
     Computes height at layer interfaces from layer thickness and surface height.

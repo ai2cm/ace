@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Tuple
+from collections.abc import Callable, MutableMapping
 
 import torch
 
@@ -13,18 +13,18 @@ DerivedVariableFunc = Callable[[AtmosphereData, datetime.timedelta], torch.Tenso
 
 
 _DERIVED_VARIABLE_REGISTRY: MutableMapping[
-    str, Tuple[DerivedVariableFunc, VariableMetadata]
+    str, tuple[DerivedVariableFunc, VariableMetadata]
 ] = {}
 
 
-def get_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+def get_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
         **get_atmosphere_derived_variable_metadata(),
         **get_ocean_derived_variable_metadata(),
     }
 
 
-def get_atmosphere_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+def get_atmosphere_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
         label: metadata for label, (_, metadata) in _DERIVED_VARIABLE_REGISTRY.items()
     }

@@ -1,5 +1,5 @@
 import datetime
-from typing import Mapping, Optional
+from collections.abc import Mapping
 
 import cftime
 import numpy as np
@@ -26,7 +26,7 @@ def _coord_value(name, size):
 
 def _save_netcdf(
     filename,
-    variable_metadata: Mapping[str, Optional[VariableMetadata]],
+    variable_metadata: Mapping[str, VariableMetadata | None],
     num_members=1,
     dim_sizes=None,
 ):

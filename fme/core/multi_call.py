@@ -1,6 +1,6 @@
 import dataclasses
 import re
-from typing import Callable, Dict, List
+from collections.abc import Callable
 
 from torch import nn
 
@@ -59,21 +59,21 @@ class MultiCallConfig:
     """
 
     forcing_name: str
-    forcing_multipliers: Dict[str, float]
-    output_names: List[str]
+    forcing_multipliers: dict[str, float]
+    output_names: list[str]
 
     def __post_init__(self):
         self._names = []
         for name in self.output_names:
             self._names.extend(self.get_multi_called_names(name))
 
-    def get_multi_called_names(self, name: str) -> List[str]:
+    def get_multi_called_names(self, name: str) -> list[str]:
         names = []
         for suffix in self.forcing_multipliers:
             names.append(get_multi_call_name(name, suffix))
         return names
 
-    def validate(self, in_names: List[str], out_names: List[str]):
+    def validate(self, in_names: list[str], out_names: list[str]):
         if self.forcing_name not in in_names:
             raise ValueError(
                 f"forcing name {self.forcing_name} not in input names. It is required "
@@ -105,7 +105,7 @@ class MultiCallConfig:
                 )
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         """
         Return the names of all multi-called output variables,
         often radiative fluxes.
@@ -140,7 +140,7 @@ class MultiCall:
         self._step = step_method
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return self._names
 
     def step(

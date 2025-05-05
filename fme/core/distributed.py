@@ -1,5 +1,5 @@
 import os
-from typing import Callable, List, Union
+from collections.abc import Callable
 
 import torch.distributed
 from torch.nn import SyncBatchNorm
@@ -136,7 +136,7 @@ class Distributed:
             torch.distributed.all_reduce(tensor, op=torch.distributed.ReduceOp.MAX)
         return tensor
 
-    def gather(self, tensor: torch.Tensor) -> List[torch.Tensor] | None:
+    def gather(self, tensor: torch.Tensor) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process.
 
@@ -152,7 +152,7 @@ class Distributed:
             A list of tensors, where the i-th element is the tensor
                 from the i-th process.
         """
-        gather_list: List[torch.Tensor] | None = None
+        gather_list: list[torch.Tensor] | None = None
         if self.rank == 0:
             gather_list = [tensor] + [
                 torch.empty_like(tensor) for _ in range(self.world_size - 1)
@@ -164,7 +164,7 @@ class Distributed:
     def gather_irregular(
         self,
         tensor: torch.Tensor,
-    ) -> List[torch.Tensor] | None:
+    ) -> list[torch.Tensor] | None:
         """
         Gather a tensor from all processes to the root process. The rank tensors
         may have diferent dimension lengths, but must have the same number of
@@ -223,10 +223,10 @@ singleton: Distributed | None = None
 def gather_irregular(
     tensor: torch.Tensor,
     reduce_max: Callable[[torch.Tensor], torch.tensor],
-    gather: Callable[[torch.Tensor], List[torch.Tensor] | None],
+    gather: Callable[[torch.Tensor], list[torch.Tensor] | None],
     is_distributed: bool = False,
-    fill_value: Union[float, int] = 0.0,
-) -> List[torch.Tensor] | None:
+    fill_value: float | int = 0.0,
+) -> list[torch.Tensor] | None:
     """
     Gather a tensor from all processes to the root process. The rank tensors
     may have diferent dimension lengths, but must have the same number of dimensions.
@@ -276,8 +276,8 @@ def gather_irregular(
 
 def pad_tensor_at_end(
     tensor: torch.Tensor,
-    dimension_difference: List[int],
-    fill_value: Union[float, int] = 0.0,
+    dimension_difference: list[int],
+    fill_value: float | int = 0.0,
 ):
     """Pad tensor by specified amount at end of each dimension.
     Note that `pad` format is in reverse dimension order.

@@ -1,6 +1,6 @@
 import datetime
 import logging
-from typing import Callable, Dict, MutableMapping, Tuple
+from collections.abc import Callable, MutableMapping
 
 import torch
 
@@ -11,11 +11,11 @@ from fme.core.typing_ import TensorDict
 OceanDerivedVariableFunc = Callable[[OceanData, datetime.timedelta], torch.Tensor]
 
 _OCEAN_DERIVED_VARIABLE_REGISTRY: MutableMapping[
-    str, Tuple[OceanDerivedVariableFunc, VariableMetadata, bool]
+    str, tuple[OceanDerivedVariableFunc, VariableMetadata, bool]
 ] = {}
 
 
-def get_ocean_derived_variable_metadata() -> Dict[str, VariableMetadata]:
+def get_ocean_derived_variable_metadata() -> dict[str, VariableMetadata]:
     return {
         label: metadata
         for label, (_, metadata, _) in _OCEAN_DERIVED_VARIABLE_REGISTRY.items()

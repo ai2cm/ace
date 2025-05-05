@@ -1,6 +1,5 @@
 import copy
 import datetime
-from typing import List
 
 import numpy as np
 import pytest
@@ -39,7 +38,7 @@ def get_sizes(
         loaded_lon_name=LON_DIM,
     ),
 ):
-    spatial_sizes: List[DimSize] = copy.deepcopy(spatial_dims.loaded_sizes)
+    spatial_sizes: list[DimSize] = copy.deepcopy(spatial_dims.loaded_sizes)
     return [DimSize(TIME_DIM, 3)] + spatial_sizes
 
 

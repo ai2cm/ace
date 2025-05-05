@@ -1,5 +1,3 @@
-from typing import List
-
 import torch
 import torch.jit
 
@@ -17,7 +15,7 @@ class Packer:
     Responsible for packing tensors into a single tensor.
     """
 
-    def __init__(self, names: List[str]):
+    def __init__(self, names: list[str]):
         self.names = names
 
     def pack(self, tensors: TensorDict, axis=0) -> torch.Tensor:
@@ -35,10 +33,8 @@ class Packer:
         for name in tensors:
             if tensors[name].shape != shape:
                 raise DataShapesNotUniform(
-                    (
-                        f"Cannot pack tensors of different shapes. "
-                        f'Expected "{shape}" got "{tensors[name].shape}"'
-                    )
+                    f"Cannot pack tensors of different shapes. "
+                    f'Expected "{shape}" got "{tensors[name].shape}"'
                 )
         return _pack(tensors, self.names, axis=axis)
 
@@ -47,10 +43,10 @@ class Packer:
 
 
 @torch.jit.script
-def _pack(tensors: TensorDict, names: List[str], axis: int = 0) -> torch.Tensor:
+def _pack(tensors: TensorDict, names: list[str], axis: int = 0) -> torch.Tensor:
     return torch.cat([tensors[n].unsqueeze(axis) for n in names], dim=axis)
 
 
 @torch.jit.script
-def _unpack(tensor: torch.Tensor, names: List[str], axis: int = 0) -> TensorDict:
+def _unpack(tensor: torch.Tensor, names: list[str], axis: int = 0) -> TensorDict:
     return {n: tensor.select(axis, index=i) for i, n in enumerate(names)}
