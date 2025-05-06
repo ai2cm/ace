@@ -388,11 +388,54 @@ class XarrayDataset(torch.utils.data.Dataset):
                 self._nonspacetime_dims + self._horizontal_coordinates.loaded_dims
             )
         ]
-        self.dims = (
+        self._loaded_dims = (
             ["time"]
             + self._nonspacetime_dims
             + self._horizontal_coordinates.loaded_dims
         )
+        self.isel = {
+            dim: v if isinstance(v, int) else v.slice for dim, v in config.isel.items()
+        }
+        self._isel_tuple = tuple(
+            [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
+        )
+        self._check_isel_dimensions()
+
+    def _check_isel_dimensions(self):
+        # Horizontal dimensions are not currently supported, as the current isel code
+        # does not adjust HorizonalCoordinates to match selection.
+        if "time" in self.isel:
+            raise ValueError("isel cannot be used to select time. Use subset instead.")
+
+        for dim in self.isel:
+            if dim not in self._nonspacetime_dims:
+                raise ValueError(
+                    f"isel dimension {dim} must be a non-spacetime dimension "
+                    f"of the dataset ({self._nonspacetime_dims})."
+                )
+
+    @property
+    def _shape_excluding_time_after_selection(self):
+        final_shape = []
+        for orig_size, sel in zip(self._shape_excluding_time, self._isel_tuple):
+            # if selecting a single index, dimension is squeezed
+            # so it is not included in the final shape
+            if isinstance(sel, slice):
+                if sel.start is None and sel.stop is None and sel.step is None:
+                    final_shape.append(orig_size)
+                else:
+                    final_shape.append(len(range(*sel.indices(orig_size))))
+        return final_shape
+
+    @property
+    def dims(self):
+        # Final dimensions of returned data after dims that are selected
+        # with a single index are dropped
+        final_dims = ["time"]
+        for dim, sel in zip(self._loaded_dims[1:], self._isel_tuple):
+            if isinstance(sel, slice):
+                final_dims.append(dim)
+        return final_dims
 
     @property
     def properties(self) -> DatasetProperties:
@@ -568,10 +611,12 @@ class XarrayDataset(torch.utils.data.Dataset):
         total_steps = 0
         for i, file_idx in enumerate(idxs):
             ds = self._open_file(file_idx)
+            ds = ds.isel(**self.isel)
+
             start = input_local_idx if i == 0 else 0
             stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
             n_steps = stop - start + 1
-            shape = [n_steps] + self._shape_excluding_time
+            shape = [n_steps] + self._shape_excluding_time_after_selection
             total_steps += n_steps
             if self.engine == "zarr":
                 tensor_dict = load_series_data_zarr_async(
@@ -579,9 +624,10 @@ class XarrayDataset(torch.utils.data.Dataset):
                     n_steps=n_steps,
                     path=self.full_paths[file_idx],
                     names=self._time_dependent_names,
-                    dims=self.dims,
-                    shape=shape,
+                    final_dims=self.dims,
+                    final_shape=shape,
                     fill_nans=self.fill_nans,
+                    nontime_selection=self._isel_tuple,
                 )
             else:
                 tensor_dict = load_series_data(
@@ -589,8 +635,8 @@ class XarrayDataset(torch.utils.data.Dataset):
                     n_steps=n_steps,
                     ds=ds,
                     names=self._time_dependent_names,
-                    dims=self.dims,
-                    shape=shape,
+                    final_dims=self.dims,
+                    final_shape=shape,
                     fill_nans=self.fill_nans,
                 )
             for n in self._time_dependent_names:
@@ -606,7 +652,8 @@ class XarrayDataset(torch.utils.data.Dataset):
         # load time-invariant variables from first dataset
         if len(self._time_invariant_names) > 0:
             ds = self._open_file(idxs[0])
-            shape = [total_steps] + self._shape_excluding_time
+            ds = ds.isel(**self.isel)
+            shape = [total_steps] + self._shape_excluding_time_after_selection
             for name in self._time_invariant_names:
                 variable = ds[name].variable
                 if self.fill_nans is not None:
