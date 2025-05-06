@@ -219,6 +219,10 @@ class XarrayDataConfig:
             required that 'torch.{dtype}' is a valid dtype.
         overwrite: Optional OverwriteConfig to overwrite loaded field values.
         fill_nans: Optional FillNaNsConfig to fill NaNs with a constant value.
+        isel: Optional xarray isel arguments to be passed to the dataset. Will
+            raise ValueError if time is included here, since the subset argument
+            is used specifically for selecting times. Horizontal dimensions are
+            also not currently supported.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -248,6 +252,7 @@ class XarrayDataConfig:
     dtype: str | None = "float32"
     overwrite: OverwriteConfig = dataclasses.field(default_factory=OverwriteConfig)
     fill_nans: FillNaNsConfig | None = None
+    isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
