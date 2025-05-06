@@ -188,8 +188,8 @@ class Evaluator:
         wandb = WandB.get_instance()
         wandb.log(logs, step=0)
 
+        ds = aggregator.get_dataset()
         if self.dist.is_root():
-            ds = aggregator.get_dataset()
             # no slashes allowed in netcdf variable names
             ds = ds.rename({k: k.replace("/", "_") for k in ds.data_vars})
             ds.to_netcdf(
