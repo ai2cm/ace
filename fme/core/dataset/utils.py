@@ -71,19 +71,30 @@ def _broadcast_array_to_tensor(
 
 async def _get_item(group, name, selection):
     async_array = await group.getitem(name)
-    return await async_array.getitem(selection)
+    if len(async_array.shape) != len(selection):
+        if len(async_array.shape) != 1:
+            raise ValueError(
+                f"Index selection slices/indices were provided as {selection} "
+                f"but array {name} has {len(async_array.shape)} dimensions. "
+            )
+        else:
+            # 1d scalar arrays are sliced along time dim
+            array_selection = selection[0]
+    else:
+        array_selection = selection
+    return await async_array.getitem(array_selection)
 
 
-async def _get_items(url, names, timestep):
+async def _get_items(url, names, selection):
     async_group = await zarr.api.asynchronous.open(store=url)
     coroutines = []
     for name in names:
-        coroutines.append(_get_item(async_group, name, timestep))
+        coroutines.append(_get_item(async_group, name, selection))
     return await asyncio.gather(*coroutines)
 
 
 def _load_all_variables_zarr_async(
-    path: str, variables: Sequence[str], time_slice: slice = SLICE_NONE
+    path: str, variables: Sequence[str], selection: tuple[slice | int, ...]
 ) -> MutableMapping[str, np.ndarray]:
     """Load data from a variables into memory.
 
@@ -92,7 +103,7 @@ def _load_all_variables_zarr_async(
     Assumes that the time dimension is the first dimension in the dataset.
     """
     loop = asyncio.get_event_loop()
-    arrays = loop.run_until_complete(_get_items(path, variables, time_slice))
+    arrays = loop.run_until_complete(_get_items(path, variables, selection))
     return {k: v for k, v in zip(variables, arrays)}
 
 
@@ -114,18 +125,20 @@ def load_series_data_zarr_async(
     n_steps: int,
     path: str,
     names: list[str],
-    dims: list[str],
-    shape: list[int],
+    final_dims: list[str],
+    final_shape: list[int],
+    nontime_selection: tuple[int | slice, ...],
     fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
-    loaded = _load_all_variables_zarr_async(path, names, time_slice)
+    selection = (time_slice, *nontime_selection)
+    loaded = _load_all_variables_zarr_async(path, names, selection)
     if fill_nans is not None:
         for k, v in loaded.items():
             loaded[k] = np.nan_to_num(v, nan=fill_nans.value)
     arrays = {}
     for name in names:
-        arrays[name] = _broadcast_array_to_tensor(loaded[name], dims, shape)
+        arrays[name] = _broadcast_array_to_tensor(loaded[name], final_dims, final_shape)
     return arrays
 
 
@@ -134,8 +147,8 @@ def load_series_data(
     n_steps: int,
     ds: xr.Dataset,
     names: list[str],
-    dims: list[str],
-    shape: list[int],
+    final_dims: list[str],
+    final_shape: list[int],
     fill_nans: FillNaNsConfig | None = None,
 ):
     time_slice = slice(idx, idx + n_steps)
@@ -147,12 +160,12 @@ def load_series_data(
     arrays = {}
     for n in names:
         variable = loaded[n].variable
-        if len(variable.shape) != len(shape):
-            if variable.shape[0] != shape[0]:
+        if len(variable.shape) != len(final_shape):
+            if variable.shape[0] != final_shape[0]:
                 raise ValueError("Must have matching time dimension")
             if len(variable.shape) != 1:
                 raise ValueError("If broadcasting, array must be 1D")
-        arrays[n] = as_broadcasted_tensor(variable, dims, shape)
+        arrays[n] = as_broadcasted_tensor(variable, final_dims, final_shape)
     return arrays
 
 

@@ -171,6 +171,14 @@ def _get_data(
                 np.random.randn(len(time), n_lat, n_lon).astype(np.float32),
                 dims=("time", "lat", "lon"),
             )
+            # set values to sample index for testing convenience
+            sample_index_values = np.broadcast_to(
+                np.arange(n_sample).reshape(1, n_sample, 1, 1),  # shape [1, ns, 1, 1],
+                (len(time), n_sample, n_lat, n_lon),
+            )
+            data_vars["var_matches_sample_index"] = (
+                xr.zeros_like(data_vars["foo"]) + sample_index_values
+            )
 
         ds = xr.Dataset(data_vars=data_vars, coords=coords)
         filename = tmpdir / f"{first.strftime('%Y%m%d%H')}.nc"
@@ -256,7 +264,7 @@ def mock_monthly_netcdfs_ensemble_dim(tmp_path_factory) -> MockData:
         tmp_path_factory,
         "month_with_ensemble_dim",
         add_ensemble_dim=True,
-        var_names=["foo", "bar", "var_no_ensemble_dim"],
+        var_names=["foo", "bar", "var_no_ensemble_dim", "var_matches_sample_index"],
     )
 
 
@@ -1069,10 +1077,58 @@ def test_xarray_raise_error_on_concat_dim_mismatch(
     config1 = XarrayDataConfig(
         data_path=mock_data.tmpdir, subset=TimeSlice("2003-03-01", "2003-03-31")
     )
-
     config2 = XarrayDataConfig(
         data_path=mock_data_ensemble.tmpdir,
         subset=TimeSlice("2003-05-01", "2003-05-31"),
     )
     with pytest.raises(ValueError):
         get_dataset([config1, config2], names, n_timesteps)
+
+
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs_ensemble_dim", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr_ensemble_dim", "zarr", "*.zarr"),
+    ],
+)
+def test_xarray_dataset_isel(mock_data_fixture, engine, file_pattern, request):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        engine=engine,
+        file_pattern=file_pattern,
+        subset=Slice(start=None, stop=2),
+        isel={"sample": 1},
+    )
+    vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
+    dataset = XarrayDataset(config, vars, 2)
+    data, _ = dataset[0]
+    # Original lat/lon sizes are 4, 8
+    assert data["var_matches_sample_index"].shape == (2, 4, 8)
+    assert data["constant_var"].shape == (2, 4, 8)
+    assert "sample" not in dataset.dims
+    assert torch.all(data["var_matches_sample_index"] == 1.0)
+
+
+@pytest.mark.parametrize(
+    "isel",
+    [
+        {"lat": 0},
+        {"time": 0},
+        {"grid_x": 0},
+    ],
+)
+def test_xarray_dataset_invalid_isel_raises_error(
+    mock_monthly_netcdfs_ensemble_dim, isel
+):
+    mock_data: MockData = mock_monthly_netcdfs_ensemble_dim
+    names = mock_data.var_names.all_names
+
+    with pytest.raises(ValueError):
+        config = XarrayDataConfig(
+            data_path=mock_data.tmpdir,
+            subset=TimeSlice("2003-03-01", "2003-03-31"),
+            isel=isel,
+        )
+        get_dataset([config], names, 5)
