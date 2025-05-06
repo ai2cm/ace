@@ -1,6 +1,6 @@
 import pytest
 
-from fme.downscaling.modules.unets import check_level_compatibility
+from fme.downscaling.modules.unets import check_level_compatibility, validate_shape
 
 
 @pytest.mark.parametrize(
@@ -24,3 +24,14 @@ def test_check_level_compatibility(channel_mult, attn_res, passes):
     else:
         with pytest.raises(ValueError):
             check_level_compatibility(img_res, channel_mult, attn_res)
+
+
+@pytest.mark.parametrize("shape", [(6, 6), (6, 8), (8, 6)])
+def test_validate_shape(shape):
+    # UNet only downsamples for depths 2 and greater
+    # 6 -> 6 -> 3, any more than 3 levels should fail
+    validate_shape(shape, 1)
+    validate_shape(shape, 2)
+
+    with pytest.raises(ValueError):
+        validate_shape(shape, 3)

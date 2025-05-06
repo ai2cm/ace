@@ -401,10 +401,16 @@ class NonDivisibleShapeError(ValueError):
 
 
 def validate_shape(x_shape: Tuple[int, int], levels: int):
+    """
+    Validates that the input shape is divisible by the number of downsampling levels.
+
+    Note that the SongUnet does not downsample the first level, so the
+    number of downsamplings considered is the len of channel_mult - 1.
+    """
     next_shape = (x_shape[0] // 2, x_shape[1] // 2)
     if next_shape[0] * next_shape[1] * 4 != x_shape[0] * x_shape[1]:
         raise NonDivisibleShapeError(f"Shape {x_shape} is not divisible by {levels} levels")
-    elif levels > 1:
+    elif levels > 2:
         try:
             validate_shape(next_shape, levels - 1)
         except NonDivisibleShapeError:
