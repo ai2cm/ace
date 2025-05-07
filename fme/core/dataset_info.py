@@ -1,7 +1,10 @@
 import datetime
+import logging
+from collections.abc import Mapping
 from typing import Any
 
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.mask_provider import MaskProvider
@@ -39,12 +42,14 @@ class DatasetInfo:
         vertical_coordinate: VerticalCoordinate | None = None,
         mask_provider: MaskProvider | None = None,
         timestep: datetime.timedelta | None = None,
+        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
         self._img_shape = img_shape
         self._gridded_operations = gridded_operations
         self._vertical_coordinate = vertical_coordinate
         self._mask_provider = mask_provider
         self._timestep = timestep
+        self._variable_metadata = variable_metadata
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DatasetInfo):
@@ -55,6 +60,7 @@ class DatasetInfo:
             and self._vertical_coordinate == other._vertical_coordinate
             and self._mask_provider == other._mask_provider
             and self._timestep == other._timestep
+            and self._variable_metadata == other._variable_metadata
         )
 
     def __repr__(self) -> str:
@@ -62,7 +68,9 @@ class DatasetInfo:
             f"DatasetInfo(img_shape={self._img_shape}, "
             f"gridded_operations={self._gridded_operations}, "
             f"vertical_coordinate={self._vertical_coordinate}, "
-            f"timestep={self._timestep})"
+            f"timestep={self._timestep}), "
+            f"mask_provider={self._mask_provider}, "
+            f"variable_metadata={self._variable_metadata})"
         )
 
     def assert_compatible_with(self, other: "DatasetInfo"):
@@ -97,6 +105,14 @@ class DatasetInfo:
                 issues.append(
                     f"timestep is not compatible, {self._timestep} != {other._timestep}"
                 )
+        metadata_conflicts = get_keys_with_conflicts(
+            self._variable_metadata, other._variable_metadata
+        )
+        for key, (a, b) in metadata_conflicts.items():
+            logging.warning(
+                "DatasetInfo has different metadata from other DatasetInfo for key "
+                f"{key}: {a} != {b}"
+            )
         if issues:
             raise IncompatibleDatasetInfo(
                 "DatasetInfo is not compatible with other DatasetInfo:\n"
@@ -139,6 +155,12 @@ class DatasetInfo:
             raise MissingDatasetInfo("timestep")
         return self._timestep
 
+    @property
+    def variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        if self._variable_metadata is None:
+            return {}
+        return self._variable_metadata
+
     def to_state(self) -> dict[str, Any]:
         if self._gridded_operations is None:
             gridded_operations = None
@@ -162,6 +184,7 @@ class DatasetInfo:
             "vertical_coordinate": vertical_coordinate,
             "mask_provider": mask_provider,
             "timestep": timestep,
+            "variable_metadata": self._variable_metadata,
         }
 
     @classmethod
@@ -190,10 +213,31 @@ class DatasetInfo:
             timestep = decode_timestep(state["timestep"])
         else:
             timestep = None
+        if state.get("variable_metadata") is not None:
+            variable_metadata = state["variable_metadata"]
+        else:
+            variable_metadata = None
         return cls(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             mask_provider=mask_provider,
             timestep=timestep,
+            variable_metadata=variable_metadata,
         )
+
+
+def get_keys_with_conflicts(
+    a: Mapping[str, VariableMetadata] | None,
+    b: Mapping[str, VariableMetadata] | None,
+) -> Mapping[str, tuple[VariableMetadata, VariableMetadata]]:
+    """
+    Get the return the keys where the values in the two dictionaries are different.
+    """
+    a = a or {}
+    b = b or {}
+    keys_with_conflicts = {}
+    for key in a.keys() & b.keys():
+        if a[key] != b[key]:
+            keys_with_conflicts[key] = (a[key], b[key])
+    return keys_with_conflicts

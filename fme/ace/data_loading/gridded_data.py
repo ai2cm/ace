@@ -113,6 +113,7 @@ class GriddedData(GriddedDataABC[BatchData]):
             vertical_coordinate=self._vertical_coordinate,
             mask_provider=self._mask_provider,
             timestep=self._timestep,
+            variable_metadata=self._properties.variable_metadata,
         )
 
     @property
