@@ -19,6 +19,7 @@ from fme.core.coordinates import (
     LatLonCoordinates,
     NullVerticalCoordinate,
 )
+from fme.core.dataset.concat import XarrayConcat
 from fme.core.dataset.config import (
     FillNaNsConfig,
     OverwriteConfig,
@@ -1132,3 +1133,13 @@ def test_xarray_dataset_invalid_isel_raises_error(
             isel=isel,
         )
         get_dataset([config], names, 5)
+
+
+def test_concat_of_XarrayConcat(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    n_timesteps = 5
+    names = mock_data.var_names.all_names + ["x"]
+    config = XarrayDataConfig(data_path=mock_data.tmpdir, subset=Slice(None, 4))
+    concat, _ = get_dataset([config, config], names, n_timesteps)
+    concat2 = XarrayConcat(datasets=[concat, concat])
+    assert len(concat2) == 16
