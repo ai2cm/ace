@@ -428,7 +428,7 @@ class XarrayDataset(torch.utils.data.Dataset):
         return final_shape
 
     @property
-    def dims(self):
+    def dims(self) -> list[str]:
         # Final dimensions of returned data after dims that are selected
         # with a single index are dropped
         final_dims = ["time"]
