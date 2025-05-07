@@ -1,10 +1,16 @@
 import datetime
+import logging
 
 import pytest
 import torch
 
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.dataset_info import DatasetInfo, IncompatibleDatasetInfo
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import (
+    DatasetInfo,
+    IncompatibleDatasetInfo,
+    get_keys_with_conflicts,
+)
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
 
@@ -36,6 +42,17 @@ from fme.core.mask_provider import MaskProvider
                 timestep=datetime.timedelta(hours=1),
             ),
             id="mask_provider",
+        ),
+        pytest.param(
+            DatasetInfo(
+                variable_metadata={
+                    "var_0": VariableMetadata(
+                        "m",
+                        "Variable 0",
+                    ),
+                },
+            ),
+            id="variable_metadata",
         ),
     ],
 )
@@ -129,6 +146,18 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
             DatasetInfo(timestep=datetime.timedelta(hours=1)),
             id="timestep_missing_from_first",
         ),  # a model trained with no timestep can work with any timestep
+        pytest.param(
+            DatasetInfo(),
+            DatasetInfo(
+                variable_metadata={
+                    "var_0": VariableMetadata(
+                        "m",
+                        "Variable 0",
+                    )
+                }
+            ),
+            id="variable_metadata_missing_from_first",
+        ),  # different variable metadata is allowed
     ],
 )
 def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: DatasetInfo):
@@ -245,3 +274,54 @@ def test_assert_compatible_with_incompatible_dataset_info(
     ).difference(msgs)
     for msg in non_messages:
         assert msg not in str(exc_info.value)
+
+
+def test_get_keys_with_conflicts():
+    dict_a = {
+        "var_1": VariableMetadata(
+            "m",
+            "Variable 1",
+        ),
+    }
+    dict_b = {
+        "var_0": VariableMetadata(
+            "m",
+            "Variable 0",
+        ),
+        "var_1": VariableMetadata(
+            "cm",
+            "Variable 1",
+        ),
+    }
+    keys_with_conflicts = get_keys_with_conflicts(dict_a, dict_b)
+    assert len(keys_with_conflicts) == 1
+    assert next(iter(keys_with_conflicts.keys())) == "var_1"
+    assert keys_with_conflicts["var_1"] == (
+        VariableMetadata("m", "Variable 1"),
+        VariableMetadata("cm", "Variable 1"),
+    )
+
+
+def test_compatibility_logs_metadata_keys(caplog):
+    dataset_info_a = DatasetInfo(
+        variable_metadata={
+            "var_1": VariableMetadata(
+                "m",
+                "Variable 1",
+            ),
+        }
+    )
+    dataset_info_b = DatasetInfo(
+        variable_metadata={
+            "var_1": VariableMetadata(
+                "cm",
+                "Variable 1's other name",
+            ),
+        }
+    )
+    with caplog.at_level(logging.WARNING):
+        dataset_info_a.assert_compatible_with(dataset_info_b)
+    assert (
+        "DatasetInfo has different metadata from other DatasetInfo for key var_1"
+        in caplog.text
+    )

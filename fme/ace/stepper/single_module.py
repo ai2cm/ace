@@ -16,6 +16,7 @@ from fme.ace.requirements import DataRequirements, PrognosticStateDataRequiremen
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -979,6 +980,10 @@ class Stepper(
     @property
     def training_dataset_info(self) -> DatasetInfo:
         return self._dataset_info
+
+    @property
+    def training_variable_metadata(self) -> Mapping[str, VariableMetadata]:
+        return self._dataset_info.variable_metadata
 
     @property
     def effective_loss_scaling(self) -> TensorDict:
