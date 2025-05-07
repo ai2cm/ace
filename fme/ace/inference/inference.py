@@ -1,11 +1,13 @@
 import copy
 import dataclasses
+import datetime
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import dacite
+import numpy as np
 import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
@@ -15,7 +17,6 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.data_loading.getters import get_forcing_data
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
     ForcingDataLoaderConfig,
@@ -31,14 +32,14 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
-from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
 from fme.core.logging_utils import LoggingConfig
 from fme.core.timing import GlobalTimer
 
-from .evaluator import validate_time_coarsen_config
+from .evaluator import resolve_variable_metadata, validate_time_coarsen_config
 
 StartIndices = InferenceInitialConditionIndices | ExplicitIndices | TimestampList
 
@@ -201,16 +202,21 @@ class InferenceConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
-        variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    def get_data_writer(
+        self,
+        n_initial_conditions: int,
+        timestep: datetime.timedelta,
+        coords: Mapping[str, np.ndarray],
+        variable_metadata: Mapping[str, VariableMetadata],
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             # each batch contains all samples, for different times
-            n_initial_conditions=data.n_initial_conditions,
+            n_initial_conditions=n_initial_conditions,
             n_timesteps=self.n_forward_steps,
-            timestep=data.timestep,
+            timestep=timestep,
             variable_metadata=variable_metadata,
-            coords=data.coords,
+            coords=coords,
         )
 
 
@@ -280,7 +286,10 @@ def run_inference_from_config(config: InferenceConfig):
                 "used for stepper training"
             ) from err
 
-    variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    variable_metadata = resolve_variable_metadata(
+        data.variable_metadata,
+        stepper.training_variable_metadata,
+    )
     aggregator = config.aggregator.build(
         horizontal_coordinates=data.horizontal_coordinates,
         n_timesteps=config.n_forward_steps + stepper.n_ic_timesteps,
@@ -289,7 +298,12 @@ def run_inference_from_config(config: InferenceConfig):
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(data)
+    writer = config.get_data_writer(
+        n_initial_conditions=data.n_initial_conditions,
+        timestep=data.timestep,
+        coords=data.coords,
+        variable_metadata=variable_metadata,
+    )
 
     timer.stop()
     logging.info("Starting inference")

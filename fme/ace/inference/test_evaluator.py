@@ -31,6 +31,7 @@ from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
 from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
@@ -101,11 +102,18 @@ def save_plus_one_stepper(
         vertical_coordinate = HybridSigmaPressureCoordinate(
             ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
         )
+        variable_metadata = {
+            out_names[0]: VariableMetadata(
+                units="cm",
+                long_name="an output variable",
+            ),
+        }  # attach metadata to this output var to validate that persists in stepper
         dataset_info = DatasetInfo(
             img_shape=(data_shape[-2], data_shape[-1]),
             gridded_operations=LatLonOperations(area),
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
+            variable_metadata=variable_metadata,
         )
         stepper = config.get_stepper(
             dataset_info=dataset_info,
@@ -320,7 +328,9 @@ def inference_helper(
                 assert log[f"inference/mean/weighted_rmse/{var}"] == 0.0
                 assert log[f"inference/mean/weighted_bias/{var}"] == 0.0
 
-    var = list(set(in_names).difference(forcing_names))[0]
+    example_output_var = out_names[0]
+    # for all data written out, this example variable should have the same metadata
+    # as the stepper, not the dataset on disk
 
     if not use_prediction_data:
         initial_condition_ds = xr.open_dataset(
@@ -328,7 +338,7 @@ def inference_helper(
         )
         for dim_name in ["lat", "lon"]:
             assert dim_name in initial_condition_ds.dims
-            assert dim_name in initial_condition_ds.data_vars[var].dims
+            assert dim_name in initial_condition_ds.data_vars[example_output_var].dims
             assert dim_name in initial_condition_ds.coords
 
     prediction_ds = xr.open_dataset(
@@ -339,13 +349,19 @@ def inference_helper(
     assert len(prediction_ds["time"]) == config.n_forward_steps
     for i in range(config.n_forward_steps - 1):
         np.testing.assert_allclose(
-            prediction_ds[var].isel(time=i).values + 1,
-            prediction_ds[var].isel(time=i + 1).values,
+            prediction_ds[example_output_var].isel(time=i).values + 1,
+            prediction_ds[example_output_var].isel(time=i + 1).values,
         )
-        assert not np.any(np.isnan(prediction_ds[var].isel(time=i + 1).values))
+        assert not np.any(
+            np.isnan(prediction_ds[example_output_var].isel(time=i + 1).values)
+        )
 
     assert "lat" in prediction_ds.coords
     assert "lon" in prediction_ds.coords
+    assert prediction_ds[out_names[0]].attrs == {
+        "units": "cm",
+        "long_name": "an output variable",
+    }
 
     if use_prediction_data:
         assert not os.path.exists(tmp_path / "restart.nc")
@@ -355,8 +371,8 @@ def inference_helper(
             tmp_path / "restart.nc", decode_timedelta=False, decode_times=False
         )
         np.testing.assert_allclose(
-            prediction_ds[var].isel(time=-1).values,
-            restart_ds[var].values,
+            prediction_ds[example_output_var].isel(time=-1).values,
+            restart_ds[example_output_var].values,
         )
 
         ic_ds = xr.open_dataset(
@@ -364,31 +380,34 @@ def inference_helper(
             decode_timedelta=False,
             decode_times=False,
         )
-        np.testing.assert_allclose(ic_ds[var].values, 0.0)
+        np.testing.assert_allclose(ic_ds[example_output_var].values, 0.0)
 
     metric_ds = xr.open_dataset(
         tmp_path / "reduced_autoregressive_predictions.nc", decode_timedelta=False
     )
-    assert var in metric_ds.data_vars
-    assert metric_ds.data_vars[var].attrs["units"] == "m"
-    assert metric_ds.data_vars[var].attrs["long_name"] == f"ensemble mean of {var}"
-    assert f"rmse_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"rmse_{var}"].attrs["units"] == "m"
+    assert example_output_var in metric_ds.data_vars
+    assert metric_ds.data_vars[example_output_var].attrs["units"] == "cm"
     assert (
-        metric_ds.data_vars[f"rmse_{var}"].attrs["long_name"]
-        == f"root mean squared error of {var}"
+        metric_ds.data_vars[example_output_var].attrs["long_name"]
+        == f"ensemble mean of an output variable"
     )
-    assert f"bias_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"bias_{var}"].attrs["units"] == "m"
-    assert f"min_err_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"min_err_{var}"].attrs["units"] == "m"
-    assert f"max_err_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"max_err_{var}"].attrs["units"] == "m"
-    assert f"gen_var_{var}" in metric_ds.data_vars
-    assert metric_ds.data_vars[f"gen_var_{var}"].attrs["units"] == ""
+    assert f"rmse_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["units"] == "cm"
     assert (
-        metric_ds.data_vars[f"gen_var_{var}"].attrs["long_name"]
-        == f"prediction variance of {var} as fraction of target variance"
+        metric_ds.data_vars[f"rmse_{example_output_var}"].attrs["long_name"]
+        == f"root mean squared error of an output variable"
+    )
+    assert f"bias_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"bias_{example_output_var}"].attrs["units"] == "cm"
+    assert f"min_err_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"min_err_{example_output_var}"].attrs["units"] == "cm"
+    assert f"max_err_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"max_err_{example_output_var}"].attrs["units"] == "cm"
+    assert f"gen_var_{example_output_var}" in metric_ds.data_vars
+    assert metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["units"] == ""
+    assert (
+        metric_ds.data_vars[f"gen_var_{example_output_var}"].attrs["long_name"]
+        == f"prediction variance of an output variable as fraction of target variance"
     )
     assert "lat" in metric_ds.coords
     assert "lon" in metric_ds.coords
@@ -398,10 +417,16 @@ def inference_helper(
     )
     actual_var_names = sorted([str(k) for k in time_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
-    assert f"bias_map-{var}" in actual_var_names
-    assert time_mean_diagnostics.data_vars[f"bias_map-{var}"].attrs["units"] == "m"
-    assert f"gen_map-{var}" in actual_var_names
-    assert time_mean_diagnostics.data_vars[f"gen_map-{var}"].attrs["units"] == "m"
+    assert f"bias_map-{example_output_var}" in actual_var_names
+    assert (
+        time_mean_diagnostics.data_vars[f"bias_map-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
+    assert f"gen_map-{example_output_var}" in actual_var_names
+    assert (
+        time_mean_diagnostics.data_vars[f"gen_map-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
     assert len(time_mean_diagnostics.coords) == 2
     assert "lat" in time_mean_diagnostics.coords
     assert "lon" in time_mean_diagnostics.coords
@@ -411,10 +436,16 @@ def inference_helper(
     )
     actual_var_names = sorted([str(k) for k in zonal_mean_diagnostics.keys()])
     assert len(actual_var_names) == 2 * len(all_out_names)
-    assert f"error-{var}" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars[f"error-{var}"].attrs["units"] == "m"
-    assert f"gen-{var}" in actual_var_names
-    assert zonal_mean_diagnostics.data_vars[f"gen-{var}"].attrs["units"] == ""
+    assert f"error-{example_output_var}" in actual_var_names
+    assert (
+        zonal_mean_diagnostics.data_vars[f"error-{example_output_var}"].attrs["units"]
+        == "cm"
+    )
+    assert f"gen-{example_output_var}" in actual_var_names
+    assert (
+        zonal_mean_diagnostics.data_vars[f"gen-{example_output_var}"].attrs["units"]
+        == ""
+    )
     assert len(zonal_mean_diagnostics.coords) == 1
     assert "lat" in zonal_mean_diagnostics.coords
 
@@ -430,19 +461,22 @@ def inference_helper(
             else len(all_out_names) + len(forcing_names)
         )
         assert len(actual_var_names) == 2 * n_vars
-        assert var in actual_var_names
-        assert histograms.data_vars[var].attrs["units"] == "count"
-        assert f"{var}_bin_edges" in actual_var_names
-        assert histograms.data_vars[f"{var}_bin_edges"].attrs["units"] == "m"
-        var_counts_per_timestep = histograms[var].sum(dim=["bin"])
+        assert example_output_var in actual_var_names
+        assert histograms.data_vars[example_output_var].attrs["units"] == "count"
+        assert f"{example_output_var}_bin_edges" in actual_var_names
+        assert (
+            histograms.data_vars[f"{example_output_var}_bin_edges"].attrs["units"]
+            == "cm"
+        )
+        var_counts_per_timestep = histograms[example_output_var].sum(dim=["bin"])
         same_count_each_timestep = np.all(
             var_counts_per_timestep.values == var_counts_per_timestep.values[0]
         )
         assert same_count_each_timestep
     if monthly_reference_filename is not None:
-        assert f"inference/annual/{var}" in wandb_logs[-1]
-        assert f"inference/annual/r2_gen_{var}" in wandb_logs[-1]
-        assert f"inference/annual/r2_target_{var}" in wandb_logs[-1]
+        assert f"inference/annual/{example_output_var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_gen_{example_output_var}" in wandb_logs[-1]
+        assert f"inference/annual/r2_target_{example_output_var}" in wandb_logs[-1]
     assert "inference/total_steps_per_second" in wandb_logs[-1]
 
 
