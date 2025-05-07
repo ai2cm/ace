@@ -34,6 +34,7 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
@@ -81,6 +82,12 @@ def save_stepper(
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
+        variable_metadata={
+            "prog": VariableMetadata(
+                units="m",
+                long_name="a prognostic variable",
+            ),
+        },
     )
     stepper = config.get_stepper(
         dataset_info=dataset_info,
@@ -193,6 +200,10 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     # prognostic in
     assert "prog" in ds
+    assert ds["prog"].attrs == {
+        "units": "m",
+        "long_name": "a prognostic variable",
+    }
     # diags in
     assert "ULWRFtoa" in ds
     assert "USWRFtoa" in ds

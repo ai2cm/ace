@@ -1,9 +1,11 @@
 import dataclasses
+import datetime
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import dacite
+import numpy as np
 import torch
 
 import fme
@@ -11,7 +13,6 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.aggregator.inference import InferenceEvaluatorAggregatorConfig
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.getters import get_inference_data
-from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
@@ -24,6 +25,7 @@ from fme.ace.stepper import (
 )
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.cli import prepare_config, prepare_directory
+from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import IncompatibleDatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
@@ -49,6 +51,18 @@ def validate_time_coarsen_config(
             f"time_coarsen.coarsen_factor. Got {n_forward_steps} "
             f"and {coarsen_factor}."
         )
+
+
+def resolve_variable_metadata(
+    dataset_metadata: Mapping[str, VariableMetadata],
+    stepper_metadata: Mapping[str, VariableMetadata],
+) -> Mapping[str, VariableMetadata]:
+    """
+    Resolve variable metadata by merging derived, dataset, and stepper metadata.
+    Preference is given to stepper and then dataset metadata if there are conflicts.
+    """
+    derived_metadata = get_derived_variable_metadata()
+    return derived_metadata | dict(dataset_metadata) | dict(stepper_metadata)
 
 
 @dataclasses.dataclass
@@ -122,15 +136,19 @@ class InferenceEvaluatorConfig:
         logging.info(f"Loading trained model checkpoint from {self.checkpoint_path}")
         return load_stepper_config(self.checkpoint_path, self.stepper_override)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> PairedDataWriter:
-        variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    def get_data_writer(
+        self,
+        timestep: datetime.timedelta,
+        variable_metadata: Mapping[str, VariableMetadata],
+        coords: Mapping[str, np.ndarray],
+    ) -> PairedDataWriter:
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
             n_timesteps=self.n_forward_steps,
-            timestep=data.timestep,
+            timestep=timestep,
             variable_metadata=variable_metadata,
-            coords=data.coords,
+            coords=coords,
         )
 
 
@@ -225,7 +243,10 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     for batch in data.loader:
         initial_time = batch.time.isel(time=0)
         break
-    variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    variable_metadata = resolve_variable_metadata(
+        dataset_metadata=data.variable_metadata,
+        stepper_metadata=stepper.training_variable_metadata,
+    )
     aggregator = aggregator_config.build(
         horizontal_coordinates=data.horizontal_coordinates,
         timestep=data.timestep,
@@ -238,7 +259,11 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
         output_dir=config.experiment_dir,
     )
 
-    writer = config.get_data_writer(data)
+    writer = config.get_data_writer(
+        timestep=data.timestep,
+        variable_metadata=variable_metadata,
+        coords=data.coords,
+    )
 
     timer.stop()
     logging.info("Starting inference")
