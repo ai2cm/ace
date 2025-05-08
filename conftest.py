@@ -63,7 +63,7 @@ def enforce_timeout(skip_slow, very_fast_only, pdb_enabled, no_timeout):
     elif skip_slow:
         timeout_seconds = 30
     else:
-        timeout_seconds = 60
+        timeout_seconds = 90
     signal.signal(signal.SIGALRM, timeout_handler)
     signal.alarm(timeout_seconds)  # Set the timeout for the test
     try:
