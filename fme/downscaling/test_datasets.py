@@ -1,9 +1,11 @@
+import dataclasses
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 import xarray as xr
 
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.properties import DatasetProperties
 from fme.downscaling.datasets import (
     BatchData,
@@ -16,6 +18,7 @@ from fme.downscaling.datasets import (
     HorizontalSubsetDataset,
     LatLonCoordinates,
     PairedBatchItem,
+    XarrayEnsembleDataConfig,
     _scale_slice,
     _subset_horizontal,
 )
@@ -460,3 +463,21 @@ def test_BatchData_slice_latlon():
         batch_slice.topography,
         batch.topography[:, lat_slice, lon_slice],  # type: ignore
     )
+
+
+def test_XarrayEnsembleDataConfig():
+    """Tests the XarrayEnsembleDataConfig class."""
+    n_ensemble_members = 5
+    base_config = XarrayDataConfig(
+        data_path="ensemble_dataset_path", n_repeats=3, spatial_dimensions="healpix"
+    )
+    ensemble_config = XarrayEnsembleDataConfig(
+        data_config=base_config,
+        ensemble_dim="sample",
+        n_ensemble_members=n_ensemble_members,
+    )
+    isel_sample_configs = [
+        dataclasses.replace(base_config, isel={"sample": i})
+        for i in range(n_ensemble_members)
+    ]
+    assert ensemble_config.expand() == isel_sample_configs

@@ -23,7 +23,51 @@ from fme.core.typing_ import TensorMapping
 from fme.downscaling.requirements import DataRequirements
 
 
-def get_normalized_topography(configs: Sequence[XarrayDataConfig]) -> torch.Tensor:
+@dataclasses.dataclass
+class XarrayEnsembleDataConfig:
+    """
+    Configuration for an ensemble dataset.
+    This config's expand method returns a sequence of xarray datasets, each
+    with the same data_config, where each individual dataset is an ensemble member
+    selected from the ensemble dimension.
+
+    Parameters:
+        data_config: XarrayDataConfig for the dataset.
+        ensemble_dim: Name of the ensemble dimension in the dataset.
+        n_ensemble_members: Number of ensemble members to load. They will be taken
+            in order from index 0 of the ensemble_dim.
+    """
+
+    data_config: XarrayDataConfig
+    ensemble_dim: str
+    n_ensemble_members: int
+
+    def __post_init__(self):
+        if self.n_ensemble_members <= 0:
+            raise ValueError(
+                f"n_ensemble_members must be > 0, got {self.n_ensemble_members}"
+            )
+        if self.ensemble_dim in self.data_config.isel:
+            raise ValueError(
+                f"Ensemble dimension {self.ensemble_dim} cannot be in the "
+                "base data_config.isel"
+            )
+
+    def expand(self) -> list[XarrayDataConfig]:
+        configs = []
+        for i in range(self.n_ensemble_members):
+            configs.append(
+                dataclasses.replace(
+                    self.data_config,
+                    isel={self.ensemble_dim: i},
+                )
+            )
+        return configs
+
+
+def get_normalized_topography(
+    configs: Sequence[XarrayDataConfig],
+) -> torch.Tensor:
     """
     Load the topography data from the specified path and return the normalized
     height of the topography values.
@@ -786,7 +830,8 @@ class DataLoaderConfig:
 
     Args:
         fine: The fine dataset configuration.
-        coarse: The coarse dataset configuration.
+        coarse: The coarse dataset configuration. XarrayEnsembleDataConfig
+            is supported to load multiple ensemble members.
         batch_size: The batch size to use for the dataloader.
         num_data_workers: The number of data workers to use for the dataloader.
             (For multi-GPU runtime, it's the number of workers per GPU.)
@@ -804,7 +849,7 @@ class DataLoaderConfig:
     """
 
     fine: Sequence[XarrayDataConfig]
-    coarse: Sequence[XarrayDataConfig]
+    coarse: Sequence[XarrayDataConfig | XarrayEnsembleDataConfig]
     batch_size: int
     num_data_workers: int
     strict_ensemble: bool
@@ -818,6 +863,18 @@ class DataLoaderConfig:
 
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
+
+    @property
+    def coarse_full_config(self) -> Sequence[XarrayDataConfig]:
+        # Expands the coarse dataset configs so that any XarrayEnsembleDataConfig
+        # is converted to the equivalent sequence of XarrayDataConfig.
+        coarse_configs = []
+        for config in self.coarse:
+            if isinstance(config, XarrayEnsembleDataConfig):
+                coarse_configs += config.expand()
+            else:
+                coarse_configs.append(config)
+        return coarse_configs
 
     def build(
         self,
@@ -835,8 +892,9 @@ class DataLoaderConfig:
             requirements.n_timesteps,
             strict=self.strict_ensemble,
         )
+
         dataset_coarse, properties_coarse = get_dataset(
-            self.coarse,
+            self.coarse_full_config,
             requirements.coarse_names,
             requirements.n_timesteps,
             strict=self.strict_ensemble,

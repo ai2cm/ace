@@ -287,9 +287,10 @@ class EventConfig:
         ).strftime(self.date_format)
 
         time_slice = TimeSlice(self.date, _stop)
+
         event_fine = dataclasses.replace(base_data_config.fine[0], subset=time_slice)
         event_coarse = dataclasses.replace(
-            base_data_config.coarse[0], subset=time_slice
+            base_data_config.coarse_full_config[0], subset=time_slice
         )
 
         n_processes = Distributed.get_instance().world_size

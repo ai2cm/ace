@@ -399,19 +399,27 @@ class XarrayDataset(torch.utils.data.Dataset):
         self._isel_tuple = tuple(
             [self.isel.get(dim, SLICE_NONE) for dim in self._loaded_dims[1:]]
         )
-        self._check_isel_dimensions()
+        self._check_isel_dimensions(first_dataset.sizes)
 
-    def _check_isel_dimensions(self):
+    def _check_isel_dimensions(self, data_dim_sizes):
         # Horizontal dimensions are not currently supported, as the current isel code
         # does not adjust HorizonalCoordinates to match selection.
         if "time" in self.isel:
             raise ValueError("isel cannot be used to select time. Use subset instead.")
 
-        for dim in self.isel:
+        for dim, selection in self.isel.items():
             if dim not in self._nonspacetime_dims:
                 raise ValueError(
                     f"isel dimension {dim} must be a non-spacetime dimension "
                     f"of the dataset ({self._nonspacetime_dims})."
+                )
+            max_isel_index = (
+                (selection.start or 0) if isinstance(selection, slice) else selection
+            )
+            if max_isel_index >= data_dim_sizes[dim]:
+                raise ValueError(
+                    f"isel index {max_isel_index} is out of bounds for dimension "
+                    f"{dim} with size {data_dim_sizes[dim]}."
                 )
 
     @property
