@@ -1135,6 +1135,25 @@ def test_xarray_dataset_invalid_isel_raises_error(
         get_dataset([config], names, 5)
 
 
+@pytest.mark.parametrize(
+    "isel_value",
+    [3, Slice(3, 13)],
+)
+def test_XarrayDataset_error_on_isel_outside_data(
+    mock_monthly_netcdfs_ensemble_dim, isel_value
+):
+    # mock data has sample dimension size 3
+    mock_data: MockData = mock_monthly_netcdfs_ensemble_dim
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        subset=Slice(start=None, stop=2),
+        isel={"sample": isel_value},
+    )
+    vars = list(set(mock_data.var_names.all_names) - {"var_no_ensemble_dim"})
+    with pytest.raises(ValueError):
+        XarrayDataset(config, vars, 2)
+
+
 def test_concat_of_XarrayConcat(mock_monthly_netcdfs):
     mock_data: MockData = mock_monthly_netcdfs
     n_timesteps = 5
