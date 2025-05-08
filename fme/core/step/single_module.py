@@ -41,7 +41,7 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
-        crps_training: Whether to use CRPS training for stochastic models.
+        crps_training: Unused, kept for backwards compatibility.
         residual_prediction: Whether to use residual prediction.
     """
 
@@ -54,10 +54,11 @@ class SingleModuleStepConfig(StepConfigABC):
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
-    crps_training: bool = False
+    crps_training: bool | None = None
     residual_prediction: bool = False
 
     def __post_init__(self):
+        self.crps_training = None  # unused, kept for backwards compatibility
         for name in self.next_step_forcing_names:
             if name not in self.in_names:
                 raise ValueError(

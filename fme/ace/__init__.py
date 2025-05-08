@@ -60,6 +60,7 @@ from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.typing_ import Slice
 
+from . import step
 from .train.train import run_train
 from .train.train_config import (
     CopyWeightsConfig,

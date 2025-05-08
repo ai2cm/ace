@@ -13,6 +13,7 @@ import torch._dynamo.exc
 
 import fme
 from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
+from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
@@ -27,6 +28,8 @@ from fme.core.step.step import StepABC, StepSelector
 from fme.core.typing_ import TensorDict
 
 from .radiation import SeparateRadiationStepConfig
+
+DEFAULT_IMG_SHAPE = (45, 90)
 
 
 def get_network_and_loss_normalization_config(
@@ -242,6 +245,73 @@ def get_single_module_with_atmosphere_corrector_selector(
     )
 
 
+def get_fcn2_selector(
+    dir: pathlib.Path | None = None,
+) -> StepSelector:
+    forcing_names = [
+        "DSWRFtoa",
+        "HGTsfc",
+    ]
+    atmosphere_prognostic_names = [
+        "air_temperature",
+        "specific_total_water",
+    ]
+    atmosphere_levels = 6
+    surface_prognostic_names = [
+        "PRESsfc",
+        "PRATEsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "ULWRFsfc",
+        "ULWRFtoa",
+        "DLWRFsfc",
+        "DSWRFsfc",
+        "USWRFtoa",
+        "USWRFsfc",
+        "tendency_of_total_water_path_due_to_advection",
+    ]
+    atmosphere_packed_names = []
+    for i in range(atmosphere_levels):
+        atmosphere_packed_names.append(f"air_temperature_{i}")
+        atmosphere_packed_names.append(f"specific_total_water_{i}")
+    normalization = get_network_and_loss_normalization_config(
+        names=list(
+            set(forcing_names)
+            .union(atmosphere_packed_names)
+            .union(surface_prognostic_names)
+        ),
+        dir=dir,
+    )
+    step_config = FCN2StepConfig(
+        builder=FCN2Selector(
+            type="FCN2",
+            config=FCN2Config(
+                scale_factor=1,
+                atmo_embed_dim=2,
+                surf_embed_dim=2,
+                aux_embed_dim=2,
+                num_layers=2,
+            ),
+        ),
+        forcing_names=forcing_names,
+        atmosphere_prognostic_names=atmosphere_prognostic_names,
+        atmosphere_levels=atmosphere_levels,
+        surface_prognostic_names=surface_prognostic_names,
+        normalization=normalization,
+        corrector=AtmosphereCorrectorConfig(
+            conserve_dry_air=True,
+            zero_global_mean_moisture_advection=True,
+            moisture_budget_correction="advection_and_precipitation",
+            force_positive_names=["PRATEsfc"],
+            total_energy_budget_correction="constant_temperature",
+        ),
+    )
+    return StepSelector(
+        type="FCN2",
+        config=dataclasses.asdict(step_config),
+    )
+
+
 def get_multi_call_selector(
     dir: pathlib.Path | None = None,
 ) -> StepSelector:
@@ -266,6 +336,7 @@ def get_multi_call_selector(
 SEPARATE_RADIATION_CONFIG = get_separate_radiation_config()
 
 SELECTOR_GETTERS = [
+    get_fcn2_selector,
     get_single_module_with_atmosphere_corrector_selector,
     get_separate_radiation_selector,
     get_single_module_selector,
@@ -335,7 +406,7 @@ def get_step(selector: StepSelector, img_shape: tuple[int, int]) -> StepABC:
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_forcing(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     forcing_names = set(step.input_names).difference(step.output_names)
     data["config"]["next_step_forcing_names"] = [list(forcing_names)[0]]
@@ -345,7 +416,7 @@ def test_next_step_forcing_names_is_forcing(config: StepSelector):
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_prognostic(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     prognostic_names = set(step.output_names).intersection(step.input_names)
     name = list(prognostic_names)[0]
@@ -359,7 +430,7 @@ def test_next_step_forcing_names_is_prognostic(config: StepSelector):
 @pytest.mark.parametrize("config", HAS_NEXT_STEP_FORCING_NAME_CASES)
 def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
     data = dataclasses.asdict(config)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     diagnostic_names = set(step.output_names).difference(step.input_names)
     name = list(diagnostic_names)[0]
@@ -373,7 +444,7 @@ def test_next_step_forcing_names_is_diagnostic(config: StepSelector):
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
 def test_step_applies_wrapper(config: StepSelector):
     torch.manual_seed(0)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     n_samples = 5
     step = get_step(config, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
@@ -396,8 +467,10 @@ def test_step_applies_wrapper(config: StepSelector):
 def test_export_step(config: StepSelector, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
+    if config.type == "FCN2":
+        pytest.xfail("FCN2 is not supported for export")
     torch.manual_seed(0)
-    img_shape = (6, 12)
+    img_shape = DEFAULT_IMG_SHAPE
     n_samples = 5
     step = get_step(config, img_shape)
     input_data = get_tensor_dict(step.input_names, img_shape, n_samples)
@@ -431,7 +504,7 @@ def test_load_config(
         get_scalar_dataset(all_names, fill_value=1.1).to_netcdf(temp_path / "stds.nc")
         config = get_config(temp_path)
         config.load()
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     step = get_step(config, img_shape)
     normalizer = step.normalizer
     assert normalizer.means.keys() == all_names
@@ -456,6 +529,6 @@ def test_load_is_required_for_path_config(
         get_scalar_dataset(all_names, fill_value=0.1).to_netcdf(temp_path / "means.nc")
         get_scalar_dataset(all_names, fill_value=1.1).to_netcdf(temp_path / "stds.nc")
         config = get_config(temp_path)
-    img_shape = (5, 5)
+    img_shape = DEFAULT_IMG_SHAPE
     with pytest.raises(FileNotFoundError):
         get_step(config, img_shape)
