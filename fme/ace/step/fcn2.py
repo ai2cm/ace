@@ -2,24 +2,27 @@ import dataclasses
 import datetime
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import dacite
 import torch
 from torch import nn
 
+from fme.ace.models.makani_fcn2.models.networks.fourcastnet2 import (  # type: ignore
+    AtmoSphericNeuralOperatorNet,
+)
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.registry import CorrectorABC
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.dicts import add_names
 from fme.core.distributed import Distributed
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, StandardNormalizer
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
-from fme.core.registry import CorrectorSelector, ModuleSelector
+from fme.core.registry import CorrectorSelector
+from fme.core.step.single_module import step_with_adjustments
 from fme.core.step.step import StepABC, StepConfigABC, StepSelector
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -27,9 +30,112 @@ DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
-@StepSelector.register("single_module")
 @dataclasses.dataclass
-class SingleModuleStepConfig(StepConfigABC):
+class FCN2Config:
+    """
+    Configuration for a FCN2 model.
+    """
+
+    model_grid_type: str = "legendre-gauss"
+    sht_grid_type: str = "legendre-gauss"
+    kernel_width: int = 3
+    filter_basis_type: str = "morlet"
+    filter_basis_norm_mode: str = "mean"
+    scale_factor: int = 8
+    encoder_mlp: bool = False
+    upsample_sht: bool = False
+    n_history: int = 0
+    atmo_embed_dim: int = 8
+    surf_embed_dim: int = 8
+    aux_embed_dim: int = 8
+    num_layers: int = 4
+    use_mlp: bool = True
+    mlp_ratio: float = 2.0
+    activation_function: str = "gelu"
+    layer_scale: bool = True
+    pos_drop_rate: float = 0.0
+    path_drop_rate: float = 0.0
+    mlp_drop_rate: float = 0.0
+    normalization_layer: str = "none"
+    max_modes: int | None = None
+    hard_thresholding_fraction: float = 1.0
+    sfno_block_frequency: int = 2
+    bias: bool = False
+    checkpointing: int = 0
+    freeze_encoder: bool = False
+    freeze_processor: bool = False
+
+    def build(
+        self,
+        n_atmo_channels: int,
+        n_atmo_groups: int,
+        n_surf_channels: int,
+        n_aux_channels: int,
+        img_shape: tuple[int, int],
+    ) -> AtmoSphericNeuralOperatorNet:
+        return AtmoSphericNeuralOperatorNet(
+            n_atmo_channels=n_atmo_channels,
+            n_atmo_groups=n_atmo_groups,
+            n_surf_channels=n_surf_channels,
+            n_aux_channels=n_aux_channels,
+            model_grid_type=self.model_grid_type,
+            sht_grid_type=self.sht_grid_type,
+            inp_shape=img_shape,
+            out_shape=img_shape,
+            kernel_shape=(self.kernel_width, self.kernel_width),
+            filter_basis_type=self.filter_basis_type,
+            filter_basis_norm_mode=self.filter_basis_norm_mode,
+            scale_factor=self.scale_factor,
+            encoder_mlp=self.encoder_mlp,
+            upsample_sht=self.upsample_sht,
+            n_history=self.n_history,
+            atmo_embed_dim=self.atmo_embed_dim,
+            surf_embed_dim=self.surf_embed_dim,
+            aux_embed_dim=self.aux_embed_dim,
+            num_layers=self.num_layers,
+            use_mlp=self.use_mlp,
+            mlp_ratio=self.mlp_ratio,
+            activation_function=self.activation_function,
+            layer_scale=self.layer_scale,
+            pos_drop_rate=self.pos_drop_rate,
+            path_drop_rate=self.path_drop_rate,
+            mlp_drop_rate=self.mlp_drop_rate,
+            normalization_layer=self.normalization_layer,
+            max_modes=self.max_modes,
+            hard_thresholding_fraction=self.hard_thresholding_fraction,
+            sfno_block_frequency=self.sfno_block_frequency,
+            bias=self.bias,
+            checkpointing=self.checkpointing,
+            freeze_encoder=self.freeze_encoder,
+            freeze_processor=self.freeze_processor,
+        )
+
+
+@dataclasses.dataclass
+class FCN2Selector:
+    type: Literal["FCN2"]
+    config: FCN2Config
+
+    def build(
+        self,
+        n_atmo_channels: int,
+        n_atmo_groups: int,
+        n_surf_channels: int,
+        n_aux_channels: int,
+        img_shape: tuple[int, int],
+    ) -> AtmoSphericNeuralOperatorNet:
+        return self.config.build(
+            n_atmo_channels=n_atmo_channels,
+            n_atmo_groups=n_atmo_groups,
+            n_surf_channels=n_surf_channels,
+            n_aux_channels=n_aux_channels,
+            img_shape=img_shape,
+        )
+
+
+@StepSelector.register("FCN2")
+@dataclasses.dataclass
+class FCN2StepConfig(StepConfigABC):
     """
     Configuration for a single module stepper.
 
@@ -41,33 +147,44 @@ class SingleModuleStepConfig(StepConfigABC):
         ocean: The ocean configuration.
         corrector: The corrector configuration.
         next_step_forcing_names: Names of forcing variables for the next timestep.
-        crps_training: Unused, kept for backwards compatibility.
         residual_prediction: Whether to use residual prediction.
     """
 
-    builder: ModuleSelector
-    in_names: list[str]
-    out_names: list[str]
+    builder: FCN2Selector
+    forcing_names: list[str]
+    atmosphere_prognostic_names: list[str]
+    atmosphere_levels: int
+    surface_prognostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
         default_factory=lambda: AtmosphereCorrectorConfig()
     )
     next_step_forcing_names: list[str] = dataclasses.field(default_factory=list)
-    crps_training: bool | None = None
     residual_prediction: bool = False
 
     def __post_init__(self):
-        self.crps_training = None  # unused, kept for backwards compatibility
         for name in self.next_step_forcing_names:
-            if name not in self.in_names:
+            if name not in self.forcing_names:
                 raise ValueError(
-                    f"next_step_forcing_name '{name}' not in in_names: {self.in_names}"
+                    f"next_step_forcing_name '{name}' not in forcing_names: "
+                    f"{self.forcing_names}"
                 )
-            if name in self.out_names:
-                raise ValueError(
-                    f"next_step_forcing_name is an output variable: '{name}'"
-                )
+        atmosphere_names = []
+        # the FCN2 model expects atmosphere "channels" to be the faster dimension
+        # so that they can be encoded together, meaning we must replicate that
+        # ordering here.
+        for i in range(self.atmosphere_levels):
+            for name in self.atmosphere_prognostic_names:
+                atmosphere_names.append(f"{name}_{i}")
+        self.atmosphere_packed_names = atmosphere_names
+        self.surface_packed_names = self.surface_prognostic_names
+        self.in_names = (
+            self.forcing_names
+            + self.atmosphere_packed_names
+            + self.surface_packed_names
+        )
+        self.out_names = self.atmosphere_packed_names + self.surface_packed_names
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -91,7 +208,7 @@ class SingleModuleStepConfig(StepConfigABC):
         )
 
     @classmethod
-    def from_state(cls, state) -> "SingleModuleStepConfig":
+    def from_state(cls, state) -> "FCN2StepConfig":
         state = cls._remove_deprecated_keys(state)
         return dacite.from_dict(
             data_class=cls, data=state, config=dacite.Config(strict=True)
@@ -120,7 +237,7 @@ class SingleModuleStepConfig(StepConfigABC):
     @property
     def diagnostic_names(self) -> list[str]:
         """Names of variables which are outputs only."""
-        return list(set(self.out_names).difference(self.in_names))
+        return []  # not currently supported
 
     @property
     def output_names(self) -> list[str]:
@@ -158,7 +275,7 @@ class SingleModuleStepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
-    ) -> "SingleModuleStep":
+    ) -> "FCN2Step":
         logging.info("Initializing stepper from provided config")
         corrector = dataset_info.vertical_coordinate.build_corrector(
             config=self.corrector,
@@ -166,7 +283,7 @@ class SingleModuleStepConfig(StepConfigABC):
             timestep=dataset_info.timestep,
         )
         normalizer = self.normalization.get_network_normalizer(self._normalize_names)
-        return SingleModuleStep(
+        return FCN2Step(
             config=self,
             img_shape=dataset_info.img_shape,
             corrector=corrector,
@@ -178,7 +295,7 @@ class SingleModuleStepConfig(StepConfigABC):
         self.normalization.load()
 
 
-class SingleModuleStep(StepABC):
+class FCN2Step(StepABC):
     """
     Step class for a single pytorch module.
     """
@@ -188,7 +305,7 @@ class SingleModuleStep(StepABC):
 
     def __init__(
         self,
-        config: SingleModuleStepConfig,
+        config: FCN2StepConfig,
         img_shape: tuple[int, int],
         corrector: CorrectorABC,
         normalizer: StandardNormalizer,
@@ -205,10 +322,9 @@ class SingleModuleStep(StepABC):
                 the weights are about to be overwritten by a checkpoint.
         """
         super().__init__()
-        n_in_channels = len(config.in_names)
-        n_out_channels = len(config.out_names)
-        self.in_packer = Packer(config.in_names)
-        self.out_packer = Packer(config.out_names)
+        self.forcing_packer = Packer(config.forcing_names)
+        self.atmosphere_packer = Packer(config.atmosphere_packed_names)
+        self.surface_packer = Packer(config.surface_packed_names)
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
@@ -216,17 +332,20 @@ class SingleModuleStep(StepABC):
             )
         else:
             self.ocean = None
-        self.module = config.builder.build(
-            n_in_channels=n_in_channels,
-            n_out_channels=n_out_channels,
+        module: nn.Module = config.builder.build(
+            n_atmo_channels=len(config.atmosphere_prognostic_names),
+            n_atmo_groups=config.atmosphere_levels,
+            n_surf_channels=len(config.surface_prognostic_names),
+            n_aux_channels=len(config.forcing_names),
             img_shape=img_shape,
-        ).to(get_device())
+        )
+        module = module.to(get_device())
+
+        dist = Distributed.get_instance()
+        self.module = dist.wrap_module(module)
         self._img_shape = img_shape
         self._config = config
         self._no_optimization = NullOptimization()
-
-        dist = Distributed.get_instance()
-        self.module = dist.wrap_module(self.module)
 
         self._timestep = timestep
 
@@ -235,7 +354,7 @@ class SingleModuleStep(StepABC):
         self.out_names = config.out_names
 
     @property
-    def config(self) -> SingleModuleStepConfig:
+    def config(self) -> FCN2StepConfig:
         return self._config
 
     @property
@@ -286,9 +405,24 @@ class SingleModuleStep(StepABC):
         """
 
         def network_call(input_norm: TensorDict) -> TensorDict:
-            input_tensor = self.in_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            output_tensor = wrapper(self.module)(input_tensor)
-            return self.out_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
+            forcing_tensor = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            atmosphere_tensor = self.atmosphere_packer.pack(
+                input_norm, axis=self.CHANNEL_DIM
+            )
+            surface_tensor = self.surface_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
+                atmosphere_tensor, surface_tensor, forcing_tensor
+            )
+            atmosphere_output = self.atmosphere_packer.unpack(
+                atmosphere_output_tensor, axis=self.CHANNEL_DIM
+            )
+            surface_output = self.surface_packer.unpack(
+                surface_output_tensor, axis=self.CHANNEL_DIM
+            )
+            return {
+                **atmosphere_output,
+                **surface_output,
+            }
 
         return step_with_adjustments(
             input=input,
@@ -320,52 +454,4 @@ class SingleModuleStep(StepABC):
         Args:
             state: The state to load.
         """
-        module = state["module"]
-        if "module.device_buffer" in module:
-            # for backwards compatibility with old checkpoints
-            del module["module.device_buffer"]
-        self.module.load_state_dict(module)
-
-
-def step_with_adjustments(
-    input: TensorMapping,
-    next_step_input_data: TensorMapping,
-    network_calls: Callable[[TensorDict], TensorDict],
-    normalizer: StandardNormalizer,
-    corrector: CorrectorABC,
-    ocean: Ocean | None,
-    residual_prediction: bool,
-    prognostic_names: list[str],
-) -> TensorDict:
-    """
-    Step the model forward one timestep given input data.
-
-    Args:
-        input: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from the
-            initial timestep. In practice this contains the ML inputs.
-        next_step_input_data: Mapping from variable name to tensor of shape
-            [n_batch, n_lat, n_lon] containing denormalized data from
-            the output timestep. In practice this contains the necessary data
-            at the output timestep for the ocean model and corrector.
-        network_calls: Callable[[TensorMapping], TensorDict] that takes a
-            normalized input and returns a normalized output.
-        normalizer: The normalizer to use.
-        corrector: The corrector to use at the end of each step.
-        ocean: The ocean model to use.
-        residual_prediction: Whether to use residual prediction.
-        prognostic_names: Names of prognostic variables.
-
-    Returns:
-        The denormalized output data at the next time step.
-    """
-    input_norm = normalizer.normalize(input)
-    output_norm = network_calls(input_norm)
-    if residual_prediction:
-        output_norm = add_names(input_norm, output_norm, prognostic_names)
-    output = normalizer.denormalize(output_norm)
-    if corrector is not None:
-        output = corrector(input, output, next_step_input_data)
-    if ocean is not None:
-        output = ocean(input, output, next_step_input_data)
-    return output
+        self.module.load_state_dict(state["module"])

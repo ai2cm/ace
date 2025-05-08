@@ -1,3 +1,4 @@
+# type: ignore
 # SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -15,7 +16,7 @@
 
 import math
 from functools import partial
-from typing import Optional, Tuple, TypeVar
+from typing import Callable, Optional, Tuple, TypeVar
 
 import torch
 import torch.amp as amp
@@ -31,7 +32,13 @@ from fme.ace.models.makani_fcn2.models.common import (
     MLP,
     DropPath,
     EncoderDecoder,
+    GeometricInstanceNormS2,
     SpectralConv,
+)
+from fme.ace.models.makani_fcn2.mpu.layer_norm import (
+    DistributedGeometricInstanceNormS2,
+    DistributedInstanceNorm2d,
+    DistributedLayerNorm,
 )
 
 # get pre-formulated layers
@@ -58,15 +65,6 @@ def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
         * math.pi
         / float(nlat - 1)
     )
-
-
-# commenting out torch.compile due to long intiial compile times
-# @torch.compile
-def _soft_clamp(x: torch.Tensor, offset: float = 0.0):
-    x = x + offset
-    y = torch.where(x > 0.0, x**2, 0.0)
-    y = torch.where(x >= 0.5, x - 0.25, y)
-    return y
 
 
 class DiscreteContinuousEncoder(nn.Module):
@@ -224,7 +222,8 @@ class DiscreteContinuousDecoder(nn.Module):
             )
 
         # heuristic for finding theta_cutoff
-        # nto entirely clear if out or in shape should be used here with a non-conv method for upsampling
+        # nto entirely clear if out or in shape should be used here with a
+        # non-conv method for upsampling
         theta_cutoff = _compute_cutoff_radius(
             nlat=out_shape[0], kernel_shape=kernel_shape, basis_type=basis_type
         )
@@ -426,8 +425,9 @@ OptionalTensorType = TypeVar("OptionalTensorType", torch.Tensor, None)
 
 class AtmoSphericNeuralOperatorNet(nn.Module):
     """
-    Backbone of the FourCastNet2 architecture. Uses a Spherical Fourier Neural Operator augmented with localized
-    Neural Operator Convolutions. Encoder and Decoder are grouped by channel groups.
+    Backbone of the FourCastNet2 architecture. Uses a Spherical Fourier Neural Operator
+    augmented with localized Neural Operator Convolutions.
+    Encoder and Decoder are grouped by channel groups.
 
     References:
     [1] Bonev et al., Spherical Fourier Neural Operators: Learning Stable Dynamics on the Sphere
@@ -451,14 +451,11 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         scale_factor=8,
         encoder_mlp=False,
         upsample_sht=False,
-        channel_names=["u500", "v500"],
-        aux_channel_names=[],
         n_history=0,
         atmo_embed_dim=8,
         surf_embed_dim=8,
         aux_embed_dim=8,
         num_layers=4,
-        num_groups=1,
         use_mlp=True,
         mlp_ratio=2.0,
         activation_function="gelu",
@@ -470,13 +467,10 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         max_modes=None,
         hard_thresholding_fraction=1.0,
         sfno_block_frequency=2,
-        big_skip=False,
-        clamp_water=False,
         bias=False,
         checkpointing=0,
         freeze_encoder=False,
         freeze_processor=False,
-        **kwargs,
     ):
         super().__init__()
 
@@ -485,7 +479,6 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         self.atmo_embed_dim = atmo_embed_dim
         self.surf_embed_dim = surf_embed_dim
         self.aux_embed_dim = aux_embed_dim
-        self.big_skip = big_skip
         self.checkpointing = checkpointing
         self.n_atmo_channels = n_atmo_channels
         self.n_surf_channels = n_surf_channels
@@ -634,9 +627,6 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         # Internal NO blocks
         self.blocks = nn.ModuleList([])
         for i in range(num_layers):
-            first_layer = i == 0
-            last_layer = i == num_layers - 1
-
             if i % sfno_block_frequency == 0:
                 # if True:
                 conv_type = "global"
@@ -666,24 +656,6 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
 
             self.blocks.append(block)
 
-        # residual prediction
-        if self.big_skip:
-            self.residual_transform = nn.Conv2d(
-                self.n_out_chans, self.n_out_chans, 1, bias=False
-            )
-            self.residual_transform.weight.is_shared_mp = ["spatial"]
-            self.residual_transform.weight.sharded_dims_mp = [None, None, None, None]
-            scale = math.sqrt(0.5 / self.n_out_chans)
-            nn.init.normal_(self.residual_transform.weight, mean=0.0, std=scale)
-
-        # controlled output normalization of q and tcwv
-        if clamp_water:
-            water_chans = get_water_channels(channel_names)
-            if len(water_chans) > 0:
-                self.register_buffer(
-                    "water_channels", torch.LongTensor(water_chans), persistent=False
-                )
-
         # freeze the encoder/decoder
         if freeze_encoder:
             frozen_params = list(self.atmo_encoder.parameters()) + list(
@@ -695,8 +667,6 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
                 )
             if hasattr(self, "aux_encoder"):
                 frozen_params += list(self.aux_encoder.parameters())
-            if self.big_skip:
-                frozen_params += list(self.residual_transform.parameters())
             for param in frozen_params:
                 param.requires_grad = False
 
@@ -715,8 +685,9 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         max_modes=None,
     ):
         """
-        Initialize the spectral transforms based on the maximum number of modes to keep. Handles the computation
-        of local image shapes and domain parallelism, based on the
+        Initialize the spectral transforms based on the maximum number of modes
+        to keep. Handles the computation of local image shapes and domain
+        parallelism, based on the grid type.
         """
         # precompute the cutoff frequency on the sphere
         if max_modes is not None:
@@ -754,13 +725,11 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         sht_grid_type="legendre-gauss",
     ):
         """
-        Get the handle for ionitializing normalization layers
+        Get the handle for initializing normalization layers.
         """
         # pick norm layer
         if normalization_layer == "layer_norm":
-            from makani.mpu.layer_norm import DistributedLayerNorm
-
-            norm_layer_handle = partial(
+            norm_layer_handle: Callable = partial(
                 DistributedLayerNorm,
                 normalized_shape=(embed_dim),
                 elementwise_affine=True,
@@ -768,8 +737,6 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
             )
         elif normalization_layer == "instance_norm":
             if comm.get_size("spatial") > 1:
-                from makani.mpu.layer_norm import DistributedInstanceNorm2d
-
                 norm_layer_handle = partial(
                     DistributedInstanceNorm2d,
                     num_features=embed_dim,
@@ -786,12 +753,8 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
                 )
         elif normalization_layer == "instance_norm_s2":
             if comm.get_size("spatial") > 1:
-                from makani.mpu.layer_norm import DistributedGeometricInstanceNormS2
-
                 norm_layer_handle = DistributedGeometricInstanceNormS2
             else:
-                from makani.models.common import GeometricInstanceNormS2
-
                 norm_layer_handle = GeometricInstanceNormS2
             norm_layer_handle = partial(
                 norm_layer_handle,
@@ -817,7 +780,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         self, x_atmo: torch.Tensor, x_surf: Optional[torch.Tensor]
     ) -> torch.Tensor:
         """
-        Forward pass for the encoder
+        Forward pass for the encoder.
         """
         batchdims = x_atmo.shape[:-3]
         if x_surf is not None and x_surf.shape[:-3] != batchdims:
@@ -848,7 +811,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         self, x_aux: OptionalTensorType
     ) -> OptionalTensorType:
         """
-        Returns the embedded auxiliary channels
+        Returns the embedded auxiliary channels.
         """
         if x_aux is None:
             return None
@@ -865,7 +828,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
 
     def decode(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass for the decoder
+        Forward pass for the decoder.
         """
         batchdims = x.shape[:-3]
 
