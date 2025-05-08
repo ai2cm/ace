@@ -262,23 +262,28 @@ class XarrayDataConfig:
                 "`XarrayDataConfig.file_pattern` to match the zarr filename."
             )
 
+    @property
+    def torch_dtype(self) -> torch.dtype | None:
+        if self.dtype is None:
+            return None
+        else:
+            try:
+                torch_dtype = getattr(torch, self.dtype)
+            except AttributeError:
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
+            if not isinstance(torch_dtype, torch.dtype):
+                raise ValueError(f"Invalid dtype '{self.dtype}'")
+        return torch_dtype
+
     def __post_init__(self):
         if self.n_repeats > 1 and not self.infer_timestep:
             raise ValueError(
                 "infer_timestep must be True if n_repeats is greater than 1"
             )
-        if self.dtype is None:
-            self.torch_dtype = None
-        else:
-            try:
-                self.torch_dtype = getattr(torch, self.dtype)
-            except AttributeError:
-                raise ValueError(f"Invalid dtype '{self.dtype}'")
-            if not isinstance(self.torch_dtype, torch.dtype):
-                raise ValueError(f"Invalid dtype '{self.dtype}'")
         if self.spatial_dimensions not in ["latlon", "healpix"]:
             raise ValueError(
                 f"unexpected spatial_dimensions {self.spatial_dimensions},"
                 " should be one of 'latlon' or 'healpix'"
             )
+        self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()

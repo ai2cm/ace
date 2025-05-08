@@ -3,8 +3,8 @@ import dataclasses
 import pathlib
 import subprocess
 import tempfile
-import textwrap
 import unittest.mock
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -13,6 +13,15 @@ import xarray as xr
 import yaml
 
 import fme
+from fme.ace.aggregator.inference.main import InferenceEvaluatorAggregatorConfig
+from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.inference import (
+    InferenceDataLoaderConfig,
+    InferenceInitialConditionIndices,
+)
+from fme.ace.inference.data_writer.main import DataWriterConfig
+from fme.ace.inference.evaluator import InferenceEvaluatorConfig
 from fme.ace.inference.evaluator import main as inference_evaluator_main
 from fme.ace.registry.test_hpx import (
     conv_next_block_config,
@@ -23,6 +32,7 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
+from fme.ace.stepper.single_module import SingleModuleStepperConfig
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -30,16 +40,27 @@ from fme.ace.testing import (
     save_scalar_netcdf,
 )
 from fme.ace.train.train import main as train_main
+from fme.ace.train.train_config import InlineInferenceConfig, TrainConfig
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
     LatLonCoordinates,
 )
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.dataset.config import XarrayDataConfig
 from fme.core.generics.trainer import (
     _restore_checkpoint,
     count_parameters,
     epoch_checkpoint_enabled,
 )
+from fme.core.logging_utils import LoggingConfig
+from fme.core.loss import WeightedMappingLossConfig
+from fme.core.normalizer import NormalizationConfig
+from fme.core.ocean import OceanConfig
+from fme.core.optimization import OptimizationConfig
+from fme.core.registry.corrector import CorrectorSelector
+from fme.core.registry.module import ModuleSelector
+from fme.core.scheduler import SchedulerConfig
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
 
@@ -52,7 +73,7 @@ def _get_test_yaml_files(
     *,
     train_data_path,
     valid_data_path,
-    monthly_data_filename,
+    monthly_data_filename: pathlib.Path | None,
     results_dir,
     global_means_path,
     global_stds_path,
@@ -61,7 +82,6 @@ def _get_test_yaml_files(
     mask_name,
     n_forward_steps=2,
     nettype="SphericalFourierNeuralOperatorNet",
-    stepper_checkpoint_file=None,
     log_to_wandb=False,
     max_epochs=1,
     segment_epochs=1,
@@ -86,7 +106,6 @@ def _get_test_yaml_files(
         decoder_input_channels = 0  # was 1, to indicate insolation - now 0
         input_time_size = 1  # TODO: change to 2 (issue #1177)
         output_time_size = 1  # TODO: change to 4 (issue #1177)
-        spatial_dimensions_str = "healpix"
 
         conv_next_block = conv_next_block_config(in_channels=in_channels)
         down_sampling_block = down_sampling_block_config()
@@ -103,161 +122,177 @@ def _get_test_yaml_files(
             recurrent_block,
             n_channels=[4, 8, 16],
         )
-
-        # Need to manually indent these YAML strings
-        encoder_yaml = yaml.dump(
-            dataclasses.asdict(encoder), default_flow_style=False, indent=2
+        net_config = dict(
+            encoder=encoder,
+            decoder=decoder,
+            prognostic_variables=prognostic_variables,
+            n_constants=n_constants,
+            decoder_input_channels=decoder_input_channels,
+            input_time_size=input_time_size,
+            output_time_size=output_time_size,
         )
-        decoder_yaml = yaml.dump(
-            dataclasses.asdict(decoder), default_flow_style=False, indent=2
-        )
-        encoder_yaml_indented = textwrap.indent(encoder_yaml, "        ")
-        decoder_yaml_indented = textwrap.indent(decoder_yaml, "        ")
-        config_str = f"""
-      encoder:
-{encoder_yaml_indented}
-      decoder:
-{decoder_yaml_indented}
-      prognostic_variables: {prognostic_variables}
-      n_constants: {n_constants}
-      decoder_input_channels: {decoder_input_channels}
-      input_time_size: {input_time_size}
-      output_time_size: {output_time_size}
-        """
+        spatial_dimensions_str: Literal["healpix", "latlon"] = "healpix"
     elif nettype == "Samudra":
-        config_str = f"""
-      ch_width: [8, 16]
-      dilation: [2, 4]
-      n_layers: [1, 1]
-      """
+        net_config = dict(
+            ch_width=[8, 16],
+            dilation=[2, 4],
+            n_layers=[1, 1],
+        )
         spatial_dimensions_str = "latlon"
-    else:
-        config_str = """
-      num_layers: 2
-      embed_dim: 12"""
+    elif nettype == "SphericalFourierNeuralOperatorNet":
+        net_config = dict(
+            num_layers=2,
+            embed_dim=12,
+        )
+        spatial_dimensions_str = "latlon"
+    elif nettype == "NoiseConditionedSFNO":
+        net_config = dict(
+            num_layers=2,
+            embed_dim=12,
+        )
         spatial_dimensions_str = "latlon"
 
-    new_stepper_config = f"""
-  crps_training: {"true" if crps_training else "false"}
-  in_names: {in_variable_names}
-  out_names: {out_variable_names}
-  normalization:
-    global_means_path: '{global_means_path}'
-    global_stds_path: '{global_stds_path}'
-  residual_normalization:
-    global_means_path: '{global_means_path}'
-    global_stds_path: '{global_stds_path}'
-  loss:
-    type: "MSE"
-  builder:
-    type: {nettype}
-    config: {config_str}
-  ocean:
-    surface_temperature_name: {in_variable_names[0]}
-    ocean_fraction_name: {mask_name}
-"""
     if nettype == "SphericalFourierNeuralOperatorNet":
-        new_stepper_config += """
-  corrector:
-    type: "atmosphere_corrector"
-    config:
-      conserve_dry_air: true
-
-"""
-    existing_stepper_config = f"""
-  checkpoint_file: {stepper_checkpoint_file}
-"""
-
-    if stepper_checkpoint_file:
-        stepper_config = existing_stepper_config
+        corrector_config: AtmosphereCorrectorConfig | CorrectorSelector = (
+            CorrectorSelector(
+                type="atmosphere_corrector",
+                config=dataclasses.asdict(
+                    AtmosphereCorrectorConfig(conserve_dry_air=True)
+                ),
+            )
+        )
     else:
-        stepper_config = new_stepper_config
+        corrector_config = AtmosphereCorrectorConfig()
 
-    train_string = f"""
-train_loader:
-  dataset:
-    - data_path: '{train_data_path}'
-      spatial_dimensions: {spatial_dimensions_str}
-  batch_size: 2
-  num_data_workers: 0
-validation_loader:
-  dataset:
-    - data_path: '{valid_data_path}'
-      spatial_dimensions: {spatial_dimensions_str}
-  batch_size: 2
-  num_data_workers: 0
-optimization:
-  use_gradient_accumulation: true
-  optimizer_type: "Adam"
-  lr: 0.001
-  kwargs:
-    weight_decay: 0.01
-  scheduler:
-      type: CosineAnnealingLR
-      kwargs:
-        T_max: 1
-stepper:
-{stepper_config}
-inference:
-  aggregator:
-    monthly_reference_data: {monthly_data_filename}
-  loader:
-    dataset:
-      data_path: '{valid_data_path}'
-      spatial_dimensions: {spatial_dimensions_str}
-    start_indices:
-      first: 0
-      n_initial_conditions: 2
-      interval: 1
-  n_forward_steps: {inference_forward_steps}
-  forward_steps_in_memory: 2
-n_forward_steps: {n_forward_steps}
-max_epochs: {max_epochs}
-segment_epochs: {segment_epochs}
-save_checkpoint: true
-logging:
-  log_to_screen: true
-  log_to_wandb: {str(log_to_wandb).lower()}
-  log_to_file: false
-  project: fme
-  entity: ai2cm
-experiment_dir: {results_dir}
-save_per_epoch_diagnostics: {str(save_per_epoch_diagnostics).lower()}
-validation_aggregator:
-  log_snapshots: {str(log_validation_maps).lower()}
-  log_mean_maps: {str(log_validation_maps).lower()}
-"""  # noqa: E501
-    inference_string = f"""
-experiment_dir: {results_dir}
-n_forward_steps: 6
-forward_steps_in_memory: 2
-checkpoint_path: {results_dir}/training_checkpoints/best_ckpt.tar
-data_writer:
-  save_prediction_files: true
-aggregator:
-  log_video: true
-logging:
-  log_to_screen: true
-  log_to_wandb: {str(log_to_wandb).lower()}
-  log_to_file: false
-  project: fme
-  entity: ai2cm
-loader:
-  dataset:
-    data_path: '{valid_data_path}'
-    spatial_dimensions: {spatial_dimensions_str}
-  start_indices:
-    first: 0
-    n_initial_conditions: 2
-    interval: 1
-    """  # noqa: E501
+    logging_config = LoggingConfig(
+        log_to_screen=True,
+        log_to_wandb=log_to_wandb,
+        log_to_file=False,
+        project="fme",
+        entity="ai2cm",
+    )
+
+    train_config = TrainConfig(
+        train_loader=DataLoaderConfig(
+            dataset=[
+                XarrayDataConfig(
+                    data_path=str(train_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                )
+            ],
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        validation_loader=DataLoaderConfig(
+            dataset=[
+                XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                )
+            ],
+            batch_size=2,
+            num_data_workers=0,
+        ),
+        optimization=OptimizationConfig(
+            use_gradient_accumulation=True,
+            optimizer_type="Adam",
+            lr=0.001,
+            kwargs=dict(weight_decay=0.01),
+            scheduler=SchedulerConfig(
+                type="CosineAnnealingLR",
+                kwargs=dict(T_max=1),
+            ),
+        ),
+        stepper=SingleModuleStepperConfig(
+            crps_training=crps_training,
+            in_names=in_variable_names,
+            out_names=out_variable_names,
+            normalization=NormalizationConfig(
+                global_means_path=str(global_means_path),
+                global_stds_path=str(global_stds_path),
+            ),
+            residual_normalization=NormalizationConfig(
+                global_means_path=str(global_means_path),
+                global_stds_path=str(global_stds_path),
+            ),
+            loss=WeightedMappingLossConfig(type="MSE"),
+            builder=ModuleSelector(
+                type=nettype,
+                config=net_config,
+            ),
+            ocean=OceanConfig(
+                surface_temperature_name=in_variable_names[0],
+                ocean_fraction_name=mask_name,
+            ),
+            corrector=corrector_config,
+        ),
+        inference=InlineInferenceConfig(
+            aggregator=InferenceEvaluatorAggregatorConfig(
+                monthly_reference_data=(
+                    str(monthly_data_filename)
+                    if monthly_data_filename is not None
+                    else None
+                ),
+            ),
+            loader=InferenceDataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                ),
+                start_indices=InferenceInitialConditionIndices(
+                    first=0,
+                    n_initial_conditions=2,
+                    interval=1,
+                ),
+            ),
+            n_forward_steps=inference_forward_steps,
+            forward_steps_in_memory=2,
+        ),
+        n_forward_steps=n_forward_steps,
+        max_epochs=max_epochs,
+        segment_epochs=segment_epochs,
+        save_checkpoint=True,
+        logging=logging_config,
+        experiment_dir=str(results_dir),
+        save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+        validation_aggregator=OneStepAggregatorConfig(
+            log_snapshots=log_validation_maps,
+            log_mean_maps=log_validation_maps,
+        ),
+    )
+
+    inference_config = InferenceEvaluatorConfig(
+        experiment_dir=str(results_dir),
+        n_forward_steps=6,
+        forward_steps_in_memory=2,
+        checkpoint_path=str(results_dir / "training_checkpoints" / "best_ckpt.tar"),
+        data_writer=DataWriterConfig(
+            save_prediction_files=True,
+        ),
+        aggregator=InferenceEvaluatorAggregatorConfig(
+            log_video=True,
+        ),
+        logging=logging_config,
+        loader=InferenceDataLoaderConfig(
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+            ),
+            start_indices=InferenceInitialConditionIndices(
+                first=0,
+                n_initial_conditions=2,
+                interval=1,
+            ),
+        ),
+    )
+
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f_train:
-        f_train.write(train_string)
+        f_train.write(yaml.dump(dataclasses.asdict(train_config)))
 
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".yaml"
     ) as f_inference:
-        f_inference.write(inference_string)
+        f_inference.write(yaml.dump(dataclasses.asdict(inference_config)))
 
     return f_train.name, f_inference.name
 
@@ -348,7 +383,7 @@ def _setup(
     if use_healpix:
         # monthly reference functionality not supported for HEALPix
         # see https://github.com/ai2cm/full-model/issues/1561
-        monthly_data_filename = "null"
+        monthly_data_filename = None
     else:
         monthly_dim_sizes = get_sizes(n_time=10 * 12, nz_interface=1)
         monthly_reference_data = MonthlyReferenceData(
