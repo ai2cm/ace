@@ -287,8 +287,9 @@ def run_inference_from_config(config: InferenceConfig):
             ) from err
 
     variable_metadata = resolve_variable_metadata(
-        data.variable_metadata,
-        stepper.training_variable_metadata,
+        dataset_metadata=data.variable_metadata,
+        stepper_metadata=stepper.training_variable_metadata,
+        stepper_all_names=stepper_config.all_names,
     )
     aggregator = config.aggregator.build(
         horizontal_coordinates=data.horizontal_coordinates,
