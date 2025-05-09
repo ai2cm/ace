@@ -200,13 +200,18 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     )
     # prognostic in
     assert "prog" in ds
-    assert ds["prog"].attrs == {
+    assert ds["prog"].attrs == {  # this should come from the stepper metadata
         "units": "m",
         "long_name": "a prognostic variable",
     }
     # diags in
     assert "ULWRFtoa" in ds
+    assert ds["ULWRFtoa"].attrs == {  # this should come from default metadata
+        "units": "W/m**2",
+        "long_name": "Upward LW radiative flux at TOA",
+    }
     assert "USWRFtoa" in ds
+
     # derived in
     assert "net_energy_flux_toa_into_atmosphere" in ds
     assert "units" in ds.net_energy_flux_toa_into_atmosphere.attrs
