@@ -1,9 +1,11 @@
 import dataclasses
 import datetime
+import logging
 import os
 import pathlib
 import tempfile
 from collections.abc import Iterable
+from unittest.mock import patch
 
 import dacite
 import numpy as np
@@ -23,6 +25,7 @@ from fme.ace.inference.evaluator import (
     InferenceEvaluatorConfig,
     StepperOverrideConfig,
     main,
+    resolve_variable_metadata,
 )
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
@@ -1074,3 +1077,54 @@ def test_inference_includes_diagnostics(tmp_path: pathlib.Path):
         assert "USWRFtoa" not in ds
         assert "forcing_var" not in ds
         assert "prog" in ds
+
+
+@pytest.mark.parametrize(
+    ["stepper_metadata", "dataset_metadata"],
+    [
+        pytest.param(
+            {"foo": VariableMetadata("m", "first definition of foo")},
+            {"foo": VariableMetadata("mm", "second definition of foo")},
+            id="different_metadata",
+        ),
+        pytest.param(
+            {},
+            {"foo": VariableMetadata("mm", "second definition of foo")},
+            id="datset_has_metadata",
+        ),
+        pytest.param({}, {}, id="neither_have_metadata"),
+    ],
+)
+@patch(
+    "fme.ace.inference.evaluator.get_default_variable_metadata",
+    return_value={"foo": VariableMetadata("cm", "third definition of foo")},
+)
+@patch("fme.ace.inference.evaluator.get_derived_variable_metadata", return_value={})
+def test_resolve_variable_metadata(
+    mock_get_derived_variable_metadata,
+    mock_get_default_variable_metadata,
+    stepper_metadata,
+    dataset_metadata,
+    caplog,
+):
+    with caplog.at_level(logging.WARNING):
+        variable_metadata = resolve_variable_metadata(
+            dataset_metadata=dataset_metadata,
+            stepper_metadata=stepper_metadata,
+            stepper_all_names=["foo"],
+        )
+    if "foo" in stepper_metadata:
+        assert "foo" not in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("m", "first definition of foo")
+        }
+    elif "foo" in dataset_metadata:
+        assert "foo" not in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("mm", "second definition of foo")
+        }
+    else:
+        assert "foo" in caplog.text
+        assert variable_metadata == {
+            "foo": VariableMetadata("cm", "third definition of foo")
+        }

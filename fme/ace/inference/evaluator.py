@@ -16,6 +16,7 @@ from fme.ace.data_loading.getters import get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
+from fme.ace.inference.default_metadata import get_default_variable_metadata
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
 from fme.ace.stepper import (
     Stepper,
@@ -56,13 +57,46 @@ def validate_time_coarsen_config(
 def resolve_variable_metadata(
     dataset_metadata: Mapping[str, VariableMetadata],
     stepper_metadata: Mapping[str, VariableMetadata],
-) -> Mapping[str, VariableMetadata]:
+    stepper_all_names: Sequence[str],
+) -> dict[str, VariableMetadata]:
     """
-    Resolve variable metadata by merging derived, dataset, and stepper metadata.
-    Preference is given to stepper and then dataset metadata if there are conflicts.
+    Resolve variable metadata by merging from the following sources: derived variables,
+    the dataset, the stepper, and finally a set of defaults. If there are conflicts on
+    variable metadata values, preference is given first to values from the stepper,
+    then from the dataset, and finally from default values.
+
+    Note that if not saved with the stepper, the variable metadata is not guaranteed to
+    be the same as that in the dataset used for training the stepper.
+
+    Args:
+        dataset_metadata: Metadata from the dataset.
+        stepper_metadata: Metadata from the stepper.
+        stepper_all_names: Variable names associated with the stepper.
+
+    Returns:
+        A mappping of variable names to metadata.
     """
-    derived_metadata = get_derived_variable_metadata()
-    return derived_metadata | dict(dataset_metadata) | dict(stepper_metadata)
+    default_metadata = get_default_variable_metadata(version="era5_v1")
+    names_from_default = (
+        set(stepper_all_names) - (dataset_metadata.keys() | stepper_metadata.keys())
+    ) & default_metadata.keys()
+    if names_from_default:
+        logging.warning(
+            "Variable metadata for the following stepper variables were not found in "
+            "the variable metadata of the forcing dataset or stepper: "
+            f"{names_from_default}. Using default values for these variables instead. "
+            "Users should ensure that the default values are consistent with the "
+            "training dataset of the stepper."
+        )
+    resolved_metadata = (
+        default_metadata | dict(dataset_metadata) | dict(stepper_metadata)
+    )
+    resolved_metadata = {
+        name: resolved_metadata[name]
+        for name in stepper_all_names
+        if name in resolved_metadata
+    }
+    return get_derived_variable_metadata() | resolved_metadata
 
 
 @dataclasses.dataclass
@@ -246,6 +280,7 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     variable_metadata = resolve_variable_metadata(
         dataset_metadata=data.variable_metadata,
         stepper_metadata=stepper.training_variable_metadata,
+        stepper_all_names=stepper_config.all_names,
     )
     aggregator = aggregator_config.build(
         horizontal_coordinates=data.horizontal_coordinates,
