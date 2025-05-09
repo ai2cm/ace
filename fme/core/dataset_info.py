@@ -213,10 +213,7 @@ class DatasetInfo:
             timestep = decode_timestep(state["timestep"])
         else:
             timestep = None
-        if state.get("variable_metadata") is not None:
-            variable_metadata = state["variable_metadata"]
-        else:
-            variable_metadata = None
+        variable_metadata = state.get("variable_metadata")
         return cls(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
