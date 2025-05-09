@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Callable
 
@@ -7,6 +8,8 @@ from torch.nn.functional import pad
 from torch.nn.parallel import DistributedDataParallel
 
 from fme.core.device import get_device, using_gpu
+
+logger = logging.getLogger(__name__)
 
 
 class DummyWrapper(torch.nn.Module):
@@ -215,6 +218,14 @@ class Distributed:
             )
         else:
             return DummyWrapper(module)
+
+    def barrier(self):
+        """
+        Wait for all processes to reach this point.
+        """
+        if self._distributed:
+            logger.debug(f"Barrier on rank {self.rank}")
+            torch.distributed.barrier()
 
 
 singleton: Distributed | None = None
