@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import warnings
 from collections import namedtuple
 from functools import lru_cache
@@ -98,7 +99,7 @@ def _get_vertical_coordinate(
             mask_layers = {
                 name: torch.as_tensor(ds[name].values, dtype=dtype)
                 for name in ds.data_vars
-                if "mask_" in name
+                if re.match(r"mask_(\d+)$", name)
             }
             for name in mask_layers:
                 if "time" in ds[name].dims:
