@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Mapping
 
 import cftime
@@ -6,6 +7,10 @@ import gcsfs
 import netCDF4
 import numpy as np
 import zarr
+
+from fme.core.distributed import Distributed
+
+logger = logging.getLogger(__name__)
 
 
 def _encode_cftime_times(times, units="hours since 2000-01-01", calendar="julian"):
@@ -109,6 +114,7 @@ class ZarrWriter:
         self.coords = coords
         self.data_vars = data_vars
         self.chunks = chunks or {}
+        self.dist = Distributed.get_instance()
 
         self._store_initialized = False
 
@@ -162,15 +168,24 @@ class ZarrWriter:
         self,
         example_data: Mapping[str, np.ndarray],
     ):
-        data_dtype = example_data[self.data_vars[0]].dtype
-        dim_sizes = tuple([len(self.coords[dim]) for dim in self.dims])
-        initialize_zarr(
-            path=self.path,
-            vars=self.data_vars,
-            dim_sizes=dim_sizes,
-            chunks=self.chunks,
-            coords=self.coords,
-            dim_names=self.dims,
-            dtype=data_dtype,
-        )
-        self._store_initialized = True
+        if self.dist.is_root():
+            logger.debug(f"Rank {self.dist.rank}: Initializing zarr store")
+            data_dtype = example_data[self.data_vars[0]].dtype
+            dim_sizes = tuple([len(self.coords[dim]) for dim in self.dims])
+            initialize_zarr(
+                path=self.path,
+                vars=self.data_vars,
+                dim_sizes=dim_sizes,
+                chunks=self.chunks,
+                coords=self.coords,
+                dim_names=self.dims,
+                dtype=data_dtype,
+            )
+            self.dist.barrier()
+            self._store_initialized = True
+        else:
+            logger.debug(
+                f"Rank {self.dist.rank}: Waiting for zarr store to be initialized"
+            )
+            self.dist.barrier()
+            self._store_initialized = True
