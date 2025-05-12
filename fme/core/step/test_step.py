@@ -256,9 +256,14 @@ def get_fcn2_selector(
         "air_temperature",
         "specific_total_water",
     ]
+    atmosphere_diagnostic_names = [
+        "radiative_heating",
+    ]
     atmosphere_levels = 6
     surface_prognostic_names = [
         "PRESsfc",
+    ]
+    surface_diagnostic_names = [
         "PRATEsfc",
         "LHTFLsfc",
         "SHTFLsfc",
@@ -274,11 +279,13 @@ def get_fcn2_selector(
     for i in range(atmosphere_levels):
         atmosphere_packed_names.append(f"air_temperature_{i}")
         atmosphere_packed_names.append(f"specific_total_water_{i}")
+        atmosphere_packed_names.append(f"radiative_heating_{i}")
     normalization = get_network_and_loss_normalization_config(
         names=list(
             set(forcing_names)
             .union(atmosphere_packed_names)
             .union(surface_prognostic_names)
+            .union(surface_diagnostic_names)
         ),
         dir=dir,
     )
@@ -295,8 +302,10 @@ def get_fcn2_selector(
         ),
         forcing_names=forcing_names,
         atmosphere_prognostic_names=atmosphere_prognostic_names,
+        atmosphere_diagnostic_names=atmosphere_diagnostic_names,
         atmosphere_levels=atmosphere_levels,
         surface_prognostic_names=surface_prognostic_names,
+        surface_diagnostic_names=surface_diagnostic_names,
         normalization=normalization,
         corrector=AtmosphereCorrectorConfig(
             conserve_dry_air=True,
