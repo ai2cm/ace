@@ -11,6 +11,13 @@ repos:
     - id: check-added-large-files
       args: [--maxkb=250]
     - id: trailing-whitespace
+    - id: file-contents-sorter
+      files: |
+            (?x)^(
+                ^.*requirements.*\.txt|
+                constraints.txt|
+                analysis-deps.txt
+            )$
 -   repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.15.0
     hooks:

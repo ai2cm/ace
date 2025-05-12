@@ -1,13 +1,11 @@
-# these are some packages which are convenient to have installed for ad-hoc analysis
-# but which are not requirements of the "fme" package. We do not relist the fme
-# dependencies here.
-beaker-py
-beaker-gantry>=1.12.0
+# these are convenient to have installed for ad-hoc analysis but are not requirements of the "fme" package
 Bottleneck
+beaker-gantry>=1.12.0
+beaker-py
+bokeh>=3.1.0
 dask[distributed]
 ipywidgets
-nc-time-axis
 jupyterlab
+nc-time-axis
 pyproj<3.7
 seaborn
-bokeh>=3.1.0
