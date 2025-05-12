@@ -28,9 +28,6 @@ inference:
         data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
         file_pattern: data.zarr
         engine: zarr
-      mask_2d:
-        data_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset
-        file_pattern: mask_2d.nc
     num_data_workers: 8
   aggregator:
     log_histograms: false
@@ -56,11 +53,6 @@ train_loader:
       engine: zarr
       subset:
         stop_time: '0306-01-01'
-    masks:
-    - data_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset
-      file_pattern: mask_2d.nc
-      subset:
-        stop_time: '0306-01-01'
 validation_loader:
   batch_size: 16
   num_data_workers: 8
@@ -76,12 +68,6 @@ validation_loader:
     - data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
       file_pattern: data.zarr
       engine: zarr
-      subset:
-        start_time: '0306-01-01'
-        stop_time: '0311-01-01'
-    masks:
-    - data_path: /climate-default/2025-04-16-cm4-piControl-ocean-200yr-dataset
-      file_pattern: mask_2d.nc
       subset:
         start_time: '0306-01-01'
         stop_time: '0311-01-01'
