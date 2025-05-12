@@ -17,8 +17,10 @@ def test__AtmoSphericNeuralOperatorNet():
 
     net = AtmoSphericNeuralOperatorNet(
         n_atmo_channels=n_atmo_channels,
+        n_atmo_diagnostic_channels=0,
         n_atmo_groups=n_atmo_groups,
         n_surf_channels=n_surf_channels,
+        n_surf_diagnostic_channels=0,
         n_aux_channels=n_aux_channels,
         inp_shape=img_shape,
         out_shape=img_shape,
