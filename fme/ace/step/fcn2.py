@@ -71,6 +71,8 @@ class FCN2Config:
         n_atmo_groups: int,
         n_surf_channels: int,
         n_aux_channels: int,
+        n_atmo_diagnostic_channels: int,
+        n_surf_diagnostic_channels: int,
         img_shape: tuple[int, int],
     ) -> AtmoSphericNeuralOperatorNet:
         return AtmoSphericNeuralOperatorNet(
@@ -78,6 +80,8 @@ class FCN2Config:
             n_atmo_groups=n_atmo_groups,
             n_surf_channels=n_surf_channels,
             n_aux_channels=n_aux_channels,
+            n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
+            n_surf_diagnostic_channels=n_surf_diagnostic_channels,
             model_grid_type=self.model_grid_type,
             sht_grid_type=self.sht_grid_type,
             inp_shape=img_shape,
@@ -122,6 +126,8 @@ class FCN2Selector:
         n_atmo_groups: int,
         n_surf_channels: int,
         n_aux_channels: int,
+        n_atmo_diagnostic_channels: int,
+        n_surf_diagnostic_channels: int,
         img_shape: tuple[int, int],
     ) -> AtmoSphericNeuralOperatorNet:
         return self.config.build(
@@ -129,6 +135,8 @@ class FCN2Selector:
             n_atmo_groups=n_atmo_groups,
             n_surf_channels=n_surf_channels,
             n_aux_channels=n_aux_channels,
+            n_atmo_diagnostic_channels=n_atmo_diagnostic_channels,
+            n_surf_diagnostic_channels=n_surf_diagnostic_channels,
             img_shape=img_shape,
         )
 
@@ -153,8 +161,10 @@ class FCN2StepConfig(StepConfigABC):
     builder: FCN2Selector
     forcing_names: list[str]
     atmosphere_prognostic_names: list[str]
+    atmosphere_diagnostic_names: list[str]
     atmosphere_levels: int
     surface_prognostic_names: list[str]
+    surface_diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
@@ -170,21 +180,27 @@ class FCN2StepConfig(StepConfigABC):
                     f"next_step_forcing_name '{name}' not in forcing_names: "
                     f"{self.forcing_names}"
                 )
-        atmosphere_names = []
+        atmosphere_out_names = []
+        atmosphere_in_names = []
         # the FCN2 model expects atmosphere "channels" to be the faster dimension
         # so that they can be encoded together, meaning we must replicate that
         # ordering here.
         for i in range(self.atmosphere_levels):
             for name in self.atmosphere_prognostic_names:
-                atmosphere_names.append(f"{name}_{i}")
-        self.atmosphere_packed_names = atmosphere_names
-        self.surface_packed_names = self.surface_prognostic_names
-        self.in_names = (
-            self.forcing_names
-            + self.atmosphere_packed_names
-            + self.surface_packed_names
+                atmosphere_in_names.append(f"{name}_{i}")
+                atmosphere_out_names.append(f"{name}_{i}")
+            for name in self.atmosphere_diagnostic_names:
+                atmosphere_out_names.append(f"{name}_{i}")
+        self.atmosphere_input_names = atmosphere_in_names
+        self.atmosphere_output_names = atmosphere_out_names
+        self.surface_input_names = self.surface_prognostic_names
+        self.surface_output_names = (
+            self.surface_prognostic_names + self.surface_diagnostic_names
         )
-        self.out_names = self.atmosphere_packed_names + self.surface_packed_names
+        self.in_names = (
+            self.forcing_names + self.atmosphere_input_names + self.surface_input_names
+        )
+        self.out_names = self.atmosphere_output_names + self.surface_output_names
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -323,8 +339,10 @@ class FCN2Step(StepABC):
         """
         super().__init__()
         self.forcing_packer = Packer(config.forcing_names)
-        self.atmosphere_packer = Packer(config.atmosphere_packed_names)
-        self.surface_packer = Packer(config.surface_packed_names)
+        self.atmosphere_input_packer = Packer(config.atmosphere_input_names)
+        self.atmosphere_output_packer = Packer(config.atmosphere_output_names)
+        self.surface_input_packer = Packer(config.surface_input_names)
+        self.surface_output_packer = Packer(config.surface_output_names)
         self._normalizer = normalizer
         if config.ocean is not None:
             self.ocean: Ocean | None = config.ocean.build(
@@ -333,9 +351,13 @@ class FCN2Step(StepABC):
         else:
             self.ocean = None
         module: nn.Module = config.builder.build(
-            n_atmo_channels=len(config.atmosphere_prognostic_names),
+            n_atmo_channels=len(config.atmosphere_prognostic_names)
+            + len(config.atmosphere_diagnostic_names),
             n_atmo_groups=config.atmosphere_levels,
-            n_surf_channels=len(config.surface_prognostic_names),
+            n_atmo_diagnostic_channels=len(config.atmosphere_diagnostic_names),
+            n_surf_channels=len(config.surface_prognostic_names)
+            + len(config.surface_diagnostic_names),
+            n_surf_diagnostic_channels=len(config.surface_diagnostic_names),
             n_aux_channels=len(config.forcing_names),
             img_shape=img_shape,
         )
@@ -406,17 +428,19 @@ class FCN2Step(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             forcing_tensor = self.forcing_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            atmosphere_tensor = self.atmosphere_packer.pack(
+            atmosphere_tensor = self.atmosphere_input_packer.pack(
                 input_norm, axis=self.CHANNEL_DIM
             )
-            surface_tensor = self.surface_packer.pack(input_norm, axis=self.CHANNEL_DIM)
+            surface_tensor = self.surface_input_packer.pack(
+                input_norm, axis=self.CHANNEL_DIM
+            )
             atmosphere_output_tensor, surface_output_tensor = wrapper(self.module)(
                 atmosphere_tensor, surface_tensor, forcing_tensor
             )
-            atmosphere_output = self.atmosphere_packer.unpack(
+            atmosphere_output = self.atmosphere_output_packer.unpack(
                 atmosphere_output_tensor, axis=self.CHANNEL_DIM
             )
-            surface_output = self.surface_packer.unpack(
+            surface_output = self.surface_output_packer.unpack(
                 surface_output_tensor, axis=self.CHANNEL_DIM
             )
             return {

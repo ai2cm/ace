@@ -441,6 +441,8 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         n_atmo_groups: int,
         n_surf_channels: int,
         n_aux_channels: int,
+        n_atmo_diagnostic_channels: int,
+        n_surf_diagnostic_channels: int,
         model_grid_type="equiangular",
         sht_grid_type="legendre-gauss",
         inp_shape=(721, 1440),
@@ -473,6 +475,16 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         freeze_processor=False,
     ):
         super().__init__()
+        if n_surf_diagnostic_channels > n_surf_channels:
+            raise ValueError(
+                f"n_surf_diagnostic_channels ({n_surf_diagnostic_channels}) "
+                f"must be less than or equal to n_surf_channels ({n_surf_channels})"
+            )
+        if n_atmo_diagnostic_channels > n_atmo_channels:
+            raise ValueError(
+                f"n_atmo_diagnostic_channels ({n_atmo_diagnostic_channels}) "
+                f"must be less than or equal to n_atmo_channels ({n_atmo_channels})"
+            )
 
         self.inp_shape = inp_shape
         self.out_shape = out_shape
@@ -481,7 +493,9 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         self.aux_embed_dim = aux_embed_dim
         self.checkpointing = checkpointing
         self.n_atmo_channels = n_atmo_channels
+        self.n_atmo_diagnostic_channels = n_atmo_diagnostic_channels
         self.n_surf_channels = n_surf_channels
+        self.n_surf_diagnostic_channels = n_surf_diagnostic_channels
         self.n_aux_channels = n_aux_channels
         self.n_atmo_groups = n_atmo_groups
 
@@ -523,7 +537,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         self.atmo_encoder = DiscreteContinuousEncoder(
             inp_shape=inp_shape,
             out_shape=(self.h, self.w),
-            inp_chans=self.n_atmo_channels,
+            inp_chans=self.n_atmo_channels - n_atmo_diagnostic_channels,
             out_chans=self.atmo_embed_dim,
             grid_in=model_grid_type,
             grid_out=sht_grid_type,
@@ -531,7 +545,10 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
             basis_type=filter_basis_type,
             basis_norm_mode=filter_basis_norm_mode,
             activation_function=activation_function,
-            groups=math.gcd(self.n_atmo_channels, self.atmo_embed_dim),
+            groups=math.gcd(
+                self.n_atmo_channels - n_atmo_diagnostic_channels,
+                self.atmo_embed_dim,
+            ),
             bias=bias,
             use_mlp=encoder_mlp,
         )
@@ -541,7 +558,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
             self.surf_encoder = DiscreteContinuousEncoder(
                 inp_shape=inp_shape,
                 out_shape=(self.h, self.w),
-                inp_chans=self.n_surf_channels,
+                inp_chans=self.n_surf_channels - n_surf_diagnostic_channels,
                 out_chans=self.surf_embed_dim,
                 grid_in=model_grid_type,
                 grid_out=sht_grid_type,
@@ -549,7 +566,9 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
                 basis_type=filter_basis_type,
                 basis_norm_mode=filter_basis_norm_mode,
                 activation_function=activation_function,
-                groups=math.gcd(self.n_surf_channels, self.surf_embed_dim),
+                groups=math.gcd(
+                    self.n_surf_channels - n_surf_diagnostic_channels, self.surf_embed_dim
+                ),
                 bias=bias,
                 use_mlp=encoder_mlp,
             )
@@ -791,7 +810,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
 
         # for atmospheric channels the same encoder is applied to each atmospheric level
         x_atmo = x_atmo.contiguous().reshape(
-            -1, self.n_atmo_channels, *x_atmo.shape[-2:]
+            -1, self.n_atmo_channels - self.n_atmo_diagnostic_channels, *x_atmo.shape[-2:]
         )
         x_out = self.atmo_encoder(x_atmo)
         x_out = x_out.reshape(
