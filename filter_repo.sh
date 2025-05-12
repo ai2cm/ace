@@ -20,8 +20,8 @@ git filter-repo --force --refs "refs/heads/main" \
     --path fme/require_gpu.py \
     --path fme/sht_fix.py \
     --path fme/test_harmonics.py \
-    --path deploy-requirements.txt \
-    --path dev-requirements.txt \
+    --path requirements-deploy.txt \
+    --path requirements-dev.txt \
     --path requirements.txt \
     --path LICENSE \
     --path README.md \

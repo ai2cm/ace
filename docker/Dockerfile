@@ -21,8 +21,8 @@ ENV FORCE_CUDA_EXTENSION=1
 # install python deps
 COPY requirements.txt /tmp/requirements.txt
 RUN python3 -m pip install -r /tmp/requirements.txt
-COPY healpix-requirements.txt /tmp/healpix-requirements.txt
-RUN python3 -m pip install --no-build-isolation -r /tmp/healpix-requirements.txt
+COPY requirements-healpix.txt /tmp/requirements-healpix.txt
+RUN python3 -m pip install --no-build-isolation -r /tmp/requirements-healpix.txt
 
 FROM base AS production
 
