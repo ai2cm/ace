@@ -21,34 +21,23 @@ from typing import Callable, Optional, Tuple, TypeVar
 import torch
 import torch.amp as amp
 import torch.nn as nn
-
 # get spectral transforms and spherical convolutions from torch_harmonics
 import torch_harmonics as th
 import torch_harmonics.distributed as thd
 from torch.utils.checkpoint import checkpoint
 
 # helpers
-from fme.ace.models.makani_fcn2.models.common import (
-    MLP,
-    DropPath,
-    EncoderDecoder,
-    GeometricInstanceNormS2,
-    SpectralConv,
-)
+from fme.ace.models.makani_fcn2.models.common import (MLP, DropPath,
+                                                      EncoderDecoder,
+                                                      GeometricInstanceNormS2,
+                                                      SpectralConv)
 from fme.ace.models.makani_fcn2.mpu.layer_norm import (
-    DistributedGeometricInstanceNormS2,
-    DistributedInstanceNorm2d,
-    DistributedLayerNorm,
-)
-
+    DistributedGeometricInstanceNormS2, DistributedInstanceNorm2d,
+    DistributedLayerNorm)
 # get pre-formulated layers
 from fme.ace.models.makani_fcn2.mpu.layers import DistributedMLP
-
 # more distributed stuff
 from fme.ace.models.makani_fcn2.utils import comm
-
-# layer normalization
-# from makani.mpu.layer_norm import DistributedInstanceNorm2d, DistributedLayerNorm
 
 
 # heuristic for finding theta_cutoff
@@ -638,7 +627,7 @@ class AtmoSphericNeuralOperatorNet(nn.Module):
         norm_layer = self._get_norm_layer_handle(
             self.h,
             self.w,
-            self.total_embed_dim,
+            self.total_embed_dim + (self.n_aux_channels > 0) * self.aux_embed_dim,
             normalization_layer=normalization_layer,
             sht_grid_type=sht_grid_type,
         )
