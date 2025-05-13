@@ -1,8 +1,13 @@
 import dataclasses
-from collections.abc import Mapping, Sequence
+import warnings
+from collections.abc import Sequence
 
 from fme.ace.data_loading.augmentation import AugmentationConfig
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.config import (
+    ConcatDatasetConfig,
+    MergeDatasetConfig,
+    XarrayDataConfig,
+)
 from fme.core.distributed import Distributed
 
 
@@ -10,22 +15,13 @@ from fme.core.distributed import Distributed
 class DataLoaderConfig:
     """
     Parameters:
-        dataset: A sequence of configurations each defining a dataset
-            to be loaded. This sequence of datasets will be concatenated.
-            It could also be a mapping of dataset names to sequences of
-            configurations, in which each value in the mapping is a
-            different source of data to be merged. For example:
-
-            .. code-block:: yaml
-
-                dataset:
-                    source1:
-                    - data_path: ...
-                    source2:
-                    - data_path: ...
-
-            If multiple sources contain the same data variable, the version
-            from the first source is loaded and other sources are ignored.
+        dataset: Could be a single dataset configuration,
+            or a sequence of datasets to be concatenated using the keyword `concat`,
+            or datasets from different sources to be merged using the keyword `merge`.
+            For backwards compatibility, it can also be a sequence of
+            datasets, which will be concatenated.
+            During `merge`, if multiple datasets contain the same data variable,
+            the version from the first source is loaded and other sources are ignored.
         batch_size: Number of samples per batch.
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
@@ -35,7 +31,12 @@ class DataLoaderConfig:
         augmentation: Configuration for data augmentation.
     """  # noqa: D415
 
-    dataset: Sequence[XarrayDataConfig] | Mapping[str, Sequence[XarrayDataConfig]]
+    dataset: (
+        ConcatDatasetConfig
+        | MergeDatasetConfig
+        | XarrayDataConfig
+        | Sequence[XarrayDataConfig]
+    )
     batch_size: int
     num_data_workers: int = 0
     prefetch_factor: int | None = None
@@ -51,15 +52,15 @@ class DataLoaderConfig:
                 "batch_size must be divisible by the number of parallel "
                 f"workers, got {self.batch_size} and {dist.world_size}"
             )
-        self._zarr_engine_used = False
+        # TODO: remove following backwards compatibility code in a future release
         if isinstance(self.dataset, Sequence):
-            self._zarr_engine_used = any(ds.engine == "zarr" for ds in self.dataset)
-        elif isinstance(self.dataset, Mapping):
-            self._zarr_engine_used = any(
-                ds.engine == "zarr"
-                for ds_list in self.dataset.values()
-                for ds in ds_list
+            warnings.warn(
+                "Dataset list format is deprecated. "
+                "Use `concat` to specify concatenating datasets.",
+                DeprecationWarning,
             )
+            self.dataset = ConcatDatasetConfig(concat=self.dataset)
+        self._zarr_engine_used = self.dataset.zarr_engine_used
 
     @property
     def zarr_engine_used(self) -> bool:

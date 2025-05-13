@@ -1,6 +1,6 @@
 import dataclasses
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from math import ceil
 
 import cftime
@@ -12,7 +12,7 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.perturbation import SSTPerturbation
 from fme.ace.requirements import DataRequirements
 from fme.core.coordinates import LatLonCoordinates
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
 from fme.core.dataset.getters import get_per_dataset_names
 from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
@@ -122,7 +122,7 @@ class InferenceDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: XarrayDataConfig | Mapping[str, XarrayDataConfig]
+    dataset: XarrayDataConfig | MergeNoConcatDatasetConfig
     start_indices: InferenceInitialConditionIndices | ExplicitIndices | TimestampList
     num_data_workers: int = 0
     perturbations: SSTPerturbation | None = None
@@ -132,16 +132,11 @@ class InferenceDataLoaderConfig:
         if isinstance(self.dataset, XarrayDataConfig):
             if self.dataset.subset != Slice(None, None, None):
                 raise ValueError("Inference data may not be subset.")
-        elif isinstance(self.dataset, Mapping):
-            for key, data in self.dataset.items():
+        elif isinstance(self.dataset, MergeNoConcatDatasetConfig):
+            for data in self.dataset.merge:
                 if data.subset != Slice(None, None, None):
-                    raise ValueError(f"Inference data for {key} may not be subset.")
-        if isinstance(self.dataset, XarrayDataConfig):
-            self._zarr_engine_used = self.dataset.engine == "zarr"
-        elif isinstance(self.dataset, Mapping):
-            self._zarr_engine_used = any(
-                ds.engine == "zarr" for ds in self.dataset.values()
-            )
+                    raise ValueError(f"Inference data may not be subset.")
+        self._zarr_engine_used = self.dataset.zarr_engine_used
 
     @property
     def n_initial_conditions(self) -> int:
@@ -171,7 +166,7 @@ class ForcingDataLoaderConfig:
             not be updated during inference (e.g. surface temperature).
     """
 
-    dataset: XarrayDataConfig | Mapping[str, XarrayDataConfig]
+    dataset: XarrayDataConfig | MergeNoConcatDatasetConfig
     num_data_workers: int = 0
     perturbations: SSTPerturbation | None = None
     persistence_names: Sequence[str] | None = None
@@ -180,10 +175,10 @@ class ForcingDataLoaderConfig:
         if isinstance(self.dataset, XarrayDataConfig):
             if self.dataset.subset != Slice(None, None, None):
                 raise ValueError("Inference data may not be subset.")
-        elif isinstance(self.dataset, Mapping):
-            for key, data in self.dataset.items():
+        elif isinstance(self.dataset, MergeNoConcatDatasetConfig):
+            for data in self.dataset.merge:
                 if data.subset != Slice(None, None, None):
-                    raise ValueError(f"Inference data for {key} may not be subset.")
+                    raise ValueError(f"Inference data may not be subset.")
 
     def build_inference_config(self, start_indices: ExplicitIndices):
         return InferenceDataLoaderConfig(
@@ -209,7 +204,7 @@ class InferenceDataset(torch.utils.data.Dataset):
                 config.dataset, requirements.names, requirements.n_timesteps
             )
             self._dataset = dataset
-        elif isinstance(config.dataset, Mapping):
+        elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
             self._dataset = self._resolve_merged_datasets(config.dataset, requirements)
         self._properties = self._dataset.properties
         self._forward_steps_in_memory = requirements.n_timesteps - 1
@@ -326,19 +321,21 @@ class InferenceDataset(torch.utils.data.Dataset):
 
     def _resolve_merged_datasets(
         self,
-        merged_datasets_config: Mapping[str, XarrayDataConfig],
+        merged_datasets_config: MergeNoConcatDatasetConfig,
         requirements: DataRequirements,
     ):
         per_dataset_names = get_per_dataset_names(
             merged_datasets_config, requirements.names
         )
         merged_xarray_datasets = []
-        for key, config in merged_datasets_config.items():
+        config_counter = 0
+        for config in merged_datasets_config.merge:
             current_dataset = XarrayDataset(
                 config,
-                per_dataset_names[key],
+                per_dataset_names[config_counter],
                 requirements.n_timesteps,
             )
             merged_xarray_datasets.append(current_dataset)
+            config_counter += 1
         merged_datasets = MergedXarrayDataset(datasets=merged_xarray_datasets)
         return merged_datasets

@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import timedelta
 from typing import Literal
 
@@ -287,3 +287,61 @@ class XarrayDataConfig:
             )
         self.torch_dtype  # check it can be retrieved
         self._default_file_pattern_check()
+        self.zarr_engine_used = False
+        if self.engine == "zarr":
+            self.zarr_engine_used = True
+
+
+@dataclasses.dataclass
+class ConcatDatasetConfig:
+    """
+    Configuration for concatenating multiple datasets.
+    Parameters:
+        concat: List of XarrayDataConfig objects to concatenate.
+    """
+
+    concat: Sequence[XarrayDataConfig]
+
+    def __post_init__(self):
+        self.zarr_engine_used = any(ds.engine == "zarr" for ds in self.concat)
+
+
+@dataclasses.dataclass
+class MergeDatasetConfig:
+    """
+    Configuration for merging multiple datasets.
+    Parameters:
+        merge: List of ConcatDatasetConfig or XarrayDataConfig to merge.
+    """
+
+    merge: Sequence[ConcatDatasetConfig | XarrayDataConfig]
+
+    def __post_init__(self):
+        self.zarr_engine_used = False
+        for ds in self.merge:
+            if isinstance(ds, ConcatDatasetConfig):
+                if ds.zarr_engine_used:
+                    self.zarr_engine_used = ds.zarr_engine_used
+                    break
+            elif isinstance(ds, XarrayDataConfig):
+                if ds.engine == "zarr":
+                    self.zarr_engine_used = True
+                    break
+
+
+@dataclasses.dataclass
+class MergeNoConcatDatasetConfig:
+    """
+    Configuration for merging multiple datasets. No concatenation is allowed.
+    Parameters:
+        merge: List of XarrayDataConfig to merge.
+    """
+
+    merge: Sequence[XarrayDataConfig]
+
+    def __post_init__(self):
+        self.zarr_engine_used = False
+        for ds in self.merge:
+            if ds.engine == "zarr":
+                self.zarr_engine_used = True
+                break
