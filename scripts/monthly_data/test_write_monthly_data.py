@@ -5,7 +5,7 @@ import pytest
 import xarray as xr
 from write_monthly_data import Config, run
 
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import ConcatDatasetConfig, DataLoaderConfig
 from fme.ace.testing import DimSize, DimSizes
 from fme.ace.testing.fv3gfs_data import save_nd_netcdf
 from fme.core.dataset.config import XarrayDataConfig
@@ -47,7 +47,7 @@ def test_write_monthly_data(very_fast_only: bool, tmp_path: pathlib.Path):
     config = Config(
         experiment_dir=str(tmp_path),
         data_loader=DataLoaderConfig(
-            dataset=dataset,
+            dataset=ConcatDatasetConfig(concat=dataset),
             batch_size=1,
             num_data_workers=0,
         ),

@@ -13,7 +13,11 @@ import xarray as xr
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import (
+    ConcatDatasetConfig,
+    DataLoaderConfig,
+    MergeDatasetConfig,
+)
 from fme.ace.data_loading.getters import (
     get_data_loader,
     get_forcing_data,
@@ -30,7 +34,7 @@ from fme.ace.data_loading.inference import (
 from fme.ace.data_loading.perturbation import PerturbationSelector, SSTPerturbation
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.config import MergeNoConcatDatasetConfig, XarrayDataConfig
 from fme.core.typing_ import Slice
 
 
@@ -117,7 +121,9 @@ def test_ensemble_loader(tmp_path, num_ensemble_members=3):
         netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path=str(path)) for path in netcdfs],
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(path)) for path in netcdfs]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -147,10 +153,12 @@ def test_ensemble_loader_n_samples(tmp_path, num_ensemble_members=3, n_samples=1
         netcdfs.append(ic_path)
 
     config = DataLoaderConfig(
-        dataset=[
-            XarrayDataConfig(data_path=str(path), subset=Slice(stop=n_samples))
-            for path in netcdfs
-        ],
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(data_path=str(path), subset=Slice(stop=n_samples))
+                for path in netcdfs
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -167,7 +175,9 @@ def test_xarray_loader(tmp_path):
     """Checks that vertical coordinates are present."""
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)],
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -189,20 +199,18 @@ def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     )
 
     config = DataLoaderConfig(
-        dataset={
-            "source1": [
+        dataset=MergeDatasetConfig(
+            merge=[
                 XarrayDataConfig(
                     data_path=tmp_path,
                     file_pattern="data*.nc",
                     n_repeats=1,
                 ),
-            ],
-            "source2": [
                 XarrayDataConfig(
                     data_path=other_path, file_pattern="other_source*.nc", n_repeats=1
-                )
-            ],
-        },
+                ),
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -227,22 +235,20 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
     )
 
     config = DataLoaderConfig(
-        dataset={
-            "source1": [
+        dataset=MergeDatasetConfig(
+            merge=[
                 XarrayDataConfig(
                     data_path=tmp_path,
                     file_pattern="data*.nc",
                     n_repeats=1,
                 ),
-            ],
-            "source2": [
                 XarrayDataConfig(
                     data_path=other_path,
                     file_pattern="other_source*.nc",
                     n_repeats=1,
-                )
-            ],
-        },
+                ),
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -256,23 +262,21 @@ def test_xarray_loader_using_merged_dataset_errors_if_different_time(
 
     # subset source2 to have the same time stamps as source1
     config = DataLoaderConfig(
-        dataset={
-            "source1": [
+        dataset=MergeDatasetConfig(
+            merge=[
                 XarrayDataConfig(
                     data_path=tmp_path,
                     file_pattern="data*.nc",
                     n_repeats=1,
                 ),
-            ],
-            "source2": [
                 XarrayDataConfig(
                     data_path=other_path,
                     file_pattern="other_source*.nc",
                     n_repeats=1,
                     subset=Slice(stop=2),
-                )
-            ],
-        },
+                ),
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -285,11 +289,13 @@ def test_xarray_loader_hpx(tmp_path):
     data_dim_sizes = {"time": n_times, "face": 12, "width": 16, "height": 16}
     _create_dataset_on_disk(tmp_path, data_dim_sizes=data_dim_sizes, n_times=n_times)
     config = DataLoaderConfig(
-        dataset=[
-            XarrayDataConfig(
-                data_path=tmp_path, n_repeats=1, spatial_dimensions="healpix"
-            )
-        ],
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, n_repeats=1, spatial_dimensions="healpix"
+                )
+            ]
+        ),
         batch_size=1,
         num_data_workers=0,
     )
@@ -309,9 +315,13 @@ def test_loader_n_repeats_but_not_infer_timestep_error(tmp_path):
     _create_dataset_on_disk(tmp_path)
     with pytest.raises(ValueError, match="infer_timestep must be True"):
         DataLoaderConfig(
-            dataset=[
-                XarrayDataConfig(data_path=tmp_path, n_repeats=2, infer_timestep=False)
-            ],
+            dataset=ConcatDatasetConfig(
+                concat=[
+                    XarrayDataConfig(
+                        data_path=tmp_path, n_repeats=2, infer_timestep=False
+                    )
+                ]
+            ),
             batch_size=1,
             num_data_workers=0,
         )
@@ -387,7 +397,9 @@ def test_data_loader_outputs(tmp_path, calendar):
     _create_dataset_on_disk(tmp_path, calendar=calendar)
     n_samples = 2
     config = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path=tmp_path, subset=Slice(stop=n_samples))],
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, subset=Slice(stop=n_samples))]
+        ),
         batch_size=n_samples,
         num_data_workers=0,
     )
@@ -479,11 +491,13 @@ def test_inference_data_loader_validate_n_forward_steps(
 def test_zero_batches_raises_error(tmp_path, start, stop, batch_size, raises_error):
     _create_dataset_on_disk(tmp_path)
     config = DataLoaderConfig(
-        dataset=[
-            XarrayDataConfig(
-                data_path=tmp_path, n_repeats=10, subset=Slice(start, stop)
-            )
-        ],
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(
+                    data_path=tmp_path, n_repeats=10, subset=Slice(start, stop)
+                )
+            ]
+        ),
         batch_size=batch_size,
         num_data_workers=0,
     )
@@ -559,10 +573,12 @@ def test_inference_loader_merged_inputs(tmp_path, tmp_path_factory):
         filename="other_source.nc",
     )
     merged = InferenceDataLoaderConfig(
-        dataset={
-            "source1": XarrayDataConfig(data_path=tmp_path),
-            "source2": XarrayDataConfig(data_path=other_path),
-        },
+        dataset=MergeNoConcatDatasetConfig(
+            merge=[
+                XarrayDataConfig(data_path=tmp_path),
+                XarrayDataConfig(data_path=other_path),
+            ]
+        ),
         start_indices=ExplicitIndices([0, 1]),
     )
     window_requirements = DataRequirements(
@@ -596,10 +612,12 @@ def test_forcing_loader_raises_if_subset():
 
 def test_forcing_loader_config_merged_dataset_inputs():
     ForcingDataLoaderConfig(
-        dataset={
-            "source1": XarrayDataConfig(data_path="foo"),
-            "source2": XarrayDataConfig(data_path="bar"),
-        },
+        dataset=MergeNoConcatDatasetConfig(
+            merge=[
+                XarrayDataConfig(data_path="foo"),
+                XarrayDataConfig(data_path="bar"),
+            ]
+        )
     )
 
 
@@ -615,10 +633,12 @@ def test_forcing_loader_loads_merged_dataset(tmp_path, tmp_path_factory):
     )
     config = ForcingDataLoaderConfig(dataset=XarrayDataConfig(data_path=tmp_path))
     config = ForcingDataLoaderConfig(
-        dataset={
-            "source1": XarrayDataConfig(data_path=tmp_path),
-            "source2": XarrayDataConfig(data_path=other_path),
-        }
+        dataset=MergeNoConcatDatasetConfig(
+            merge=[
+                XarrayDataConfig(data_path=tmp_path),
+                XarrayDataConfig(data_path=other_path),
+            ]
+        ),
     )
     window_requirements = DataRequirements(
         names=["foo", "foo2"],
@@ -759,10 +779,12 @@ def test_inference_persistence_names(tmp_path):
 
 def test_zarr_engine_used_sequence():
     config = DataLoaderConfig(
-        dataset=[
-            XarrayDataConfig(data_path="foo", file_pattern=".zarr", engine="zarr"),
-            XarrayDataConfig(data_path="bar"),
-        ],
+        dataset=ConcatDatasetConfig(
+            concat=[
+                XarrayDataConfig(data_path="foo", file_pattern=".zarr", engine="zarr"),
+                XarrayDataConfig(data_path="bar"),
+            ]
+        ),
         batch_size=1,
     )
     assert config.zarr_engine_used
@@ -770,13 +792,29 @@ def test_zarr_engine_used_sequence():
 
 def test_zarr_engine_used_mapping():
     config = DataLoaderConfig(
-        dataset={
-            "first": [
-                XarrayDataConfig(data_path="foo", file_pattern=".zarr", engine="zarr"),
+        dataset=MergeDatasetConfig(
+            merge=[
+                ConcatDatasetConfig(
+                    concat=[
+                        XarrayDataConfig(
+                            data_path="foo", file_pattern=".zarr", engine="zarr"
+                        ),
+                        XarrayDataConfig(data_path="bar"),
+                    ]
+                ),
                 XarrayDataConfig(data_path="bar"),
-            ],
-            "second": [XarrayDataConfig(data_path="bar")],
-        },
+            ]
+        ),
         batch_size=1,
     )
     assert config.zarr_engine_used
+
+
+def test_data_loader_maintains_backward_concat_compatibility(recwarn):
+    data_loader = DataLoaderConfig(
+        dataset=[XarrayDataConfig(data_path="some_path")],
+        batch_size=1,
+    )
+    assert isinstance(data_loader.dataset, ConcatDatasetConfig)
+    warning = recwarn.pop(DeprecationWarning)
+    assert "Dataset list format is deprecated" in str(warning.message)

@@ -1,5 +1,4 @@
 import logging
-from collections.abc import Mapping, Sequence
 
 import torch.utils.data
 from torch.utils.data.distributed import DistributedSampler
@@ -7,7 +6,16 @@ from torch.utils.data.sampler import RandomSampler
 
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.core.dataset.getters import get_dataset, get_merged_datasets
+from fme.core.dataset.config import (
+    ConcatDatasetConfig,
+    MergeDatasetConfig,
+    MergeNoConcatDatasetConfig,
+)
+from fme.core.dataset.getters import (
+    get_dataset,
+    get_merged_datasets,
+    get_xarray_dataset,
+)
 from fme.core.dataset.xarray import XarrayDataConfig, XarrayDataset
 from fme.core.device import using_gpu
 from fme.core.distributed import Distributed
@@ -49,14 +57,20 @@ def get_data_loader(
         requirements: Data requirements for the model.
     """
     dataset: torch.utils.data.Dataset
-    if isinstance(config.dataset, Sequence):
-        dataset, properties = get_dataset(
+    if isinstance(config.dataset, XarrayDataConfig):
+        dataset, properties = get_xarray_dataset(
             config.dataset,
+            requirements.names,
+            requirements.n_timesteps,
+        )
+    elif isinstance(config.dataset, ConcatDatasetConfig):
+        dataset, properties = get_dataset(
+            config.dataset.concat,
             requirements.names,
             requirements.n_timesteps,
             strict=config.strict_ensemble,
         )
-    elif isinstance(config.dataset, Mapping):
+    elif isinstance(config.dataset, MergeDatasetConfig):
         dataset, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
@@ -212,14 +226,17 @@ def get_forcing_data(
         available_times = XarrayDataset(
             config.dataset, window_requirements.names, window_requirements.n_timesteps
         ).all_times
-    elif isinstance(config.dataset, Mapping):
+    elif isinstance(config.dataset, MergeNoConcatDatasetConfig):
         # Some forcing variables may not be in the first dataset,
         # use an empty data requirements to get all times
-        available_times = XarrayDataset(
-            config.dataset[next(iter(config.dataset))],
-            names=[],
-            n_timesteps=window_requirements.n_timesteps,
-        ).all_times
+        if isinstance(config.dataset.merge[0], XarrayDataConfig):
+            available_times = XarrayDataset(
+                config.dataset.merge[0],
+                names=[],
+                n_timesteps=window_requirements.n_timesteps,
+            ).all_times
+        else:
+            raise ValueError("Forcing data cannot be concatenated.")
     start_time_indices = []
     for time in initial_time.values[:, 0]:
         start_time_indices.append(available_times.get_loc(time))
