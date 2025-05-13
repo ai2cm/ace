@@ -13,14 +13,13 @@ loader:
     times:
     - '0311-01-01T00:00:00'
   dataset:
-    ocean:
-      data_path: /climate-default
-      file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
-      engine: zarr
-    atmosphere:
-      data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
-      file_pattern: data.zarr
-      engine: zarr
+    merge:
+      - data_path: /climate-default
+        file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
+        engine: zarr
+      - data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
+        file_pattern: data.zarr
+        engine: zarr
   num_data_workers: 1
 data_writer:
   save_prediction_files: false

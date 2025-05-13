@@ -20,12 +20,11 @@ inference:
       - '0271-01-06T00:00:00'
       - '0291-01-06T00:00:00'
     dataset:
-      ocean:
-        data_path: /climate-default
+      merge:
+      - data_path: /climate-default
         file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
         engine: zarr
-      atmosphere:
-        data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
+      - data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
         file_pattern: data.zarr
         engine: zarr
     num_data_workers: 8
@@ -41,13 +40,12 @@ train_loader:
   batch_size: 16
   num_data_workers: 8
   dataset:
-    ocean:
+    merge:
     - data_path: /climate-default
       file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
       engine: zarr
       subset:
         stop_time: '0306-01-01'
-    atmosphere:
     - data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
       file_pattern: data.zarr
       engine: zarr
@@ -57,14 +55,13 @@ validation_loader:
   batch_size: 16
   num_data_workers: 8
   dataset:
-    ocean:
+    merge:
     - data_path: /climate-default
       file_pattern: 2025-04-16-cm4-piControl-ocean-200yr-dataset.zarr
       engine: zarr
       subset:
         start_time: '0306-01-01'
         stop_time: '0311-01-01'
-    atmosphere:
     - data_path: /climate-default/2025-01-27-cm4-piControl-atmosphere-5daily-sfc-only/zarr_v3
       file_pattern: data.zarr
       engine: zarr

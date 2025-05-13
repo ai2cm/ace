@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import ConcatDatasetConfig, DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader
 from fme.ace.requirements import DataRequirements
 from fme.core.dataset.config import XarrayDataConfig
@@ -96,7 +96,9 @@ def test_metadata(tmp_path, variable_metadata, n_ensemble_members):
         _save_netcdf(path / "data.nc", variable_metadata)
 
     config = DataLoaderConfig(
-        dataset=[XarrayDataConfig(data_path=str(path)) for path in paths],
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=str(path)) for path in paths]
+        ),
         batch_size=1,
         num_data_workers=0,
     )

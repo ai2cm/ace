@@ -174,22 +174,18 @@ def _get_test_yaml_files(
 
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
-            dataset=[
-                XarrayDataConfig(
-                    data_path=str(train_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                )
-            ],
+            dataset=XarrayDataConfig(
+                data_path=str(train_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+            ),
             batch_size=2,
             num_data_workers=0,
         ),
         validation_loader=DataLoaderConfig(
-            dataset=[
-                XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                )
-            ],
+            dataset=XarrayDataConfig(
+                data_path=str(valid_data_path),
+                spatial_dimensions=spatial_dimensions_str,
+            ),
             batch_size=2,
             num_data_workers=0,
         ),

@@ -36,18 +36,18 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    - data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
-      subset:
-        stop_time: '0306-01-01T06:00:00'
+    data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+    subset:
+      stop_time: '0306-01-01T06:00:00'
 validation_loader:
   batch_size: 64
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    - data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
-      subset:
-        start_time: '0306-01-01T06:00:00'
-        stop_time: '0311-01-01T06:00:00'
+    data_path: /climate-default/2024-11-15-CM4-piControl-atmosphere-1deg-8layer-200yr/netCDFs/ic_0001
+    subset:
+      start_time: '0306-01-01T06:00:00'
+      stop_time: '0311-01-01T06:00:00'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001

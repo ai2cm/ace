@@ -53,7 +53,6 @@ if __name__ == "__main__":
         config_data = yaml.load(f, Loader=yaml.CLoader)
 
     config_data = update_dict_with_dotlist(config_data, args.override)
-
     if config_type == "evaluator":
         dacite.from_dict(
             data_class=InferenceEvaluatorConfig,

@@ -1,11 +1,18 @@
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import xarray as xr
 
 from fme.core.dataset.concat import XarrayConcat
-from fme.core.dataset.config import RepeatedInterval, TimeSlice, XarrayDataConfig
+from fme.core.dataset.config import (
+    ConcatDatasetConfig,
+    MergeDatasetConfig,
+    MergeNoConcatDatasetConfig,
+    RepeatedInterval,
+    TimeSlice,
+    XarrayDataConfig,
+)
 from fme.core.dataset.merged import MergedXarrayDataset
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.subset import XarraySubset
@@ -100,47 +107,60 @@ def _infer_available_variables(config: XarrayDataConfig):
 
 
 def get_per_dataset_names(
-    dataset_configs: Mapping[str, XarrayDataConfig | Sequence[XarrayDataConfig]],
+    merged_config: MergeDatasetConfig | MergeNoConcatDatasetConfig,
     names: list[str],
-) -> Mapping[str, list[str]]:
+) -> list[list[str]]:
     merged_required_names = names.copy()
-    per_dataset_names = {}
-    for key, config in dataset_configs.items():
+    per_dataset_names = []
+    for config in merged_config.merge:
         if isinstance(config, XarrayDataConfig):
             current_source_variables = _infer_available_variables(config)
-        elif isinstance(config, Sequence):
-            current_source_variables = _infer_available_variables(config[0])
+        elif isinstance(config, ConcatDatasetConfig):
+            current_source_variables = _infer_available_variables(config.concat[0])
         current_source_names = [
             name for name in merged_required_names if name in current_source_variables
         ]
-        per_dataset_names[key] = current_source_names
+        per_dataset_names.append(current_source_names)
         for name in current_source_names:
             merged_required_names.remove(name)
     return per_dataset_names
 
 
 def get_merged_datasets(
-    dataset_configs: Mapping[str, Sequence[XarrayDataConfig]],
+    merged_config: MergeDatasetConfig,
     names: list[str],
     n_timesteps: int,
     strict: bool = True,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
-    per_dataset_names = get_per_dataset_names(dataset_configs, names)
-    for key, config in dataset_configs.items():
-        current_source_datasets, current_source_properties = get_datasets(
-            config,
-            per_dataset_names[key],
-            n_timesteps,
-            strict=strict,
-        )
-        current_source_ensemble = XarrayConcat(current_source_datasets)
-        merged_xarray_datasets.append(current_source_ensemble)
+    per_dataset_names = get_per_dataset_names(merged_config, names)
+    config_counter = 0
+    for config in merged_config.merge:
+        if isinstance(config, XarrayDataConfig):
+            current_source_xarray_dataset, current_source_properties = (
+                get_xarray_dataset(
+                    config,
+                    per_dataset_names[config_counter],
+                    n_timesteps,
+                )
+            )
+            merged_xarray_datasets.append(current_source_xarray_dataset)
+        elif isinstance(config, ConcatDatasetConfig):
+            current_source_datasets, current_source_properties = get_datasets(
+                config.concat,
+                per_dataset_names[config_counter],
+                n_timesteps,
+                strict=strict,
+            )
+            current_source_ensemble = XarrayConcat(current_source_datasets)
+            merged_xarray_datasets.append(current_source_ensemble)
+
         if merged_properties is None:
             merged_properties = current_source_properties
         else:
             merged_properties.update_merged_dataset(current_source_properties)
+        config_counter += 1
 
     if merged_properties is None:
         raise ValueError("At least one dataset must be provided.")

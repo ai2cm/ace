@@ -36,6 +36,7 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
+    concat:
     - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
       subset:
         stop_time: '1995-12-31'
@@ -51,10 +52,10 @@ validation_loader:
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    - data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
-      subset:
-        start_time: '1996-01-01'
-        stop_time: '1997-12-31'
+    data_path: /climate-default/2024-06-20-era5-1deg-8layer-1940-2022-netcdfs
+    subset:
+      start_time: '1996-01-01'
+      stop_time: '1997-12-31'
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001
