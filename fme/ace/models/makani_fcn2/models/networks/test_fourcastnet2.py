@@ -24,6 +24,7 @@ def test__AtmoSphericNeuralOperatorNet():
         n_aux_channels=n_aux_channels,
         inp_shape=img_shape,
         out_shape=img_shape,
+        normalization_layer="instance_norm",
     )
 
     assert net.n_atmo_channels == n_atmo_channels
