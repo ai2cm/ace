@@ -44,7 +44,7 @@ class InferenceDataLoaderConfig:
 
     def __post_init__(self):
         self._zarr_engine_used = any(
-            ds.engine == "zarr" for ds in self.dataset.data_configs
+            ds.zarr_engine_used for ds in self.dataset.data_configs
         )
 
     @property

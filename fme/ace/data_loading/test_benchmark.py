@@ -6,7 +6,7 @@ import xarray as xr
 from fme.core.dataset.config import XarrayDataConfig
 
 from .benchmark import BenchmarkConfig, benchmark
-from .config import DataLoaderConfig
+from .config import ConcatDatasetConfig, DataLoaderConfig
 
 
 def get_test_data(path):
@@ -36,7 +36,9 @@ def test_benchmark(tmp_path):
     """Ensure that the benchmark runs without error."""
     ds = get_test_data(tmp_path / "test.nc")
     dataset_config = XarrayDataConfig(data_path=str(tmp_path))
-    loader_config = DataLoaderConfig(dataset=[dataset_config], batch_size=4)
+    loader_config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(concat=[dataset_config]), batch_size=4
+    )
     config = BenchmarkConfig(
         loader=loader_config,
         names=list(ds.data_vars),

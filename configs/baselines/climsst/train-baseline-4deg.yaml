@@ -37,6 +37,7 @@ train_loader:
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
+    concat:
     - data_path: /climate-default/2023-08-11-vertically-resolved-4deg-fme-ensemble-dataset/ic_0001
       subset: &subset
         start: 0
@@ -63,9 +64,9 @@ validation_loader:
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
-    - data_path: /climate-default/2023-08-11-vertically-resolved-4deg-fme-ensemble-dataset/ic_0011
-      subset:
-        stop: 1456
+    data_path: /climate-default/2023-08-11-vertically-resolved-4deg-fme-ensemble-dataset/ic_0011
+    subset:
+      stop: 1456
 optimization:
   enable_automatic_mixed_precision: false
   lr: 0.0001

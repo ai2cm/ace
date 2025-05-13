@@ -2,7 +2,7 @@ import argparse
 import dataclasses
 import logging
 import os
-from typing import List, Mapping, Sequence, Tuple
+from typing import List, Sequence, Tuple
 
 import dacite
 import torch.utils.data
@@ -11,7 +11,11 @@ import yaml
 
 import fme.core.logging_utils as logging_utils
 from fme.ace.data_loading.batch_data import BatchData, default_collate
-from fme.ace.data_loading.config import DataLoaderConfig
+from fme.ace.data_loading.config import (
+    ConcatDatasetConfig,
+    DataLoaderConfig,
+    MergeDatasetConfig,
+)
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
@@ -55,12 +59,13 @@ def get_data_loaders(
             "Data loading for write_monthly_data.py is not "
             "supported in distributed mode."
         )
-    if isinstance(config.dataset, Sequence):
+    datasets: torch.utils.data.Dataset
+    if isinstance(config.dataset, ConcatDatasetConfig):
         datasets, properties = get_datasets(
-            config.dataset, requirements.names, requirements.n_timesteps
+            config.dataset.concat, requirements.names, requirements.n_timesteps
         )
-    elif isinstance(config.dataset, Mapping):
-        dataset, properties = get_merged_datasets(
+    elif isinstance(config.dataset, MergeDatasetConfig):
+        datasets, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
             requirements.n_timesteps,

@@ -71,13 +71,13 @@ def _get_test_yaml_files(
     train_string = f"""
 train_loader:
   dataset:
-    - data_path: '{train_data_path}'
+      data_path: '{train_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 0
 validation_loader:
   dataset:
-    - data_path: '{valid_data_path}'
+      data_path: '{valid_data_path}'
       spatial_dimensions: {spatial_dimensions_str}
   batch_size: 2
   num_data_workers: 0
