@@ -128,8 +128,6 @@ def test_inference_logs_labels_exist(tmpdir):
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 

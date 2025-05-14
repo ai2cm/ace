@@ -34,8 +34,6 @@ def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        loaded_lat_name=LAT_DIM,
-        loaded_lon_name=LON_DIM,
     ),
 ):
     spatial_sizes: list[DimSize] = copy.deepcopy(spatial_dims.loaded_sizes)
@@ -46,12 +44,10 @@ def create_reference_dataset(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(6)),
         lat=torch.Tensor(np.arange(12)),
-        loaded_lat_name=LAT_DIM,
-        loaded_lon_name=LON_DIM,
     ),
 ):
-    dims = [TIME_DIM] + spatial_dims.loaded_dims
-    dim_sizes = get_sizes(spatial_dims=spatial_dims)
+    dims = [TIME_DIM] + spatial_dims.dims
+    dim_sizes = get_sizes(spatial_dims)
     shape = tuple(dim_size.size for dim_size in dim_sizes)
     data = np.arange(np.prod(shape)).reshape(shape)
     coords = [np.arange(size) for size in shape]
@@ -80,11 +76,11 @@ def create_reference_dataset(
         ),
     ],
 )
-def test_get_horizontal_coordinates_healpix(spatial_dimensions, expected_coords):
+def test_get_horizontal_coordinates(spatial_dimensions, expected_coords):
     ds = create_reference_dataset(spatial_dims=expected_coords)
-    result = get_horizontal_coordinates(ds, spatial_dimensions, None)
-    assert expected_coords.loaded_dims == result.loaded_dims
-    for name in expected_coords.loaded_dims:
+    result, loaded_dim_names = get_horizontal_coordinates(ds, spatial_dimensions, None)
+    assert expected_coords.dims == result.dims
+    for name in expected_coords.dims:
         np.testing.assert_array_equal(expected_coords.coords[name], result.coords[name])
 
 
