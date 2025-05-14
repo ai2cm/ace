@@ -369,7 +369,8 @@ class XarrayDataset(torch.utils.data.Dataset):
         (
             self._horizontal_coordinates,
             self._static_derived_data,
-        ) = self.configure_horizontal_coordinates(first_dataset)
+            _loaded_horizontal_dims,
+        ) = self._configure_horizontal_coordinates(first_dataset)
         (
             self._time_dependent_names,
             self._time_invariant_names,
@@ -381,19 +382,13 @@ class XarrayDataset(torch.utils.data.Dataset):
         self.overwrite = config.overwrite
 
         self._nonspacetime_dims = get_nonspacetime_dimensions(
-            first_dataset, self._horizontal_coordinates.loaded_dims
+            first_dataset, _loaded_horizontal_dims
         )
         self._shape_excluding_time = [
             first_dataset.sizes[dim]
-            for dim in (
-                self._nonspacetime_dims + self._horizontal_coordinates.loaded_dims
-            )
+            for dim in (self._nonspacetime_dims + _loaded_horizontal_dims)
         ]
-        self._loaded_dims = (
-            ["time"]
-            + self._nonspacetime_dims
-            + self._horizontal_coordinates.loaded_dims
-        )
+        self._loaded_dims = ["time"] + self._nonspacetime_dims + _loaded_horizontal_dims
         self.isel = {
             dim: v if isinstance(v, int) else v.slice for dim, v in config.isel.items()
         }
@@ -549,13 +544,13 @@ class XarrayDataset(torch.utils.data.Dataset):
             static_derived_names,
         )
 
-    def configure_horizontal_coordinates(
+    def _configure_horizontal_coordinates(
         self, first_dataset
-    ) -> tuple[HorizontalCoordinates, StaticDerivedData]:
+    ) -> tuple[HorizontalCoordinates, StaticDerivedData, list[str]]:
         horizontal_coordinates: HorizontalCoordinates
         static_derived_data: StaticDerivedData
 
-        horizontal_coordinates = get_horizontal_coordinates(
+        horizontal_coordinates, dim_names = get_horizontal_coordinates(
             first_dataset, self.spatial_dimensions, self.dtype
         )
         static_derived_data = StaticDerivedData(horizontal_coordinates)
@@ -565,7 +560,7 @@ class XarrayDataset(torch.utils.data.Dataset):
             for coord_name, coord in horizontal_coordinates.coords.items()
         }
         logging.info(f"Horizontal coordinate sizes are {coords_sizes}.")
-        return horizontal_coordinates, static_derived_data
+        return horizontal_coordinates, static_derived_data, dim_names
 
     @property
     def timestep(self) -> datetime.timedelta:
