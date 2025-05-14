@@ -7,7 +7,11 @@ import torch
 import xarray as xr
 import zarr
 
-from fme.core.coordinates import HEALPixCoordinates, LatLonCoordinates
+from fme.core.coordinates import (
+    HEALPixCoordinates,
+    HorizontalCoordinates,
+    LatLonCoordinates,
+)
 from fme.core.dataset.config import FillNaNsConfig
 
 SLICE_NONE = slice(None)
@@ -171,27 +175,29 @@ def load_series_data(
 
 def get_horizontal_coordinates(
     ds: xr.Dataset, spatial_dimensions: str, dtype: torch.dtype | None
-) -> LatLonCoordinates | HEALPixCoordinates:
+) -> tuple[HorizontalCoordinates, list[str]]:
+    """Return the horizontal coordinate class and dimension names."""
     min_ndim = 3 if spatial_dimensions == "latlon" else 4
+    coords: HorizontalCoordinates
     for da in ds.data_vars.values():
         if da.ndim >= min_ndim:
-            dim_order = list(da.dims)
+            dims = list(da.dims)
             break
     if spatial_dimensions == "latlon":
-        lat_name, lon_name = dim_order[-2:]
-        return LatLonCoordinates(
+        lat_name, lon_name = dims[-2:]
+        coords = LatLonCoordinates(
             lon=torch.tensor(ds[lon_name].values, dtype=dtype),
             lat=torch.tensor(ds[lat_name].values, dtype=dtype),
-            loaded_lat_name=lat_name,
-            loaded_lon_name=lon_name,
         )
+        return coords, dims[-2:]
     elif spatial_dimensions == "healpix":
-        face_name, height_name, width_name = dim_order[-3:]
-        return HEALPixCoordinates(
+        face_name, height_name, width_name = dims[-3:]
+        coords = HEALPixCoordinates(
             face=torch.tensor(ds[face_name].values, dtype=dtype),
             height=torch.tensor(ds[height_name].values, dtype=dtype),
             width=torch.tensor(ds[width_name].values, dtype=dtype),
         )
+        return coords, dims[-3:]
     else:
         raise ValueError(
             f"spatial_dimensions must be either 'latlon' or 'healpix', "

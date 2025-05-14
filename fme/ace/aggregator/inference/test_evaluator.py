@@ -25,8 +25,6 @@ def test_logs_labels_exist():
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
@@ -108,8 +106,6 @@ def test_inference_logs_labels_exist():
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     initial_time = (get_zero_time(shape=[n_sample, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
@@ -165,8 +161,6 @@ def test_inference_logs_length(window_len: int, n_windows: int):
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     initial_time = (get_zero_time(shape=[2, 0], dims=["sample", "time"]),)
     agg = InferenceEvaluatorAggregator(
@@ -203,8 +197,6 @@ def test_flush_diagnostics(tmpdir):
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
     agg = InferenceEvaluatorAggregator(

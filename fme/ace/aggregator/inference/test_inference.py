@@ -119,8 +119,6 @@ def test_flush_diagnostics(tmpdir):
     horizontal_coordinates = LatLonCoordinates(
         lon=torch.arange(nx),
         lat=torch.arange(ny),
-        loaded_lon_name="lon",
-        loaded_lat_name="lat",
     )
     agg = InferenceAggregator(
         horizontal_coordinates.to(device=get_device()),

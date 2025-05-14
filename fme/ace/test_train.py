@@ -297,8 +297,6 @@ def get_sizes(
     spatial_dims: HorizontalCoordinates = LatLonCoordinates(
         lon=torch.Tensor(np.arange(32)),
         lat=torch.Tensor(np.arange(16)),
-        loaded_lat_name="lat",
-        loaded_lon_name="lon",
     ),
     n_time=3,
     nz_interface=3,

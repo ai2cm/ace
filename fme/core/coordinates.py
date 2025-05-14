@@ -625,32 +625,13 @@ class HorizontalCoordinates(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def loaded_dims(self) -> list[str]:
-        """Names of horizontal dimensions as loaded from training dataset."""
-        pass
-
-    @property
-    @abc.abstractmethod
     def loaded_sizes(self) -> list[DimSize]:
         """Sizes of horizontal dimensions as loaded from training dataset."""
         pass
 
     @property
     @abc.abstractmethod
-    def loaded_default_sizes(self) -> list[DimSize]:
-        """Default sizes of horizontal data dimensions, used by testing code."""
-        pass
-
-    @property
-    @abc.abstractmethod
     def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
-        pass
-
-    # A temporary solution for training which allows us to aggregate along the
-    # latitude dimension.
-    # TODO: https://github.com/ai2cm/full-model/issues/1003
-    @abc.abstractmethod
-    def get_lat(self) -> torch.Tensor:
         pass
 
     @property
@@ -678,16 +659,10 @@ class LatLonCoordinates(HorizontalCoordinates):
     Parameters:
         lat: 1-dimensional tensor of latitudes
         lon: 1-dimensional tensor of longitudes
-        loaded_lat_name: name of the latitude dimension
-            as loaded from training dataset
-        loaded_lon_name: name of the longitude dimension
-            as loaded from training dataset
     """
 
     lon: torch.Tensor
     lat: torch.Tensor
-    loaded_lat_name: str = "lat"
-    loaded_lon_name: str = "lon"
 
     def __post_init__(self):
         self._area_weights: torch.Tensor | None = None
@@ -695,30 +670,15 @@ class LatLonCoordinates(HorizontalCoordinates):
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
             return False
-        return (
-            torch.allclose(self.lat, other.lat)
-            and torch.allclose(self.lon, other.lon)
-            and self.loaded_lat_name == other.loaded_lat_name
-            and self.loaded_lon_name == other.loaded_lon_name
+        return torch.allclose(self.lat, other.lat) and torch.allclose(
+            self.lon, other.lon
         )
 
     def __repr__(self) -> str:
-        return (
-            "LatLonCoordinates(\n"
-            f"    lat={self.lat},\n"
-            f"    lon={self.lon},\n"
-            f"    loaded_lat_name={self.loaded_lat_name},\n"
-            f"    loaded_lon_name={self.loaded_lon_name}\n"
-            ")"
-        )
+        return f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon},\n)"
 
     def to(self, device: str) -> "LatLonCoordinates":
-        return LatLonCoordinates(
-            lon=self.lon.to(device),
-            lat=self.lat.to(device),
-            loaded_lat_name=self.loaded_lat_name,
-            loaded_lon_name=self.loaded_lon_name,
-        )
+        return LatLonCoordinates(lon=self.lon.to(device), lat=self.lat.to(device))
 
     @property
     def area_weights(self) -> torch.Tensor:
@@ -728,40 +688,28 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def coords(self) -> Mapping[str, np.ndarray]:
-        # TODO: Replace with lat/lon name?
         return {
-            "lat": self.lat.cpu().type(torch.float32).numpy(),
-            "lon": self.lon.cpu().type(torch.float32).numpy(),
+            self.dims[0]: self.lat.cpu().type(torch.float32).numpy(),
+            self.dims[1]: self.lon.cpu().type(torch.float32).numpy(),
         }
 
     @property
     def xyz(self) -> tuple[float, float, float]:
         lats, lons = np.broadcast_arrays(
-            self.coords["lat"][:, None], self.coords["lon"][None, :]
+            self.coords[self.dims[0]][:, None], self.coords[self.dims[1]][None, :]
         )
         return lon_lat_to_xyz(lons, lats)
-
-    def get_lat(self) -> torch.Tensor:
-        return self.lat
 
     @property
     def dims(self) -> list[str]:
         return ["lat", "lon"]
 
     @property
-    def loaded_dims(self) -> list[str]:
-        return [self.loaded_lat_name, self.loaded_lon_name]
-
-    @property
     def loaded_sizes(self) -> list[DimSize]:
         return [
-            DimSize(self.loaded_lat_name, len(self.lat)),
-            DimSize(self.loaded_lon_name, len(self.lon)),
+            DimSize(self.dims[0], len(self.lat)),
+            DimSize(self.dims[1], len(self.lon)),
         ]
-
-    @property
-    def loaded_default_sizes(self) -> list[DimSize]:
-        return [DimSize(self.loaded_lat_name, 16), DimSize(self.loaded_lon_name, 32)]
 
     @property
     def grid(self) -> Literal["equiangular", "legendre-gauss"]:
@@ -857,22 +805,6 @@ class HEALPixCoordinates(HorizontalCoordinates):
             DimSize("height", len(self.width)),
             DimSize("width", len(self.height)),
         ]
-
-    @property
-    def loaded_default_sizes(cls) -> list[DimSize]:
-        return [
-            DimSize("face", 12),
-            DimSize("height", 16),
-            DimSize("width", 16),
-        ]
-
-    # TODO: https://github.com/ai2cm/full-model/issues/1003
-    # This is currently the dummy solution.
-    def get_lat(self) -> torch.Tensor:
-        raise NotImplementedError(
-            "healpix does not support get_lat. If latitude is needed \
-            for some reason, you may use this class's self.xyz property to derive it."
-        )
 
     @property
     def grid(self) -> Literal["healpix"]:
