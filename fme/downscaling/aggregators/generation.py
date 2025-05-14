@@ -16,11 +16,16 @@ from ..models import ModelOutputs
 from .main import (
     Aggregator,
     MeanComparison,
+    MeanMapAggregator,
     SumComparison,
     ensure_trailing_slash,
     interpolate,
 )
-from .shape_helpers import _check_batch_dims_for_recording, _fold_sample_dim
+from .shape_helpers import (
+    _check_batch_dims_for_recording,
+    _fold_sample_dim,
+    subselect_and_squeeze,
+)
 from .typing import _CoarseComparisonAggregator
 
 
@@ -291,6 +296,12 @@ class GenerationAggregator:
             name="maps/snapshot/latent_steps"
         )
 
+        self._single_sample_aggregators = []
+        if include_positional_comparisons:
+            self._single_sample_aggregators.append(
+                MeanMapAggregator(variable_metadata, name="single_sample_time_mean")
+            )
+
     @torch.no_grad()
     def record_batch(
         self, outputs: ModelOutputs, coarse: TensorMapping, batch: PairedBatchData
@@ -320,6 +331,12 @@ class GenerationAggregator:
         )
         self._agg.record_batch(folded_outputs, folded_coarse, expanded_batch)
 
+        for aggregator in self._single_sample_aggregators:
+            aggregator.record_batch(
+                subselect_and_squeeze(target, sample_dim),
+                subselect_and_squeeze(prediction, sample_dim),
+            )
+
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
         Get the wandb output to log from all sub aggregators.
@@ -330,10 +347,18 @@ class GenerationAggregator:
         for coarse_comparison in self._probabilistic_coarse_comparisons:
             ret.update(coarse_comparison.get_wandb(prefix))
         ret.update(self._latent_step_aggregator.get_wandb(prefix))
+        for single_sample_record in self._single_sample_aggregators:
+            ret.update(single_sample_record.get_wandb(prefix))
+
         return ret
 
     def get_dataset(self) -> xr.Dataset:
         """
-        Get the dataset output from the underlying aggregator.
+        Get the dataset output from the underlying aggregator and
+        single sample aggregator.
         """
-        return self._agg.get_dataset()
+        ds = self._agg.get_dataset()
+        for agg in self._single_sample_aggregators:
+            if hasattr(agg, "get_dataset"):
+                ds = ds.merge(agg.get_dataset())
+        return ds

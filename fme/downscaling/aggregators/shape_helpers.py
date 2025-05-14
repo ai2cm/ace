@@ -93,3 +93,11 @@ def _fold_sample_dim(
         new_datasets.append(new_dataset)
 
     return new_datasets
+
+
+def subselect_and_squeeze(data: TensorDict, dim: int) -> TensorDict:
+    # Selects first element along dim and squeezes it out
+    squeezed = {}
+    for key, value in data.items():
+        squeezed[key] = value.select(dim, 0).squeeze(dim)
+    return squeezed
