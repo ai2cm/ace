@@ -16,6 +16,7 @@ import fme
 from fme.ace.aggregator import OneStepAggregator
 from fme.ace.aggregator.plotting import plot_paneled_data
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.registry.registry import ModuleConfig
 from fme.ace.registry.sfno import SphericalFourierNeuralOperatorBuilder
 from fme.ace.stepper.single_module import (
     AtmosphereCorrectorConfig,
@@ -1210,3 +1211,73 @@ def test_set_train_eval():
     stepper.set_train()
     for module in stepper.modules:
         assert module.training
+
+
+def test_from_state_backwards_compatibility():
+    """Ensure that the stepper can be loaded from a legacy style state dict.
+
+    The state here is a simplified version of the one used in the checkpoint
+    at https://huggingface.co/allenai/ACE2-ERA5/blob/main/ace2_era5_ckpt.tar"""
+
+    class TestModule(torch.nn.Module):
+        def __init__(self, param_shapes: Iterable[tuple[int, ...]]):
+            super().__init__()
+            for i, shape in enumerate(param_shapes):
+                setattr(self, f"param{i}", torch.nn.Parameter(torch.randn(shape)))
+
+    @ModuleSelector.register("test")
+    @dataclasses.dataclass
+    class TestModuleBuilder(ModuleConfig):
+        param_shapes: list[tuple[int, ...]]
+
+        def build(self, n_in_channels, n_out_channels, img_shape):
+            return TestModule(self.param_shapes)
+
+        @classmethod
+        def from_state(cls, state):
+            return cls(state["param_shapes"])
+
+        def get_state(self):
+            return {"param_shapes": self.param_shapes}
+
+    model_shape = (10, 5)
+    normalizer_state = {
+        "means": {"surface_temperature": 1.0, "DSWRFtoa": 3.0},
+        "stds": {"surface_temperature": 1.0, "DSWRFtoa": 3.0},
+    }
+    state = {
+        "normalizer": normalizer_state,
+        "img_shape": torch.Size([2, 4]),
+        "module": {"module.param0": torch.zeros(model_shape)},
+        "area": torch.tensor([[1.0, 1.0], [1.0, 1.0], [1.0, 1.0], [1.0, 1.0]]),
+        "sigma_coordinates": {
+            "ak": torch.tensor([0.0000, 5119.8950]),
+            "bk": torch.tensor([0.0000, 0.0000]),
+        },
+        "encoded_timestep": 21600000000,
+        "loss_normalizer": normalizer_state,
+        "config": {
+            "builder": {
+                "type": "mock",
+                "config": {"param_shapes": [model_shape]},
+            },
+            "in_names": ["DSWRFtoa", "surface_temperature"],
+            "out_names": ["surface_temperature"],
+            "normalization": {
+                "global_means_path": "/statsdata/centering.nc",
+                "global_stds_path": "/statsdata/scaling-full-field.nc",
+                "exclude_names": None,
+                "means": {},
+                "stds": {},
+            },
+            "ocean": {
+                "surface_temperature_name": "surface_temperature",
+                "ocean_fraction_name": "ocean_fraction",
+                "interpolate": False,
+                "slab": None,
+            },
+            "loss": {"type": "MSE"},
+            "next_step_forcing_names": ["DSWRFtoa"],
+        },
+    }
+    Stepper.from_state(state)
