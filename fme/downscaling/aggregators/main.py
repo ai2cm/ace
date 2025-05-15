@@ -525,7 +525,6 @@ class MeanMapAggregator:
         else:
             self._variable_metadata = variable_metadata
         self._name = ensure_trailing_slash(name)
-
         self._mean_target = Mean(batch_mean)
         self._mean_prediction = Mean(batch_mean)
 
@@ -547,7 +546,18 @@ class MeanMapAggregator:
         prediction = self._mean_prediction.get()
         return target, prediction
 
-    def _get_metrics_and_maps(self) -> tuple[TensorMapping, TensorMapping]:
+    def _plot_spectrum(self, prediction: np.ndarray, target: np.ndarray) -> Any:
+        fig = plt.figure()
+        plt.loglog(prediction, linestyle="--", label="prediction")
+        plt.loglog(target, linestyle="-.", label="target")
+        plt.legend()
+        plt.grid()
+        plt.close(fig)
+        return fig
+
+    def _get_metrics_and_maps(
+        self,
+    ) -> tuple[TensorMapping, TensorMapping, Mapping[str, Any]]:
         target, prediction = self._get()
 
         def get_relative_mean(target, prediction):
@@ -555,8 +565,16 @@ class MeanMapAggregator:
 
         relative = map_tensor_mapping(get_relative_mean)(target, prediction)
 
+        target_power_spectrum = map_tensor_mapping(compute_zonal_power_spectrum)(target)
+        prediction_power_spectrum = map_tensor_mapping(compute_zonal_power_spectrum)(
+            prediction
+        )
+        target_power_spectrum = _tensor_mapping_to_numpy(target_power_spectrum)
+        prediction_power_spectrum = _tensor_mapping_to_numpy(prediction_power_spectrum)
+
         maps = {}
         metrics = {}
+        spectra = {}
         for var_name in target.keys():
             gap = torch.full(
                 (target[var_name].shape[-2], self.gap_width),
@@ -572,7 +590,12 @@ class MeanMapAggregator:
             error = prediction[var_name] - target[var_name]
             maps[f"maps/{self._name}error/{var_name}"] = error
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
-        return metrics, maps
+            spectra[f"power_spectrum_of_time_mean/{self._name}{var_name}"] = (
+                self._plot_spectrum(
+                    prediction_power_spectrum[var_name], target_power_spectrum[var_name]
+                )
+            )
+        return metrics, maps, spectra
 
     _captions = {
         "full-field": (
@@ -602,7 +625,7 @@ class MeanMapAggregator:
         prefix = ensure_trailing_slash(prefix)
         ret = {}
         wandb = WandB.get_instance()
-        metrics, maps = self._get_metrics_and_maps()
+        metrics, maps, spectra = self._get_metrics_and_maps()
         ret.update({f"{prefix}{k}": v.cpu().numpy() for k, v in metrics.items()})
         for key, data in maps.items():
             if "error" in key:
@@ -616,6 +639,7 @@ class MeanMapAggregator:
             fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
             ret[f"{prefix}{key}"] = wandb.Image(fig, caption=caption)
             plt.close(fig)
+        ret.update(spectra)
         return ret
 
     def get_dataset(self) -> xr.Dataset:
