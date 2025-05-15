@@ -8,6 +8,17 @@ from fme.core.typing_ import TensorDict, TensorMapping
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
 
 
+class _NullMaskProvider:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
+        return None
+
+    def to(self, device: str) -> "_NullMaskProvider":
+        return self
+
+
+NullMaskProvider = _NullMaskProvider()
+
+
 class MaskProvider:
     """
     Stores and returns 2D mask tensors.

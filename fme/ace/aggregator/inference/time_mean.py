@@ -30,6 +30,7 @@ class _TargetGenPair:
             self.ops.area_weighted_rmse(
                 predicted=self.gen,
                 truth=self.target,
+                name=self.name,
             )
             .cpu()
             .numpy()
@@ -41,6 +42,7 @@ class _TargetGenPair:
             self.ops.area_weighted_mean_bias(
                 predicted=self.gen,
                 truth=self.target,
+                name=self.name,
             )
             .cpu()
             .numpy()

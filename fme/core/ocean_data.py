@@ -41,6 +41,8 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    def to(self, device: str) -> "HasOceanDepthIntegral": ...
+
 
 class OceanData:
     """Container for ocean data for accessing variables and providing

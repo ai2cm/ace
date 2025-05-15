@@ -36,6 +36,8 @@ class HasGetMaskTensorFor(Protocol):
         """Get the mask for a specific variable name."""
         ...
 
+    def to(self, device: str) -> "HasGetMaskTensorFor": ...
+
 
 @dataclasses.dataclass
 class StaticMaskingConfig:
