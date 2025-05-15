@@ -20,7 +20,7 @@ class _Mask:
         self.mask_2d = mask_2d
         self.mask_3d = mask_3d
 
-    def get_mask_tensor_for(self, name) -> torch.Tensor | None:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         if name == "mask_ignored":
             return None
         match = self.LEVEL_PATTERN.search(name)
@@ -33,6 +33,9 @@ class _Mask:
         else:
             # 2D variable
             return self.mask_2d
+
+    def to(self, device: str) -> "_Mask":
+        return self
 
 
 def test_masking_config():

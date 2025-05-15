@@ -66,31 +66,9 @@ def test_spherical_area_weights_batch_dim():
 
 
 @pytest.mark.parametrize(*test_cases)
-def test_weighted_mean(variable, time, lats, n_lon):
-    """Tests the weighted mean for a few simple test cases."""
-    x = torch.randn(time, variable, len(lats), n_lon)
-    weights = fme.spherical_area_weights(lats, n_lon)
-
-    result = fme.weighted_mean(x, weights, dim=(0, 2, 3))
-    assert result.shape == (variable,), "You should be able to specify time as dim = 1."
-
-    result = fme.weighted_mean(
-        torch.zeros(variable, time, len(lats), n_lon), weights, dim=(0, 2, 3)
-    )
-    assert torch.all(
-        torch.isclose(result, torch.tensor([0.0]))
-    ), "Weighted mean of zeros should be zero."
-
-    result = fme.weighted_mean(torch.ones(variable, time, len(lats), n_lon), weights)
-    assert torch.all(
-        torch.isclose(result, torch.Tensor([1.0]))
-    ), "The weighted mean of a constant should be that constant."
-
-
-@pytest.mark.parametrize(*test_cases)
-def test_weighted_mean_with_nans(variable, time, lats, n_lon):
-    """Tests the weighted mean for a few simple test cases, with NaNs in the
-    input tensor."""
+def test_weighted_nanmean(variable, time, lats, n_lon):
+    """Tests the weighted nanmean over test_cases, with NaNs in the input
+    tensor. See also test_weighted_nanmean_ignores_nans below."""
     x = torch.randn(time, variable, len(lats), n_lon)
     x_nan = x.clone()
     x_nan[0, 0, 0, 0] = float("nan")
@@ -98,14 +76,14 @@ def test_weighted_mean_with_nans(variable, time, lats, n_lon):
     mask = ~torch.isnan(x_nan)
     expected_result = (x * mask).sum(dim=(0, 2, 3)) / mask.sum(dim=(0, 2, 3))
 
-    result = fme.weighted_mean(x_nan, dim=(0, 2, 3))
+    result = fme.weighted_nanmean(x_nan, dim=(0, 2, 3))
     assert torch.allclose(
         result, expected_result
     ), "unweighted mean with NaNs should ignore NaNs"
 
     # weighting with ones shouldn't change the result
     weights = torch.ones(len(lats), n_lon)
-    result = fme.weighted_mean(x_nan, weights, dim=(0, 2, 3))
+    result = fme.weighted_nanmean(x_nan, weights, dim=(0, 2, 3))
     assert torch.allclose(
         result, expected_result
     ), "weighted mean with NaNs weights by ones should be the same as unweighted"
@@ -114,11 +92,96 @@ def test_weighted_mean_with_nans(variable, time, lats, n_lon):
     weights_like_nan = weights.expand(x.shape).clone()
     weights_like_nan[0, 0, 0, 0] = 0.0
 
-    expected_result = fme.weighted_mean(x, weights_like_nan, dim=(0, 2, 3))
-    result = fme.weighted_mean(x_nan, weights, dim=(0, 2, 3))
+    expected_result = fme.weighted_nanmean(x, weights_like_nan, dim=(0, 2, 3))
+    result = fme.weighted_nanmean(x_nan, weights, dim=(0, 2, 3))
     assert torch.allclose(
         result, expected_result
     ), "weighted mean of NaNs should act like zero weight in masked regions"
+
+
+@pytest.mark.parametrize(
+    "x_nan, weights, expected_result",
+    [
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            None,
+            torch.tensor(1 / 2),
+            id="unweighted nanmean ignores nans",
+        ),
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            torch.tensor([1, 1, 1]),
+            torch.tensor(1 / 2),
+            id="weighted nanmean still ignores nans, shape: (3,)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [float("nan"), 3, 4]]),
+            torch.tensor([0, 1, 2]),
+            torch.tensor([(1 + 4) / 3, (3 + 8) / 3]),
+            id="zero weight nan ignored, shape: (2, 3)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [2, 3, 4]]),
+            torch.tensor([1, 1, 2]),
+            torch.tensor([(1 + 4) / 3, (2 + 3 + 8) / 4]),
+            id="nonzero weighted nan ignored, shape: (2, 3)",
+        ),
+    ],
+)
+def test_weighted_nanmean_ignores_nans(x_nan, weights, expected_result):
+    """Tests the weighted nanmean for a few simple test cases, with NaNs in the
+    input tensor.
+
+    weighted_nanmean always ignores NaNs, regardless of their assigned weight.
+    """
+    result = fme.weighted_nanmean(x_nan, weights=weights, dim=-1)
+    torch.testing.assert_close(
+        result,
+        expected_result,
+    )
+
+
+@pytest.mark.parametrize(
+    "x_nan, weights, expected_result",
+    [
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            None,
+            torch.tensor(float("nan")),
+            id="unweighted mean with nan is nan",
+        ),
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            torch.tensor([0, 1, 1]),
+            torch.tensor(1 / 2),
+            id="zero weight nan ignored, shape: (3,)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [float("nan"), 3, 4]]),
+            torch.tensor([0, 1, 2]),
+            torch.tensor([(1 + 4) / 3, (3 + 8) / 3]),
+            id="zero weight nan ignored, shape: (2, 3)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [2, 3, 4]]),
+            torch.tensor([1, 1, 2]),
+            torch.tensor([float("nan"), (2 + 3 + 8) / 4]),
+            id="nonzero weighted nan survives, shape: (2, 3)",
+        ),
+    ],
+)
+def test_weighted_mean_with_nans(x_nan, weights, expected_result):
+    """Tests the weighted mean for a few simple test cases, with NaNs in the
+    input tensor.
+
+    weighted_mean does not ignore NaNs unless they have zero weight.
+    """
+    result = fme.weighted_mean(x_nan, weights=weights, dim=-1)
+    torch.testing.assert_close(
+        result,
+        expected_result,
+        equal_nan=True,
+    )
 
 
 def test_weighted_std_constant_weights():
@@ -291,6 +354,28 @@ def test_weighted_mean_gradient_magnitude():
     torch.testing.assert_close(monotonic_grad_magnitude, torch.ones((5, 2)))
 
 
+def test_weighted_mean_gradient_magnitude_with_nans():
+    all_nans = torch.tensor([float("nan"), float("nan")])
+    all_nans_magnitude = fme.weighted_mean_gradient_magnitude(all_nans, dim=-1)
+    assert np.isnan(all_nans_magnitude.item())
+
+    constant_nan = torch.ones((5, 2, 4, 4))
+    constant_nan[:, 0, 0, 0] = float("nan")
+
+    weights = torch.ones((2, 4, 4))
+    constant_grad_magnitude = fme.weighted_mean_gradient_magnitude(
+        constant_nan, weights=weights, dim=(-2, -1)
+    )
+    torch.testing.assert_close(constant_grad_magnitude, torch.zeros((5, 2)))
+
+    monotonic_nan = torch.tile(torch.arange(4.0), (5, 2, 4, 4))
+    monotonic_nan[:, 0, 2, 2] = float("nan")
+    monotonic_grad_magnitude = fme.weighted_mean_gradient_magnitude(
+        monotonic_nan, dim=(-2, -1)
+    )
+    torch.testing.assert_close(monotonic_grad_magnitude, torch.ones((5, 2)))
+
+
 def test_gradient_magnitude_percent_diff():
     constant = torch.ones((5, 2, 4, 4))
     self_percent_diff = fme.gradient_magnitude_percent_diff(
@@ -307,10 +392,7 @@ def test_gradient_magnitude_percent_diff():
 
 def test_dry_air_no_water():
     torch.manual_seed(0)
-    (
-        nlat,
-        nlon,
-    ) = 4, 8
+    nlat, nlon = 4, 8
     water = torch.zeros(nlat, nlon)
     pressure = torch.rand(nlat, nlon)
     dry_air = surface_pressure_due_to_dry_air(pressure, water)

@@ -50,12 +50,40 @@ def weighted_mean(
         a tensor of the weighted mean averaged over the specified dimensions `dim`.
     """
     if weights is None:
-        return tensor.nanmean(dim=dim, keepdim=keepdim)
+        return tensor.mean(dim=dim, keepdim=keepdim)
 
+    expanded_weights = weights.expand(tensor.shape)
+
+    # remove potential "expected NaNs", i.e. any NaNs with 0 weight
+    tensor = tensor.where(expanded_weights != 0.0, 0.0)
+
+    return (tensor * expanded_weights).sum(
+        dim=dim, keepdim=keepdim
+    ) / expanded_weights.sum(dim=dim, keepdim=keepdim)
+
+
+def weighted_nanmean(
+    tensor: torch.Tensor,
+    weights: torch.Tensor | None = None,
+    dim: Dimension = (),
+    keepdim: bool = False,
+) -> torch.Tensor:
+    """Computes the weighted nanmean across the specified list of dimensions.
+
+    Args:
+        tensor: torch.Tensor
+        weights: Weights to apply to the mean.
+        dim: Dimensions to compute the mean over.
+        keepdim: Whether the output tensor has `dim` retained or not.
+
+    Returns:
+        a tensor of the weighted mean averaged over the specified dimensions `dim`.
+    """
+    if weights is None:
+        return tensor.nanmean(dim=dim, keepdim=keepdim)
     denom = torch.where(torch.isnan(tensor), 0.0, weights.expand(tensor.shape)).sum(
         dim=dim, keepdim=keepdim
     )
-
     return (tensor * weights).nansum(dim=dim, keepdim=keepdim) / denom
 
 
@@ -151,7 +179,7 @@ def weighted_mean_gradient_magnitude(
     tensor: torch.Tensor, weights: torch.Tensor | None = None, dim: Dimension = ()
 ) -> torch.Tensor:
     """Compute weighted mean of gradient magnitude across the specified dimensions."""
-    return weighted_mean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
+    return weighted_nanmean(gradient_magnitude(tensor, dim), weights=weights, dim=dim)
 
 
 def gradient_magnitude_percent_diff(

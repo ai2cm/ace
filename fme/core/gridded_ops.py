@@ -6,6 +6,8 @@ import torch_harmonics
 
 from fme.core import metrics
 from fme.core.device import get_device
+from fme.core.mask_provider import NullMaskProvider
+from fme.core.masking import HasGetMaskTensorFor
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -31,7 +33,10 @@ class GriddedOperations(abc.ABC):
 
     @abc.abstractmethod
     def area_weighted_mean(
-        self, data: torch.Tensor, keepdim: bool = False
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
     ) -> torch.Tensor: ...
 
     @final
@@ -43,13 +48,17 @@ class GriddedOperations(abc.ABC):
             result[name] = self.area_weighted_mean(
                 data=data[name],
                 keepdim=keepdim,
+                name=name,
             )
         return result
 
     def area_weighted_mean_bias(
-        self, truth: torch.Tensor, predicted: torch.Tensor
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
     ) -> torch.Tensor:
-        return self.area_weighted_mean(predicted - truth)
+        return self.area_weighted_mean(predicted - truth, name=name)
 
     @final
     def area_weighted_mean_bias_dict(
@@ -58,14 +67,19 @@ class GriddedOperations(abc.ABC):
         result = {}
         for name in truth:
             result[name] = self.area_weighted_mean_bias(
-                truth=truth[name], predicted=predicted[name]
+                truth=truth[name],
+                predicted=predicted[name],
+                name=name,
             )
         return result
 
     def area_weighted_rmse(
-        self, truth: torch.Tensor, predicted: torch.Tensor
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
     ) -> torch.Tensor:
-        return torch.sqrt(self.area_weighted_mean((predicted - truth) ** 2))
+        return torch.sqrt(self.area_weighted_mean((predicted - truth) ** 2, name=name))
 
     @final
     def area_weighted_rmse_dict(
@@ -76,13 +90,20 @@ class GriddedOperations(abc.ABC):
             result[name] = self.area_weighted_rmse(
                 truth=truth[name],
                 predicted=predicted[name],
+                name=name,
             )
         return result
 
-    def area_weighted_std(self, data: torch.Tensor, keepdim: bool = False):
+    def area_weighted_std(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ):
         return self.area_weighted_mean(
-            (data - self.area_weighted_mean(data, keepdim=True)) ** 2,
+            (data - self.area_weighted_mean(data, keepdim=True, name=name)) ** 2,
             keepdim=keepdim,
+            name=name,
         ).sqrt()
 
     @final
@@ -93,13 +114,20 @@ class GriddedOperations(abc.ABC):
     ) -> TensorDict:
         result = {}
         for name in data:
-            result[name] = self.area_weighted_std(data=data[name], keepdim=keepdim)
+            result[name] = self.area_weighted_std(
+                data=data[name],
+                keepdim=keepdim,
+                name=name,
+            )
         return result
 
     @abc.abstractmethod
     def area_weighted_gradient_magnitude_percent_diff(
-        self, truth: torch.Tensor, predicted: torch.Tensor
-    ) -> torch.Tensor: ...
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
+    ): ...
 
     @final
     def area_weighted_gradient_magnitude_percent_diff_dict(
@@ -110,6 +138,7 @@ class GriddedOperations(abc.ABC):
             result[name] = self.area_weighted_gradient_magnitude_percent_diff(
                 truth=truth[name],
                 predicted=predicted[name],
+                name=name,
             )
         return result
 
@@ -119,6 +148,7 @@ class GriddedOperations(abc.ABC):
         data: torch.Tensor,
         regional_weights: torch.Tensor,
         keepdim: bool = False,
+        name: str | None = None,
     ) -> torch.Tensor: ...
 
     @final
@@ -134,6 +164,7 @@ class GriddedOperations(abc.ABC):
                 data=data[name],
                 regional_weights=regional_weights,
                 keepdim=keepdim,
+                name=name,
             )
         return result
 
@@ -201,36 +232,70 @@ def get_all_subclasses(cls: type[T]) -> list[type[T]]:
     return all_subclasses
 
 
+def _mask_area_weights(
+    area_weights: torch.Tensor,
+    mask_provider: HasGetMaskTensorFor,
+    name: str | None,
+) -> torch.Tensor:
+    if name is None:
+        return area_weights
+    mask = mask_provider.get_mask_tensor_for(name)
+    if mask is None:
+        return area_weights
+    return area_weights * mask
+
+
 class LatLonOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-2, -1)
 
     def __init__(
         self,
         area_weights: torch.Tensor,
+        mask_provider: HasGetMaskTensorFor = NullMaskProvider,
     ):
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")
+        self._device_mask_provider = mask_provider.to(get_device())
+        self._cpu_mask_provider = mask_provider.to("cpu")
 
-    def area_weighted_mean(
-        self, data: torch.Tensor, keepdim: bool = False
-    ) -> torch.Tensor:
+    def _get_area_weights(
+        self,
+        data: torch.Tensor,
+        name: str | None = None,
+        regional_weights: torch.Tensor | None = None,
+    ):
         if data.device == torch.device("cpu"):
             area_weights = self._cpu_area
+            mask_provider = self._cpu_mask_provider
         else:
             area_weights = self._device_area
+            mask_provider = self._device_mask_provider
+        area_weights = _mask_area_weights(area_weights, mask_provider, name)
+        if regional_weights is None:
+            return area_weights
+        if regional_weights.device.type != data.device.type:
+            regional_weights = regional_weights.to(data.device)
+        return regional_weights * area_weights
+
+    def area_weighted_mean(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        area_weights = self._get_area_weights(data, name)
         return metrics.weighted_mean(
             data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
         )
 
     def regional_area_weighted_mean(
-        self, data: torch.Tensor, regional_weights: torch.Tensor, keepdim: bool = False
+        self,
+        data: torch.Tensor,
+        regional_weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
     ) -> torch.Tensor:
-        if regional_weights.device.type != data.device.type:
-            regional_weights = regional_weights.to(data.device)
-        if data.device == torch.device("cpu"):
-            regional_area_weights = regional_weights * self._cpu_area
-        else:
-            regional_area_weights = regional_weights * self._device_area
+        regional_area_weights = self._get_area_weights(data, name, regional_weights)
         return metrics.weighted_mean(
             data,
             regional_area_weights,
@@ -239,12 +304,12 @@ class LatLonOperations(GriddedOperations):
         )
 
     def area_weighted_gradient_magnitude_percent_diff(
-        self, truth: torch.Tensor, predicted: torch.Tensor
-    ) -> torch.Tensor:
-        if predicted.device == torch.device("cpu"):
-            area_weights = self._cpu_area
-        else:
-            area_weights = self._device_area
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
+    ):
+        area_weights = self._get_area_weights(truth, name)
         return metrics.gradient_magnitude_percent_diff(
             truth,
             predicted,
@@ -265,20 +330,30 @@ class HEALPixOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-3, -2, -1)
 
     def area_weighted_mean(
-        self, data: torch.Tensor, keepdim: bool = False
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
     ) -> torch.Tensor:
         # For HEALPix, area weights are uniform, so mean is sufficient
         return data.mean(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
 
     def area_weighted_gradient_magnitude_percent_diff(
-        self, truth: torch.Tensor, predicted: torch.Tensor
+        self,
+        truth: torch.Tensor,
+        predicted: torch.Tensor,
+        name: str | None = None,
     ) -> torch.Tensor:
         return metrics.gradient_magnitude_percent_diff(
             truth, predicted, weights=None, dim=self.HORIZONTAL_DIMS
         )
 
     def regional_area_weighted_mean(
-        self, data: torch.Tensor, regional_weights: torch.Tensor, keepdim: bool = False
+        self,
+        data: torch.Tensor,
+        weights: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
     ) -> torch.Tensor:
         raise NotImplementedError(
             "Regional area weighted mean is not implemented for HEALPix."
