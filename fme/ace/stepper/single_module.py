@@ -1331,8 +1331,8 @@ class Stepper(
 
         stepped = TrainOutput(
             metrics=metrics,
-            gen_data=self._post_process(gen_data),
-            target_data=add_ensemble_dim(self._post_process_func(target_data.data)),
+            gen_data=gen_data,
+            target_data=add_ensemble_dim(target_data.data),
             time=target_data.time,
             normalize=self.normalizer.normalize,
             derive_func=self.derive_func,
@@ -1343,7 +1343,15 @@ class Stepper(
         stepped = stepped.prepend_initial_condition(ic)
         if compute_derived_variables:
             stepped = stepped.compute_derived_variables()
-        return stepped
+        # apply post-processing and return
+        return TrainOutput(
+            metrics=stepped.metrics,
+            gen_data=self._post_process(stepped.gen_data),
+            target_data=self._post_process(stepped.target_data),
+            time=stepped.time,
+            normalize=stepped.normalize,
+            derive_func=stepped.derive_func,
+        )
 
     def _accumulate_loss(
         self,
