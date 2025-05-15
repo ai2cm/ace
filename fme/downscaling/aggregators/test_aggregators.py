@@ -151,7 +151,7 @@ def test_map_aggregator(n_steps: int):
         }
         aggregator.record_batch(target, prediction)
 
-    _, maps = aggregator._get_metrics_and_maps()
+    _, maps, _ = aggregator._get_metrics_and_maps()
     for var_name in ("x", "y"):
         assert maps[f"maps/full-field/{var_name}"].shape == (
             height,
