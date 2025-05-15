@@ -6,6 +6,7 @@ from .metrics import (
     spherical_area_weights,
     weighted_mean,
     weighted_mean_bias,
+    weighted_nanmean,
 )
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
@@ -15,6 +16,7 @@ __all__ = [
     "spherical_area_weights",
     "weighted_mean",
     "weighted_mean_bias",
+    "weighted_nanmean",
     "root_mean_squared_error",
     "get_device",
     "using_gpu",

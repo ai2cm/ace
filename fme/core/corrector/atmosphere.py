@@ -257,7 +257,9 @@ class AtmosphereCorrector(CorrectorABC):
 
 
 class AreaWeightedMean(Protocol):
-    def __call__(self, data: torch.Tensor, keepdim: bool) -> torch.Tensor: ...
+    def __call__(
+        self, data: torch.Tensor, keepdim: bool, name: str | None = None
+    ) -> torch.Tensor: ...
 
 
 def _force_conserve_dry_air(

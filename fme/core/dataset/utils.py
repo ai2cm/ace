@@ -13,6 +13,8 @@ from fme.core.coordinates import (
     LatLonCoordinates,
 )
 from fme.core.dataset.config import FillNaNsConfig
+from fme.core.mask_provider import NullMaskProvider
+from fme.core.masking import HasGetMaskTensorFor
 
 SLICE_NONE = slice(None)
 
@@ -174,7 +176,10 @@ def load_series_data(
 
 
 def get_horizontal_coordinates(
-    ds: xr.Dataset, spatial_dimensions: str, dtype: torch.dtype | None
+    ds: xr.Dataset,
+    spatial_dimensions: str,
+    dtype: torch.dtype | None,
+    mask_provider: HasGetMaskTensorFor = NullMaskProvider,
 ) -> tuple[HorizontalCoordinates, list[str]]:
     """Return the horizontal coordinate class and dimension names."""
     min_ndim = 3 if spatial_dimensions == "latlon" else 4
@@ -188,6 +193,7 @@ def get_horizontal_coordinates(
         coords = LatLonCoordinates(
             lon=torch.tensor(ds[lon_name].values, dtype=dtype),
             lat=torch.tensor(ds[lat_name].values, dtype=dtype),
+            mask_provider=mask_provider,
         )
         return coords, dims[-2:]
     elif spatial_dimensions == "healpix":
