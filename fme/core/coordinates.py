@@ -23,7 +23,8 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.masking import StaticMasking
+from fme.core.mask_provider import NullMaskProvider
+from fme.core.masking import HasGetMaskTensorFor, StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -358,7 +359,7 @@ class DepthCoordinate(VerticalCoordinate):
     def get_mask_level(self, level: int) -> torch.Tensor:
         return self.mask.select(dim=-1, index=level)
 
-    def get_mask_tensor_for(self, name: str) -> torch.Tensor:
+    def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         match = LEVEL_PATTERN.search(name)
         if match:
             # 3D variable
@@ -659,10 +660,13 @@ class LatLonCoordinates(HorizontalCoordinates):
     Parameters:
         lat: 1-dimensional tensor of latitudes
         lon: 1-dimensional tensor of longitudes
+        mask_provider: Provides variable-specific masks for
+            horizontally-aware operations.
     """
 
     lon: torch.Tensor
     lat: torch.Tensor
+    mask_provider: HasGetMaskTensorFor = NullMaskProvider
 
     def __post_init__(self):
         self._area_weights: torch.Tensor | None = None
@@ -678,7 +682,11 @@ class LatLonCoordinates(HorizontalCoordinates):
         return f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon},\n)"
 
     def to(self, device: str) -> "LatLonCoordinates":
-        return LatLonCoordinates(lon=self.lon.to(device), lat=self.lat.to(device))
+        return LatLonCoordinates(
+            lon=self.lon.to(device),
+            lat=self.lat.to(device),
+            mask_provider=self.mask_provider.to(device),
+        )
 
     @property
     def area_weights(self) -> torch.Tensor:
@@ -723,7 +731,7 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     @property
     def gridded_operations(self) -> LatLonOperations:
-        return LatLonOperations(self.area_weights)
+        return LatLonOperations(self.area_weights, self.mask_provider)
 
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
