@@ -295,9 +295,10 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
             trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
         )
     )
+    trainer1.startEpoch = 3
 
     tmp_path.mkdir(exist_ok=True)
-    trainer1.save_all_checkpoints(float("-inf"))
+    trainer1.save_epoch_checkpoints()
     restore_checkpoint(trainer2)
     assert all(
         torch.equal(p1, p2)
@@ -305,6 +306,7 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
             trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
         )
     )
+    assert trainer2.startEpoch == 3
 
 
 def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
@@ -373,7 +375,8 @@ def test_resume(default_trainer_config, tmp_path, very_fast_only: bool):
             # set the id so that we can check it matches what's in the experiment dir
             wandb.set_id(id)
             main(config_segment_two_path)
-            assert 2 == len(
+            # resumes at epoch 1 since epoch 0 completed in previous segment
+            assert 1 == len(
                 [log["epoch"] for log in wandb.get_logs() if "epoch" in log]
             )
             mock.assert_called()

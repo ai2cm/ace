@@ -4,6 +4,7 @@ import dataclasses
 import logging
 import os
 import time
+import uuid
 import warnings
 
 import dacite
@@ -40,18 +41,25 @@ def count_parameters(modules: torch.nn.ModuleList) -> int:
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
-    torch.save(
-        {
-            "model": trainer.model.get_state(),
-            "ema": trainer.ema.get_state(),
-            "optimization": trainer.optimization.get_state(),
-            "num_batches_seen": trainer.num_batches_seen,
-            "startEpoch": trainer.startEpoch,
-            "best_valid_loss": trainer.best_valid_loss,
-            "validate_using_ema": trainer.validate_using_ema,
-        },
-        path,
-    )
+    # save to a temporary file in case we get pre-empted during save
+    temporary_location = os.path.join(os.path.dirname(path), f".{uuid.uuid4()}.tmp")
+    try:
+        torch.save(
+            {
+                "model": trainer.model.get_state(),
+                "ema": trainer.ema.get_state(),
+                "optimization": trainer.optimization.get_state(),
+                "num_batches_seen": trainer.num_batches_seen,
+                "startEpoch": trainer.startEpoch,
+                "best_valid_loss": trainer.best_valid_loss,
+                "validate_using_ema": trainer.validate_using_ema,
+            },
+            temporary_location,
+        )
+        os.replace(temporary_location, path)
+    finally:
+        if os.path.exists(temporary_location):
+            os.remove(temporary_location)
 
 
 def restore_checkpoint(trainer: "Trainer") -> None:
@@ -266,27 +274,34 @@ class Trainer:
             return False
         return os.path.isfile(self.epoch_checkpoint_path)
 
-    def save_all_checkpoints(self, valid_loss: float) -> None:
-        if (
-            self.epoch_checkpoint_path is not None
-            and self.best_checkpoint_path is not None
-        ):
-            logging.info(f"Saving latest checkpoint")
+    def save_best_checkpoint(self, valid_loss: float) -> None:
+        if self.best_checkpoint_path is not None:
+            logging.info(f"Saving best checkpoint")
             if self.validate_using_ema:
                 best_checkpoint_context = self._ema_context
             else:
                 best_checkpoint_context = contextlib.nullcontext  # type: ignore
-
             if valid_loss < self.best_valid_loss:
-                logging.info(f"Saving best checkpoint")
+                logging.info("Saving best checkpoint")
                 self.best_valid_loss = valid_loss
                 with best_checkpoint_context():
                     _save_checkpoint(self, self.best_checkpoint_path)
+            else:
+                logging.info(
+                    "Validation loss did not improve, will not overwrite "
+                    "best checkpoint."
+                )
+        else:
+            raise ValueError("Best checkpoint path is not set")
 
+    def save_epoch_checkpoints(self) -> None:
+        if self.epoch_checkpoint_path is not None:
+            logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
-
             with self._ema_context():
                 _save_checkpoint(self, self.ema_checkpoint_path)
+        else:
+            raise ValueError("Latest checkpoint path is not set")
 
     def _validate_current_epoch(self, epoch: int) -> bool:
         valid_frequency = self.config.validate_interval
@@ -299,6 +314,7 @@ class Trainer:
         logging.info("Running metrics on validation data.")
         self.valid_one_epoch()
         wandb = WandB.get_instance()
+        dist = Distributed.get_instance()
 
         if self.segment_epochs is None:
             segment_max_epochs = self.config.max_epochs
@@ -308,20 +324,22 @@ class Trainer:
             )
 
         for epoch in range(self.startEpoch, segment_max_epochs):
-            self.startEpoch = epoch
             logging.info(f"Training epoch: {epoch + 1}")
             start_time = time.time()
             self.train_one_epoch()
             train_end = time.time()
+
+            self.startEpoch = epoch + 1
             if self._validate_current_epoch(epoch):
                 logging.info("Running metrics on validation data.")
                 valid_loss = self.valid_one_epoch()
                 valid_end = time.time()
                 wandb.log({"epoch": epoch}, step=self.num_batches_seen)
 
-                dist = Distributed.get_instance()
                 if dist.is_root():
-                    self.save_all_checkpoints(valid_loss)
+                    self.save_best_checkpoint(valid_loss)
+            if dist.is_root():
+                self.save_epoch_checkpoints()
             epoch_end = time.time()
             timings = {
                 "epoch_train_seconds": train_end - start_time,

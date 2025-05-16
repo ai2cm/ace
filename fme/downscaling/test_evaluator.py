@@ -182,7 +182,7 @@ def test_evaluator_runs(
             logging=LoggingConfig(),
         ).build()
 
-        trainer.save_all_checkpoints(float("-inf"))
+        trainer.save_epoch_checkpoints()
 
         with open(evaluator_config_path, "w") as file:
             config["model"] = {"checkpoint_path": trainer.epoch_checkpoint_path}
