@@ -132,10 +132,6 @@ class VerticalCoordinate(abc.ABC):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         pass
 
-    @abc.abstractmethod
-    def build_post_process_function(self) -> PostProcessFnType:
-        pass
-
     @property
     @abc.abstractmethod
     def coords(self) -> dict[str, np.ndarray]:
@@ -222,9 +218,6 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
-
-    def build_post_process_function(self) -> PostProcessFnType:
-        return NullPostProcessFn()
 
     def get_ak(self) -> torch.Tensor:
         return self.ak
@@ -405,10 +398,10 @@ class DepthCoordinate(VerticalCoordinate):
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return OceanDeriveFn(self, timestep)
 
-    def build_post_process_function(self) -> PostProcessFnType:
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
         """
-        Return a function that fills in NaNs outside of the mask valid
-        points, i.e. where the mask value is 0.
+        Returns a StaticMasking object that fills in NaNs outside of mask
+        valid points, i.e. where the mask value is 0.
 
         """
         return StaticMasking(
@@ -543,9 +536,6 @@ class NullVerticalCoordinate(VerticalCoordinate):
 
     def build_derive_function(self, timestep: timedelta) -> DeriveFnABC:
         return NullDeriveFn()
-
-    def build_post_process_function(self) -> PostProcessFnType:
-        return NullPostProcessFn()
 
     def to(self, device: str) -> "NullVerticalCoordinate":
         return self

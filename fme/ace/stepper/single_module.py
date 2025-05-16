@@ -14,11 +14,15 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper.parameter_init import ParameterInitializationConfig
-from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
+from fme.core.coordinates import (
+    NullPostProcessFn,
+    SerializableVerticalCoordinate,
+    VerticalCoordinate,
+)
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
-from fme.core.dataset_info import DatasetInfo
+from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.ensemble import get_crps
 from fme.core.generics.inference import PredictFunction
@@ -734,9 +738,10 @@ class StepperConfig:
                 mask=dataset_info.mask_provider,
                 means=step.normalizer.means,
             )
-        post_process_func = (
-            dataset_info.vertical_coordinate.build_post_process_function()
-        )
+        try:
+            post_process_func = dataset_info.mask_provider.build_output_masker()
+        except MissingDatasetInfo:
+            post_process_func = NullPostProcessFn()
         return Stepper(
             config=self,
             step=step,
