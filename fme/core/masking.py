@@ -1,6 +1,7 @@
 import collections
 import dataclasses
 import re
+from collections.abc import Callable
 from typing import Literal, Protocol, runtime_checkable
 
 import torch
@@ -32,6 +33,8 @@ def replace_on_mask(
 
 @runtime_checkable
 class HasGetMaskTensorFor(Protocol):
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
+
     def get_mask_tensor_for(self, name: str) -> torch.Tensor | None:
         """Get the mask for a specific variable name."""
         ...
