@@ -34,6 +34,9 @@ class _Mask:
             # 2D variable
             return self.mask_2d
 
+    def build_output_masker(self):
+        raise NotImplementedError
+
     def to(self, device: str) -> "_Mask":
         return self
 

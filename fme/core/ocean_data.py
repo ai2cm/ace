@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import Protocol
 
@@ -40,6 +40,8 @@ class HasOceanDepthIntegral(Protocol):
         self,
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
+
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]: ...
 
     def to(self, device: str) -> "HasOceanDepthIntegral": ...
 

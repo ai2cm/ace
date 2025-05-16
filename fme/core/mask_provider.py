@@ -1,8 +1,10 @@
 import re
+from collections.abc import Callable
 from typing import Any
 
 import torch
 
+from fme.core.masking import NullMasking, StaticMasking
 from fme.core.typing_ import TensorDict, TensorMapping
 
 LEVEL_PATTERN = re.compile(r"_(\d+)$")
@@ -14,6 +16,9 @@ class _NullMaskProvider:
 
     def to(self, device: str) -> "_NullMaskProvider":
         return self
+
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
+        return NullMasking()
 
 
 NullMaskProvider = _NullMaskProvider()
@@ -53,6 +58,18 @@ class MaskProvider:
                     f"non-mask tensors, including {key}. Expected all keys "
                     "to start with the string 'mask_'."
                 )
+
+    def build_output_masker(self) -> Callable[[TensorMapping], TensorDict]:
+        """
+        Returns a StaticMasking object that fills in NaNs outside of mask
+        valid points, i.e. where the mask value is 0.
+
+        """
+        return StaticMasking(
+            mask_value=0,
+            fill_value=float("nan"),
+            mask=self,
+        )
 
     @property
     def masks(self) -> TensorMapping:
