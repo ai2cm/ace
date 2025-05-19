@@ -38,7 +38,6 @@ from .stepper import (
     CoupledStepperConfig,
 )
 
-DEVICE = fme.get_device()
 NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
@@ -403,8 +402,10 @@ def get_data(
 
     lats = torch.linspace(-89.5, 89.5, N_LAT)  # arbitary choice
     for name in names:
-        data_dict[name] = torch.rand(n_samples, n_time, N_LAT, N_LON, device=DEVICE)
-    area_weights = fme.spherical_area_weights(lats, N_LON).to(DEVICE)
+        data_dict[name] = torch.rand(
+            n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
+        )
+    area_weights = fme.spherical_area_weights(lats, N_LON).to(fme.get_device())
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -642,12 +643,12 @@ def test__get_atmosphere_forcings(
     shape_ocean = (1, 1, N_LAT, N_LON)
     shape_atmos = (1, coupler.n_inner_steps + 1, N_LAT, N_LON)
     forcings_from_ocean = {
-        "sea_ice_frac": torch.rand(*shape_ocean, device=DEVICE),
-        "sst": torch.rand(*shape_ocean, device=DEVICE),
+        "sea_ice_frac": torch.rand(*shape_ocean, device=fme.get_device()),
+        "sst": torch.rand(*shape_ocean, device=fme.get_device()),
     }
     atmos_forcing_data = {
-        "land_frac": torch.rand(*shape_atmos, device=DEVICE),
-        "ocean_frac": torch.rand(*shape_atmos, device=DEVICE),
+        "land_frac": torch.rand(*shape_atmos, device=fme.get_device()),
+        "ocean_frac": torch.rand(*shape_atmos, device=fme.get_device()),
     }
     expected_forcings_from_ocean = {
         k: v.clone() for k, v in forcings_from_ocean.items()
@@ -670,7 +671,9 @@ def test__get_atmosphere_forcings(
     if sea_ice_frac_is_input_to_atmos:
         if ocean_fraction_prediction is None and not sea_ice_frac_is_ocean_prog:
             # sea ice frac comes from atmosphere
-            atmos_forcing_data["sea_ice_frac"] = torch.rand(*shape_atmos, device=DEVICE)
+            atmos_forcing_data["sea_ice_frac"] = torch.rand(
+                *shape_atmos, device=fme.get_device()
+            )
             expected_atmos_forcings["sea_ice_frac"] = atmos_forcing_data[
                 "sea_ice_frac"
             ].clone()
@@ -714,11 +717,11 @@ def test__get_ocean_forcings():
     ocean_shape = (1, 2, N_LAT, N_LON)
     atmos_shape = (1, 2, N_LAT, N_LON)
     ocean_data = {
-        "o_exog": torch.rand(*ocean_shape, device=DEVICE),
-        "sst": torch.rand(*ocean_shape, device=DEVICE),
+        "o_exog": torch.rand(*ocean_shape, device=fme.get_device()),
+        "sst": torch.rand(*ocean_shape, device=fme.get_device()),
     }
-    atmos_gen = {"a_diag": torch.rand(*atmos_shape, device=DEVICE)}
-    atmos_forcings = {"exog": torch.rand(*atmos_shape, device=DEVICE)}
+    atmos_gen = {"a_diag": torch.rand(*atmos_shape, device=fme.get_device())}
+    atmos_forcings = {"exog": torch.rand(*atmos_shape, device=fme.get_device())}
     expected_ocean_forcings = {
         "o_exog": ocean_data["o_exog"].clone(),
         "exog": atmos_forcings["exog"].mean(dim=1),
@@ -1004,7 +1007,7 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         sst_name="o_sfc",
     )
-    area = torch.ones((N_LAT, N_LON), device=DEVICE)
+    area = torch.ones((N_LAT, N_LON), device=fme.get_device())
     vertical_coordinate = CoupledVerticalCoordinate(
         ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)),
         atmosphere=HybridSigmaPressureCoordinate(
