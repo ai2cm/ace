@@ -146,6 +146,14 @@ def _random_offset(full_size, patch_size):
     return random.randint(0, max_offset)
 
 
+def _paired_shuffle(a: list, b: list) -> tuple[list, list]:
+    if len(a) != len(b):
+        raise ValueError("Lists in paired shuffle must have the same length.")
+    indices = list(range(len(a)))
+    random.shuffle(indices)
+    return [a[i] for i in indices], [b[i] for i in indices]
+
+
 def paired_patch_generator_from_loader(
     loader: DataLoader[PairedBatchItem],
     coarse_yx_extent: tuple[int, int],
@@ -154,6 +162,7 @@ def paired_patch_generator_from_loader(
     coarse_overlap: int = 0,
     drop_partial_patches: bool = True,
     random_offset: bool = False,
+    shuffle: bool = False,
 ) -> Generator[PairedBatchData, None, None]:
     fine_yx_extent = (
         coarse_yx_extent[0] * downscale_factor,
@@ -164,8 +173,8 @@ def paired_patch_generator_from_loader(
         coarse_yx_patch_extents[1] * downscale_factor,
     )
     for batch in loader:
-        # get_patches is called at each iteration so that each batch has
-        # a different random offset if this option is enabled.
+        # get_patches and shuffle (if applicable) are called at each iteration
+        # so that each batch has a different random offset if this option is enabled.
 
         coarse_y_random_offset = (
             _random_offset(
@@ -198,6 +207,9 @@ def paired_patch_generator_from_loader(
             y_offset=coarse_y_random_offset * downscale_factor,
             x_offset=coarse_x_random_offset * downscale_factor,
         )
+        if shuffle:
+            coarse_patches, fine_patches = _paired_shuffle(coarse_patches, fine_patches)
+
         yield from paired_patch_generator_from_batch(
             batch,
             coarse_patches=coarse_patches,

@@ -15,6 +15,7 @@ from fme.downscaling.patching import (
     PatchPredictor,
     _divide_into_slices,
     _get_patch_slices,
+    _paired_shuffle,
     composite_patch_predictions,
     get_patches,
     paired_patch_generator_from_loader,
@@ -282,3 +283,54 @@ def test_paired_patches_with_random_offset_consistent(overlap):
 
     assert len(np.unique(y_offsets)) > 1
     assert len(np.unique(x_offsets)) > 1
+
+
+def test__paired_shuffle():
+    a = np.arange(5)
+    b = a * 10
+    a_shuffled, b_shuffled = _paired_shuffle(list(a), list(b))
+    for ai, bi in zip(a_shuffled, b_shuffled):
+        assert ai * 10 == bi
+
+
+@pytest.mark.parametrize("shuffle", [True, False])
+def test_paired_patches_shuffle(shuffle):
+    coarse_shape = (8, 8)
+    downscale_factor = 2
+    batch_size = 3
+    loader = _mock_data_loader(
+        10, *coarse_shape, downscale_factor=downscale_factor, batch_size=batch_size
+    )
+    generator0 = paired_patch_generator_from_loader(
+        loader,
+        coarse_yx_extent=coarse_shape,
+        coarse_yx_patch_extents=(2, 2),
+        downscale_factor=downscale_factor,
+        coarse_overlap=0,
+        drop_partial_patches=True,
+        random_offset=False,
+        shuffle=shuffle,
+    )
+    generator1 = paired_patch_generator_from_loader(
+        loader,
+        coarse_yx_extent=coarse_shape,
+        coarse_yx_patch_extents=(2, 2),
+        downscale_factor=downscale_factor,
+        coarse_overlap=0,
+        drop_partial_patches=True,
+        random_offset=False,
+        shuffle=shuffle,
+    )
+
+    patches0: list[PairedBatchData] = []
+    patches1: list[PairedBatchData] = []
+    for i in range(4):
+        patches0 = next(generator0)  # type: ignore
+        patches1 = next(generator1)  # type: ignore
+
+    data0 = torch.concat([patch.coarse.data["x"] for patch in patches0], dim=0)
+    data1 = torch.concat([patch.coarse.data["x"] for patch in patches1], dim=0)
+    if shuffle:
+        assert not torch.equal(data0, data1)
+    else:
+        assert torch.equal(data0, data1)

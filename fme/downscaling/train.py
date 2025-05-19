@@ -136,7 +136,9 @@ class Trainer:
                 self.config.checkpoint_dir, "ema_ckpt.tar"
             )
 
-    def _get_batch_generator(self, data: GriddedData, random_offset: bool):
+    def _get_batch_generator(
+        self, data: GriddedData, random_offset: bool, shuffle: bool
+    ):
         if self.patch_data:
             batch_generator = paired_patch_generator_from_loader(
                 loader=data.loader,
@@ -144,6 +146,7 @@ class Trainer:
                 coarse_yx_patch_extents=self.model.coarse_shape,
                 downscale_factor=self.model.downscale_factor,
                 random_offset=random_offset,
+                shuffle=shuffle,
             )
         else:
             batch_generator = data.loader
@@ -161,7 +164,7 @@ class Trainer:
         batch: PairedBatchData
         wandb = WandB.get_instance()
         train_batch_generator = self._get_batch_generator(
-            self.train_data, random_offset=True
+            self.train_data, random_offset=True, shuffle=True
         )
         outputs = None
         for i, batch in enumerate(train_batch_generator):
@@ -236,7 +239,7 @@ class Trainer:
             )
             batch: PairedBatchData
             validation_batch_generator = self._get_batch_generator(
-                self.validation_data, random_offset=False
+                self.validation_data, random_offset=False, shuffle=False
             )
             for batch in validation_batch_generator:
                 outputs = self.model.train_on_batch(batch, self.null_optimization)
