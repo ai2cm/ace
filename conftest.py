@@ -1,7 +1,9 @@
 import gc
 import signal
+from unittest import mock
 
 import pytest
+import torch
 
 
 def pytest_addoption(parser):
@@ -23,6 +25,19 @@ def pytest_addoption(parser):
         default=False,
         help="Disable test timeout",
     )
+    parser.addoption(
+        "--meta-get-device",
+        action="store_true",
+        default=False,
+        help=(
+            "fme.get_device() returns torch.device('meta'). "
+            "NOTE: This is an experimental option primarily for debugging device "
+            "errors in a local (non-GPU) environment that will lead to unexpected "
+            "results and failures in tests which rely on tensor values to check "
+            "correctness. To work properly, get_device() must be called inside of "
+            "your test function."
+        ),
+    )
 
 
 @pytest.fixture
@@ -33,6 +48,11 @@ def skip_slow(request, very_fast_only):
 @pytest.fixture
 def very_fast_only(request):
     return request.config.getoption("--very-fast")
+
+
+@pytest.fixture
+def meta_get_device(request):
+    return request.config.getoption("--meta-get-device")
 
 
 class TimeoutException(Exception):
@@ -86,3 +106,30 @@ def mock_gc_collect(monkeypatch):
         pass
 
     monkeypatch.setattr(gc, "collect", mock_collect)
+
+
+_original_cpu = torch.Tensor.cpu
+
+
+def _mock_cpu(self, *args, **kwargs):
+    try:
+        return _original_cpu(self, *args, **kwargs)
+    except NotImplementedError:
+        return torch.rand_like(self, device=torch.device("cpu"))
+
+
+@pytest.fixture(autouse=True)
+def mock_get_device_to_meta(monkeypatch, meta_get_device):
+    """
+    Mocks the fme.core.device.get_device function to always return
+    torch.device("meta") for all tests.
+    """
+    if meta_get_device:
+        mock_meta_device_fn = mock.MagicMock(return_value=torch.device("meta"))
+
+        import fme
+        import fme.core.device
+
+        monkeypatch.setattr(fme.core.device, "get_device", mock_meta_device_fn)
+        monkeypatch.setattr(fme, "get_device", mock_meta_device_fn)
+        monkeypatch.setattr(torch.Tensor, "cpu", _mock_cpu)
