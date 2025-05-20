@@ -75,7 +75,7 @@ class CRPSMetric(ReducedMetric):
 
 class SSRBiasMetric(ReducedMetric):
     """
-    Computes the spread-skill ratio bias (equal to (rmse / stdev) - 1).
+    Computes the spread-skill ratio bias (equal to (stdev / rmse) - 1).
     """
 
     def __init__(self):
@@ -85,7 +85,7 @@ class SSRBiasMetric(ReducedMetric):
 
     def record(self, target: torch.Tensor, gen: torch.Tensor):
         mse = ((gen - target) ** 2).mean(dim=(0, 1, 2))  # batch, ensemble, time
-        variance = gen.var(dim=1).mean(dim=(0, 1))
+        variance = gen.var(dim=1, unbiased=True).mean(dim=(0, 1))
         self._add_mse(mse)
         self._add_variance(variance)
         self._n_batches += 1
@@ -103,7 +103,11 @@ class SSRBiasMetric(ReducedMetric):
     def get(self) -> torch.Tensor:
         if self._total_mse is None or self._total_variance is None:
             raise ValueError("No batches have been recorded.")
-        return (self._total_mse / self._total_variance) ** 0.5 - 1
+        spread = self._total_variance.sqrt()
+        # must remove the component of the MSE that is due to the
+        # variance of the generated values
+        skill = (self._total_mse - self._total_variance).sqrt()
+        return spread / skill - 1
 
 
 class _EnsembleAggregator:
