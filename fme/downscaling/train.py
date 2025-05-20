@@ -338,9 +338,10 @@ class Trainer:
                 valid_loss = self.valid_one_epoch()
                 valid_end = time.time()
                 wandb.log({"epoch": epoch}, step=self.num_batches_seen)
-
                 if dist.is_root():
                     self.save_best_checkpoint(valid_loss)
+            else:
+                valid_end = train_end
             if dist.is_root():
                 self.save_epoch_checkpoints()
             epoch_end = time.time()
