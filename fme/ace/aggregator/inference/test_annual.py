@@ -77,11 +77,13 @@ def test_paired_annual_aggregator(tmpdir):
 
 
 def test_paired_annual_aggregator_with_nans(tmpdir):
+    torch.manual_seed(0)
     n_lat = 16
     n_lon = 32
     # need to have two actual full years of data for plotting to get exercised
     n_sample = 2
-    n_time = 365 * 4 * 2
+    n_years = 5
+    n_time = 365 * 4 * n_years
     area_weights = torch.ones(n_lat, n_lon).to(fme.get_device())
     names = ["a"]
     horizontal = [DimSize("grid_yt", n_lat), DimSize("grid_xt", n_lon)]
@@ -89,7 +91,7 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
         path=pathlib.Path(tmpdir),
         names=names,
         dim_sizes=DimSizes(
-            n_time=48,
+            n_time=n_years * 12,
             horizontal=horizontal,
             nz_interface=1,
         ),
@@ -155,8 +157,9 @@ def test_paired_annual_aggregator_with_nans(tmpdir):
     for source in ["target", "gen"]:
         r2 = logs[f"test/r2/a_{source}"]
         assert not np.isnan(r2)
-        # can be -inf when the reference is 0 due to incorrect nan handling
-        assert abs(r2) < 1
+        big_r2 = 50  # account for small denominators
+        assert r2 > -big_r2  # can be -inf if NaNs improperly handled
+        assert r2 < 1
 
 
 @pytest.mark.parametrize("use_mock_distributed", [False, True])
