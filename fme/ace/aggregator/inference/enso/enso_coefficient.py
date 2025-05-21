@@ -269,6 +269,7 @@ class EnsoCoefficientEvaluatorAggregator:
                 self._ops.area_weighted_rmse(
                     predicted=gen_coefficients[name],
                     truth=target_coefficients[name],
+                    name=name,
                 )
                 .cpu()
                 .numpy()

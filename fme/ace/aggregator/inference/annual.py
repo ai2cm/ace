@@ -1,6 +1,7 @@
 import dataclasses
 import datetime
 from collections.abc import Callable, Mapping
+from functools import partial
 from typing import Any, Optional
 
 import numpy as np
@@ -43,8 +44,9 @@ class PairedGlobalMeanAnnualAggregator:
         if name not in self._variable_reference_data:
             if name not in self._monthly_reference_data:
                 return None
+            area_weighted_mean = partial(self._area_weighted_mean, name=name)
             self._variable_reference_data[name] = process_monthly_reference(
-                self._monthly_reference_data, self._area_weighted_mean, name
+                self._monthly_reference_data, area_weighted_mean, name
             )
         return self._variable_reference_data[name]
 
@@ -158,7 +160,7 @@ class GlobalMeanAnnualAggregator:
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ):
-        self._area_weighted_mean = ops.area_weighted_mean
+        self._area_weighted_mean_dict = ops.area_weighted_mean_dict
         self.timestep = timestep
         self.variable_metadata = variable_metadata or {}
         self._datasets: list[xr.Dataset] | None = None
@@ -166,9 +168,10 @@ class GlobalMeanAnnualAggregator:
     @torch.no_grad()
     def record_batch(self, time: xr.DataArray, data: TensorMapping):
         """Record a batch of data for computing time variability statistics."""
-        data_area_mean = {}
-        for name in data:
-            data_area_mean[name] = self._area_weighted_mean(data[name]).cpu()
+        data_area_mean = {
+            name: tensor.cpu()
+            for name, tensor in self._area_weighted_mean_dict(data).items()
+        }
         ds = to_dataset(data_area_mean, time)
 
         # must keep a separate dataset for each sample to avoid averaging across
