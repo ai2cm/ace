@@ -15,7 +15,8 @@
 # limitations under the License.
 
 from functools import partial
-from typing import Any, Tuple
+import math
+from typing import Any, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -40,6 +41,31 @@ from .layers import (
     SpectralAttention2d,
 )
 from .s2convolutions import SpectralAttentionS2, SpectralConvS2
+
+
+# heuristic for finding theta_cutoff
+def _compute_cutoff_radius(nlat, kernel_shape, basis_type):
+    theta_cutoff_factor = {
+        "piecewise linear": 0.5,
+        "morlet": 0.5,
+        "zernike": math.sqrt(2.0),
+    }
+
+    return (
+        (kernel_shape[0] + 1)
+        * theta_cutoff_factor[basis_type]
+        * math.pi
+        / float(nlat - 1)
+    )
+
+
+class DiscreteContinuousConvS2(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.conv = th.DiscreteContinuousConvS2(*args, **kwargs)
+
+    def forward(self, x):
+        return self.conv(x), x
 
 
 class SpectralFilterLayer(nn.Module):
@@ -115,6 +141,27 @@ class SpectralFilterLayer(nn.Module):
                 filter_residual=filter_residual,
             )
 
+        elif filter_type == "local":
+            # heuristic for finding theta_cutoff
+            theta_cutoff = 2 * _compute_cutoff_radius(
+                nlat=forward_transform.nlat,
+                kernel_shape=(3, 3),
+                basis_type="morlet",
+            )
+            self.filter = DiscreteContinuousConvS2(
+                embed_dim,
+                embed_dim,
+                in_shape=(forward_transform.nlat, forward_transform.nlon),
+                out_shape=(inverse_transform.nlat, inverse_transform.nlon),
+                kernel_shape=(3, 3),
+                basis_type="morlet",
+                basis_norm_mode="mean",
+                groups=1,
+                grid_in=forward_transform.grid,
+                grid_out=inverse_transform.grid,
+                bias=False,
+                theta_cutoff=theta_cutoff,
+            )
         else:
             raise (NotImplementedError)
 
@@ -338,6 +385,8 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         Number of spectral layers, by default 3
     checkpointing : int, optional
         Number of checkpointing segments, by default 0
+    local_blocks: List[int], optional
+        List of blocks to use local filters, by default []
 
     Example:
     --------
@@ -397,6 +446,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         checkpointing: int = 0,
         filter_residual: bool = False,
         filter_output: bool = False,
+        local_blocks: Optional[List[int]] = None,
     ):
         super(SphericalFourierNeuralOperatorNet, self).__init__()
 
@@ -500,6 +550,14 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         self.checkpointing = (
             params.checkpointing if hasattr(params, "checkpointing") else checkpointing
         )
+        local_blocks = (
+            params.local_blocks if hasattr(params, "local_blocks") else local_blocks
+        )
+        if local_blocks is not None:
+            self.local_blocks = [i for i in range(self.num_layers) if i in local_blocks]
+        else:
+            self.local_blocks = []
+
         data_grid = params.data_grid if hasattr(params, "data_grid") else "equiangular"
         # self.pretrain_encoding = params.pretrain_encoding if hasattr(params, "pretrain_encoding") else False
 
@@ -636,6 +694,11 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
         # FNO blocks
         self.blocks = nn.ModuleList([])
         for i in range(self.num_layers):
+            if i in self.local_blocks:
+                block_filter_type = "local"
+            else:
+                block_filter_type = self.filter_type
+
             first_layer = i == 0
             last_layer = i == self.num_layers - 1
 
@@ -650,7 +713,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
                 inverse_transform,
                 self.embed_dim,
                 context_config=context_config,
-                filter_type=self.filter_type,
+                filter_type=block_filter_type,
                 operator_type=self.operator_type,
                 mlp_ratio=self.mlp_ratio,
                 drop_rate=drop_rate,
