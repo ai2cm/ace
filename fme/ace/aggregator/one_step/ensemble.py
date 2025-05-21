@@ -188,7 +188,7 @@ class _EnsembleAggregator:
                     self._variable_metrics[metric][key].get()
                 )
                 data[f"{metric}/{key}"] = (
-                    self._gridded_operations.area_weighted_mean(metric_value)
+                    self._gridded_operations.area_weighted_mean(metric_value, name=key)
                     .cpu()
                     .numpy()
                 )

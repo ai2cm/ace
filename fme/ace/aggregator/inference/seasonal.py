@@ -44,24 +44,24 @@ class SeasonalAggregator:
         if self._target_dataset is None:
             self._target_dataset = target_ds.groupby(
                 target_ds.valid_time.dt.season
-            ).sum(dim="stacked_sample_time")
+            ).sum(dim="stacked_sample_time", skipna=False)
         else:
             self._target_dataset = _add_dataarray(
                 self._target_dataset,
                 target_ds.groupby(target_ds.valid_time.dt.season).sum(
-                    dim="stacked_sample_time"
+                    dim="stacked_sample_time", skipna=False
                 ),
             )
 
         if self._gen_dataset is None:
             self._gen_dataset = gen_ds.groupby(gen_ds.valid_time.dt.season).sum(
-                dim="stacked_sample_time"
+                dim="stacked_sample_time", skipna=False
             )
         else:
             self._gen_dataset = _add_dataarray(
                 self._gen_dataset,
                 gen_ds.groupby(gen_ds.valid_time.dt.season).sum(
-                    dim="stacked_sample_time"
+                    dim="stacked_sample_time", skipna=False
                 ),
             )
 
@@ -152,6 +152,7 @@ class SeasonalAggregator:
 
             mse_tensor = self._area_weighted_mean(
                 torch.as_tensor(bias[name].values ** 2),
+                name=name,
             )
             for i, season in enumerate(bias[name].season.values):
                 rmse = float(mse_tensor[i].sqrt().numpy())
