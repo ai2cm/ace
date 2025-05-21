@@ -157,6 +157,7 @@ def get_single_module_noise_conditioned_selector(
                             embed_dim=4,
                             noise_embed_dim=4,
                             num_layers=2,
+                            local_blocks=[0],
                         )
                     ),
                 ),
@@ -361,6 +362,22 @@ SELECTOR_CONFIG_CASES = [
     for getter in SELECTOR_GETTERS
 ]
 
+EXPORTABLE_SELECTOR_CONFIG_CASES = [
+    # Some configs use th.DiscreteContinuousConvS2 layers
+    # which currently do not support export, see
+    # https://github.com/NVIDIA/torch-harmonics/issues/73
+    pytest.param(
+        getter(),
+        id=getter.__name__,
+    )
+    for getter in [
+        get_single_module_with_atmosphere_corrector_selector,
+        get_separate_radiation_selector,
+        get_single_module_selector,
+        get_multi_call_selector,
+    ]
+]
+
 HAS_NEXT_STEP_FORCING_NAME_CASES = [
     pytest.param(
         StepSelector(
@@ -472,12 +489,10 @@ def test_step_applies_wrapper(config: StepSelector):
         wrapper.assert_any_call(module)
 
 
-@pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
+@pytest.mark.parametrize("config", EXPORTABLE_SELECTOR_CONFIG_CASES)
 def test_export_step(config: StepSelector, very_fast_only: bool):
     if very_fast_only:
         pytest.skip("Skipping non-fast tests")
-    if config.type == "FCN2":
-        pytest.xfail("FCN2 is not supported for export")
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
     n_samples = 5

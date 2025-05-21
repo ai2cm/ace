@@ -69,6 +69,10 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
             is not 1.
         filter_output: Whether to filter the output of the model through a
             SHT round-trip.
+        local_blocks: List of block indices to use discrete-conditional
+            convolution (DISCO) blocks, which apply local filters. See
+            Ocampo et al. (2022)
+            https://arxiv.org/abs/2209.13603 for more details.
     """
 
     spectral_transform: str = "sht"
@@ -96,6 +100,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     data_grid: Literal["legendre-gauss", "equiangular"] = "legendre-gauss"
     filter_residual: bool = False
     filter_output: bool = False
+    local_blocks: list[int] | None = None
 
     def build(
         self,
