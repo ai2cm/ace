@@ -110,6 +110,7 @@ class WandB:
     def __init__(self):
         self._enabled = False
         self._configured = False
+        self._id = None
 
     def configure(self, log_to_wandb: bool):
         dist = Distributed.get_instance()
@@ -143,14 +144,17 @@ class WandB:
                         "must provide `experiment_dir` when `resumable` is True"
                     )
                 else:
-                    init_wandb_with_resumption(
+                    id_ = init_wandb_with_resumption(
                         experiment_dir, direct_access=False, **kwargs
                     )
             else:
                 wandb.init(**kwargs)
                 if wandb.run is None:
                     raise RuntimeError("wandb.init did not return a run")
-                logging.info(f"New non-resuming wandb run with id: {wandb.run.id}.")
+                else:
+                    id_ = wandb.run.id
+                logging.info(f"New non-resuming wandb run with id: {id_}.")
+            self._id = id_
 
     def watch(self, modules):
         if self._enabled:
@@ -181,6 +185,13 @@ class WandB:
     def enabled(self) -> bool:
         return self._enabled
 
+    @property
+    def configured(self) -> bool:
+        return self._configured
+
+    def get_id(self) -> str | None:
+        return self._id
+
 
 singleton: WandB | None = None
 
@@ -208,7 +219,7 @@ def init_wandb_with_resumption(
     wandb_init=None,
     wandb_id=None,
     **kwargs: Any,
-) -> None:
+) -> str:
     """
     Initialize wandb with resumption logic. If wandb has previously
     been initialized in the experiment directory, resume the run. Otherwise,
@@ -225,6 +236,9 @@ def init_wandb_with_resumption(
         wandb_init: The wandb.init function to use (for testing).
         wandb_id: A function returning the wandb run_id (for testing).
         **kwargs: Arguments to pass to `wandb.init`.
+
+    Returns:
+        The wandb run id.
     """
     if direct_access:
         raise DirectInitializationError(
@@ -257,3 +271,4 @@ def init_wandb_with_resumption(
         kwargs.update({"resume": "must", "id": wandb_run_id})
         wandb_init(**kwargs)
         logging.info(f"Resuming wandb run with id: {wandb_id()}")
+    return wandb_id()
