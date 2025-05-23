@@ -423,12 +423,14 @@ def _load_weights(path: str) -> list[Mapping[str, Any]]:
 @dataclasses.dataclass
 class ExistingStepperConfig:
     """
-    Configuration for an existing stepper. This is only designed to point to
-    a serialized stepper checkpoint for loading, e.g., in the case of training
-    resumption.
+    Configuration for an existing stepper. This allows loading a serialized
+    stepper from a checkpoint without loading its configuration of the training
+    and optimization schedule, i.e., this allows for specifying a new
+    schedule in fine-tuning. Not used for training resumption.
 
     Parameters:
-        checkpoint_path: The path to the serialized checkpoint.
+        checkpoint_path: The path to the serialized checkpoint; should be different
+        than the experiment output directory.
     """
 
     checkpoint_path: str
