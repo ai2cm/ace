@@ -47,7 +47,7 @@ class MockWandB:
                         **kwargs,
                     )
             else:
-                pass
+                self._wandb_init(resume="never", **kwargs)
 
     def _wandb_init(
         self, resume: Literal["must", "never"], id: str | None = None, **kwargs
@@ -73,7 +73,9 @@ class MockWandB:
                     )
             self._id = _mock_wandb_id()
 
-    def get_id(self) -> str | None:
+    def get_id(self) -> str:
+        if self._id is None:
+            raise ValueError("mock wandb id is None")
         return self._id
 
     def set_id(self, id: str):
@@ -119,6 +121,10 @@ class MockWandB:
     @property
     def enabled(self) -> bool:
         return self._enabled
+
+    @property
+    def configured(self) -> bool:
+        return self._configured
 
 
 @contextlib.contextmanager
