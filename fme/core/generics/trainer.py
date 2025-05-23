@@ -470,6 +470,12 @@ class Trainer:
                 os.remove(temporary_location)
 
     def restore_checkpoint(self, checkpoint_path, ema_checkpoint_path):
+        """
+        Restore the checkpoint from the given path. This includes the existing state of
+        the stepper, optimization, training epoch, and EMA. This is most suitable
+        for resuming training from a checkpoint without changing the training schedule,
+        i.e., to manage preemption.
+        """
         _restore_checkpoint(self, checkpoint_path, ema_checkpoint_path)
 
     def _epoch_checkpoint_enabled(self, epoch: int) -> bool:
@@ -535,13 +541,9 @@ class Trainer:
 
 
 def _restore_checkpoint(trainer: Trainer, checkpoint_path, ema_checkpoint_path):
-    # separated into a function only to make it easier to mock
     checkpoint = torch.load(
         checkpoint_path, map_location=fme.get_device(), weights_only=False
     )
-    # restore checkpoint is used for finetuning as well as resuming.
-    # If finetuning (i.e., not resuming), restore checkpoint
-    # does not load optimizer state, instead uses config specified lr.
     trainer.stepper.load_state(checkpoint["stepper"])
     trainer.optimization.load_state(checkpoint["optimization"])
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
