@@ -40,6 +40,24 @@ def test_gridded_operations_from_state(
         expected_class.from_state(state["state"])
 
 
+def test_latlon_area_weighted_sum_dict():
+    area_weights = torch.ones(4, 5)
+    ops = LatLonOperations(area_weights=area_weights)
+    data_dict: TensorMapping = {
+        "var1": torch.randn(2, 4, 5),
+        "var2": torch.randn(2, 4, 5),
+    }
+    result = ops.area_weighted_sum_dict(data_dict)
+    assert isinstance(result, dict)
+    assert set(result.keys()) == {"var1", "var2"}
+    for var_name in data_dict:
+        assert result[var_name].shape == (2,)
+        # all weights are 1, so it's just sum
+        torch.testing.assert_close(
+            result[var_name], data_dict[var_name].sum(dim=(-2, -1))
+        )
+
+
 def test_latlon_area_weighted_mean_dict():
     area_weights = torch.ones(4, 5)
     ops = LatLonOperations(area_weights=area_weights)

@@ -32,6 +32,34 @@ def spherical_area_weights(lats: Array, num_lon: int) -> torch.Tensor:
     return weights
 
 
+def weighted_sum(
+    tensor: torch.Tensor,
+    weights: torch.Tensor | None = None,
+    dim: Dimension = (),
+    keepdim: bool = False,
+) -> torch.Tensor:
+    """Computes the weighted sum across the specified list of dimensions.
+
+    Args:
+        tensor: torch.Tensor
+        weights: Weights to apply to the sum.
+        dim: Dimensions to compute the sum over.
+        keepdim: Whether the output tensor has `dim` retained or not.
+
+    Returns:
+        a tensor of the weighted sum averaged over the specified dimensions `dim`.
+    """
+    if weights is None:
+        return tensor.sum(dim=dim, keepdim=keepdim)
+
+    expanded_weights = weights.expand(tensor.shape)
+
+    # remove potential "expected NaNs", i.e. any NaNs with 0 weight
+    tensor = tensor.where(expanded_weights != 0.0, 0.0)
+
+    return (tensor * expanded_weights).sum(dim=dim, keepdim=keepdim)
+
+
 def weighted_mean(
     tensor: torch.Tensor,
     weights: torch.Tensor | None = None,

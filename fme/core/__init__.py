@@ -7,6 +7,7 @@ from .metrics import (
     weighted_mean,
     weighted_mean_bias,
     weighted_nanmean,
+    weighted_sum,
 )
 from .normalizer import StandardNormalizer, get_normalizer
 from .packer import Packer
