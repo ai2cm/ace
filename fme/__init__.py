@@ -16,6 +16,7 @@ from .core.metrics import (
     weighted_mean_gradient_magnitude,
     weighted_nanmean,
     weighted_std,
+    weighted_sum,
 )
 
 __all__ = [
