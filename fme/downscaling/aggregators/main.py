@@ -89,7 +89,8 @@ class Mean:
         if self._sum is None:
             raise ValueError("No values have been added to the running average")
         return {
-            k: self._dist.reduce_mean(self._sum[k] / self._count) for k in self._sum
+            k: self._dist.reduce_mean(self._sum[k] / self._count)
+            for k in sorted(list(self._sum))
         }
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
@@ -144,7 +145,7 @@ class SumComparison:
         """
         if self._sum is None:
             raise ValueError("No values have been added to the running sum")
-        return {k: self._dist.reduce_sum(self._sum[k]) for k in self._sum}
+        return {k: self._dist.reduce_sum(self._sum[k]) for k in sorted(list(self._sum))}
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
         """
@@ -218,7 +219,8 @@ class MeanComparison:
         if self._sum is None:
             raise ValueError("No values have been added to the running average")
         return {
-            k: self._dist.reduce_mean(self._sum[k] / self._count) for k in self._sum
+            k: self._dist.reduce_mean(self._sum[k] / self._count)
+            for k in sorted(list(self._sum))
         }
 
     def get_wandb(self, prefix: str = "") -> Mapping[str, Any]:
