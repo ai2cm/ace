@@ -32,6 +32,27 @@ class GriddedOperations(abc.ABC):
         )
 
     @abc.abstractmethod
+    def area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor: ...
+
+    @final
+    def area_weighted_sum_dict(
+        self, data: TensorMapping, keepdim: bool = False
+    ) -> TensorDict:
+        result = {}
+        for name in data:
+            result[name] = self.area_weighted_sum(
+                data=data[name],
+                keepdim=keepdim,
+                name=name,
+            )
+        return result
+
+    @abc.abstractmethod
     def area_weighted_mean(
         self,
         data: torch.Tensor,
@@ -277,6 +298,17 @@ class LatLonOperations(GriddedOperations):
             regional_weights = regional_weights.to(data.device)
         return regional_weights * area_weights
 
+    def area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        area_weights = self._get_area_weights(data, name)
+        return metrics.weighted_sum(
+            data, area_weights, dim=self.HORIZONTAL_DIMS, keepdim=keepdim
+        )
+
     def area_weighted_mean(
         self,
         data: torch.Tensor,
@@ -328,6 +360,15 @@ class LatLonOperations(GriddedOperations):
 
 class HEALPixOperations(GriddedOperations):
     HORIZONTAL_DIMS = (-3, -2, -1)
+
+    def area_weighted_sum(
+        self,
+        data: torch.Tensor,
+        keepdim: bool = False,
+        name: str | None = None,
+    ) -> torch.Tensor:
+        # For HEALPix, area weights are uniform, so sum is sufficient
+        return data.sum(dim=self.HORIZONTAL_DIMS, keepdim=keepdim)
 
     def area_weighted_mean(
         self,
