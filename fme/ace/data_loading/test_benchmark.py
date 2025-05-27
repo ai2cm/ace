@@ -3,7 +3,9 @@ import datetime
 import numpy as np
 import xarray as xr
 
+from fme.core import logging_utils
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.testing.wandb import mock_wandb
 
 from .benchmark import BenchmarkConfig, benchmark
 from .config import ConcatDatasetConfig, DataLoaderConfig
@@ -39,10 +41,13 @@ def test_benchmark(tmp_path):
     loader_config = DataLoaderConfig(
         dataset=ConcatDatasetConfig(concat=[dataset_config]), batch_size=4
     )
+    logging_config = logging_utils.LoggingConfig(project="test", entity="test")
     config = BenchmarkConfig(
         loader=loader_config,
+        logging=logging_config,
         names=list(ds.data_vars),
         n_timesteps=3,
         sleep=0,
     )
-    benchmark(config)
+    with mock_wandb() as wandb:  # noqa: F841
+        benchmark(config)
