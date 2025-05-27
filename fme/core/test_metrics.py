@@ -148,6 +148,49 @@ def test_weighted_nanmean_ignores_nans(x_nan, weights, expected_result):
             torch.tensor([float("nan"), 0, 1]),
             None,
             torch.tensor(float("nan")),
+            id="unweighted sum with nan is nan",
+        ),
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            torch.tensor([0, 1, 1]),
+            torch.tensor(1.0),
+            id="zero weight nan ignored, shape: (3,)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [float("nan"), 3, 4]]),
+            torch.tensor([0, 1, 2]),
+            torch.tensor([float(1 + 4), float(3 + 8)]),
+            id="zero weight nan ignored, shape: (2, 3)",
+        ),
+        pytest.param(
+            torch.tensor([[float("nan"), 1, 2], [2, 3, 4]]),
+            torch.tensor([1, 1, 2]),
+            torch.tensor([float("nan"), float(2 + 3 + 8)]),
+            id="nonzero weighted nan survives, shape: (2, 3)",
+        ),
+    ],
+)
+def test_weighted_sum_with_nans(x_nan, weights, expected_result):
+    """Tests the weighted sum for a few simple test cases, with NaNs in the
+    input tensor.
+
+    weighted_sum does not ignore NaNs unless they have zero weight.
+    """
+    result = fme.weighted_sum(x_nan, weights=weights, dim=-1)
+    torch.testing.assert_close(
+        result,
+        expected_result,
+        equal_nan=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "x_nan, weights, expected_result",
+    [
+        pytest.param(
+            torch.tensor([float("nan"), 0, 1]),
+            None,
+            torch.tensor(float("nan")),
             id="unweighted mean with nan is nan",
         ),
         pytest.param(
