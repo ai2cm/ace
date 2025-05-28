@@ -2,7 +2,7 @@
 
 set -e
 
-JOB_NAME="ace-data-benchmark-v1-30-steps-16dw"  # recommended but not required to change this
+JOB_NAME="ace-data-benchmark-v2-30-steps-16dw-noopen"  # recommended but not required to change this
 CONFIG_PATH=configs/experiments/2025-05-23-ace-data-loading-benchmark/config.yaml  # relative to the root of the repository
 
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
