@@ -616,11 +616,12 @@ class XarrayDataset(torch.utils.data.Dataset):
         idxs = range(input_file_idx, output_file_idx + 1)
         total_steps = 0
         for i, file_idx in enumerate(idxs):
-            ds = self._open_file(file_idx)
-            ds = ds.isel(**self.isel)
-
             start = input_local_idx if i == 0 else 0
-            stop = output_local_idx if i == len(idxs) - 1 else len(ds["time"]) - 1
+            if i == len(idxs) - 1:
+                stop = output_local_idx
+            else:
+                stop = self.start_indices[i + 1] - self.start_indices[i] - 1
+
             n_steps = stop - start + 1
             shape = [n_steps] + self._shape_excluding_time_after_selection
             total_steps += n_steps
@@ -636,6 +637,8 @@ class XarrayDataset(torch.utils.data.Dataset):
                     nontime_selection=self._isel_tuple,
                 )
             else:
+                ds = self._open_file(file_idx)
+                ds = ds.isel(**self.isel)
                 tensor_dict = load_series_data(
                     idx=start,
                     n_steps=n_steps,
@@ -645,10 +648,10 @@ class XarrayDataset(torch.utils.data.Dataset):
                     final_shape=shape,
                     fill_nans=self.fill_nans,
                 )
+                ds.close()
+                del ds
             for n in self._time_dependent_names:
                 arrays.setdefault(n, []).append(tensor_dict[n])
-            ds.close()
-            del ds
 
         tensors: TensorDict = {}
         for n, tensor_list in arrays.items():
