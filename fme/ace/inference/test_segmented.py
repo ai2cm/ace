@@ -186,7 +186,7 @@ def test_inference_segmented_entrypoint():
         )
         ds_two_segments_1 = ds_two_segments_1.drop_vars(["init_time", "time"])
         ds_one_segment = ds_one_segment.drop_vars(["init_time", "time"])
-        xr.testing.assert_identical(
+        xr.testing.assert_equal(
             ds_two_segments_1, ds_one_segment.isel(time=slice(3, None))
         )
 

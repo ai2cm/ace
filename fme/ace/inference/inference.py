@@ -24,6 +24,7 @@ from fme.ace.data_loading.inference import (
     TimestampList,
 )
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.stepper import (
     Stepper,
     StepperOverrideConfig,
@@ -217,6 +218,7 @@ class InferenceConfig:
             timestep=timestep,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 
