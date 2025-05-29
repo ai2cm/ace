@@ -6,6 +6,7 @@ import tempfile
 import unittest.mock
 from typing import Literal
 
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -39,8 +40,9 @@ from fme.ace.testing import (
     save_nd_netcdf,
     save_scalar_netcdf,
 )
+from fme.ace.train.train import build_trainer, prepare_directory
 from fme.ace.train.train import main as train_main
-from fme.ace.train.train_config import InlineInferenceConfig, TrainConfig
+from fme.ace.train.train_config import InlineInferenceConfig, TrainBuilders, TrainConfig
 from fme.core.coordinates import (
     HEALPixCoordinates,
     HorizontalCoordinates,
@@ -61,6 +63,7 @@ from fme.core.optimization import OptimizationConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
+from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
 
@@ -552,6 +555,42 @@ def test_resume(tmp_path, nettype, very_fast_only: bool):
             assert (
                 max([val["epoch"] for val in wandb.get_logs() if "epoch" in val]) == 2
             )
+
+
+def test_restore_checkpoint(tmp_path, very_fast_only: bool):
+    """Test that restoring a checkpoint works."""
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+
+    config_path, _ = _setup(tmp_path, "SphericalFourierNeuralOperatorNet")
+    with open(config_path) as f:
+        config_dict = yaml.safe_load(f)
+    config = dacite.from_dict(
+        data_class=TrainConfig, data=config_dict, config=dacite.Config(strict=True)
+    )
+    prepare_directory(config.experiment_dir, config_dict)
+
+    builders = TrainBuilders(config)
+    trainer1 = build_trainer(builders, config)
+
+    # run one epoch
+    trainer1.train_one_epoch()
+    trainer1.save_all_checkpoints(0.1, 0.2)
+
+    # reload and check model parameters and optimizer state
+    trainer2 = build_trainer(builders, config)
+    _restore_checkpoint(
+        trainer2,
+        trainer1.paths.latest_checkpoint_path,
+        trainer1.paths.ema_checkpoint_path,
+    )
+
+    compare_restored_parameters(
+        trainer1.stepper.modules.parameters(),
+        trainer2.stepper.modules.parameters(),
+        trainer1.optimization.optimizer,
+        trainer2.optimization.optimizer,
+    )
 
 
 @pytest.mark.parametrize("nettype", ["SphericalFourierNeuralOperatorNet"])

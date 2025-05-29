@@ -16,6 +16,7 @@ import xarray as xr
 import yaml
 
 from fme.core.optimization import NullOptimization
+from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -296,8 +297,8 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
         )
     )
     trainer1.startEpoch = 3
-
     tmp_path.mkdir(exist_ok=True)
+    trainer1.train_one_epoch()
     trainer1.save_epoch_checkpoints()
     restore_checkpoint(trainer2)
     assert all(
@@ -307,6 +308,13 @@ def test_restore_checkpoint(default_trainer_config, tmp_path):
         )
     )
     assert trainer2.startEpoch == 3
+
+    compare_restored_parameters(
+        trainer1.model.modules.parameters(),
+        trainer2.model.modules.parameters(),
+        trainer1.optimization.optimizer,
+        trainer2.optimization.optimizer,
+    )
 
 
 def test_train_eval_modes(default_trainer_config, very_fast_only: bool):
