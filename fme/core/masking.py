@@ -154,6 +154,7 @@ class StaticMasking:
                     f"but the mapping is missing key '{name}'."
                 ) from err
             fill = torch.full_like(tensor, fill_value)
+            mask = mask.expand(fill.shape)
             masked = replace_on_mask(
                 original=tensor,
                 replacement=fill,

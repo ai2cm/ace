@@ -409,11 +409,11 @@ def get_data(
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
-        vertical_coord = HybridSigmaPressureCoordinate(ak, bk)
+        vertical_coord = HybridSigmaPressureCoordinate(ak, bk).to(fme.get_device())
     elif realm == "ocean":
         vertical_coord = DepthCoordinate(
             torch.arange(NZ), torch.ones(N_LAT, N_LON, NZ - 1)
-        )
+        ).to(fme.get_device())
     data = BatchData.new_on_device(
         data=data_dict,
         time=xr.DataArray(
@@ -632,7 +632,7 @@ def test__get_atmosphere_forcings(
     vertical_coord = Mock(spec=CoupledVerticalCoordinate)
     vertical_coord.atmosphere = Mock(spec=HybridSigmaPressureCoordinate)
     vertical_coord.ocean = Mock(spec=DepthCoordinate)
-    sst_mask = torch.ones(N_LAT, N_LON)
+    sst_mask = torch.ones(N_LAT, N_LON).to(fme.get_device())
     sst_mask[0, 0] = 0
     vertical_coord.ocean.get_mask_level.return_value = sst_mask
     coupler = config.get_stepper(
@@ -646,6 +646,9 @@ def test__get_atmosphere_forcings(
         "sea_ice_frac": torch.rand(*shape_ocean, device=fme.get_device()),
         "sst": torch.rand(*shape_ocean, device=fme.get_device()),
     }
+    for tensor in forcings_from_ocean.values():
+        # apply mask to ocean data
+        tensor[..., 0, 0] = float("nan")
     atmos_forcing_data = {
         "land_frac": torch.rand(*shape_atmos, device=fme.get_device()),
         "ocean_frac": torch.rand(*shape_atmos, device=fme.get_device()),
@@ -687,7 +690,7 @@ def test__get_atmosphere_forcings(
     )
     for name in expected_atmos_forcings:
         torch.testing.assert_close(
-            new_atmos_forcings[name], expected_atmos_forcings[name]
+            new_atmos_forcings[name], torch.nan_to_num(expected_atmos_forcings[name])
         )
 
 
@@ -1009,10 +1012,12 @@ def test_reloaded_stepper_gives_same_prediction():
     )
     area = torch.ones((N_LAT, N_LON), device=fme.get_device())
     vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)),
+        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)).to(
+            fme.get_device()
+        ),
         atmosphere=HybridSigmaPressureCoordinate(
             ak=torch.arange(7), bk=torch.arange(7)
-        ),
+        ).to(fme.get_device()),
     )
     stepper = config.get_stepper(
         img_shape=(N_LAT, N_LON),

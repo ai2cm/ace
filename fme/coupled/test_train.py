@@ -32,9 +32,6 @@ train_loader:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
-        fill_nans:
-            method: constant
-            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -47,9 +44,6 @@ validation_loader:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
-        fill_nans:
-            method: constant
-            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -61,9 +55,6 @@ inference:
         data_path: {ocean_data_path}
         subset:
             start_time: '1970-01-01'
-        fill_nans:
-            method: constant
-            value: 0
       atmosphere:
         data_path: {atmosphere_data_path}
         subset:
@@ -89,53 +80,64 @@ stepper:
     loss_contributions:
       weight: {loss_ocean_weight}
     stepper:
-      builder:
-        type: Samudra
-        config:
-            ch_width: [8, 16]
-            dilation: [2, 4]
-            n_layers: [1, 1]
-            norm: batch
-            norm_kwargs:
-                track_running_stats: false
       loss:
         type: MSE
-      normalization:
-        global_means_path: {global_means_path}
-        global_stds_path: {global_stds_path}
-      corrector:
-        type: "ocean_corrector"
+      input_masking:
+        mask_value: 0
+        fill_value: 0.0
+      step:
+        type: single_module
         config:
-          sea_ice_fraction_correction:
-            sea_ice_fraction_name: {sea_ice_frac_name}
-            land_fraction_name: {land_frac_name}
-      next_step_forcing_names: {ocean_next_step_forcing_names}
-      in_names: {ocean_in_names}
-      out_names: {ocean_out_names}
+          builder:
+            type: Samudra
+            config:
+                ch_width: [8, 16]
+                dilation: [2, 4]
+                n_layers: [1, 1]
+                norm: batch
+                norm_kwargs:
+                    track_running_stats: false
+          normalization:
+            network:
+              global_means_path: {global_means_path}
+              global_stds_path: {global_stds_path}
+          corrector:
+            type: "ocean_corrector"
+            config:
+              sea_ice_fraction_correction:
+                sea_ice_fraction_name: {sea_ice_frac_name}
+                land_fraction_name: {land_frac_name}
+          next_step_forcing_names: {ocean_next_step_forcing_names}
+          in_names: {ocean_in_names}
+          out_names: {ocean_out_names}
   atmosphere:
     timedelta: 1D
     loss_contributions:
       n_steps: {loss_atmos_n_steps}
     stepper:
-      builder:
-        type: SphericalFourierNeuralOperatorNet
-        config:
-          num_layers: 2
-          embed_dim: 12
       loss:
         type: MSE
-      normalization:
-        global_means_path: {global_means_path}
-        global_stds_path: {global_stds_path}
-      in_names: {atmos_in_names}
-      out_names: {atmos_out_names}
-      ocean:
-        surface_temperature_name: {atmos_sfc_temp_name}
-        ocean_fraction_name: {ocean_frac_name}
-      corrector:
-        type: "atmosphere_corrector"
+      step:
+        type: single_module
         config:
-          conserve_dry_air: true
+          builder:
+            type: SphericalFourierNeuralOperatorNet
+            config:
+              num_layers: 2
+              embed_dim: 12
+          normalization:
+            network:
+              global_means_path: {global_means_path}
+              global_stds_path: {global_stds_path}
+          in_names: {atmos_in_names}
+          out_names: {atmos_out_names}
+          ocean:
+            surface_temperature_name: {atmos_sfc_temp_name}
+            ocean_fraction_name: {ocean_frac_name}
+          corrector:
+            type: "atmosphere_corrector"
+            config:
+              conserve_dry_air: true
 """
 
 _INFERENCE_CONFIG_TEMPLATE = """
@@ -162,9 +164,6 @@ loader:
       data_path: {ocean_data_path}
       subset:
           start_time: '1970-01-01'
-      fill_nans:
-          method: constant
-          value: 0
     atmosphere:
       data_path: {atmosphere_data_path}
       subset:
@@ -506,11 +505,13 @@ def test_train_and_inference(
     assert (
         ds_ocean["sample"].size == 2
     )  # 2 initial conditions in _INFERENCE_CONFIG_TEMPLATE
-    assert np.sum(np.isnan(ds_ocean["sst"].values)) == 0
-    assert np.sum(np.isnan(ds_ocean["thetao_0"].values)) == 0
+    for name in ds_ocean.data_vars:
+        # outputs should have some non-null values
+        assert not np.isnan(ds_ocean[name].values).all()
+        # outputs should have some masked regions
+        assert np.isnan(ds_ocean[name].values).any()
     ds_atmos = xr.open_dataset(atmosphere_output_path, decode_timedelta=False)
     assert ds_atmos["time"].size == 6 * n_inner_steps
     assert ds_atmos["sample"].size == 2
-    assert np.sum(np.isnan(ds_atmos["surface_temperature"].values)) == 0
-    assert np.sum(np.isnan(ds_atmos["PRESsfc"].values)) == 0
-    assert np.sum(np.isnan(ds_atmos["DLWRFsfc"].values)) == 0
+    for name in ds_atmos.data_vars:
+        assert not np.isnan(ds_atmos[name].values).any()
