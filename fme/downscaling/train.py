@@ -69,8 +69,9 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     checkpoint = torch.load(
         trainer.epoch_checkpoint_path, map_location=get_device(), weights_only=False
     )
-    trainer.model = trainer.model.from_state(checkpoint["model"])
+    trainer.model.module.load_state_dict(checkpoint["model"]["module"])
     trainer.optimization.load_state(checkpoint["optimization"])
+
     trainer.num_batches_seen = checkpoint["num_batches_seen"]
     trainer.startEpoch = checkpoint["startEpoch"]
     trainer.best_valid_loss = checkpoint["best_valid_loss"]
