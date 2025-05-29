@@ -156,10 +156,10 @@ def test_depth_coordinate_integral_raises():
 @pytest.mark.parametrize(
     "idepth, mask, expected",
     [
-        (torch.tensor([1, 2, 3]), torch.tensor([1, 1]), torch.tensor(3)),
-        (torch.tensor([1, 2, 3]), torch.tensor([1, 0]), torch.tensor(1)),
-        (torch.tensor([1, 2, 3]), torch.tensor([0, 0]), torch.tensor(0)),
-        (torch.tensor([1, 2, 4]), torch.tensor([1, 1]), torch.tensor(5)),
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 1]), torch.tensor(3.0)),
+        (torch.tensor([1, 2, 3]), torch.tensor([1, 0]), torch.tensor(1.0)),
+        (torch.tensor([1, 2, 3]), torch.tensor([0, 0]), torch.tensor(float("nan"))),
+        (torch.tensor([1, 2, 4]), torch.tensor([1, 1]), torch.tensor(5.0)),
     ],
     ids=[
         "mask is all ones",
@@ -171,7 +171,7 @@ def test_depth_coordinate_integral_raises():
 def test_depth_integral_1d_data(idepth, mask, expected):
     data = torch.arange(1, len(idepth))
     result = DepthCoordinate(idepth, mask).depth_integral(data)
-    torch.testing.assert_close(result, expected)
+    torch.testing.assert_close(result, expected, equal_nan=True)
 
 
 def test_depth_integral_3d_data():
@@ -184,7 +184,7 @@ def test_depth_integral_3d_data():
     )
     depth_0 = idepth[1] - idepth[0]
     depth_1 = idepth[2] - idepth[1]
-    expected = data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1
+    expected = (data[:, :, 0] * depth_0 + data[:, :, 1] * depth_1).float()
     result = DepthCoordinate(idepth, mask).depth_integral(data)
     torch.testing.assert_close(result, expected)
 
