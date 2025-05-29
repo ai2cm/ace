@@ -77,7 +77,7 @@ class DownscalingModelConfig:
         downscale_factor: int,
     ) -> "Model":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build(reduction="mean")
+        loss = self.loss.build(reduction="mean", gridded_operations=None)
         n_in_channels = len(self.in_names)
 
         if self.use_fine_topography:
@@ -282,7 +282,7 @@ class DiffusionModelConfig:
         downscale_factor: int,
     ) -> "DiffusionModel":
         normalizer = self.normalization.build(self.in_names, self.out_names)
-        loss = self.loss.build("none")
+        loss = self.loss.build(reduction="none", gridded_operations=None)
         # We always use standard score normalization, so sigma_data is
         # always 1.0. See below for standard score normalization:
         # https://en.wikipedia.org/wiki/Standard_score
