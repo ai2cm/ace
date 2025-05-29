@@ -115,6 +115,8 @@ def repeat_interleave_batch_dim(data: TensorMapping, repeats: int) -> TensorDict
     the ensemble dimension, you would get an ensemble tensor dict with the data
     repeated across the ensemble dimension.
     """
+    if repeats == 1:
+        return dict(data)  # no-op
     return {k: v.repeat_interleave(repeats, dim=0) for k, v in data.items()}
 
 

@@ -6,6 +6,8 @@ from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import (
     AreaWeightedMSELoss,
+    CRPSLoss,
+    EnergyScoreLoss,
     GlobalMeanLoss,
     LossConfig,
     VariableWeightingLoss,
@@ -22,7 +24,8 @@ def test_loss_builds_and_runs(global_mean_type):
     config = LossConfig(global_mean_type=global_mean_type)
     area = torch.randn(10, 10, device=get_device())
     loss = config.build(
-        reduction="mean", area_weighted_mean=LatLonOperations(area).area_weighted_mean
+        reduction="mean",
+        gridded_operations=LatLonOperations(area),
     )
     x = torch.randn(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
@@ -31,10 +34,39 @@ def test_loss_builds_and_runs(global_mean_type):
     assert isinstance(result, torch.Tensor)
 
 
+def test_spectral_energy_score():
+    torch.manual_seed(0)
+    DEVICE = get_device()
+    n_lat, n_lon = 16, 32
+    pred = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    target = torch.rand(10000, 2, n_lat, n_lon, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat, n_lon), device=DEVICE)).get_real_sht(
+        grid="legendre-gauss"
+    )
+    spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
+    crps_loss = CRPSLoss(alpha=0.95)
+    score = spectral_energy_score_loss(pred, target)
+    crps = crps_loss(pred, target)
+
+    n_lat2, n_lon2 = 32, 64
+    pred = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    target = torch.rand(10000, 2, n_lat2, n_lon2, device=DEVICE)
+    sht = LatLonOperations(torch.ones((n_lat2, n_lon2), device=DEVICE)).get_real_sht(
+        grid="legendre-gauss"
+    )
+    spectral_energy_score_loss = EnergyScoreLoss(sht=sht)
+    larger_domain_score = spectral_energy_score_loss(pred, target)
+    torch.testing.assert_close(larger_domain_score, score, rtol=0.05, atol=0.0)
+    torch.testing.assert_close(score, crps, rtol=0.5, atol=0.0)
+
+
 def test_loss_of_zeros_is_variance():
     torch.manual_seed(0)
     config = LossConfig(global_mean_type=None)
-    loss = config.build(reduction="mean")
+    loss = config.build(
+        reduction="mean",
+        gridded_operations=LatLonOperations(torch.ones(10, 10)),
+    )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
     result = loss(x, y)
@@ -57,7 +89,8 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     )
     area = torch.randn(10, 10, device=get_device())
     loss = config.build(
-        reduction="mean", area_weighted_mean=LatLonOperations(area).area_weighted_mean
+        reduction="mean",
+        gridded_operations=LatLonOperations(area),
     )
     x = torch.zeros(10, 10, 10, 10, 10, device=get_device())
     y = torch.randn(10, 10, 10, 10, 10, device=get_device())
@@ -73,14 +106,21 @@ def test_loss_of_zeros_is_one_plus_global_mean_weight(global_mean_weight: float)
     torch.testing.assert_close(result.cpu(), expected, **tol)
 
 
-def test_loss_fails_when_area_weighted_mean_not_provided():
-    config = LossConfig(type="AreaWeightedMSE")
+@pytest.mark.parametrize(
+    "config",
+    [
+        LossConfig(type="AreaWeightedMSE"),
+        LossConfig(global_mean_type="LpLoss"),
+        LossConfig(
+            type="EnsembleLoss", kwargs={"energy_score_weight": 1.0, "crps_weight": 0.0}
+        ),
+    ],
+)
+def test_loss_fails_when_gridded_operations_not_provided(
+    config: LossConfig,
+):
     with pytest.raises(ValueError):
-        config.build(reduction="mean")
-
-    config = LossConfig(global_mean_type="LpLoss")
-    with pytest.raises(ValueError):
-        config.build(reduction="mean")
+        config.build(reduction="mean", gridded_operations=None)
 
 
 def test_global_mean_loss():
@@ -195,9 +235,8 @@ def test_WeightedMappingLossConfig_no_weights():
     channel_dim = -3
     area = torch.tensor([])  # area not used by this config
     gridded_operations: GriddedOperations = LatLonOperations(area)
-    area_weighted_mean = gridded_operations.area_weighted_mean
     mapping_loss_config = WeightedMappingLossConfig()
-    loss = loss_config.build(reduction="mean", area_weighted_mean=area_weighted_mean)
+    loss = loss_config.build(reduction="mean", gridded_operations=gridded_operations)
     normalizer = StandardNormalizer(
         means={name: torch.as_tensor(0.0) for name in out_names},
         stds={name: torch.as_tensor(1.0) for name in out_names},
