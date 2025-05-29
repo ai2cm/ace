@@ -76,7 +76,7 @@ class CoupledDatasetProperties:
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
-        return self.atmosphere.horizontal_coordinates
+        return self.ocean.horizontal_coordinates
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:

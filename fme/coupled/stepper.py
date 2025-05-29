@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 from torch import nn
 
+import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.requirements import DataRequirements
 from fme.ace.stepper import (
@@ -25,7 +26,6 @@ from fme.ace.stepper.single_module import (
 )
 from fme.core.coordinates import DepthCoordinate
 from fme.core.dataset_info import DatasetInfo
-from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -494,7 +494,7 @@ class ComponentStepMetrics:
 
     def get_ocean_metrics(self) -> TensorDict:
         if not self._ocean:
-            return {"loss/ocean": torch.tensor(0.0, device=get_device())}
+            return {"loss/ocean": torch.tensor(0.0, device=fme.get_device())}
         loss = sum(self._ocean.values())
         return {
             "loss/ocean": loss,
@@ -503,7 +503,7 @@ class ComponentStepMetrics:
 
     def get_atmosphere_metrics(self) -> TensorDict:
         if not self._atmos:
-            return {"loss/atmosphere": torch.tensor(0.0, device=get_device())}
+            return {"loss/atmosphere": torch.tensor(0.0, device=fme.get_device())}
         loss = sum(self._atmos.values())
         return {
             "loss/atmosphere": loss,
@@ -673,7 +673,7 @@ class CoupledStepper(
         self._config = config
         self._sst_mask = sst_mask
         if self._sst_mask is not None:
-            self._sst_mask = self._sst_mask.to(get_device())
+            self._sst_mask = self._sst_mask.to(fme.get_device())
 
         ocean_loss = self._config.get_ocean_loss(
             self.ocean.loss_obj,
@@ -769,24 +769,18 @@ class CoupledStepper(
         else:
             # compute ocean frac from land frac and ocean-predicted sea ice frac
             land_frac_name = self._config.ocean_fraction_prediction.land_fraction_name
-            sea_ice_frac = forcings_from_ocean[
-                self._config.ocean_fraction_prediction.sea_ice_fraction_name
-            ]
+            sic_name = self._config.ocean_fraction_prediction.sea_ice_fraction_name
+            sea_ice_frac = forcings_from_ocean[sic_name]
             ocean_frac = 1 - atmos_forcing_data[land_frac_name] - sea_ice_frac
             # remove negative values just in case the ocean doesn't constrain
             # the sea ice
             forcings_from_ocean[ocean_frac_name] = torch.clip(ocean_frac, min=0)
-        if self._sst_mask is not None:
-            # enforce agreement between the ocean frac and the SST mask so that
-            # ocean frac is 0 everywhere the ocean target data is NaN (i.e., where
-            # the mask indicates there is no ocean)
-            ocean_frac = forcings_from_ocean[ocean_frac_name]
-            img_shape = list(ocean_frac.shape[-2:])
-            expanded_shape = [1] * (ocean_frac.ndim - len(img_shape)) + img_shape
-            forcings_from_ocean[ocean_frac_name] = torch.minimum(
-                ocean_frac,
-                self._sst_mask.expand(*expanded_shape),
-            )
+        mask = self._sst_mask
+        if mask is not None:
+            for name, tensor in forcings_from_ocean.items():
+                # set ocean invalid points to 0 based on the ocean masking
+                mask = mask.expand(tensor.shape)
+                forcings_from_ocean[name] = tensor.where(mask != 0, 0)
         return forcings_from_ocean
 
     def _get_atmosphere_forcings(

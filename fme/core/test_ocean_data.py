@@ -40,7 +40,10 @@ def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
         ocean_data = OceanData(data, depth_coordinate)
         assert ocean_data.ocean_heat_content.shape == shape_2d
         assert torch.allclose(
-            ocean_data.ocean_heat_content.sum(), expected_ohc, atol=1e-10
+            ocean_data.ocean_heat_content.nansum(),
+            expected_ohc,
+            atol=1e-10,
+            equal_nan=True,
         )
     else:
         ocean_data = OceanData(data)
