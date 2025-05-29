@@ -319,8 +319,14 @@ def test_train_on_batch_crps_loss():
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
-        crps_training=True,
+        n_ensemble=2,
+        loss=WeightedMappingLossConfig(
+            type="EnsembleLoss",
+            kwargs={
+                "crps_weight": 0.1,
+                "energy_score_weight": 0.9,
+            },
+        ),
     )
     dataset_info = DatasetInfo(
         img_shape=(5, 5),
@@ -1264,6 +1270,16 @@ def get_regression_stepper_and_data(
         ak=torch.arange(7), bk=torch.arange(7)
     )
 
+    if crps_training:
+        loss = WeightedMappingLossConfig(
+            type="EnsembleLoss",
+            kwargs={"crps_weight": 1.0, "energy_score_weight": 0.0},
+        )
+        n_ensemble: int = 2
+    else:
+        loss = WeightedMappingLossConfig(type="MSE")
+        n_ensemble = 1
+
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -1290,8 +1306,8 @@ def get_regression_stepper_and_data(
                 )
             ),
         ),
-        loss=WeightedMappingLossConfig(type="MSE"),
-        crps_training=crps_training,
+        loss=loss,
+        n_ensemble=n_ensemble,
     )
 
     dataset_info = DatasetInfo(
