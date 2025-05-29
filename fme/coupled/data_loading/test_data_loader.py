@@ -55,10 +55,17 @@ def _save_netcdf(
             data_vars[f"ak_{i}"] = float(i)
             data_vars[f"bk_{i}"] = float(i + 1)
     elif realm == "ocean":
-        if "mask_0" in data_vars:
-            mask = data_vars["mask_0"]
+        if "mask_2d" in data_vars and "mask_0" in data_vars:
+            data_vars["mask_2d"] = data_vars["mask_0"]
+        if "mask_2d" in data_vars or "mask_0" in data_vars:
+            mask = data_vars.get("mask_2d", data_vars.get("mask_0"))
+            assert mask is not None
             # add nans to 2D vars
-            names = [name for name in data_vars if re.search(r"_\d+$", name) is None]
+            names = [
+                name
+                for name in data_vars
+                if re.search(r"_\d+$", name) is None and name != "mask_2d"
+            ]
             for name in names:
                 data_vars[name] = data_vars[name].where(mask == 1, float("nan"))
         for i in range(nz):

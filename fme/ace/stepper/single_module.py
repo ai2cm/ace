@@ -736,15 +736,15 @@ class StepperConfig:
                 means=step.normalizer.means,
             )
         try:
-            post_process_func = dataset_info.mask_provider.build_output_masker()
+            output_process_func = dataset_info.mask_provider.build_output_masker()
         except MissingDatasetInfo:
-            post_process_func = NullPostProcessFn()
+            output_process_func = NullPostProcessFn()
         return Stepper(
             config=self,
             step=step,
             dataset_info=dataset_info,
             input_process_func=input_masking,
-            post_process_func=post_process_func,
+            output_process_func=output_process_func,
             derive_func=derive_func,
             init_weights=init_weights,
         )
@@ -893,7 +893,7 @@ class Stepper(
         step: StepABC,
         dataset_info: DatasetInfo,
         input_process_func: Callable[[TensorMapping], TensorDict],
-        post_process_func: Callable[[TensorMapping], TensorDict],
+        output_process_func: Callable[[TensorMapping], TensorDict],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         init_weights: bool = True,
     ):
@@ -902,7 +902,8 @@ class Stepper(
             config: The configuration.
             step: The step object.
             dataset_info: Information about dataset used for training.
-            post_process_func: Function to post-process the output of the step function.
+            output_process_func: Function to post-process the output of the step
+                function.
             derive_func: Function to compute derived variables.
             input_process_func: Optional function for processing inputs and next-step
                 inputs before passing them to the step object, e.g., by masking
@@ -914,7 +915,7 @@ class Stepper(
         self._step_obj = step
         self._dataset_info = dataset_info
         self._derive_func = derive_func
-        self._post_process_func = post_process_func
+        self._output_process_func = output_process_func
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
 
@@ -1082,7 +1083,8 @@ class Stepper(
         """
         input = self._input_process_func(input)
         next_step_input_data = self._input_process_func(next_step_input_data)
-        return self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
+        output = self._step_obj.step(input, next_step_input_data, wrapper=wrapper)
+        return self._output_process_func(output)
 
     def get_prediction_generator(
         self,
@@ -1155,11 +1157,6 @@ class Stepper(
             yield state
             state = optimizer.detach_if_using_gradient_accumulation(state)
 
-    def _post_process(self, data: EnsembleTensorDict) -> EnsembleTensorDict:
-        reshaped, n_ensemble = fold_ensemble_dim(data)
-        processed = self._post_process_func(reshaped)
-        return unfold_ensemble_dim(processed, n_ensemble)
-
     def predict(
         self,
         initial_condition: PrognosticState,
@@ -1221,7 +1218,7 @@ class Stepper(
                 )
         prognostic_state = data.get_end(self.prognostic_names, self.n_ic_timesteps)
         data = BatchData.new_on_device(
-            data=self._post_process_func(data.data),
+            data=data.data,
             time=data.time,
             horizontal_dims=data.horizontal_dims,
         )
@@ -1262,7 +1259,7 @@ class Stepper(
             PairedData.from_batch_data(
                 prediction=prediction,
                 reference=BatchData.new_on_device(
-                    data=self._post_process_func(forward_data.data),
+                    data=forward_data.data,
                     time=forward_data.time,
                     horizontal_dims=forward_data.horizontal_dims,
                 ),
@@ -1347,14 +1344,7 @@ class Stepper(
         if compute_derived_variables:
             stepped = stepped.compute_derived_variables()
         # apply post-processing and return
-        return TrainOutput(
-            metrics=stepped.metrics,
-            gen_data=self._post_process(stepped.gen_data),
-            target_data=self._post_process(stepped.target_data),
-            time=stepped.time,
-            normalize=stepped.normalize,
-            derive_func=stepped.derive_func,
-        )
+        return stepped
 
     def _accumulate_loss(
         self,

@@ -473,7 +473,9 @@ class DepthCoordinate(VerticalCoordinate):
                 f"{self.idepth.shape}."
             )
         layer_thickness = self.idepth.diff(dim=-1)
-        return (integrand * layer_thickness * self.mask).nansum(dim=-1)
+        ohc = (integrand * layer_thickness * self.mask).nansum(dim=-1)
+        mask = self.get_mask_level(0).expand(ohc.shape)
+        return ohc.where(mask > 0, float("nan"))
 
 
 @dataclasses.dataclass

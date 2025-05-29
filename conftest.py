@@ -115,14 +115,39 @@ def _mock_cpu(self, *args, **kwargs):
     try:
         return _original_cpu(self, *args, **kwargs)
     except NotImplementedError:
-        return torch.rand_like(self, device=torch.device("cpu"))
+        return torch.rand_like(self, dtype=torch.float32, device=torch.device("cpu"))
+
+
+_original_to = torch.Tensor.to
+
+
+def _mock_to(self, *args, **kwargs):
+    try:
+        return _original_to(self, *args, **kwargs)
+    except NotImplementedError:
+        return torch.rand_like(self, dtype=torch.float32, device=torch.device("cpu"))
 
 
 @pytest.fixture(autouse=True)
 def mock_get_device_to_meta(monkeypatch, meta_get_device):
-    """
-    Mocks the fme.core.device.get_device function to always return
-    torch.device("meta") for all tests.
+    """Mocks the fme.core.device.get_device function to always return
+    torch.device("meta") for all tests if `meta_get_device == True`.
+
+    Meta devices have metadata (e.g., a shape) but no actual data and therefore
+    cannot be used in general as a replacement for CUDA devices in the tests.
+    However, this mock can be useful for debugging device-related issues.
+
+    Because tensors on the meta device have no data, certain torch.Tensor
+    methods will raise an error when called on a meta tensor. For this reason,
+    this fixture also mocks torch.Tensor.cpu and torch.Tensor.to to catch these
+    errors and return random data, allowing the tests to proceed. As such,
+    meta_get_device should only be used selectively
+    for local debugging of tensor-on-wrong-device errors when only a CPU is
+    available.
+
+    See https://docs.pytorch.org/docs/stable/meta.html for more information on
+    torch.device("meta").
+
     """
     if meta_get_device:
         mock_meta_device_fn = mock.MagicMock(return_value=torch.device("meta"))
@@ -133,3 +158,4 @@ def mock_get_device_to_meta(monkeypatch, meta_get_device):
         monkeypatch.setattr(fme.core.device, "get_device", mock_meta_device_fn)
         monkeypatch.setattr(fme, "get_device", mock_meta_device_fn)
         monkeypatch.setattr(torch.Tensor, "cpu", _mock_cpu)
+        monkeypatch.setattr(torch.Tensor, "to", _mock_to)
