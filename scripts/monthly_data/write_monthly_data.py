@@ -16,6 +16,7 @@ from fme.ace.data_loading.config import (
     DataLoaderConfig,
     MergeDatasetConfig,
 )
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     months_for_timesteps,
@@ -155,6 +156,7 @@ class Config:
             n_months=n_months,
             variable_metadata=data.properties.variable_metadata,
             coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 

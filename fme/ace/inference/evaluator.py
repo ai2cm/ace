@@ -15,6 +15,7 @@ from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.data_loading.getters import get_inference_data
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
 from fme.ace.inference.data_writer import DataWriterConfig, PairedDataWriter
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.time_coarsen import TimeCoarsenConfig
 from fme.ace.inference.default_metadata import get_default_variable_metadata
 from fme.ace.inference.loop import DeriverABC, run_dataset_comparison
@@ -183,6 +184,7 @@ class InferenceEvaluatorConfig:
             timestep=timestep,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=DatasetMetadata.from_env(),
         )
 
 
