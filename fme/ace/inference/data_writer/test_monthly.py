@@ -6,6 +6,7 @@ import pytest
 import torch
 import xarray as xr
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.monthly import (
     MonthlyDataWriter,
     add_data,
@@ -40,6 +41,7 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
         save_names=None,
         variable_metadata={"x": VariableMetadata(units="m", long_name="x_name")},
         coords={},
+        dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
     )
     month_values = []
     for year in range(2020, 2022):
@@ -80,6 +82,8 @@ def test_monthly_data_writer(tmpdir, window_size: int, n_writes: int):
     assert "counts" in written.coords
     assert "counts" in written.x.coords
     assert "counts" in written.valid_time.coords
+    assert written.attrs["title"] == "ACE monthly predictions data file"
+    assert written.attrs["source.inference_version"] == "1.0"
 
 
 @pytest.mark.parametrize(

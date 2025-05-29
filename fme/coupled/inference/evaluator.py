@@ -27,6 +27,7 @@ from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
 from fme.coupled.inference.data_writer import (
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
+    DatasetMetadata,
 )
 from fme.coupled.stepper import (
     ComponentConfig,
@@ -215,7 +216,10 @@ class InferenceEvaluatorConfig:
     def load_stepper_config(self) -> CoupledStepperConfig:
         return load_stepper_config(self.checkpoint_path)
 
-    def get_data_writer(self, data: InferenceGriddedData) -> CoupledPairedDataWriter:
+    def get_data_writer(
+        self,
+        data: InferenceGriddedData,
+    ) -> CoupledPairedDataWriter:
         if self.data_writer.ocean.time_coarsen is not None:
             try:
                 validate_time_coarsen_config(
@@ -240,6 +244,11 @@ class InferenceEvaluatorConfig:
                 )
 
         variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+        dataset_metadata = DatasetMetadata.from_env()
+        coupled_dataset_metadata = {
+            "ocean": dataset_metadata,
+            "atmosphere": dataset_metadata,
+        }
         return self.data_writer.build_paired(
             experiment_dir=self.experiment_dir,
             n_initial_conditions=self.loader.n_initial_conditions,
@@ -249,6 +258,7 @@ class InferenceEvaluatorConfig:
             atmosphere_timestep=data.atmosphere_timestep,
             variable_metadata=variable_metadata,
             coords=data.coords,
+            dataset_metadata=coupled_dataset_metadata,
         )
 
 

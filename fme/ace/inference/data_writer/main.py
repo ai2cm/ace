@@ -12,6 +12,7 @@ from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticSta
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
 
+from .dataset_metadata import DatasetMetadata
 from .histograms import PairedHistogramDataWriter
 from .monthly import MonthlyDataWriter, PairedMonthlyDataWriter, months_for_timesteps
 from .raw import PairedRawDataWriter, RawDataWriter
@@ -78,6 +79,7 @@ class DataWriterConfig:
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
         return PairedDataWriter(
             path=experiment_dir,
@@ -92,6 +94,7 @@ class DataWriterConfig:
             save_names=self.names,
             enable_histogram_netcdfs=self.save_histogram_files,
             time_coarsen=self.time_coarsen,
+            dataset_metadata=dataset_metadata,
         )
 
     def build(
@@ -102,6 +105,7 @@ class DataWriterConfig:
         timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
         if self.save_histogram_files:
             raise NotImplementedError(
@@ -124,6 +128,7 @@ class DataWriterConfig:
             enable_monthly_netcdfs=self.save_monthly_files,
             save_names=self.names,
             time_coarsen=self.time_coarsen,
+            dataset_metadata=dataset_metadata,
         )
 
 
@@ -141,6 +146,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
         enable_video_netcdfs: bool,
         save_names: Sequence[str] | None,
         enable_histogram_netcdfs: bool,
+        dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
     ):
         """
@@ -160,12 +166,14 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
             enable_histogram_netcdfs: Whether to write netCDFs with histogram data.
+            dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of written outputs.
         """
         self._writers: list[PairedSubwriter] = []
         self.path = path
         self.coords = coords
         self.variable_metadata = variable_metadata
+        self.dataset_metadata = dataset_metadata
 
         if time_coarsen is not None:
             n_coarsened_timesteps = time_coarsen.n_coarsened_timesteps(n_timesteps)
@@ -186,6 +194,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                         save_names=save_names,
                         variable_metadata=variable_metadata,
                         coords=coords,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
             )
@@ -199,6 +208,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                     save_names=save_names,
                     variable_metadata=variable_metadata,
                     coords=coords,
+                    dataset_metadata=dataset_metadata,
                 )
             )
         if enable_video_netcdfs:
@@ -209,6 +219,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                         n_timesteps=n_coarsened_timesteps,
                         variable_metadata=variable_metadata,
                         coords=coords,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
             )
@@ -220,6 +231,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
                         n_timesteps=n_coarsened_timesteps,
                         variable_metadata=variable_metadata,
                         save_names=save_names,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
             )
@@ -238,6 +250,7 @@ class PairedDataWriter(WriterABC[PrognosticState, PairedData]):
             filename=filename,
             variable_metadata=self.variable_metadata,
             coords=self.coords,
+            dataset_metadata=self.dataset_metadata,
         )
 
     def append_batch(
@@ -273,6 +286,7 @@ def _write(
     filename: str,
     variable_metadata: Mapping[str, VariableMetadata],
     coords: Mapping[str, np.ndarray],
+    dataset_metadata: DatasetMetadata,
 ):
     """Write provided data to a single netCDF at specified path/filename.
 
@@ -285,6 +299,7 @@ def _write(
         filename: filename to use for netCDF.
         variable_metadata: Metadata for each variable to be written to the file.
         coords: Coordinate data to be written to the file.
+        dataset_metadata: Metadata for the dataset.
     """
     if data.time.sizes["time"] == 1:
         time_dim = data.dims.index("time")
@@ -313,6 +328,7 @@ def _write(
             }
     data_arrays["time"] = time_array
     ds = xr.Dataset(data_arrays, coords=coords)
+    ds.attrs.update(dataset_metadata.as_flat_str_dict())
     ds.to_netcdf(str(Path(path) / filename))
 
 
@@ -328,6 +344,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
         enable_prediction_netcdfs: bool,
         enable_monthly_netcdfs: bool,
         save_names: Sequence[str] | None,
+        dataset_metadata: DatasetMetadata,
         time_coarsen: TimeCoarsenConfig | None = None,
     ):
         """
@@ -344,6 +361,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             enable_monthly_netcdfs: Whether to enable writing of netCDF files
             save_names: Names of variables to save in the prediction, histogram,
                 and monthly netCDF files.
+            dataset_metadata: Metadata for the dataset.
             time_coarsen: Configuration for time coarsening of raw outputs.
         """
         self._writers: list[Subwriter] = []
@@ -367,6 +385,7 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                         save_names=save_names,
                         variable_metadata=variable_metadata,
                         coords=coords,
+                        dataset_metadata=dataset_metadata,
                     )
                 )
             )
@@ -381,11 +400,13 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
                     save_names=save_names,
                     variable_metadata=variable_metadata,
                     coords=coords,
+                    dataset_metadata=dataset_metadata,
                 )
             )
 
         self.path = path
         self.variable_metadata = variable_metadata
+        self.dataset_metadata = dataset_metadata
         self.coords = coords
         self._n_timesteps_seen = 0
 
@@ -427,4 +448,5 @@ class DataWriter(WriterABC[PrognosticState, PairedData]):
             filename=filename,
             variable_metadata=self.variable_metadata,
             coords=self.coords,
+            dataset_metadata=self.dataset_metadata,
         )

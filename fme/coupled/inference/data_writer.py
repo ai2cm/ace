@@ -3,6 +3,7 @@ import datetime
 import os
 from collections.abc import Mapping
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import DataWriterConfig, PairedDataWriter
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.generics.writer import WriterABC
@@ -43,6 +44,7 @@ class CoupledDataWriterConfig:
         atmosphere_timestep: datetime.timedelta,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: CoupledCoords,
+        dataset_metadata: dict[str, DatasetMetadata],
     ) -> "CoupledPairedDataWriter":
         ocean_dir = os.path.join(experiment_dir, OCEAN_OUTPUT_DIR_NAME)
         if not os.path.exists(ocean_dir):
@@ -58,6 +60,7 @@ class CoupledDataWriterConfig:
                 timestep=ocean_timestep,
                 variable_metadata=variable_metadata,
                 coords=coords.ocean,
+                dataset_metadata=dataset_metadata["ocean"],
             ),
             atmosphere_writer=self.atmosphere.build_paired(
                 experiment_dir=atmos_dir,
@@ -66,6 +69,7 @@ class CoupledDataWriterConfig:
                 timestep=atmosphere_timestep,
                 variable_metadata=variable_metadata,
                 coords=coords.atmosphere,
+                dataset_metadata=dataset_metadata["atmosphere"],
             ),
         )
 
