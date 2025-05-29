@@ -6,6 +6,7 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import BatchData
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import _write
 from fme.core.dataset.data_typing import VariableMetadata
 
@@ -31,6 +32,9 @@ def test_write_single_timestep():
                 )
             },
             coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
+            dataset_metadata=DatasetMetadata(
+                history={"created": "2023-10-01T00:00:00"}
+            ),
         )
         filename = os.path.join(tmpdir, "initial_condition.nc")
         assert os.path.exists(filename)
@@ -48,6 +52,7 @@ def test_write_single_timestep():
             np.testing.assert_allclose(ds.coords["lon"].values, np.arange(n_lon))
             assert ds.air_temperature.attrs["long_name"] == "Air Temperature"
             assert ds.air_temperature.attrs["units"] == "K"
+            assert ds.attrs["history.created"] == "2023-10-01T00:00:00"
 
 
 def test_write_multiple_timesteps():
@@ -71,6 +76,7 @@ def test_write_multiple_timesteps():
                 )
             },
             coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
+            dataset_metadata=DatasetMetadata(),
         )
         filename = os.path.join(tmpdir, "initial_condition.nc")
         assert os.path.exists(filename)

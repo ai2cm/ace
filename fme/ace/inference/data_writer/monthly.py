@@ -1,3 +1,4 @@
+import copy
 import datetime
 from collections.abc import Iterable, Mapping, Sequence
 from math import ceil
@@ -9,6 +10,7 @@ import torch
 import xarray as xr
 from netCDF4 import Dataset
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.utils import (
     DIM_INFO_HEALPIX,
     DIM_INFO_LATLON,
@@ -47,6 +49,7 @@ class PairedMonthlyDataWriter:
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         n_months = months_for_timesteps(n_timesteps, timestep)
         self._target_writer = MonthlyDataWriter(
@@ -57,6 +60,7 @@ class PairedMonthlyDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
         self._prediction_writer = MonthlyDataWriter(
             path=path,
@@ -66,6 +70,7 @@ class PairedMonthlyDataWriter:
             save_names=save_names,
             variable_metadata=variable_metadata,
             coords=coords,
+            dataset_metadata=dataset_metadata,
         )
 
     def append_batch(
@@ -103,6 +108,7 @@ class MonthlyDataWriter:
         save_names: Sequence[str] | None,
         variable_metadata: Mapping[str, VariableMetadata],
         coords: Mapping[str, np.ndarray],
+        dataset_metadata: DatasetMetadata,
     ):
         """
         Args:
@@ -115,10 +121,9 @@ class MonthlyDataWriter:
                 If None, all predicted variables will be saved.
             variable_metadata: Metadata for each variable to be written to the file.
             coords: Coordinate data to be written to the file.
+            dataset_metadata: Metadata for the dataset.
         """
-        if label != "":
-            label = "_" + label
-        filename = str(Path(path) / f"monthly_mean{label}.nc")
+        filename = str(Path(path) / f"monthly_mean_{label}.nc")
         self._save_names = save_names
         self.variable_metadata = variable_metadata
         self.coords = coords
@@ -141,7 +146,10 @@ class MonthlyDataWriter:
         )
         self.dataset.variables[VALID_TIME].units = TIME_UNITS
         self.dataset.variables[COUNTS][:] = 0
-
+        dataset_metadata = copy.copy(dataset_metadata)
+        dataset_metadata.title = f"ACE monthly {label} data file"
+        for key, value in dataset_metadata.as_flat_str_dict().items():
+            self.dataset.setncattr(key, value)
         self._init_years = np.full([n_samples], -1, dtype=int)
         self._init_months = np.full([n_samples], -1, dtype=int)
         self._dataset_dims_created = False

@@ -10,6 +10,7 @@ from netCDF4 import Dataset
 from xarray.coding.times import CFDatetimeCoder
 
 from fme.ace.data_loading.batch_data import PairedData
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.ace.inference.data_writer.main import (
     DataWriter,
     DataWriterConfig,
@@ -163,6 +164,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             enable_histogram_netcdfs=True,
             save_names=None,
+            dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -203,6 +205,9 @@ class TestDataWriter:
         assert dataset["time"].units == "microseconds"
         assert dataset["init_time"].units == "microseconds since 1970-01-01 00:00:00"
         assert dataset["init_time"].calendar == calendar
+        assert "source.inference_version" in dataset.ncattrs()
+        assert dataset.getncattr("source.inference_version") == "1.0"
+        assert dataset.getncattr("title") == "ACE autoregressive predictions data file"
         horizontal_shape = (4, 5) if "lat" in coords else (6, 4, 5)
         for var_name in set(sample_prediction_data.keys()):
             var_data = dataset.variables[var_name][:]
@@ -230,6 +235,9 @@ class TestDataWriter:
         dataset = Dataset(tmp_path / "autoregressive_target.nc", "r")
         coord_names = {"time", "init_time", "valid_time", *set(coords)}
         assert set(dataset.variables) == set(sample_target_data) | coord_names
+        assert "source.inference_version" in dataset.ncattrs()
+        assert dataset.getncattr("source.inference_version") == "1.0"
+        assert dataset.getncattr("title") == "ACE autoregressive target data file"
 
         # Open the file again with xarray and check the time coordinates,
         # since the values opened this way depend on calendar/units
@@ -291,6 +299,8 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
+            assert ds.attrs["title"] == "ACE monthly predictions data file"
+            assert ds.attrs["source.inference_version"] == "1.0"
 
     @pytest.mark.parametrize(
         "sample_target_data, sample_prediction_data",
@@ -325,6 +335,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=save_names,
             enable_histogram_netcdfs=True,
+            dataset_metadata=DatasetMetadata(),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -394,6 +405,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             enable_histogram_netcdfs=True,
+            dataset_metadata=DatasetMetadata(),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 12, 0, 0)
@@ -441,6 +453,7 @@ class TestDataWriter:
             enable_monthly_netcdfs=True,
             save_names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
+            dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
         )
         start_time = (2020, 1, 1, 0, 0, 0)
         end_time = (2020, 1, 1, 18, 0, 0)
@@ -485,6 +498,8 @@ class TestDataWriter:
             assert ds.temp.shape == expected_shape
             assert ds.valid_time.shape == expected_shape[:2]
             assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert ds.attrs["title"] == "ACE autoregressive predictions data file"
+            assert ds.attrs["source.inference_version"] == "1.0"
 
         with xr.open_dataset(
             tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
@@ -504,6 +519,8 @@ class TestDataWriter:
                 "lon",
                 "time",
             }
+            assert ds.attrs["title"] == "ACE monthly predictions data file"
+            assert ds.attrs["source.inference_version"] == "1.0"
 
 
 @pytest.mark.parametrize(

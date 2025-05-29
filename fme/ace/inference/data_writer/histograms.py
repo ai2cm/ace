@@ -1,3 +1,4 @@
+import copy
 import logging
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -5,6 +6,7 @@ from pathlib import Path
 import torch
 import xarray as xr
 
+from fme.ace.inference.data_writer.dataset_metadata import DatasetMetadata
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.histogram import DynamicHistogram
 
@@ -75,6 +77,7 @@ class PairedHistogramDataWriter:
         n_timesteps: int,
         variable_metadata: Mapping[str, VariableMetadata],
         save_names: Sequence[str] | None,
+        dataset_metadata: DatasetMetadata,
     ):
         self._target_writer = HistogramDataWriter(
             path=path,
@@ -82,6 +85,7 @@ class PairedHistogramDataWriter:
             filename="histograms_target.nc",
             variable_metadata=variable_metadata,
             save_names=save_names,
+            dataset_metadata=dataset_metadata,
         )
         self._prediction_writer = HistogramDataWriter(
             path=path,
@@ -89,6 +93,7 @@ class PairedHistogramDataWriter:
             filename="histograms_prediction.nc",
             variable_metadata=variable_metadata,
             save_names=save_names,
+            dataset_metadata=dataset_metadata,
         )
 
     def append_batch(
@@ -126,6 +131,7 @@ class HistogramDataWriter:
         filename: str,
         variable_metadata: Mapping[str, VariableMetadata],
         save_names: Sequence[str] | None,
+        dataset_metadata: DatasetMetadata,
     ):
         """
         Args:
@@ -134,11 +140,16 @@ class HistogramDataWriter:
             filename: Name of the file to write.
             variable_metadata: Metadata for each variable to be written to the file.
             save_names: Names of variables to save. If None, all variables are saved.
+            dataset_metadata: Metadata for the dataset.
         """
         self.path = path
         self._metrics_filename = str(Path(path) / filename)
         self.variable_metadata = variable_metadata
         self._histogram = _HistogramAggregator(n_times=n_timesteps, names=save_names)
+        self._dataset_metadata = copy.copy(dataset_metadata)
+        self._dataset_metadata.title = (
+            f"ACE {filename.removesuffix('.nc').replace('_', ' ')} data file"
+        )
 
     def append_batch(
         self,
@@ -182,4 +193,5 @@ class HistogramDataWriter:
                 )
                 metric_dataset[name].attrs["units"] = "count"
                 metric_dataset[name].attrs["long_name"] = f"{name} histogram"
+        metric_dataset.attrs.update(self._dataset_metadata.as_flat_str_dict())
         metric_dataset.to_netcdf(self._metrics_filename)
