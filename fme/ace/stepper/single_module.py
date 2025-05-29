@@ -2,6 +2,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
+import warnings
 from collections.abc import Callable, Generator, Mapping
 from typing import Any, Literal, cast
 
@@ -24,7 +25,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
-from fme.core.ensemble import get_crps
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
@@ -592,34 +592,6 @@ class TrainOutput(TrainOutputABC):
         return self.metrics
 
 
-def crps_loss(
-    gen_norm_step: TensorDict,
-    target_norm_step: TensorDict,
-    names: list[str],
-) -> torch.Tensor:
-    """
-    Compute the CRPS loss for a single timestep.
-
-    Args:
-        gen_norm_step: The generated normalized step with each variable having
-            shape [n_batch, 2, ...] where the 2 represents the two ensemble members.
-        target_norm_step: The target normalized step with each variable having
-            shape [n_batch, ...].
-        names: The names of the variables to compute the loss for.
-
-    Returns:
-        The CRPS loss for the given variables.
-    """
-    total = torch.tensor(0.0, device=get_device())
-    # we are using "almost fair" CRPS from https://arxiv.org/html/2412.15832v1
-    # with a value of alpha = 0.95 as used in the paper
-    for name in names:
-        total += get_crps(
-            gen_norm_step[name], target_norm_step[name], alpha=0.95
-        ).mean()
-    return total / len(names)
-
-
 def stack_list_of_tensor_dicts(
     dict_list: list[TensorDict],
     time_dim: int,
@@ -663,7 +635,11 @@ class StepperConfig:
     Parameters:
         step: The step configuration.
         loss: The loss configuration.
-        crps_training: Whether to use CRPS training for stochastic models.
+        n_ensemble: The number of ensemble members evaluated for each training
+            batch member. Default is 2 if the loss type is EnsembleLoss, otherwise
+            the default is 1. Must be 2 for EnsembleLoss to be valid.
+        crps_training: Deprecated, kept for backwards compatibility. Use
+            n_ensemble=2 with a CRPS loss instead.
         parameter_init: The parameter initialization configuration.
         input_masking: Config for masking step inputs.
     """
@@ -672,11 +648,30 @@ class StepperConfig:
     loss: WeightedMappingLossConfig = dataclasses.field(
         default_factory=lambda: WeightedMappingLossConfig()
     )
+    n_ensemble: int = -1  # sentinel value to avoid None typing of attribute
     crps_training: bool = False
     parameter_init: ParameterInitializationConfig = dataclasses.field(
         default_factory=lambda: ParameterInitializationConfig()
     )
     input_masking: StaticMaskingConfig | None = None
+
+    def __post_init__(self):
+        if self.crps_training:
+            warnings.warn(
+                "crps_training is deprecated, use n_ensemble=2 "
+                "with a CRPS loss instead",
+                DeprecationWarning,
+            )
+            self.n_ensemble = 2
+            self.loss = WeightedMappingLossConfig(
+                type="EnsembleLoss",
+                kwargs={"crps_weight": 1.0},
+            )
+        if self.n_ensemble == -1:
+            if self.loss.type == "EnsembleLoss":
+                self.n_ensemble = 2
+            else:
+                self.n_ensemble = 1
 
     @property
     def n_ic_timesteps(self) -> int:
@@ -925,6 +920,8 @@ class Stepper(
 
         def get_loss_obj():
             loss_normalizer = step.get_loss_normalizer()
+            if config.loss is None:
+                raise ValueError("Loss is not configured")
             return config.loss.build(
                 dataset_info.gridded_operations,
                 out_names=config.loss_names,
@@ -1325,7 +1322,6 @@ class Stepper(
             target_data,
             optimization,
             metrics,
-            use_crps=self._config.crps_training,
         )
 
         regularizer_loss = self._get_regularizer_loss()
@@ -1367,23 +1363,17 @@ class Stepper(
         target_data: BatchData,
         optimization: OptimizationABC,
         metrics: dict[str, float],
-        use_crps: bool = False,
     ) -> list[EnsembleTensorDict]:
         input_data = data.get_start(self.prognostic_names, self.n_ic_timesteps)
         # output from self.predict_paired does not include initial condition
         n_forward_steps = data.time.shape[1] - self.n_ic_timesteps
-        if use_crps:
-            n_ensemble = 2  # must be 2 for CRPS loss calculation
-            input_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-                input_data.as_batch_data().data, repeats=n_ensemble
-            )
-            forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
-                data.data, repeats=n_ensemble
-            )
-        else:
-            n_ensemble = 1
-            input_ensemble_data = input_data.as_batch_data().data
-            forcing_ensemble_data = data.data
+        n_ensemble = self._config.n_ensemble
+        input_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
+            input_data.as_batch_data().data, repeats=n_ensemble
+        )
+        forcing_ensemble_data: TensorMapping = repeat_interleave_batch_dim(
+            data.data, repeats=n_ensemble
+        )
         output_generator = self._predict_generator(
             input_ensemble_data,
             forcing_ensemble_data,
@@ -1399,15 +1389,7 @@ class Stepper(
             target_step = add_ensemble_dim(
                 {k: v.select(self.TIME_DIM, step) for k, v in target_data.data.items()}
             )
-
-            if use_crps:
-                step_loss: torch.Tensor = crps_loss(
-                    self._loaded_loss_normalizer.normalize(gen_step),
-                    self._loaded_loss_normalizer.normalize(target_step),
-                    names=self.out_names,
-                )
-            else:
-                step_loss = self.loss_obj(gen_step, target_step)
+            step_loss = self.loss_obj(gen_step, target_step)
             metrics[f"loss_step_{step}"] = step_loss.detach()
             optimization.accumulate_loss(step_loss)
         return output_list
