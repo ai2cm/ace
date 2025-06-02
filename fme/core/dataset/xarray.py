@@ -620,7 +620,9 @@ class XarrayDataset(torch.utils.data.Dataset):
             if i == len(idxs) - 1:
                 stop = output_local_idx
             else:
-                stop = self.start_indices[i + 1] - self.start_indices[i] - 1
+                stop = (
+                    self.start_indices[file_idx + 1] - self.start_indices[file_idx] - 1
+                )
 
             n_steps = stop - start + 1
             shape = [n_steps] + self._shape_excluding_time_after_selection

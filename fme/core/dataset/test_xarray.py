@@ -433,6 +433,7 @@ def _test_monthly_values(
     [
         pytest.param(31 * 8 - 1, id="monthly_XarrayDataset_2003_03_31_21"),
         pytest.param((31 + 30 + 20) * 8 - 1, id="monthly_XarrayDataset_2003_05_20_21"),
+        pytest.param((31 + 30) * 8 - 1, id="2003_04_30_21 (test for GH #1942)"),
     ],
 )
 @pytest.mark.parametrize(
