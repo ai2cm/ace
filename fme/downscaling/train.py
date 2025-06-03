@@ -3,6 +3,7 @@ import contextlib
 import dataclasses
 import logging
 import os
+import shutil
 import time
 import uuid
 import warnings
@@ -113,6 +114,7 @@ class Trainer:
 
         self.startEpoch = 0
         self.segment_epochs = self.config.segment_epochs
+        self.resume_results_dir = config.resume_results_dir
 
         dist = Distributed.get_instance()
         if dist.is_root():
@@ -326,7 +328,6 @@ class Trainer:
             segment_max_epochs = min(
                 self.startEpoch + self.segment_epochs, self.config.max_epochs
             )
-
         for epoch in range(self.startEpoch, segment_max_epochs):
             logging.info(f"Training epoch: {epoch + 1}")
             start_time = time.time()
@@ -371,6 +372,7 @@ class TrainerConfig:
     validate_interval: int = 1
     coarse_patch_extent_lat: int | None = None
     coarse_patch_extent_lon: int | None = None
+    resume_results_dir: str | None = None
 
     def __post_init__(self):
         if (
@@ -447,6 +449,20 @@ def _get_crps(metrics, prefix="generation/metrics/crps"):
         return sum(channel_crps) / len(channel_crps)
 
 
+def _resume_from_results_dir_if_not_preempted(experiment_dir, resume_results_dir):
+    resuming_from_preempt = os.path.isfile(
+        os.path.join(experiment_dir, "checkpoints/latest.ckpt")
+    )
+    if not os.path.isdir(experiment_dir):
+        os.makedirs(experiment_dir, exist_ok=True)
+    if resume_results_dir is not None and not resuming_from_preempt:
+        if not os.path.isdir(resume_results_dir):
+            raise ValueError(
+                f"Existing results directory {resume_results_dir} does not exist."
+            )
+        shutil.copytree(resume_results_dir, experiment_dir, dirs_exist_ok=True)
+
+
 def main(config_path: str):
     with open(config_path) as f:
         config = yaml.safe_load(f)
@@ -457,19 +473,24 @@ def main(config_path: str):
         config=dacite.Config(strict=True),
     )
 
+    if train_config.resume_results_dir is not None:
+        _resume_from_results_dir_if_not_preempted(
+            experiment_dir=train_config.experiment_dir,
+            resume_results_dir=train_config.resume_results_dir,
+        )
+    # Calling this after resuming from results dir so that the submitted config is saved
     prepare_directory(train_config.experiment_dir, config)
+
     train_config.configure_logging(log_filename="out.log")
     logging_utils.log_versions()
     beaker_url = logging_utils.log_beaker_url()
     train_config.configure_wandb(notes=beaker_url)
-
     logging.info("Starting training")
     trainer = train_config.build()
 
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
-
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 
