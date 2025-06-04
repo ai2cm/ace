@@ -864,6 +864,18 @@ class DataLoaderConfig:
     def _repeat_if_requested(self, dataset: XarrayConcat) -> XarrayConcat:
         return XarrayConcat([dataset] * self.repeat)
 
+    def _mp_context(self):
+        mp_context = None
+        if self.num_data_workers == 0:
+            return None
+        for config in self.fine:
+            if config.engine == "zarr":
+                mp_context = "forkserver"
+        for config in self.coarse_full_config:
+            if config.engine == "zarr":
+                mp_context = "forkserver"
+        return mp_context
+
     @property
     def coarse_full_config(self) -> Sequence[XarrayDataConfig]:
         # Expands the coarse dataset configs so that any XarrayEnsembleDataConfig
@@ -963,15 +975,6 @@ class DataLoaderConfig:
         else:
             sampler = None
 
-        if properties_coarse.is_remote or properties_fine.is_remote:
-            # GCSFS and S3FS are not fork-safe, so we need to use forkserver
-            # these settings also work in the case of one or both datasets being local
-            mp_context = "forkserver"
-            persistent_workers = True
-        else:
-            mp_context = None
-            persistent_workers = False
-
         dataloader = DataLoader(
             dataset,
             batch_size=dist.local_batch_size(int(self.batch_size)),
@@ -981,8 +984,8 @@ class DataLoaderConfig:
             drop_last=True,
             pin_memory=using_gpu(),
             collate_fn=PairedBatchData.from_sequence,
-            multiprocessing_context=mp_context,
-            persistent_workers=persistent_workers,
+            multiprocessing_context=self._mp_context(),
+            persistent_workers=True if self.num_data_workers > 0 else False,
         )
 
         example = dataset[0]
