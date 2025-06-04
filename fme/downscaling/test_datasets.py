@@ -14,6 +14,7 @@ from fme.downscaling.datasets import (
     BatchItemDatasetAdapter,
     ClosedInterval,
     ContiguousDistributedSampler,
+    DataLoaderConfig,
     FineCoarsePairedDataset,
     HorizontalSubsetDataset,
     LatLonCoordinates,
@@ -481,3 +482,35 @@ def test_XarrayEnsembleDataConfig():
         for i in range(n_ensemble_members)
     ]
     assert ensemble_config.expand() == isel_sample_configs
+
+
+@pytest.mark.parametrize(
+    "fine_engine, coarse_engine, num_data_workers, expected",
+    [
+        ("netcdf4", "zarr", 0, None),
+        ("netcdf4", "netcdf4", 2, None),
+        ("netcdf4", "zarr", 2, "forkserver"),
+        ("zarr", "zarr", 2, "forkserver"),
+    ],
+)
+def test_DataLoaderConfig_mpcontext(
+    fine_engine, coarse_engine, num_data_workers, expected
+):
+    fine_config = XarrayDataConfig(
+        data_path="fine_dataset_path",
+        engine=fine_engine,
+        file_pattern="*.nc" if fine_engine == "netcdf4" else "a.zarr",
+    )
+    coarse_config = XarrayDataConfig(
+        data_path="coarse_dataset_path",
+        engine=coarse_engine,
+        file_pattern="*.nc" if coarse_engine == "netcdf4" else "a.zarr",
+    )
+    loader_config = DataLoaderConfig(
+        fine=[fine_config],
+        coarse=[coarse_config],
+        batch_size=2,
+        num_data_workers=num_data_workers,
+        strict_ensemble=False,
+    )
+    assert loader_config._mp_context() == expected
