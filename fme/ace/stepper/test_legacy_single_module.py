@@ -1258,7 +1258,7 @@ def test_from_state_backwards_compatibility():
         "loss_normalizer": normalizer_state,
         "config": {
             "builder": {
-                "type": "mock",
+                "type": "test",
                 "config": {"param_shapes": [model_shape]},
             },
             "in_names": ["DSWRFtoa", "surface_temperature"],
