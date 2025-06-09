@@ -13,7 +13,10 @@ from torch import nn
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import TrainOutput
-from fme.ace.stepper.parameter_init import ParameterInitializationConfig
+from fme.ace.stepper.parameter_init import (
+    ParameterInitializationConfig,
+    ParameterInitializer,
+)
 from fme.core.coordinates import (
     AtmosphericDeriveFn,
     HybridSigmaPressureCoordinate,
@@ -44,6 +47,14 @@ from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
+
+
+def _load_weights(path: str) -> list[Mapping[str, Any]]:
+    stepper = load_stepper(path)
+    return_weights: list[Mapping[str, Any]] = []
+    for module in stepper.modules:
+        return_weights.append(strip_leading_module(module.state_dict()))
+    return return_weights
 
 
 @dataclasses.dataclass
@@ -148,16 +159,11 @@ class DiffusionStepperConfig:
     def get_state(self):
         return dataclasses.asdict(self)
 
-    def get_base_weights(
-        self,
-    ) -> list[Mapping[str, Any]] | None:
+    def get_parameter_initializer(self) -> ParameterInitializer:
         """
-        If the model is being initialized from another model's weights for fine-tuning,
-        returns those weights. Otherwise, returns None.
-
-        The list mirrors the order of `modules` in the `DiffusionStepper` class.
+        Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.get_base_weights(_load_weights)
+        return self.parameter_init.build(load_weights=_load_weights)
 
     def get_stepper(
         self,
@@ -165,9 +171,12 @@ class DiffusionStepperConfig:
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
+        parameter_initializer: ParameterInitializer | None = None,
     ):
         logging.info("Initializing stepper from provided config")
         derive_func = vertical_coordinate.build_derive_function(timestep)
+        if parameter_initializer is None:
+            parameter_initializer = ParameterInitializer()
         return DiffusionStepper(
             config=self,
             img_shape=img_shape,
@@ -175,6 +184,7 @@ class DiffusionStepperConfig:
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
             derive_func=derive_func,
+            parameter_initializer=parameter_initializer,
         )
 
     @classmethod
@@ -261,14 +271,6 @@ class DiffusionStepperConfig:
                 }
             del state_copy["prescriber"]
         return state_copy
-
-
-def _load_weights(path: str) -> list[Mapping[str, Any]]:
-    stepper = load_stepper(path)
-    return_weights: list[Mapping[str, Any]] = []
-    for module in stepper.modules:
-        return_weights.append(strip_leading_module(module.state_dict()))
-    return return_weights
 
 
 def _combine_normalizers(
@@ -465,7 +467,7 @@ class DiffusionStepper(
         vertical_coordinate: VerticalCoordinate,
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
-        init_weights: bool = True,
+        parameter_initializer: ParameterInitializer,
     ):
         """
         Args:
@@ -475,8 +477,8 @@ class DiffusionStepper(
             vertical_coordinate: The vertical coordinate.
             derive_func: Function to compute derived variables.
             timestep: Timestep of the model.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
+            parameter_initializer: The parameter initializer to use for loading weights
+                from an external source.
         """
         self._gridded_operations = gridded_operations  # stored for serializing
         n_in_channels = len(config.in_names)
@@ -496,8 +498,15 @@ class DiffusionStepper(
             img_shape=img_shape,
             n_sigma_embedding_channels=config.n_sigma_embedding_channels,
         )
-        self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            [module], init_weights=init_weights, load_weights=_load_weights
+        self._parameter_initializer = parameter_initializer
+        self._parameter_initializer.apply_weights(
+            [module],
+        )
+
+        self._l2_sp_tuning_regularizer = (
+            self._parameter_initializer.get_l2_sp_tuning_regularizer(
+                [module],
+            )
         )
         module = EDMPrecond(
             PositionalEmbeddingWrapper(
@@ -588,6 +597,9 @@ class DiffusionStepper(
             k: loss_normalizer_stds[k] / custom_weights.get(k, 1.0)
             for k in self._config.out_names
         }
+
+    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+        return self._parameter_initializer.base_weights
 
     def replace_ocean(self, ocean: Ocean):
         """
@@ -1054,7 +1066,7 @@ class DiffusionStepper(
             timestep=timestep,
             derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
-            init_weights=False,
+            parameter_initializer=ParameterInitializer(),
         )
         stepper.load_state(state)
         return stepper

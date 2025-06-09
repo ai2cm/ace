@@ -124,58 +124,92 @@ class ParameterInitializationConfig:
             frozen = self.frozen_parameters or FrozenParameterConfig(exclude=["*"])
             self.parameters = [ParameterClassification(exclude=exclude, frozen=frozen)]
 
+    def build(
+        self,
+        load_weights: Callable[[str], list[Mapping[str, Any]]],
+    ) -> "ParameterInitializer":
+        """
+        Build a ParameterInitializer instance with the current configuration.
+
+        Args:
+            load_weights: a function which loads weights from a path, specifically the
+                configured weights_path.
+        """
+        return ParameterInitializer(config=self, load_weights=load_weights)
+
+
+@dataclasses.dataclass
+class ParameterInitializer:
+    config: ParameterInitializationConfig = dataclasses.field(
+        default_factory=ParameterInitializationConfig
+    )
+    load_weights: Callable[[str], list[Mapping[str, Any]]] = lambda _: []
+
+    def __post_init__(self):
+        self._base_weights: list[Mapping[str, Any]] | None = None
+
+    @property
+    def base_weights(self) -> list[Mapping[str, Any]] | None:
+        if self.config.weights_path is not None and self._base_weights is None:
+            self._base_weights = self.load_weights(self.config.weights_path)
+        return self._base_weights
+
     def _filled_parameters(self, n_modules: int) -> list[ParameterClassification]:
-        return self.parameters + [
-            ParameterClassification() for _ in range(n_modules - len(self.parameters))
+        return self.config.parameters + [
+            ParameterClassification()
+            for _ in range(n_modules - len(self.config.parameters))
         ]
 
-    def apply(
+    def apply_weights(
         self,
         modules: list[nn.Module],
-        init_weights: bool,
-        load_weights: Callable[[str], list[Mapping[str, Any]]],
-    ) -> RegularizerFunction:
+    ) -> None:
         """
-        Apply the weight initialization to a module.
+        Apply the weight initialization from a base model to a module.
 
         Args:
             modules: a list of nn.Modules to initialize
-            init_weights: whether to initialize the weight values
-            load_weights: a function which loads model weights from a path,
-                specifically the configured weights_path
-
-        Returns:
-            a list of nn.Modules with initialization applied
-            a function which returns the regularization loss term
         """
         filled_parameters = self._filled_parameters(len(modules))
-        if init_weights and self.weights_path is not None:
-            loaded_state_dicts = self.get_base_weights(load_weights)
-            if loaded_state_dicts is not None:
+        if self.config.weights_path is not None:
+            if self.base_weights is not None:
                 for module, state_dict, classification in zip(
-                    modules, loaded_state_dicts, filled_parameters
+                    modules, self.base_weights, filled_parameters
                 ):
                     overwrite_weights(
                         state_dict,
                         module,
                         exclude_parameters=classification.exclude,
                     )
-        else:
-            loaded_state_dicts = None
         for module, classification in zip(modules, filled_parameters):
             classification.frozen.apply(module)
+
+    def get_l2_sp_tuning_regularizer(
+        self,
+        modules: list[nn.Module],
+    ) -> RegularizerFunction:
+        """Get L2-SP loss regularizer function for the parameters of the modules.
+        The regularizer function computes the L2 regularization loss based on
+        the base weights and the current weights of the modules.
+
+        If the base weights are set, it computes the L2 regularization loss
+        for each module based on the difference between the current weights
+        and the base weights, and the L2 norm of the weights that are not
+        initialized (i.e., those that are excluded from initialization).
+
+        Args:
+            modules: a list of nn.Modules to compute the regularization for
+
+        Returns:
+            A function that returns a tensor representing the regularization loss.
+        """
         device = get_device()
-        if loaded_state_dicts is None or (self.alpha == 0 and self.beta == 0):
-
-            def regularizer():
-                return torch.tensor(0.0, device=device)
-
-            return regularizer
-
-        else:
-            for classification, state_dict in zip(
-                filled_parameters, loaded_state_dicts
-            ):
+        filled_parameters = self._filled_parameters(len(modules))
+        base_weights = self.base_weights
+        if base_weights is not None and (
+            self.config.alpha != 0 or self.config.beta != 0
+        ):
+            for module, state_dict in zip(modules, base_weights):
                 state_dict = {
                     name: value.to(device) for name, value in state_dict.items()
                 }
@@ -188,12 +222,10 @@ class ParameterInitializationConfig:
                         "which is not allowed"
                     )
 
-            non_optional_state_dicts = loaded_state_dicts
-
             def regularizer():
                 loss = torch.tensor(0.0, device=device)
                 for module, state_dict, classification in zip(
-                    modules, non_optional_state_dicts, filled_parameters
+                    modules, base_weights, filled_parameters
                 ):
                     for name in state_dict.keys():
                         try:
@@ -205,13 +237,13 @@ class ParameterInitializationConfig:
                             for pattern in classification.exclude
                         ):
                             loss += (
-                                self.beta
+                                self.config.beta
                                 / 2
                                 * torch.linalg.norm(param.flatten(), ord=2)
                             )
                         else:
                             loss += (
-                                self.alpha
+                                self.config.alpha
                                 / 2
                                 * torch.linalg.norm(
                                     (param - state_dict[name]).flatten(),
@@ -221,23 +253,11 @@ class ParameterInitializationConfig:
 
                 return loss
 
-        return regularizer
-
-    def get_base_weights(
-        self, load_weights: Callable[[str], list[torch.nn.Module]]
-    ) -> list[Mapping[str, Any]] | None:
-        """
-        If a weights_path is provided, return the model base weights used for
-        initialization.
-
-        Args:
-            load_weights: a function which loads model weights from a path,
-                specifically the configured weights_path
-
-        Returns:
-            a list of state_dicts for each module in the stepper
-        """
-        if self.weights_path is not None:
-            return load_weights(self.weights_path)
         else:
-            return None
+
+            def regularizer():
+                return torch.tensor(0.0, device=device)
+
+            return regularizer
+
+        return regularizer
