@@ -173,20 +173,23 @@ class TrainBuilders:
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
     ) -> DiffusionStepper:
+        parameter_initializer = self.config.stepper.get_parameter_initializer()
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
             gridded_operations=gridded_operations,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
+            parameter_initializer=parameter_initializer,
         )
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: list[torch.nn.Module]
+        self,
+        modules: list[torch.nn.Module],
+        base_weights: list[Mapping[str, Any]] | None,
     ) -> EndOfBatchCallback:
-        base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:
             copy_after_batch = self.config.copy_weights_after_batch
             return lambda: copy_after_batch.apply(weights=base_weights, modules=modules)

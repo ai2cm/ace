@@ -334,8 +334,6 @@ class FCN2Step(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
         """
         super().__init__()
         self.forcing_packer = Packer(config.forcing_names)

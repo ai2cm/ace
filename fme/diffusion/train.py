@@ -112,7 +112,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         output_dir=config.output_dir,
         save_per_epoch_diagnostics=config.save_per_epoch_diagnostics,
     )
-    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+    end_of_batch_ops = builder.get_end_of_batch_ops(
+        modules=stepper.modules, base_weights=stepper.get_base_weights()
+    )
     end_of_epoch_ops = builder.get_end_of_epoch_ops(
         stepper, validation_data, aggregator_builder.get_validation_aggregator
     )
