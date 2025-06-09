@@ -100,7 +100,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     stepper = builder.get_stepper(
         dataset_info=dataset_info,
     )
-    end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
+    end_of_batch_ops = builder.get_end_of_batch_ops(
+        modules=stepper.modules, base_weights=stepper.get_base_weights()
+    )
 
     for batch in inference_data.loader:
         initial_inference_times = batch.time.isel(time=0)

@@ -3,12 +3,18 @@
 import copy
 import datetime
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
+from fme.ace.stepper import (
+    SingleModuleStepperConfig,
+    Stepper,
+    _load_weights,
+    parameter_init,
+)
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -55,12 +61,11 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         },
         str(tmpdir / "weights.ckpt"),
     )
-    parameter_init_config = {
-        "weights_path": str(tmpdir / "weights.ckpt"),
-    }
+    parameter_init_config = parameter_init.ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+    )
     with_builder_stepper_config_data = {
         "builder": sfno_config_data,
-        "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
         "normalization": {
@@ -74,10 +79,12 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
+    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
         dataset_info=dataset_info,
+        parameter_initializer=parameter_initializer,
     )
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
@@ -149,27 +156,34 @@ def test_builder_with_weights_sfno_init(
     """
     Integration test for the BuilderWithWeights stepper with a SFNO.
     """
-    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
-        loaded_shape, extra_built_layer, tmpdir
-    )
+    (
+        with_builder_stepper_config_data,
+        area,
+        vertical_coordinate,
+        stepper,
+        parameter_init_config,
+    ) = get_config(loaded_shape, extra_built_layer, tmpdir)
     dataset_info = DatasetInfo(
         img_shape=built_shape,
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
+    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
     if expect_exception:
         with pytest.raises(ValueError):
             with_builder_stepper = SingleModuleStepperConfig.from_state(
                 with_builder_stepper_config_data
             ).get_stepper(
                 dataset_info=dataset_info,
+                parameter_initializer=parameter_initializer,
             )
     else:
         with_builder_stepper = SingleModuleStepperConfig.from_state(
             with_builder_stepper_config_data
         ).get_stepper(
             dataset_info=dataset_info,
+            parameter_initializer=parameter_initializer,
         )
         assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
@@ -232,12 +246,11 @@ def get_config(
         },
         str(tmpdir / "weights.ckpt"),
     )
-    parameter_init_config = {
-        "weights_path": str(tmpdir / "weights.ckpt"),
-    }
+    parameter_init_config = parameter_init.ParameterInitializationConfig(
+        weights_path=str(tmpdir / "weights.ckpt"),
+    )
     with_builder_stepper_config_data = {
         "builder": built_sfno_config_data,
-        "parameter_init": parameter_init_config,
         "in_names": ["x"],
         "out_names": ["x"],
         "normalization": {
@@ -245,14 +258,25 @@ def get_config(
             "stds": {"x": np.random.randn(1).item()},
         },
     }
-    return with_builder_stepper_config_data, area, vertical_coordinate, stepper
+    return (
+        with_builder_stepper_config_data,
+        area,
+        vertical_coordinate,
+        stepper,
+        parameter_init_config,
+    )
 
 
 def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
     img_shape = (16, 32)
-    with_builder_stepper_config_data, area, vertical_coordinate, stepper = get_config(
-        loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir
-    )
+    (
+        with_builder_stepper_config_data,
+        area,
+        vertical_coordinate,
+        stepper,
+        parameter_init_config,
+    ) = get_config(loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir)
+    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
@@ -262,6 +286,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
             vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         ),
+        parameter_initializer=parameter_initializer,
     )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights
@@ -371,10 +396,16 @@ def test_parameter_init_with_regularizer(tmpdir):
         alpha=1.0,
         beta=1.0,
     )
+    parameter_initializer = config.build(
+        load_weights=lambda _: [saved_module.state_dict()]
+    )
     # new_module = module
     module = ComplexModule(10, 20).to(device)
-    regularizer = config.apply(
-        [module], init_weights=True, load_weights=lambda _: [saved_module.state_dict()]
+    parameter_initializer.apply_weights(
+        [module],
+    )
+    regularizer = parameter_initializer.get_l2_sp_tuning_regularizer(
+        modules=[module],
     )
 
     original_state = copy.deepcopy(module.state_dict())
@@ -401,3 +432,33 @@ def test_parameter_init_with_regularizer(tmpdir):
                 (param.data - original_state[name]) ** 2
                 < (pre_step_state[name] - original_state[name]) ** 2
             )
+
+
+def test_parameter_init_weights_loaded_once(tmpdir):
+    """
+    Test that the parameter initialization config only loads the weights once,
+        even if multiple methods are called.
+    """
+    mock_load_weights = mock.Mock()
+    mock_load_weights.return_value = [torch.nn.Module().state_dict()]
+    weights_path = str(tmpdir / "weights.ckpt")
+    module = SimpleLinearModule(10, 20).to(get_device())
+    config = parameter_init.ParameterInitializationConfig(
+        weights_path=weights_path,
+        parameters=[],
+    )
+    parameter_initializer = config.build(load_weights=mock_load_weights)
+    # initially, the weights should not be loaded
+    mock_load_weights.assert_not_called
+    # now call a method that uss the weights
+    parameter_initializer.apply_weights(
+        modules=[module],
+    )
+    # the weights should be loaded
+    mock_load_weights.assert_called_once()
+    # call another method that uses the weights
+    parameter_initializer.get_l2_sp_tuning_regularizer(
+        modules=[module],
+    )
+    # the weights should not be loaded again
+    mock_load_weights.assert_called_once()
