@@ -14,7 +14,10 @@ from torch import nn
 
 from fme.ace.data_loading.batch_data import BatchData, PairedData, PrognosticState
 from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
-from fme.ace.stepper.parameter_init import ParameterInitializationConfig
+from fme.ace.stepper.parameter_init import (
+    ParameterInitializationConfig,
+    ParameterInitializer,
+)
 from fme.core.coordinates import (
     NullPostProcessFn,
     SerializableVerticalCoordinate,
@@ -55,6 +58,14 @@ from fme.core.typing_ import EnsembleTensorDict, TensorDict, TensorMapping
 
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
+
+
+def _load_weights(path: str) -> list[Mapping[str, Any]]:
+    stepper = load_stepper(path)
+    return_weights: list[Mapping[str, Any]] = []
+    for module in stepper.modules:
+        return_weights.append(module.state_dict())
+    return return_weights
 
 
 @dataclasses.dataclass
@@ -168,25 +179,23 @@ class SingleModuleStepperConfig:
         self.load()
         return dataclasses.asdict(self)
 
-    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+    def get_parameter_initializer(
+        self, load_weights: Callable[[str], list[Mapping[str, Any]]] = _load_weights
+    ) -> ParameterInitializer:
         """
-        If the model is being initialized from another model's weights for fine-tuning,
-        returns those weights. Otherwise, returns None.
-
-        The list mirrors the order of `modules` in the `Stepper` class.
+        Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.get_base_weights(_load_weights)
+        return self.parameter_init.build(load_weights=load_weights)
 
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        init_weights: bool = True,
+        parameter_initializer: ParameterInitializer | None = None,
     ) -> "Stepper":
         """
         Args:
             dataset_info: Information about the training dataset.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
+            parameter_initializer: The parameter initializer to use for loading weights.
         """
         logging.info("Initializing stepper from provided legacy config")
         normalizer = self.normalization.build(self.normalize_names)
@@ -198,12 +207,14 @@ class SingleModuleStepperConfig:
         loss_normalizer = combined_normalization_config.get_loss_normalizer(
             self.normalize_names, residual_scaled_names=self.prognostic_names
         )
+        if parameter_initializer is None:
+            parameter_initializer = ParameterInitializer()
         new_config = self.to_stepper_config(
             normalizer=normalizer, loss_normalizer=loss_normalizer
         )
         return new_config.get_stepper(
             dataset_info=dataset_info,
-            init_weights=init_weights,
+            parameter_initializer=parameter_initializer,
         )
 
     def get_ocean(self) -> OceanConfig | None:
@@ -412,14 +423,6 @@ class SingleModuleStepperConfig:
         self.ocean = ocean
 
 
-def _load_weights(path: str) -> list[Mapping[str, Any]]:
-    stepper = load_stepper(path)
-    return_weights: list[Mapping[str, Any]] = []
-    for module in stepper.modules:
-        return_weights.append(module.state_dict())
-    return return_weights
-
-
 @dataclasses.dataclass
 class ExistingStepperConfig:
     """
@@ -462,12 +465,14 @@ class ExistingStepperConfig:
             n_forward_steps
         )
 
-    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
-        return self._stepper_config.get_base_weights()
+    def get_parameter_initializer(self) -> ParameterInitializer:
+        """Get a parameter initializer for this stepper configuration."""
+        return ParameterInitializer()
 
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
+        parameter_initializer: ParameterInitializer | None = None,
     ):
         logging.info(f"Initializing stepper from {self.checkpoint_path}")
         return Stepper.from_state(self._load_checkpoint()["stepper"])
@@ -715,13 +720,13 @@ class StepperConfig:
     def get_stepper(
         self,
         dataset_info: DatasetInfo,
-        init_weights: bool = True,
+        parameter_initializer: ParameterInitializer | None = None,
     ):
         """
         Args:
             dataset_info: Information about the training dataset.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
+            parameter_initializer: The parameter initializer to use for loading weights
+                from an external source.
         """
         logging.info("Initializing stepper from provided config")
         step = self.step.get_step(dataset_info)
@@ -739,6 +744,8 @@ class StepperConfig:
             output_process_func = dataset_info.mask_provider.build_output_masker()
         except MissingDatasetInfo:
             output_process_func = NullPostProcessFn()
+        if parameter_initializer is None:
+            parameter_initializer = ParameterInitializer()
         return Stepper(
             config=self,
             step=step,
@@ -746,7 +753,7 @@ class StepperConfig:
             input_process_func=input_masking,
             output_process_func=output_process_func,
             derive_func=derive_func,
-            init_weights=init_weights,
+            parameter_initializer=parameter_initializer,
         )
 
     @classmethod
@@ -861,14 +868,11 @@ class StepperConfig:
         self.step, new_state = replace_multi_call(self.step, multi_call, state)
         return new_state
 
-    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+    def get_parameter_initializer(self) -> ParameterInitializer:
         """
-        If the model is being initialized from another model's weights for fine-tuning,
-        returns those weights. Otherwise, returns None.
-
-        The list mirrors the order of `modules` in the `Stepper` class.
+        Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.get_base_weights(_load_weights)
+        return self.parameter_init.build(load_weights=_load_weights)
 
 
 class Stepper(
@@ -895,7 +899,7 @@ class Stepper(
         input_process_func: Callable[[TensorMapping], TensorDict],
         output_process_func: Callable[[TensorMapping], TensorDict],
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
-        init_weights: bool = True,
+        parameter_initializer: ParameterInitializer,
     ):
         """
         Args:
@@ -908,8 +912,8 @@ class Stepper(
             input_process_func: Optional function for processing inputs and next-step
                 inputs before passing them to the step object, e.g., by masking
                 specific regions.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
+            parameter_initializer: The parameter initializer to use for loading weights
+                from an external source.
         """
         self._config = config
         self._step_obj = step
@@ -918,6 +922,7 @@ class Stepper(
         self._output_process_func = output_process_func
         self._input_process_func = input_process_func
         self._no_optimization = NullOptimization()
+        self._parameter_initializer = parameter_initializer
 
         def get_loss_obj():
             loss_normalizer = step.get_loss_normalizer()
@@ -935,8 +940,14 @@ class Stepper(
         self._get_loss_obj = get_loss_obj
         self._loss_obj: WeightedMappingLoss | None = None
 
-        self._l2_sp_tuning_regularizer = config.parameter_init.apply(
-            step.modules, init_weights=init_weights, load_weights=_load_weights
+        self._parameter_initializer.apply_weights(
+            step.modules,
+        )
+
+        self._l2_sp_tuning_regularizer = (
+            self._parameter_initializer.get_l2_sp_tuning_regularizer(
+                step.modules,
+            )
         )
 
         _1: PredictFunction[  # for type checking
@@ -1012,7 +1023,6 @@ class Stepper(
         new_state = self._config.replace_multi_call(multi_call, state)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            init_weights=False,
         )
         new_stepper._step_obj.load_state(new_state)
         self._step_obj = new_stepper._step_obj
@@ -1027,10 +1037,18 @@ class Stepper(
         self._config.replace_ocean(ocean)
         new_stepper: Stepper = self._config.get_stepper(
             dataset_info=self._dataset_info,
-            init_weights=False,
         )
         new_stepper._step_obj.load_state(self._step_obj.get_state())
         self._step_obj = new_stepper._step_obj
+
+    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+        """
+        Get the base weights of the stepper.
+
+        Returns:
+            A list of weight dictionaries for each module in the stepper.
+        """
+        return self._parameter_initializer.base_weights
 
     @property
     def prognostic_names(self) -> list[str]:
@@ -1464,10 +1482,7 @@ class Stepper(
         except dacite.exceptions.DaciteError:
             config = StepperConfig.from_stepper_state(state)
             dataset_info = DatasetInfo.from_state(state["dataset_info"])
-        stepper = config.get_stepper(
-            dataset_info=dataset_info,
-            init_weights=False,
-        )
+        stepper = config.get_stepper(dataset_info=dataset_info)
         stepper.load_state(state)
         return stepper
 

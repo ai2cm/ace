@@ -1,5 +1,7 @@
 import dataclasses
 import os
+from collections.abc import Mapping
+from typing import Any
 
 import torch
 
@@ -210,17 +212,20 @@ class TrainBuilders:
         self,
         dataset_info: DatasetInfo,
     ) -> Stepper:
+        parameter_initializer = self.config.stepper.get_parameter_initializer()
         return self.config.stepper.get_stepper(
             dataset_info=dataset_info,
+            parameter_initializer=parameter_initializer,
         )
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)
 
     def get_end_of_batch_ops(
-        self, modules: list[torch.nn.Module]
+        self,
+        modules: list[torch.nn.Module],
+        base_weights: list[Mapping[str, Any]] | None,
     ) -> EndOfBatchCallback:
-        base_weights = self.config.stepper.get_base_weights()
         if base_weights is not None:
 
             def copy_after_batch():

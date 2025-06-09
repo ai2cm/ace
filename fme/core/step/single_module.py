@@ -201,8 +201,6 @@ class SingleModuleStep(StepABC):
             corrector: The corrector to use at the end of each step.
             normalizer: The normalizer to use.
             timestep: Timestep of the model.
-            init_weights: Whether to initialize the weights. Should pass False if
-                the weights are about to be overwritten by a checkpoint.
         """
         super().__init__()
         n_in_channels = len(config.in_names)
