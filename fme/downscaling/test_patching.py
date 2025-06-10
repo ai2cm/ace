@@ -325,8 +325,8 @@ def test_paired_patches_shuffle(shuffle):
     patches0: list[PairedBatchData] = []
     patches1: list[PairedBatchData] = []
     for i in range(4):
-        patches0 = next(generator0)  # type: ignore
-        patches1 = next(generator1)  # type: ignore
+        patches0.append(next(generator0))  # type: ignore
+        patches1.append(next(generator1))  # type: ignore
 
     data0 = torch.concat([patch.coarse.data["x"] for patch in patches0], dim=0)
     data1 = torch.concat([patch.coarse.data["x"] for patch in patches1], dim=0)
