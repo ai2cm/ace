@@ -8,13 +8,15 @@ from fme.core.dataset.config import Slice
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
 from fme.core.generics.trainer import EndOfBatchCallback
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
+from fme.coupled.data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
@@ -212,7 +214,7 @@ class TrainBuilders:
     def get_stepper(
         self,
         img_shape: tuple[int, int],
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         vertical_coordinate: CoupledVerticalCoordinate,
         timestep: datetime.timedelta,
     ) -> CoupledStepper:
@@ -223,7 +225,7 @@ class TrainBuilders:
             )
         return self.config.stepper.get_stepper(
             img_shape=img_shape,
-            gridded_operations=gridded_operations,
+            horizontal_coordinates=horizontal_coordinates,
             vertical_coordinate=vertical_coordinate,
         )
 

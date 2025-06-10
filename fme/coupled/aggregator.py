@@ -11,7 +11,6 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregator as InferenceEvaluatorAggregator_,
 )
 from fme.ace.aggregator.one_step.main import OneStepAggregator as OneStepAggregator_
-from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -26,6 +25,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 from fme.coupled.stepper import CoupledTrainOutput
 
 
@@ -62,7 +62,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
@@ -80,7 +80,6 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
             atmosphere_loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation for the atmosphere stepper.
         """
-        self._coords = horizontal_coordinates.coords
         self._dist = Distributed.get_instance()
         self._loss = torch.tensor(0.0, device=get_device())
         self._loss_ocean = torch.tensor(0.0, device=get_device())
@@ -88,7 +87,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
         self._n_batches = 0
         self._aggregators = {
             "ocean": OneStepAggregator_(
-                horizontal_coordinates,
+                horizontal_coordinates.ocean,
                 variable_metadata=variable_metadata,
                 loss_scaling=ocean_loss_scaling,
                 save_diagnostics=save_diagnostics,
@@ -99,7 +98,7 @@ class OneStepAggregator(AggregatorABC[CoupledTrainOutput]):
                 ),
             ),
             "atmosphere": OneStepAggregator_(
-                horizontal_coordinates,
+                horizontal_coordinates.atmosphere,
                 variable_metadata=variable_metadata,
                 loss_scaling=atmosphere_loss_scaling,
                 save_diagnostics=save_diagnostics,
@@ -201,7 +200,7 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,
         n_timesteps_ocean: int,
@@ -325,7 +324,7 @@ class InferenceEvaluatorAggregator(
 ):
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         ocean_timestep: datetime.timedelta,
         atmosphere_timestep: datetime.timedelta,
         n_timesteps_ocean: int,
@@ -350,7 +349,7 @@ class InferenceEvaluatorAggregator(
         self._record_atmos_step_20 = n_timesteps_atmosphere >= 20
         self._aggregators = {
             "ocean": InferenceEvaluatorAggregator_(
-                horizontal_coordinates=horizontal_coordinates,
+                horizontal_coordinates=horizontal_coordinates.ocean,
                 timestep=ocean_timestep,
                 n_timesteps=n_timesteps_ocean,
                 initial_time=initial_time,
@@ -375,7 +374,7 @@ class InferenceEvaluatorAggregator(
                 ),
             ),
             "atmosphere": InferenceEvaluatorAggregator_(
-                horizontal_coordinates=horizontal_coordinates,
+                horizontal_coordinates=horizontal_coordinates.atmosphere,
                 timestep=atmosphere_timestep,
                 n_timesteps=n_timesteps_atmosphere,
                 initial_time=initial_time,
@@ -401,7 +400,6 @@ class InferenceEvaluatorAggregator(
                 log_nino34_index=False,
             ),
         }
-        self._coords = horizontal_coordinates.coords
         self._num_channels_ocean: int | None = None
         self._num_channels_atmos: int | None = None
 

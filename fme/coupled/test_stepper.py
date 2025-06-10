@@ -14,10 +14,10 @@ from fme.ace.stepper import SingleModuleStepperConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
@@ -30,7 +30,10 @@ from .data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from .data_loading.data_typing import CoupledVerticalCoordinate
+from .data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from .stepper import (
     ComponentConfig,
     CoupledOceanFractionConfig,
@@ -41,6 +44,11 @@ from .stepper import (
 NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
+LON, LAT = torch.linspace(0, 360, N_LON), torch.linspace(-89.5, 89.5, N_LAT)
+HORIZONTAL_COORDS = CoupledHorizontalCoordinates(
+    ocean=LatLonCoordinates(LON, LAT),
+    atmosphere=LatLonCoordinates(LON, LAT),
+)
 
 ATMOS_STEPPER_CONFIG = SingleModuleStepperConfig(
     builder=Mock(),
@@ -389,7 +397,6 @@ SphericalData = namedtuple(
     "SphericalData",
     [
         "data",
-        "area_weights",
         "vertical_coord",
     ],
 )
@@ -399,13 +406,10 @@ def get_data(
     names: Iterable[str], n_samples, n_time, realm: Literal["atmosphere", "ocean"]
 ) -> SphericalData:
     data_dict = {}
-
-    lats = torch.linspace(-89.5, 89.5, N_LAT)  # arbitary choice
     for name in names:
         data_dict[name] = torch.rand(
             n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
         )
-    area_weights = fme.spherical_area_weights(lats, N_LON).to(fme.get_device())
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -421,7 +425,7 @@ def get_data(
             dims=["sample", "time"],
         ),
     )
-    return SphericalData(data, area_weights, vertical_coord)
+    return SphericalData(data, vertical_coord)
 
 
 def get_coupled_data(
@@ -440,7 +444,6 @@ def get_coupled_data(
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
-        atmos_data.area_weights,
         CoupledVerticalCoordinate(
             ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
         ),
@@ -583,7 +586,7 @@ def get_stepper_and_batch(
 
     coupler = config.get_stepper(
         img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(coupled_data.area_weights),
+        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
         vertical_coordinate=coupled_data.vertical_coord,
     )
     return coupler, coupled_data
@@ -637,7 +640,7 @@ def test__get_atmosphere_forcings(
     vertical_coord.ocean.get_mask_level.return_value = sst_mask
     coupler = config.get_stepper(
         img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(torch.ones(N_LAT, N_LON)),
+        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
         vertical_coordinate=vertical_coord,
     )
     shape_ocean = (1, 1, N_LAT, N_LON)
@@ -714,7 +717,7 @@ def test__get_ocean_forcings():
     vertical_coord.ocean = NullVerticalCoordinate()
     coupler = config.get_stepper(
         img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(torch.ones(N_LAT, N_LON)),
+        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
         vertical_coordinate=vertical_coord,
     )
     ocean_shape = (1, 2, N_LAT, N_LON)
@@ -1010,7 +1013,6 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         sst_name="o_sfc",
     )
-    area = torch.ones((N_LAT, N_LON), device=fme.get_device())
     vertical_coordinate = CoupledVerticalCoordinate(
         ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)).to(
             fme.get_device()
@@ -1021,7 +1023,7 @@ def test_reloaded_stepper_gives_same_prediction():
     )
     stepper = config.get_stepper(
         img_shape=(N_LAT, N_LON),
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
         vertical_coordinate=vertical_coordinate,
     )
     new_stepper = CoupledStepper.from_state(stepper.get_state())
