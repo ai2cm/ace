@@ -1,19 +1,17 @@
 import datetime
 import logging
-from typing import Literal
 
 import torch
 
 from fme.ace.data_loading.gridded_data import SizedMap
-from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.gridded_ops import GriddedOperations
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
     CoupledCoords,
     CoupledDatasetProperties,
+    CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
@@ -58,7 +56,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return self._properties.vertical_coordinate
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
+    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
         return self._properties.horizontal_coordinates
 
     @property
@@ -70,16 +68,9 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         return CoupledCoords(
             ocean_vertical=self.vertical_coordinate.ocean.coords,
             atmosphere_vertical=self.vertical_coordinate.atmosphere.coords,
-            horizontal=dict(self.horizontal_coordinates.coords),
+            ocean_horizontal=dict(self.horizontal_coordinates.ocean.coords),
+            atmosphere_horizontal=dict(self.horizontal_coordinates.atmosphere.coords),
         )
-
-    @property
-    def grid(self) -> Literal["equiangular", "legendre-gauss", "healpix"]:
-        return self.horizontal_coordinates.grid
-
-    @property
-    def gridded_operations(self) -> GriddedOperations:
-        return self.horizontal_coordinates.gridded_operations
 
     @property
     def n_samples(self) -> int:
@@ -180,7 +171,7 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return self._properties.vertical_coordinate
 
     @property
-    def horizontal_coordinates(self) -> HorizontalCoordinates:
+    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
         return self._properties.horizontal_coordinates
 
     @property

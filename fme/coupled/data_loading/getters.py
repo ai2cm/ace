@@ -31,13 +31,17 @@ from fme.coupled.requirements import (
 
 
 class CollateFn:
-    def __init__(self, horizontal_dims: list[str]):
-        self.horizontal_dims = horizontal_dims
+    def __init__(
+        self, ocean_horizontal_dims: list[str], atmosphere_horizontal_dims: list[str]
+    ):
+        self.ocean_horizontal_dims = ocean_horizontal_dims
+        self.atmosphere_horizontal_dims = atmosphere_horizontal_dims
 
     def __call__(self, samples: list[CoupledDatasetItem]) -> CoupledBatchData:
         return CoupledBatchData.collate_fn(
             samples,
-            horizontal_dims=self.horizontal_dims,
+            ocean_horizontal_dims=self.ocean_horizontal_dims,
+            atmosphere_horizontal_dims=self.atmosphere_horizontal_dims,
         )
 
 
@@ -135,7 +139,12 @@ def get_data_loader(
         sampler=sampler,
         drop_last=True,
         pin_memory=using_gpu(),
-        collate_fn=CollateFn(list(properties.atmosphere.horizontal_coordinates.dims)),
+        collate_fn=CollateFn(
+            ocean_horizontal_dims=list(properties.ocean.horizontal_coordinates.dims),
+            atmosphere_horizontal_dims=list(
+                properties.atmosphere.horizontal_coordinates.dims
+            ),
+        ),
         multiprocessing_context=mp_context,
         persistent_workers=persistent_workers,
         **kwargs,

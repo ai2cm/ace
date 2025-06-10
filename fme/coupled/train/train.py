@@ -11,12 +11,10 @@ import xarray as xr
 import fme
 import fme.core.logging_utils as logging_utils
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import HorizontalCoordinates
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
 from fme.core.generics.trainer import AggregatorBuilderABC, Trainer
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.aggregator import (
     InferenceEvaluatorAggregatorConfig,
@@ -27,6 +25,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
+from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 from fme.coupled.stepper import CoupledTrainOutput
 from fme.coupled.train.train_config import TrainBuilders, TrainConfig
 
@@ -44,7 +43,7 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(
         img_shape=img_shape,
-        gridded_operations=train_data.gridded_operations,
+        horizontal_coordinates=train_data.horizontal_coordinates,
         vertical_coordinate=train_data.vertical_coordinate,
         timestep=train_data.timestep,
     )
@@ -59,7 +58,6 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     )
     aggregator_builder = CoupledAggregatorBuilder(
         inference_config=config.inference_aggregator,
-        gridded_operations=train_data.gridded_operations,
         horizontal_coordinates=train_data.horizontal_coordinates,
         ocean_timestep=builder.ocean_timestep,
         atmosphere_timestep=builder.atmosphere_timestep,
@@ -93,8 +91,7 @@ class CoupledAggregatorBuilder(
     def __init__(
         self,
         inference_config: InferenceEvaluatorAggregatorConfig,
-        gridded_operations: GriddedOperations,
-        horizontal_coordinates: HorizontalCoordinates,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         ocean_timestep: timedelta,
         atmosphere_timestep: timedelta,
         initial_inference_times: xr.DataArray,
@@ -109,7 +106,6 @@ class CoupledAggregatorBuilder(
         save_per_epoch_diagnostics: bool = False,
     ):
         self.inference_config = inference_config
-        self.gridded_operations = gridded_operations
         self.horizontal_coordinates = horizontal_coordinates
         self.ocean_timestep = ocean_timestep
         self.atmosphere_timestep = atmosphere_timestep
