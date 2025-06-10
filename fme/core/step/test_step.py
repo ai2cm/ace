@@ -16,7 +16,7 @@ from fme.ace.registry.stochastic_sfno import NoiseConditionedSFNOBuilder
 from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
 from fme.core.coordinates import HybridSigmaPressureCoordinate
-from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
+from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
@@ -239,7 +239,9 @@ def get_single_module_with_atmosphere_corrector_selector(
                     zero_global_mean_moisture_advection=True,
                     moisture_budget_correction="advection_and_precipitation",
                     force_positive_names=["PRATEsfc"],
-                    total_energy_budget_correction="constant_temperature",
+                    total_energy_budget_correction=EnergyBudgetConfig(
+                        "constant_temperature"
+                    ),
                 ),
             ),
         ),
@@ -313,7 +315,7 @@ def get_fcn2_selector(
             zero_global_mean_moisture_advection=True,
             moisture_budget_correction="advection_and_precipitation",
             force_positive_names=["PRATEsfc"],
-            total_energy_budget_correction="constant_temperature",
+            total_energy_budget_correction=EnergyBudgetConfig("constant_temperature"),
         ),
     )
     return StepSelector(
