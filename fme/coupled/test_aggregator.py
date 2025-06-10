@@ -14,6 +14,7 @@ from fme.core.coordinates import DimSize, LatLonCoordinates
 from fme.core.device import get_device
 from fme.coupled.aggregator import InferenceEvaluatorAggregator, _combine_logs
 from fme.coupled.data_loading.batch_data import CoupledPairedData
+from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 
 TIMESTEP = datetime.timedelta(days=5)
 
@@ -125,10 +126,6 @@ def test_inference_logs_labels_exist(tmpdir):
     ny = 2
     nz = 3
 
-    horizontal_coordinates = LatLonCoordinates(
-        lon=torch.arange(nx),
-        lat=torch.arange(ny),
-    )
     initial_time = get_zero_time(shape=[n_sample, 0], dims=["sample", "time"])
 
     reference_time_means = xr.Dataset(
@@ -160,7 +157,16 @@ def test_inference_logs_labels_exist(tmpdir):
 
     output_dir = pathlib.Path(tmpdir) / "output"
     agg = InferenceEvaluatorAggregator(
-        horizontal_coordinates=horizontal_coordinates,
+        horizontal_coordinates=CoupledHorizontalCoordinates(
+            ocean=LatLonCoordinates(
+                lon=torch.arange(nx),
+                lat=torch.arange(ny),
+            ),
+            atmosphere=LatLonCoordinates(
+                lon=torch.arange(nx),
+                lat=torch.arange(ny),
+            ),
+        ),
         ocean_timestep=TIMESTEP,
         atmosphere_timestep=TIMESTEP,
         n_timesteps_ocean=n_time,

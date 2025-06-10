@@ -478,6 +478,12 @@ def test_train_and_inference(
     n_summary_steps = 1
     assert len(inference_logs) == n_ic_timesteps + n_forward_steps + n_summary_steps
 
+    for name in atmos_out_names + ocean_out_names:
+        assert np.isclose(
+            inference_logs[0][f"inference/mean/weighted_mean_target/{name}"],
+            inference_logs[0][f"inference/mean/weighted_mean_gen/{name}"],
+        )
+
     for i, log in enumerate(inference_logs[:-1]):
         assert "inference/mean/forecast_step" in log
         assert log["inference/mean/forecast_step"] == i
@@ -495,11 +501,6 @@ def test_train_and_inference(
     ocean_output_path = tmp_path / "results" / "ocean" / "autoregressive_predictions.nc"
     assert ocean_output_path.exists()
 
-    atmosphere_output_path = (
-        tmp_path / "results" / "atmosphere" / "autoregressive_predictions.nc"
-    )
-    assert atmosphere_output_path.exists()
-
     ds_ocean = xr.open_dataset(ocean_output_path, decode_timedelta=False)
     assert ds_ocean["time"].size == 6  # configured inference coupled steps
     assert (
@@ -510,8 +511,39 @@ def test_train_and_inference(
         assert not np.isnan(ds_ocean[name].values).all()
         # outputs should have some masked regions
         assert np.isnan(ds_ocean[name].values).any()
+
+    atmosphere_output_path = (
+        tmp_path / "results" / "atmosphere" / "autoregressive_predictions.nc"
+    )
+    atmosphere_target_path = (
+        tmp_path / "results" / "atmosphere" / "autoregressive_target.nc"
+    )
+    assert atmosphere_output_path.exists()
+    assert atmosphere_target_path.exists()
     ds_atmos = xr.open_dataset(atmosphere_output_path, decode_timedelta=False)
-    assert ds_atmos["time"].size == 6 * n_inner_steps
-    assert ds_atmos["sample"].size == 2
-    for name in ds_atmos.data_vars:
-        assert not np.isnan(ds_atmos[name].values).any()
+    ds_atmos_tar = xr.open_dataset(atmosphere_target_path, decode_timedelta=False)
+    for ds in [ds_atmos, ds_atmos_tar]:
+        assert ds["time"].size == 6 * n_inner_steps
+        assert ds["sample"].size == 2
+    area_weights = np.cos(np.deg2rad(ds_atmos["lat"]))
+    for name in atmos_out_names:
+        assert name in ds_atmos.data_vars
+        assert name in ds_atmos_tar.data_vars
+        da = ds_atmos[name]
+        da_tar = ds_atmos_tar[name]
+        assert not np.isnan(da.values).any()
+        assert not np.isnan(da_tar.values).any()
+        wm_tar = da_tar.isel(time=0).weighted(area_weights).mean().item()
+        wm_gen = (
+            da.isel(time=0).weighted(area_weights).mean(["lat", "lon"]).mean().item()
+        )
+        np.testing.assert_allclose(
+            wm_tar,
+            inference_logs[1][f"inference/mean/weighted_mean_target/{name}"],
+            atol=1e-5,
+        )
+        np.testing.assert_allclose(
+            wm_gen,
+            inference_logs[1][f"inference/mean/weighted_mean_gen/{name}"],
+            atol=1e-5,
+        )

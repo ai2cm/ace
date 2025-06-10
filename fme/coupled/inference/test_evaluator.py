@@ -8,16 +8,22 @@ import xarray as xr
 import yaml
 
 from fme.ace.inference.data_writer.main import DataWriterConfig
-from fme.core.coordinates import DepthCoordinate, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    DepthCoordinate,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.config import CoupledDatasetConfig
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
+from fme.coupled.data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
@@ -76,7 +82,6 @@ def save_coupled_stepper(
         atmosphere_timedelta=atmosphere_timedelta,
     )
     img_shape = (data_shape[-2], data_shape[-1])
-    area = torch.ones(*img_shape, device=get_device())
     ocean_vertical_coordinate = DepthCoordinate(
         idepth=torch.arange(nz_interface, device=get_device()),
         mask=torch.ones(*img_shape, nz_interface - 1),
@@ -85,17 +90,25 @@ def save_coupled_stepper(
         ak=torch.arange(nz_interface, device=get_device()),
         bk=torch.arange(nz_interface, device=get_device()),
     )
+    ocean_horizontal_coords = LatLonCoordinates(
+        lat=torch.arange(img_shape[0], device=get_device()),
+        lon=torch.arange(img_shape[1], device=get_device()),
+    )
+    atmos_horizontal_coords = LatLonCoordinates(
+        lat=torch.arange(img_shape[0], device=get_device()),
+        lon=torch.arange(img_shape[1], device=get_device()),
+    )
     if save_standalone_component_checkpoints:
         ocean_dataset_info = DatasetInfo(
             img_shape=img_shape,
-            gridded_operations=LatLonOperations(area),
+            gridded_operations=ocean_horizontal_coords.gridded_operations,
             vertical_coordinate=ocean_vertical_coordinate,
             timestep=config.ocean_timestep,
         )
         ocean_stepper = config.ocean.stepper.get_stepper(ocean_dataset_info)
         atmos_dataset_info = DatasetInfo(
             img_shape=img_shape,
-            gridded_operations=LatLonOperations(area),
+            gridded_operations=atmos_horizontal_coords.gridded_operations,
             vertical_coordinate=atmos_vertical_coordinate,
             timestep=config.atmosphere_timestep,
         )
@@ -117,7 +130,10 @@ def save_coupled_stepper(
         )
     coupled_stepper = config.get_stepper(
         img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=CoupledHorizontalCoordinates(
+            ocean=ocean_horizontal_coords,
+            atmosphere=atmos_horizontal_coords,
+        ),
         vertical_coordinate=CoupledVerticalCoordinate(
             ocean=ocean_vertical_coordinate,
             atmosphere=atmos_vertical_coordinate,

@@ -29,7 +29,6 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.gridded_ops import GriddedOperations
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
@@ -39,7 +38,10 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
+from fme.coupled.data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -416,7 +418,7 @@ class CoupledStepperConfig:
     def get_stepper(
         self,
         img_shape: tuple[int, int],
-        gridded_operations: GriddedOperations,
+        horizontal_coordinates: CoupledHorizontalCoordinates,
         vertical_coordinate: CoupledVerticalCoordinate,
     ):
         logging.info("Initializing coupler")
@@ -428,7 +430,7 @@ class CoupledStepperConfig:
             ocean=self._get_ocean_stepper(
                 dataset_info=DatasetInfo(
                     img_shape=img_shape,
-                    gridded_operations=gridded_operations,
+                    gridded_operations=horizontal_coordinates.ocean.gridded_operations,
                     vertical_coordinate=vertical_coordinate.ocean,
                     timestep=self.ocean_timestep,
                 ),
@@ -436,7 +438,7 @@ class CoupledStepperConfig:
             atmosphere=self._get_atmosphere_stepper(
                 dataset_info=DatasetInfo(
                     img_shape=img_shape,
-                    gridded_operations=gridded_operations,
+                    gridded_operations=horizontal_coordinates.atmosphere.gridded_operations,
                     vertical_coordinate=vertical_coordinate.atmosphere,
                     timestep=self.atmosphere_timestep,
                 ),

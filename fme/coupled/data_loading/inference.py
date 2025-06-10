@@ -110,7 +110,12 @@ class InferenceDataset(torch.utils.data.Dataset):
             samples.append(self._dataset[i_window_start])
         return CoupledBatchData.collate_fn(
             samples,
-            horizontal_dims=list(self.properties.horizontal_coordinates.dims),
+            ocean_horizontal_dims=list(
+                self.properties.horizontal_coordinates.ocean.dims
+            ),
+            atmosphere_horizontal_dims=list(
+                self.properties.horizontal_coordinates.atmosphere.dims
+            ),
         )
 
     def __getitem__(self, index) -> CoupledBatchData:
