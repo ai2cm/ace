@@ -1,6 +1,5 @@
 import dataclasses
 import datetime
-import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
@@ -131,9 +130,7 @@ class AtmosphereCorrectorConfig:
         | None
     ) = None
     force_positive_names: list[str] = dataclasses.field(default_factory=list)
-    total_energy_budget_correction: (
-        EnergyBudgetConfig | Literal["constant_temperature"] | None
-    ) = None
+    total_energy_budget_correction: EnergyBudgetConfig | None = None
 
     @classmethod
     def from_state(cls, state: Mapping[str, Any]) -> "AtmosphereCorrectorConfig":
@@ -159,30 +156,6 @@ class AtmosphereCorrector(CorrectorABC):
             self._dry_air_precision = torch.float32
         else:
             self._dry_air_precision = torch.float64
-
-        if config.total_energy_budget_correction is not None:
-            self._do_energy_correction = True
-            # TODO: remove following backwards compatibility code in a future release
-            if isinstance(config.total_energy_budget_correction, str):
-                warnings.warn(
-                    (
-                        "Using a string to activate total energy budget correction is "
-                        "deprecated. Please use a mapping that conforms with "
-                        "EnergyBudgetConfig."
-                    ),
-                    DeprecationWarning,
-                )
-                self._energy_correction_method = config.total_energy_budget_correction
-                self._energy_unaccounted_heating = 0.0
-            else:
-                self._energy_correction_method = (
-                    config.total_energy_budget_correction.method
-                )
-                self._energy_unaccounted_heating = (
-                    config.total_energy_budget_correction.constant_unaccounted_heating
-                )
-        else:
-            self._do_energy_correction = False
 
     def __call__(
         self,
@@ -237,7 +210,7 @@ class AtmosphereCorrector(CorrectorABC):
                 timestep_seconds=self._timestep_seconds,
                 terms_to_modify=self._config.moisture_budget_correction,
             )
-        if self._do_energy_correction:
+        if self._config.total_energy_budget_correction is not None:
             if self._vertical_coordinate is None:
                 raise ValueError(
                     "Energy budget correction is turned on, but no vertical coordinate"
@@ -250,8 +223,8 @@ class AtmosphereCorrector(CorrectorABC):
                 area_weighted_mean=self._gridded_operations.area_weighted_mean,
                 vertical_coordinate=self._vertical_coordinate,
                 timestep_seconds=self._timestep_seconds,
-                method=self._energy_correction_method,
-                unaccounted_heating=self._energy_unaccounted_heating,
+                method=self._config.total_energy_budget_correction.method,
+                unaccounted_heating=self._config.total_energy_budget_correction.constant_unaccounted_heating,
             )
         return gen_data
 
