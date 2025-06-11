@@ -93,6 +93,7 @@ def _get_test_yaml_files(
     crps_training=False,
     save_per_epoch_diagnostics=False,
     log_validation_maps=False,
+    skip_inline_inference=False,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -174,7 +175,31 @@ def _get_test_yaml_files(
         project="fme",
         entity="ai2cm",
     )
-
+    if skip_inline_inference:
+        inline_inference_config = None
+    else:
+        inline_inference_config = InlineInferenceConfig(
+            aggregator=InferenceEvaluatorAggregatorConfig(
+                monthly_reference_data=(
+                    str(monthly_data_filename)
+                    if monthly_data_filename is not None
+                    else None
+                ),
+            ),
+            loader=InferenceDataLoaderConfig(
+                dataset=XarrayDataConfig(
+                    data_path=str(valid_data_path),
+                    spatial_dimensions=spatial_dimensions_str,
+                ),
+                start_indices=InferenceInitialConditionIndices(
+                    first=0,
+                    n_initial_conditions=2,
+                    interval=1,
+                ),
+            ),
+            n_forward_steps=inference_forward_steps,
+            forward_steps_in_memory=2,
+        )
     train_config = TrainConfig(
         train_loader=DataLoaderConfig(
             dataset=XarrayDataConfig(
@@ -225,28 +250,7 @@ def _get_test_yaml_files(
             ),
             corrector=corrector_config,
         ),
-        inference=InlineInferenceConfig(
-            aggregator=InferenceEvaluatorAggregatorConfig(
-                monthly_reference_data=(
-                    str(monthly_data_filename)
-                    if monthly_data_filename is not None
-                    else None
-                ),
-            ),
-            loader=InferenceDataLoaderConfig(
-                dataset=XarrayDataConfig(
-                    data_path=str(valid_data_path),
-                    spatial_dimensions=spatial_dimensions_str,
-                ),
-                start_indices=InferenceInitialConditionIndices(
-                    first=0,
-                    n_initial_conditions=2,
-                    interval=1,
-                ),
-            ),
-            n_forward_steps=inference_forward_steps,
-            forward_steps_in_memory=2,
-        ),
+        inference=inline_inference_config,
         n_forward_steps=n_forward_steps,
         max_epochs=max_epochs,
         segment_epochs=segment_epochs,
@@ -324,6 +328,7 @@ def _setup(
     save_per_epoch_diagnostics=False,
     crps_training=False,
     log_validation_maps=False,
+    skip_inline_inference=False,
 ):
     if not path.exists():
         path.mkdir()
@@ -410,6 +415,7 @@ def _setup(
         crps_training=crps_training,
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
         log_validation_maps=log_validation_maps,
+        skip_inline_inference=skip_inline_inference,
     )
     return train_config_filename, inference_config_filename
 
@@ -719,3 +725,31 @@ def test_epoch_checkpoint_enabled(checkpoint_save_epochs, expected_save_epochs):
 def test_count_parameters(module_list, expected_num_parameters):
     num_parameters = count_parameters(module_list)
     assert num_parameters == expected_num_parameters
+
+
+def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
+    if very_fast_only:
+        pytest.skip("Skipping non-fast tests")
+    nettype = "SphericalFourierNeuralOperatorNet"
+    crps_training = False
+    log_validation_maps = False
+    train_config, inference_config = _setup(
+        tmp_path,
+        nettype,
+        log_to_wandb=True,
+        timestep_days=20,
+        n_time=int(366 * 3 / 20 + 1),
+        inference_forward_steps=int(366 * 3 / 20 / 2 - 1) * 2,  # must be even
+        use_healpix=(nettype == "HEALPixRecUNet"),
+        crps_training=crps_training,
+        save_per_epoch_diagnostics=True,
+        log_validation_maps=log_validation_maps,
+        skip_inline_inference=True,
+    )
+    with mock_wandb() as wandb:
+        train_main(
+            yaml_config=train_config,
+        )
+        wandb_logs = wandb.get_logs()
+    assert np.isinf(wandb_logs[-1]["best_inference_error"])
+    assert not any("inference/" in key for key in wandb_logs[-1])

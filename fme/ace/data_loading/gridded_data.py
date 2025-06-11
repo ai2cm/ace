@@ -300,3 +300,29 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         )
         logging.info(f"{name} data: first sample's initial time: {self._first_time}")
         logging.info(f"{name} data: last sample's initial time: {self._last_time}")
+
+
+class PSType:
+    pass
+
+
+class FDType:
+    pass
+
+
+class NullInferenceData(InferenceDataABC[PSType, FDType]):
+    """
+    A null inference data class that does not provide any data.
+    This is useful for cases where we don't do inference.
+    """
+
+    def __init__(self):
+        pass
+
+    @property
+    def initial_condition(self) -> PSType:
+        return PSType()
+
+    @property
+    def loader(self) -> DataLoader[FDType]:
+        return [FDType()]

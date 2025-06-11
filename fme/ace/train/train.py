@@ -70,6 +70,7 @@ from fme.ace.aggregator.inference.main import (
     InferenceEvaluatorAggregatorConfig,
 )
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
+from fme.ace.data_loading.gridded_data import InferenceGriddedData
 from fme.ace.stepper import TrainOutput
 from fme.ace.train.train_config import TrainBuilders, TrainConfig
 from fme.core.cli import prepare_config, prepare_directory
@@ -90,7 +91,10 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
     train_data = builder.get_train_data()
     logging.info("Initializing validation data loader")
     validation_data = builder.get_validation_data()
-    logging.info("Initializing inline inference data loader")
+    if config.inference is None:
+        logging.info("Skipping inline inference")
+    else:
+        logging.info("Initializing inline inference data loader")
     inference_data = builder.get_evaluation_inference_data()
 
     variable_metadata = get_derived_variable_metadata() | train_data.variable_metadata
@@ -104,9 +108,15 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         modules=stepper.modules, base_weights=stepper.get_base_weights()
     )
 
-    for batch in inference_data.loader:
-        initial_inference_times = batch.time.isel(time=0)
-        break
+    if config.inference is None:
+        initial_inference_times = None
+    elif isinstance(inference_data, InferenceGriddedData):
+        for batch in inference_data.loader:
+            initial_inference_times = batch.time.isel(time=0)
+            break
+    inference_n_forward_steps = config.inference_n_forward_steps
+    record_step_20 = inference_n_forward_steps >= 20
+
     aggregator_builder = AggregatorBuilder(
         inference_config=config.inference_aggregator,
         gridded_operations=dataset_info.gridded_operations,
@@ -114,8 +124,8 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> "Trainer":
         timestep=dataset_info.timestep,
         output_dir=config.output_dir,
         initial_inference_time=initial_inference_times,
-        record_step_20=config.inference_n_forward_steps >= 20,
-        n_timesteps=config.inference_n_forward_steps + stepper.n_ic_timesteps,
+        record_step_20=record_step_20,
+        n_timesteps=inference_n_forward_steps + stepper.n_ic_timesteps,
         variable_metadata=variable_metadata,
         loss_scaling=stepper.effective_loss_scaling,
         channel_mean_names=stepper.loss_names,
@@ -144,11 +154,11 @@ class AggregatorBuilder(
 ):
     def __init__(
         self,
-        inference_config: InferenceEvaluatorAggregatorConfig,
+        inference_config: InferenceEvaluatorAggregatorConfig | None,
         gridded_operations: GriddedOperations,
         horizontal_coordinates: HorizontalCoordinates,
         timestep: timedelta,
-        initial_inference_time: xr.DataArray,
+        initial_inference_time: xr.DataArray | None,
         record_step_20: bool,
         n_timesteps: int,
         output_dir: str,
@@ -191,18 +201,23 @@ class AggregatorBuilder(
     def get_inference_aggregator(
         self,
     ) -> InferenceEvaluatorAggregator:
-        return self.inference_config.build(
-            horizontal_coordinates=self.horizontal_coordinates,
-            timestep=self.timestep,
-            initial_time=self.initial_inference_time,
-            record_step_20=self.record_step_20,
-            n_timesteps=self.n_timesteps,
-            variable_metadata=self.variable_metadata,
-            channel_mean_names=self.channel_mean_names,
-            normalize=self.normalize,
-            save_diagnostics=self.save_per_epoch_diagnostics,
-            output_dir=os.path.join(self.output_dir, "inference"),
-        )
+        if isinstance(self.inference_config, InferenceEvaluatorAggregatorConfig):
+            return self.inference_config.build(
+                horizontal_coordinates=self.horizontal_coordinates,
+                timestep=self.timestep,
+                initial_time=self.initial_inference_time,
+                record_step_20=self.record_step_20,
+                n_timesteps=self.n_timesteps,
+                variable_metadata=self.variable_metadata,
+                channel_mean_names=self.channel_mean_names,
+                normalize=self.normalize,
+                save_diagnostics=self.save_per_epoch_diagnostics,
+                output_dir=os.path.join(self.output_dir, "inference"),
+            )
+        else:
+            raise ValueError(
+                "Trying to build an inference aggregator, but inference config not set."
+            )
 
 
 def run_train_from_config(config: TrainConfig):
