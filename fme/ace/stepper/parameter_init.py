@@ -123,6 +123,8 @@ class ParameterInitializationConfig:
             exclude = self.exclude_parameters or []
             frozen = self.frozen_parameters or FrozenParameterConfig(exclude=["*"])
             self.parameters = [ParameterClassification(exclude=exclude, frozen=frozen)]
+        self.exclude_parameters = None
+        self.frozen_parameters = None
 
     def build(
         self,
