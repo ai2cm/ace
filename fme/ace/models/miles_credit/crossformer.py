@@ -5,10 +5,10 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 from torch import einsum, nn
 
-from .base_model import BaseModel
+from fme.ace.models.miles_credit.base_model import BaseModel
 
 # from credit.postblock import PostBlock
-from .boundary_padding import TensorPadding
+from fme.ace.models.miles_credit.boundary_padding import TensorPadding
 
 # helpers
 
@@ -593,12 +593,12 @@ class CrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
-    image_height = 640  # 640, 192
-    image_width = 1280  # 1280, 288
-    levels = 15
-    frames = 2
+    image_height = 180  # 640, 192
+    image_width = 360  # 1280, 288
+    levels = 8
+    frames = 1
     channels = 4
-    surface_channels = 7
+    surface_channels = 4
     input_only_channels = 3
     frame_patch_size = 2
 
@@ -608,7 +608,7 @@ if __name__ == "__main__":
         frames,
         image_height,
         image_width,
-    ).to("cuda")
+    )
 
     model = CrossFormer(
         image_height=image_height,
@@ -627,12 +627,12 @@ if __name__ == "__main__":
         cross_embed_strides=(4, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
-    ).to("cuda")
+    )
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in the model: {num_params}")
 
-    y_pred = model(input_tensor.to("cuda"))
-    print("Predicted shape:", y_pred.shape)
+    #y_pred = model(input_tensor)
+    #print("Predicted shape:", y_pred.shape)
 
     # print(model.rk4(input_tensor.to("cpu")).shape)
