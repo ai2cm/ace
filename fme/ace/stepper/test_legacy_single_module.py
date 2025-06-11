@@ -1278,6 +1278,16 @@ def test_from_state_backwards_compatibility():
             },
             "loss": {"type": "MSE"},
             "next_step_forcing_names": ["DSWRFtoa"],
+            "parameter_init": {  # legacy parameter init with both exclude and frozen
+                "weights_path": "ckpt",
+                "exclude_parameters": [],
+                "frozen_parameters": {"include": [], "exclude": ["*"]},
+                "alpha": 0.0,
+                "beta": 0.0,
+            },
         },
     }
-    Stepper.from_state(state)
+    stepper = Stepper.from_state(state)
+    # ensure newly created Stepper results in a loadable state
+    new_state = stepper.get_state()
+    Stepper.from_state(new_state)
