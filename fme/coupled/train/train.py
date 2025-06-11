@@ -38,14 +38,9 @@ def build_trainer(builder: TrainBuilders, config: TrainConfig) -> Trainer:
     logging.info("Initializing inline inference data loader")
     inference_data = builder.get_evaluation_inference_data()
 
-    batch = next(iter(train_data.loader))
-    img_shape = next(iter(batch.ocean_data.data.values())).shape[-2:]
     logging.info("Starting model initialization")
     stepper = builder.get_stepper(
-        img_shape=img_shape,
-        horizontal_coordinates=train_data.horizontal_coordinates,
-        vertical_coordinate=train_data.vertical_coordinate,
-        timestep=train_data.timestep,
+        train_data.dataset_info,
     )
     end_of_batch_ops = builder.get_end_of_batch_ops(stepper.modules)
 
