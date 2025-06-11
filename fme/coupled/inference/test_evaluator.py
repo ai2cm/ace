@@ -20,15 +20,12 @@ from fme.core.logging_utils import LoggingConfig
 from fme.core.testing import mock_wandb
 from fme.core.typing_ import Slice
 from fme.coupled.data_loading.config import CoupledDatasetConfig
-from fme.coupled.data_loading.data_typing import (
-    CoupledHorizontalCoordinates,
-    CoupledVerticalCoordinate,
-)
 from fme.coupled.data_loading.inference import (
     InferenceDataLoaderConfig,
     InferenceInitialConditionIndices,
 )
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
 from fme.coupled.inference.evaluator import (
     InferenceEvaluatorConfig,
@@ -98,20 +95,20 @@ def save_coupled_stepper(
         lat=torch.arange(img_shape[0], device=get_device()),
         lon=torch.arange(img_shape[1], device=get_device()),
     )
+    ocean_dataset_info = DatasetInfo(
+        img_shape=img_shape,
+        gridded_operations=ocean_horizontal_coords.gridded_operations,
+        vertical_coordinate=ocean_vertical_coordinate,
+        timestep=config.ocean_timestep,
+    )
+    atmos_dataset_info = DatasetInfo(
+        img_shape=img_shape,
+        gridded_operations=atmos_horizontal_coords.gridded_operations,
+        vertical_coordinate=atmos_vertical_coordinate,
+        timestep=config.atmosphere_timestep,
+    )
     if save_standalone_component_checkpoints:
-        ocean_dataset_info = DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=ocean_horizontal_coords.gridded_operations,
-            vertical_coordinate=ocean_vertical_coordinate,
-            timestep=config.ocean_timestep,
-        )
         ocean_stepper = config.ocean.stepper.get_stepper(ocean_dataset_info)
-        atmos_dataset_info = DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=atmos_horizontal_coords.gridded_operations,
-            vertical_coordinate=atmos_vertical_coordinate,
-            timestep=config.atmosphere_timestep,
-        )
         atmos_stepper = config.atmosphere.stepper.get_stepper(atmos_dataset_info)
         ocean_path = base_dir / "ocean.pt"
         atmos_path = base_dir / "atmos.pt"
@@ -128,17 +125,11 @@ def save_coupled_stepper(
             ),
             sst_name=sst_name_in_ocean_data,
         )
-    coupled_stepper = config.get_stepper(
-        img_shape=img_shape,
-        horizontal_coordinates=CoupledHorizontalCoordinates(
-            ocean=ocean_horizontal_coords,
-            atmosphere=atmos_horizontal_coords,
-        ),
-        vertical_coordinate=CoupledVerticalCoordinate(
-            ocean=ocean_vertical_coordinate,
-            atmosphere=atmos_vertical_coordinate,
-        ),
+    coupled_dataset_info = CoupledDatasetInfo(
+        ocean=ocean_dataset_info,
+        atmosphere=atmos_dataset_info,
     )
+    coupled_stepper = config.get_stepper(coupled_dataset_info)
     coupled_path = base_dir / "coupled.pt"
     torch.save({"stepper": coupled_stepper.get_state()}, coupled_path)
     return str(coupled_path)
