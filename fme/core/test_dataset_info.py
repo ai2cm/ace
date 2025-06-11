@@ -4,7 +4,7 @@ import logging
 import pytest
 import torch
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, NullVerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import (
     DatasetInfo,
@@ -121,6 +121,17 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
                 )
             ),
             id="vertical_coordinate_missing_from_first",
+        ),
+        pytest.param(
+            DatasetInfo(
+                vertical_coordinate=NullVerticalCoordinate(),
+            ),
+            DatasetInfo(
+                vertical_coordinate=HybridSigmaPressureCoordinate(
+                    ak=torch.arange(7), bk=torch.arange(7)
+                )
+            ),
+            id="null_vertical_coordinate_first",
         ),
         pytest.param(
             DatasetInfo(
