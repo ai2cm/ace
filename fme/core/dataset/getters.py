@@ -130,7 +130,6 @@ def get_merged_datasets(
     merged_config: MergeDatasetConfig,
     names: list[str],
     n_timesteps: int,
-    strict: bool = True,
 ) -> tuple[MergedXarrayDataset, DatasetProperties]:
     merged_xarray_datasets = []
     merged_properties: DatasetProperties | None = None
@@ -151,7 +150,7 @@ def get_merged_datasets(
                 config.concat,
                 per_dataset_names[config_counter],
                 n_timesteps,
-                strict=strict,
+                strict=config.strict,
             )
             current_source_ensemble = XarrayConcat(current_source_datasets)
             merged_xarray_datasets.append(current_source_ensemble)
