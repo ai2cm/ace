@@ -11,9 +11,17 @@ from fme.ace.aggregator import (
 )
 from fme.ace.data_loading.config import DataLoaderConfig
 from fme.ace.data_loading.getters import get_data_loader, get_inference_data
-from fme.ace.data_loading.gridded_data import GriddedData, InferenceGriddedData
+from fme.ace.data_loading.gridded_data import (
+    GriddedData,
+    InferenceDataABC,
+    NullInferenceData,
+)
 from fme.ace.data_loading.inference import InferenceDataLoaderConfig
-from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
+from fme.ace.requirements import (
+    DataRequirements,
+    NullDataRequirements,
+    PrognosticStateDataRequirements,
+)
 from fme.ace.stepper import ExistingStepperConfig, SingleModuleStepperConfig, Stepper
 from fme.ace.stepper.single_module import StepperConfig
 from fme.core.dataset_info import DatasetInfo
@@ -82,6 +90,8 @@ class TrainConfig:
         save_checkpoint: Whether to save checkpoints.
         experiment_dir: Directory where checkpoints and logs are saved.
         inference: Configuration for inline inference.
+            If None, no inline inference is run,
+            and no "best_inline_inference" checkpoint will be saved.
         n_forward_steps: Number of forward steps to take gradient over.
         copy_weights_after_batch: Configuration for copying weights from the
             base model to the training model after each batch.
@@ -115,7 +125,7 @@ class TrainConfig:
     max_epochs: int
     save_checkpoint: bool
     experiment_dir: str
-    inference: InlineInferenceConfig
+    inference: InlineInferenceConfig | None
     n_forward_steps: int
     copy_weights_after_batch: list[CopyWeightsConfig] = dataclasses.field(
         default_factory=list
@@ -134,10 +144,14 @@ class TrainConfig:
 
     @property
     def inference_n_forward_steps(self) -> int:
+        if self.inference is None:
+            return 0
         return self.inference.n_forward_steps
 
     @property
-    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig:
+    def inference_aggregator(self) -> InferenceEvaluatorAggregatorConfig | None:
+        if self.inference is None:
+            return None
         return self.inference.aggregator
 
     @property
@@ -155,6 +169,8 @@ class TrainConfig:
         return os.path.join(self.experiment_dir, "output")
 
     def get_inference_epochs(self) -> list[int]:
+        if self.inference is None:
+            return []
         start_epoch = 0 if self.evaluate_before_training else 1
         all_epochs = list(range(start_epoch, self.max_epochs + 1))
         return all_epochs[self.inference.epochs.slice]
@@ -170,6 +186,8 @@ class TrainBuilders:
         )
 
     def _get_evaluation_window_data_requirements(self) -> DataRequirements:
+        if self.config.inference is None:
+            return NullDataRequirements
         return self.config.stepper.get_evaluation_window_data_requirements(
             self.config.inference.forward_steps_in_memory
         )
@@ -195,15 +213,16 @@ class TrainBuilders:
             train=False,
         )
 
-    def get_evaluation_inference_data(
-        self,
-    ) -> InferenceGriddedData:
-        return get_inference_data(
-            config=self.config.inference.loader,
-            total_forward_steps=self.config.inference_n_forward_steps,
-            window_requirements=self._get_evaluation_window_data_requirements(),
-            initial_condition=self._get_initial_condition_data_requirements(),
-        )
+    def get_evaluation_inference_data(self) -> InferenceDataABC:
+        if isinstance(self.config.inference, InlineInferenceConfig):
+            return get_inference_data(
+                config=self.config.inference.loader,
+                total_forward_steps=self.config.inference_n_forward_steps,
+                window_requirements=self._get_evaluation_window_data_requirements(),
+                initial_condition=self._get_initial_condition_data_requirements(),
+            )
+        else:  # self.config.inference is None
+            return NullInferenceData()
 
     def get_optimization(self, modules: torch.nn.ModuleList) -> Optimization:
         return self.config.optimization.build(modules, self.config.max_epochs)
