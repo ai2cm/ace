@@ -3,7 +3,11 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from fme.core.coordinates import SerializableVerticalCoordinate, VerticalCoordinate
+from fme.core.coordinates import (
+    NullVerticalCoordinate,
+    SerializableVerticalCoordinate,
+    VerticalCoordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
@@ -88,6 +92,9 @@ class DatasetInfo:
         if (
             self._vertical_coordinate is not None
             and other._vertical_coordinate is not None
+        ) and not (
+            isinstance(self._vertical_coordinate, NullVerticalCoordinate)
+            or isinstance(other._vertical_coordinate, NullVerticalCoordinate)
         ):
             if self._vertical_coordinate != other._vertical_coordinate:
                 issues.append(
