@@ -11,7 +11,6 @@ import torch
 import xarray as xr
 import yaml
 
-import fme
 from fme.ace.data_loading.batch_data import PrognosticState
 from fme.ace.data_loading.inference import (
     ExplicitIndices,
@@ -38,6 +37,7 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
+from fme.core.metrics import spherical_area_weights
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.testing import mock_wandb
@@ -56,7 +56,8 @@ def save_stepper(
     out_names: list[str],
     mean: float,
     std: float,
-    data_shape: list[int],
+    horizontal_coords: dict[str, xr.DataArray],
+    nz_interface: int,
     timestep: datetime.timedelta = TIMESTEP,
 ):
     all_names = list(set(in_names).union(out_names))
@@ -73,12 +74,17 @@ def save_stepper(
             ocean_fraction_name="ocean_fraction",
         ),
     )
-    area = torch.ones(data_shape[-2:], device=fme.get_device())
+    area = torch.tensor(
+        spherical_area_weights(
+            lats=horizontal_coords["lat"].values, num_lon=len(horizontal_coords["lon"])
+        ),
+        dtype=torch.float32,
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
+        ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
     )
     dataset_info = DatasetInfo(
-        img_shape=(data_shape[-2], data_shape[-1]),
+        img_shape=(len(horizontal_coords["lat"]), len(horizontal_coords["lon"])),
         gridded_operations=LatLonOperations(area),
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
@@ -103,19 +109,12 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     out_names = ["prog", "sst", "ULWRFtoa", "USWRFtoa"]
     stepper_path = tmp_path / "stepper"
     horizontal = [DimSize("lat", 16), DimSize("lon", 32)]
+    nz_interface = 4
 
     dim_sizes = DimSizes(
         n_time=9,
         horizontal=horizontal,
         nz_interface=4,
-    )
-    save_stepper(
-        stepper_path,
-        in_names=in_names,
-        out_names=out_names,
-        mean=0.0,
-        std=1.0,
-        data_shape=dim_sizes.shape_nd,
     )
     data = FV3GFSData(
         path=tmp_path,
@@ -123,6 +122,15 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         dim_sizes=dim_sizes,
         timestep_days=0.25,
         save_vertical_coordinate=False,
+    )
+    save_stepper(
+        stepper_path,
+        in_names=in_names,
+        out_names=out_names,
+        mean=0.0,
+        std=1.0,
+        horizontal_coords=data.horizontal_coords,
+        nz_interface=nz_interface,
     )
     dims = ["sample", "lat", "lon"]
     initial_condition = xr.Dataset(
@@ -167,7 +175,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
         initial_condition=InitialConditionConfig(path=str(initial_condition_path)),
         forcing_loader=forcing_loader,
         data_writer=DataWriterConfig(save_prediction_files=True),
-        allow_incompatible_dataset=True,  # stepper checkpoint has arbitrary info
+        allow_incompatible_dataset=False,
     )
     config_filename = tmp_path / "config.yaml"
     with open(config_filename, "w") as f:
