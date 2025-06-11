@@ -68,14 +68,13 @@ def get_data_loader(
             config.dataset.concat,
             requirements.names,
             requirements.n_timesteps,
-            strict=config.strict_ensemble,
+            strict=config.dataset.strict,
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
         dataset, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
             requirements.n_timesteps,
-            strict=config.strict_ensemble,
         )
     dist = Distributed.get_instance()
 
