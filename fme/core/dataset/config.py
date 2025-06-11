@@ -298,9 +298,12 @@ class ConcatDatasetConfig:
     Configuration for concatenating multiple datasets.
     Parameters:
         concat: List of XarrayDataConfig objects to concatenate.
+        strict: Whether to enforce that the datasets to be concatenated
+            have the same dimensions and coordinates.
     """
 
     concat: Sequence[XarrayDataConfig]
+    strict: bool = True
 
     def __post_init__(self):
         self.zarr_engine_used = any(ds.engine == "zarr" for ds in self.concat)

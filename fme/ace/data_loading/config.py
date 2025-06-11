@@ -26,8 +26,6 @@ class DataLoaderConfig:
         num_data_workers: Number of parallel workers to use for data loading.
         prefetch_factor: how many batches a single data worker will attempt to
             hold in host memory at a given time.
-        strict_ensemble: Whether to enforce that the datasets to be concatened
-            have the same dimensions and coordinates.
         augmentation: Configuration for data augmentation.
     """  # noqa: D415
 
@@ -40,7 +38,6 @@ class DataLoaderConfig:
     batch_size: int
     num_data_workers: int = 0
     prefetch_factor: int | None = None
-    strict_ensemble: bool = True
     augmentation: AugmentationConfig = dataclasses.field(
         default_factory=lambda: AugmentationConfig()
     )
