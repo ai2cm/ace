@@ -44,7 +44,8 @@ cache-keys = [
 ]
 
 [tool.ruff]
-exclude = ["fme/ace/models/makani_fcn2/**"]
+exclude = ["fme/ace/models/makani_fcn2/**", "fme/ace/models/miles_credit/**"]
+
 
 [tool.ruff.lint]
 select = ["D", "E", "F", "I", "W", "UP"]

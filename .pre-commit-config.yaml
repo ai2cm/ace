@@ -29,4 +29,5 @@ repos:
         .+/conf.py |
         .+/conftest.py |
         fme/ace/models/makani_fcn2/.*
+        fme/ace/models/miles_credit/.*
         )$
