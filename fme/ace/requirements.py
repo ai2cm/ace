@@ -27,3 +27,9 @@ class DataRequirements:
 
     names: list[str]
     n_timesteps: int
+
+
+NullDataRequirements = DataRequirements(
+    names=[],
+    n_timesteps=0,
+)
