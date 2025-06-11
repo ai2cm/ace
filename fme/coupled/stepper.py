@@ -19,12 +19,7 @@ from fme.ace.stepper import (
     process_prediction_generator_list,
     stack_list_of_tensor_dicts,
 )
-from fme.ace.stepper.single_module import (
-    SingleModuleStepperConfig,
-    StepperConfig,
-    get_serialized_stepper_vertical_coordinate,
-)
-from fme.core.coordinates import DepthCoordinate
+from fme.ace.stepper.single_module import SingleModuleStepperConfig, StepperConfig
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
@@ -38,10 +33,7 @@ from fme.coupled.data_loading.batch_data import (
     CoupledPairedData,
     CoupledPrognosticState,
 )
-from fme.coupled.data_loading.data_typing import (
-    CoupledHorizontalCoordinates,
-    CoupledVerticalCoordinate,
-)
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.loss import LossContributionsConfig, StepLossABC, StepPredictionABC
 from fme.coupled.requirements import (
     CoupledDataRequirements,
@@ -396,7 +388,7 @@ class CoupledStepperConfig:
         if dataset_info.timestep != self.ocean_timestep:
             raise ValueError(
                 "Ocean timestep must match the dataset timestep. "
-                f"Got {dataset_info.timestep} and {self.ocean_timestep}."
+                f"Got {self.ocean_timestep} and {dataset_info.timestep}, respectively."
             )
         return self.ocean.stepper.get_stepper(
             dataset_info=dataset_info,
@@ -409,7 +401,8 @@ class CoupledStepperConfig:
         if dataset_info.timestep != self.atmosphere_timestep:
             raise ValueError(
                 "Atmosphere timestep must match the dataset timestep. "
-                f"Got {dataset_info.timestep} and {self.atmosphere_timestep}."
+                f"Got {self.atmosphere_timestep} and {dataset_info.timestep}, "
+                "respectively."
             )
         return self.atmosphere.stepper.get_stepper(
             dataset_info=dataset_info,
@@ -417,33 +410,18 @@ class CoupledStepperConfig:
 
     def get_stepper(
         self,
-        img_shape: tuple[int, int],
-        horizontal_coordinates: CoupledHorizontalCoordinates,
-        vertical_coordinate: CoupledVerticalCoordinate,
+        dataset_info: CoupledDatasetInfo,
     ):
         logging.info("Initializing coupler")
-        sst_mask = None
-        if isinstance(vertical_coordinate.ocean, DepthCoordinate):
-            sst_mask = vertical_coordinate.ocean.get_mask_level(0)
         return CoupledStepper(
             config=self,
             ocean=self._get_ocean_stepper(
-                dataset_info=DatasetInfo(
-                    img_shape=img_shape,
-                    gridded_operations=horizontal_coordinates.ocean.gridded_operations,
-                    vertical_coordinate=vertical_coordinate.ocean,
-                    timestep=self.ocean_timestep,
-                ),
+                dataset_info=dataset_info.ocean,
             ),
             atmosphere=self._get_atmosphere_stepper(
-                dataset_info=DatasetInfo(
-                    img_shape=img_shape,
-                    gridded_operations=horizontal_coordinates.atmosphere.gridded_operations,
-                    vertical_coordinate=vertical_coordinate.atmosphere,
-                    timestep=self.atmosphere_timestep,
-                ),
+                dataset_info=dataset_info.atmosphere
             ),
-            sst_mask=sst_mask,
+            dataset_info=dataset_info,
         )
 
     def get_ocean_loss(
@@ -653,18 +631,14 @@ class CoupledStepper(
         config: CoupledStepperConfig,
         ocean: Stepper,
         atmosphere: Stepper,
-        sst_mask: torch.Tensor | None = None,
+        dataset_info: CoupledDatasetInfo,
     ):
         """
         Args:
             config: The configuration.
             ocean: The ocean stepper.
             atmosphere: The atmosphere stepper.
-            sst_mask: (Optional) The ocean surface mask tensor, with value 1 at
-                valid ocean points and 0 elsewhere. If provided, ensures that
-                the ocean fraction variable used by the atmosphere to determine
-                where to prescribe the ocean's SST is 0 everywhere that the mask
-                is 0.
+            dataset_info: The CoupledDatasetInfo.
 
         """
         if ocean.n_ic_timesteps != 1 or atmosphere.n_ic_timesteps != 1:
@@ -673,9 +647,8 @@ class CoupledStepper(
         self.ocean = ocean
         self.atmosphere = atmosphere
         self._config = config
-        self._sst_mask = sst_mask
-        if self._sst_mask is not None:
-            self._sst_mask = self._sst_mask.to(fme.get_device())
+        self._dataset_info = dataset_info
+        self._ocean_mask_provider = dataset_info.ocean_mask_provider
 
         ocean_loss = self._config.get_ocean_loss(
             self.ocean.loss_obj,
@@ -714,6 +687,7 @@ class CoupledStepper(
             "config": self._config.get_state(),
             "atmosphere_state": self.atmosphere.get_state(),
             "ocean_state": self.ocean.get_state(),
+            "dataset_info": self._dataset_info.to_state(),
         }
 
     def load_state(self, state: dict[str, Any]):
@@ -777,10 +751,10 @@ class CoupledStepper(
             # remove negative values just in case the ocean doesn't constrain
             # the sea ice
             forcings_from_ocean[ocean_frac_name] = torch.clip(ocean_frac, min=0)
-        mask = self._sst_mask
-        if mask is not None:
-            for name, tensor in forcings_from_ocean.items():
-                # set ocean invalid points to 0 based on the ocean masking
+        for name, tensor in forcings_from_ocean.items():
+            # set ocean invalid points to 0 based on the ocean masking
+            mask = self._ocean_mask_provider.get_mask_tensor_for(name)
+            if mask is not None:
                 mask = mask.expand(tensor.shape)
                 forcings_from_ocean[name] = tensor.where(mask != 0, 0)
         return forcings_from_ocean
@@ -1193,10 +1167,12 @@ class CoupledStepper(
         config = CoupledStepperConfig.from_state(state["config"])
         ocean = Stepper.from_state(state["ocean_state"])
         atmosphere = Stepper.from_state(state["atmosphere_state"])
-        sst_mask = None
-        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
-            state["ocean_state"]
-        )
-        if isinstance(ocean_vertical_coord, DepthCoordinate):
-            sst_mask = ocean_vertical_coord.get_mask_level(0)
-        return cls(config, ocean, atmosphere, sst_mask)
+        if "dataset_info" in state:
+            dataset_info = CoupledDatasetInfo.from_state(state["dataset_info"])
+        else:
+            # NOTE: this is included for backwards compatibility
+            dataset_info = CoupledDatasetInfo(
+                ocean=ocean.training_dataset_info,
+                atmosphere=atmosphere.training_dataset_info,
+            )
+        return cls(config, ocean, atmosphere, dataset_info)

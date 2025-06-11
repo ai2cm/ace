@@ -1,11 +1,13 @@
 import datetime
 import logging
+from collections import namedtuple
 
 import torch
 
 from fme.ace.data_loading.gridded_data import SizedMap
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
+from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
 from fme.coupled.data_loading.batch_data import CoupledBatchData, CoupledPrognosticState
 from fme.coupled.data_loading.data_typing import (
@@ -14,7 +16,26 @@ from fme.coupled.data_loading.data_typing import (
     CoupledHorizontalCoordinates,
     CoupledVerticalCoordinate,
 )
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
+
+CoupledImageShapes = namedtuple("CoupledImageShapes", ("ocean", "atmosphere"))
+
+
+def get_img_shape(
+    loader: DataLoader[CoupledBatchData],
+) -> CoupledImageShapes:
+    ocean_img_shape = None
+    atmos_img_shape = None
+    for batch in loader:
+        ocean_img_shape = next(iter(batch.ocean_data.data.values())).shape[-2:]
+        atmos_img_shape = next(iter(batch.atmosphere_data.data.values())).shape[-2:]
+        break
+    if ocean_img_shape is None:
+        raise ValueError("No ocean data found in loader")
+    if atmos_img_shape is None:
+        raise ValueError("No atmosphere data found in loader")
+    return CoupledImageShapes(ocean_img_shape, atmos_img_shape)
 
 
 class GriddedData(GriddedDataABC[CoupledBatchData]):
@@ -37,8 +58,11 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         """
         self._loader = loader
         self._properties = properties.to_device()
+        self._ocean = self._properties.ocean
+        self._atmosphere = self._properties.atmosphere
         self._sampler = sampler
         self._batch_size: int | None = None
+        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
@@ -50,6 +74,27 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
+
+    @property
+    def dataset_info(self) -> CoupledDatasetInfo:
+        return CoupledDatasetInfo(
+            ocean=DatasetInfo(
+                img_shape=self._img_shape.ocean,
+                gridded_operations=self._ocean.horizontal_coordinates.gridded_operations,
+                vertical_coordinate=self._ocean.vertical_coordinate,
+                mask_provider=self._ocean.mask_provider,
+                timestep=self._ocean.timestep,
+                variable_metadata=self._properties.variable_metadata,
+            ),
+            atmosphere=DatasetInfo(
+                img_shape=self._img_shape.atmosphere,
+                gridded_operations=self._atmosphere.horizontal_coordinates.gridded_operations,
+                vertical_coordinate=self._atmosphere.vertical_coordinate,
+                mask_provider=self._atmosphere.mask_provider,
+                timestep=self._atmosphere.timestep,
+                variable_metadata=self._properties.variable_metadata,
+            ),
+        )
 
     @property
     def vertical_coordinate(self) -> CoupledVerticalCoordinate:
@@ -66,10 +111,10 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     @property
     def coords(self) -> CoupledCoords:
         return CoupledCoords(
-            ocean_vertical=self.vertical_coordinate.ocean.coords,
-            atmosphere_vertical=self.vertical_coordinate.atmosphere.coords,
-            ocean_horizontal=dict(self.horizontal_coordinates.ocean.coords),
-            atmosphere_horizontal=dict(self.horizontal_coordinates.atmosphere.coords),
+            ocean_vertical=self._ocean.vertical_coordinate.coords,
+            atmosphere_vertical=self._atmosphere.vertical_coordinate.coords,
+            ocean_horizontal=dict(self._ocean.horizontal_coordinates.coords),
+            atmosphere_horizontal=dict(self._atmosphere.horizontal_coordinates.coords),
         )
 
     @property
