@@ -31,6 +31,5 @@ beaker session create --remote --bare --cluster ${cluster_name} \
     --env GOOGLE_APPLICATION_CREDENTIALS=/secrets/google_app_credentials.json \
     --secret-env WANDB_API_KEY=wandb-api-key \
     ${gpu_arg} \
-    --save-image \
     bash
 
