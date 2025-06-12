@@ -593,6 +593,48 @@ class CrossFormer(BaseModel):
 
 
 if __name__ == "__main__":
+    """
+    type: "crossformer"
+    frames: 1                         # number of input states (default: 1)
+    image_height: 192                 # number of latitude grids (default: 640)
+    image_width: 288                  # number of longitude grids (default: 1280)
+    levels: 32                        # number of upper-air variable levels (default: 15)
+    channels: 4                       # upper-air variable channels
+    surface_channels: 3               # surface variable channels
+    input_only_channels: 3            # dynamic forcing, forcing, static channels
+    output_only_channels: 15          # diagnostic variable channels
+
+    patch_width: 1                    # latitude grid size per 3D patch
+    patch_height: 1                   # longitude grid size per 3D patch
+    frame_patch_size: 1               # number of time frames per 3D patch
+
+    dim: [256, 512, 1024, 2048]       # dimensionality of each layer
+    depth: [2, 2, 18, 2]              # depth of each transformer block
+    global_window_size: [4, 4, 2, 1]  # global attention window sizes
+    local_window_size: 3              # local attention window size
+
+    cross_embed_kernel_sizes:         # kernel sizes for cross-embedding
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+
+    cross_embed_strides: [2, 2, 2, 2] # cross-embedding strides
+    attn_dropout: 0.0                 # dropout for attention layers
+    ff_dropout: 0.0                   # dropout for feed-forward layers
+
+    use_spectral_norm: True
+
+    # use interpolation to match the output size
+    interp: True
+
+    # map boundary padding
+    padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: 48
+    pad_lon: 48"""
+    padding_conf = dict(activate=True, mode="earth", pad_lat=(60,60), pad_lon=(24,24))
     image_height = 180  # 640, 192
     image_width = 360  # 1280, 288
     levels = 8
@@ -619,20 +661,21 @@ if __name__ == "__main__":
         surface_channels=surface_channels,
         input_only_channels=input_only_channels,
         levels=levels,
-        dim=(128, 256, 512, 1024),
+        dim=(256, 512, 1024, 2048),
         depth=(2, 2, 18, 2),
-        global_window_size=(8, 4, 2, 1),
-        local_window_size=5,
+        global_window_size=(4, 4, 2, 1),
+        local_window_size=3,
         cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides=(4, 2, 2, 2),
+        cross_embed_strides=(2, 2, 2, 2),
         attn_dropout=0.0,
         ff_dropout=0.0,
+        padding_conf=padding_conf,
     )
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Number of parameters in the model: {num_params}")
 
-    #y_pred = model(input_tensor)
-    #print("Predicted shape:", y_pred.shape)
+    y_pred = model(input_tensor)
+    print("Predicted shape:", y_pred.shape)
 
     # print(model.rk4(input_tensor.to("cpu")).shape)
