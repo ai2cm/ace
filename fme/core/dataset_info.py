@@ -12,7 +12,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
 from fme.core.mask_provider import MaskProvider
-from fme.core.masking import HasGetMaskTensorFor
 
 
 class MissingDatasetInfo(ValueError):
@@ -145,15 +144,9 @@ class DatasetInfo:
         return self._vertical_coordinate
 
     @property
-    def mask_provider(self) -> HasGetMaskTensorFor:
+    def mask_provider(self) -> MaskProvider:
         if self._mask_provider is None:
-            try:
-                coord = self.vertical_coordinate
-            except MissingDatasetInfo as err:
-                raise MissingDatasetInfo("mask_provider") from err
-            if not isinstance(coord, HasGetMaskTensorFor):
-                raise MissingDatasetInfo("mask_provider")
-            return coord
+            raise MissingDatasetInfo("mask_provider")
         return self._mask_provider
 
     @property
