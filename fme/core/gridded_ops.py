@@ -6,8 +6,7 @@ import torch_harmonics
 
 from fme.core import metrics
 from fme.core.device import get_device
-from fme.core.mask_provider import NullMaskProvider
-from fme.core.masking import HasGetMaskTensorFor
+from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
 from fme.core.tensors import assert_dict_allclose
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -255,7 +254,7 @@ def get_all_subclasses(cls: type[T]) -> list[type[T]]:
 
 def _mask_area_weights(
     area_weights: torch.Tensor,
-    mask_provider: HasGetMaskTensorFor,
+    mask_provider: MaskProviderABC,
     name: str | None,
 ) -> torch.Tensor:
     if name is None:
@@ -272,7 +271,7 @@ class LatLonOperations(GriddedOperations):
     def __init__(
         self,
         area_weights: torch.Tensor,
-        mask_provider: HasGetMaskTensorFor = NullMaskProvider,
+        mask_provider: MaskProviderABC = NullMaskProvider,
     ):
         self._device_area = area_weights.to(get_device())
         self._cpu_area = area_weights.to("cpu")

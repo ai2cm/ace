@@ -23,8 +23,8 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.mask_provider import NullMaskProvider
-from fme.core.masking import HasGetMaskTensorFor, StaticMasking
+from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
+from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -658,7 +658,7 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     lon: torch.Tensor
     lat: torch.Tensor
-    mask_provider: HasGetMaskTensorFor = NullMaskProvider
+    mask_provider: MaskProviderABC = NullMaskProvider
 
     def __post_init__(self):
         self._area_weights: torch.Tensor | None = None
