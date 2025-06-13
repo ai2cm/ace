@@ -2,10 +2,11 @@ import dataclasses
 import datetime
 import pathlib
 import re
-from typing import Literal
+from typing import Literal, cast
 
 import cftime
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 
@@ -14,8 +15,16 @@ from fme.ace.data_loading.inference import ExplicitIndices
 from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
 from fme.ace.testing import save_scalar_netcdf
+from fme.core.coordinates import (
+    OptionalDepthCoordinate,
+    OptionalHybridSigmaPressureCoordinate,
+    VerticalCoordinate,
+)
 from fme.core.dataset.config import XarrayDataConfig
+from fme.core.dataset.xarray import _get_mask_provider, _get_vertical_coordinate
+from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
+from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
@@ -86,39 +95,59 @@ def _save_netcdf(
 
 
 @dataclasses.dataclass
-class MockCoupledData:
-    ocean: xr.Dataset
-    atmosphere: xr.Dataset
-    ocean_dir: str
-    atmosphere_dir: str
+class MockComponentData:
+    ds: xr.Dataset
+    data_dir: str
     means_path: str
     stds_path: str
-    ocean_timedelta: str
-    atmosphere_timedelta: str
+    timedelta: str
 
     def __post_init__(self):
-        self.ocean["time"] = cftime.num2date(
-            self.ocean["time"].values,
-            units=self.ocean["time"].units,
-            calendar=self.ocean["time"].calendar,
+        self.ds["time"] = cftime.num2date(
+            self.ds["time"].values,
+            units=self.ds["time"].units,
+            calendar=self.ds["time"].calendar,
         )
-        self.atmosphere["time"] = cftime.num2date(
-            self.atmosphere["time"].values,
-            units=self.atmosphere["time"].units,
-            calendar=self.atmosphere["time"].calendar,
-        )
+
+    @property
+    def timestep(self) -> datetime.timedelta:
+        return pd.Timedelta(self.timedelta).to_pytimedelta()
+
+    @property
+    def mask_provider(self) -> MaskProvider:
+        return _get_mask_provider(self.ds, dtype=None)
+
+    @property
+    def vcoord(self) -> VerticalCoordinate:
+        return _get_vertical_coordinate(self.ds, dtype=None)
+
+
+@dataclasses.dataclass
+class MockCoupledData:
+    ocean: MockComponentData
+    atmosphere: MockComponentData
 
     @property
     def n_times_ocean(self):
-        return len(self.ocean["time"])
+        return len(self.ocean.ds["time"])
 
     @property
     def n_times_atmosphere(self):
-        return len(self.atmosphere["time"])
+        return len(self.atmosphere.ds["time"])
 
     @property
-    def img_shape(self) -> list[int]:
-        return list(self.ocean[next(iter(self.ocean.data_vars))].shape[-2:])
+    def img_shape(self) -> tuple[int, int]:
+        # NOTE: assumes atmosphere has same img_shape
+        return self.ocean.ds[next(iter(self.ocean.ds.data_vars))].shape[-2:]
+
+    @property
+    def vcoord(self) -> CoupledVerticalCoordinate:
+        return CoupledVerticalCoordinate(
+            ocean=cast(OptionalDepthCoordinate, self.ocean.vcoord),
+            atmosphere=cast(
+                OptionalHybridSigmaPressureCoordinate, self.atmosphere.vcoord
+            ),
+        )
 
 
 def create_coupled_data_on_disk(
@@ -185,16 +214,21 @@ def create_coupled_data_on_disk(
     all_names = list(set(ocean_names + atmosphere_names))
     save_scalar_netcdf(stats_dir / "means.nc", variable_names=all_names)
     save_scalar_netcdf(stats_dir / "stds.nc", variable_names=all_names)
-
     return MockCoupledData(
-        ocean=ocean_ds,
-        atmosphere=atmos_ds,
-        ocean_dir=str(ocean_dir),
-        atmosphere_dir=str(atmos_dir),
-        means_path=str(stats_dir / "means.nc"),
-        stds_path=str(stats_dir / "stds.nc"),
-        ocean_timedelta=timedelta_ocean,
-        atmosphere_timedelta=timedelta_atmos,
+        ocean=MockComponentData(
+            ds=ocean_ds,
+            data_dir=str(ocean_dir),
+            means_path=str(stats_dir / "means.nc"),
+            stds_path=str(stats_dir / "stds.nc"),
+            timedelta=timedelta_ocean,
+        ),
+        atmosphere=MockComponentData(
+            ds=atmos_ds,
+            data_dir=str(atmos_dir),
+            means_path=str(stats_dir / "means.nc"),
+            stds_path=str(stats_dir / "stds.nc"),
+            timedelta=timedelta_atmos,
+        ),
     )
 
 
@@ -232,10 +266,10 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
         dataset=[
             CoupledDatasetConfig(
                 ocean=XarrayDataConfig(
-                    data_path=ics[i].ocean_dir,
+                    data_path=ics[i].ocean.data_dir,
                 ),
                 atmosphere=XarrayDataConfig(
-                    data_path=ics[i].atmosphere_dir,
+                    data_path=ics[i].atmosphere.data_dir,
                     subset=atmos_data_subset,
                 ),
             )
@@ -277,8 +311,8 @@ def test_coupled_data_loader(tmp_path, atmosphere_times_offset: bool):
     # check that the sample data matches
     ic_idx = 0
     sample_idx = 1
-    ocean_ds = ics[ic_idx].ocean
-    atmos_ds = ics[ic_idx].atmosphere
+    ocean_ds = ics[ic_idx].ocean.ds
+    atmos_ds = ics[ic_idx].atmosphere.ds
     sample = data._loader.dataset[sample_idx]  # type: ignore
     ocean_sample_init_time = sample.ocean[1].isel(time=0).item()
     atmos_sample_init_time = sample.atmosphere[1].isel(time=0).item()
