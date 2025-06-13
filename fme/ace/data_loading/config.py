@@ -27,6 +27,9 @@ class DataLoaderConfig:
         prefetch_factor: how many batches a single data worker will attempt to
             hold in host memory at a given time.
         augmentation: Configuration for data augmentation.
+        sample_with_replacement: If provided, the dataset will be
+            sampled randomly with replacement to the given size each period,
+            instead of retrieving each sample once (either shuffled or not).
     """  # noqa: D415
 
     dataset: (
@@ -41,6 +44,7 @@ class DataLoaderConfig:
     augmentation: AugmentationConfig = dataclasses.field(
         default_factory=lambda: AugmentationConfig()
     )
+    sample_with_replacement: int | None = None
 
     def __post_init__(self):
         dist = Distributed.get_instance()
