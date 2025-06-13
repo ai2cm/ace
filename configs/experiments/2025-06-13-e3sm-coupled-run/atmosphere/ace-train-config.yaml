@@ -1,0 +1,215 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 50
+n_forward_steps: 2
+inference:
+  n_forward_steps: 14600
+  forward_steps_in_memory: 40
+  loader:
+    start_indices:
+      times:
+      - '0401-01-01T06:00:00'
+      - '0411-01-01T06:00:00'
+      - '0421-01-01T06:00:00'
+      - '0431-01-01T06:00:00'
+      - '0441-01-01T06:00:00'
+      - '0451-01-01T06:00:00'
+      - '0461-01-01T06:00:00'
+      - '0471-01-01T06:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+        engine: zarr
+    num_data_workers: 8
+  aggregator:
+    log_histograms: true
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-eamv3
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+      engine: zarr
+      subset:
+        stop_time: '0481-01-01T06:00:00'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
+      engine: zarr
+      subset:
+        start_time: '0481-01-01T06:00:00'
+        stop_time: '0486-01-01T06:00:00'
+optimization:
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  use_gradient_accumulation: false
+  optimizer_type: FusedAdam
+  kwargs:
+    weight_decay: 0.01
+stepper:
+  loss:
+    type: MSE
+    weights:
+      T_0: 0.5
+      T_1: 0.5
+      U_0: 0.5
+      V_0: 0.5
+      specific_total_water_0: 0.5
+      specific_total_water_1: 0.25
+      specific_total_water_2: 0.5
+      surface_precipitation_rate: 0.5
+      FLDS: 2
+      surface_upward_longwave_flux: 5
+      surface_upward_shortwave_flux: 2
+      FSDS: 2
+      top_of_atmos_upward_shortwave_flux: 2
+      tendency_of_total_water_path_due_to_advection: 0.5
+  step:
+    type: single_module
+    config:
+      builder:
+        type: SphericalFourierNeuralOperatorNet
+        config:
+          embed_dim: 384
+          filter_type: linear
+          hard_thresholding_fraction: 1.0
+          use_mlp: true
+          normalization_layer: instance_norm
+          num_layers: 8
+          operator_type: dhconv
+          scale_factor: 1
+          separable: false
+          spectral_layers: 3
+          spectral_transform: sht
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+          fill_nans_on_normalize: true
+        residual:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-residual.nc
+      ocean:
+        surface_temperature_name: TS
+        ocean_fraction_name: ocean_fraction
+      corrector:
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        force_positive_names:
+        - specific_total_water_0
+        - specific_total_water_1
+        - specific_total_water_2
+        - specific_total_water_3
+        - specific_total_water_4
+        - specific_total_water_5
+        - specific_total_water_6
+        - specific_total_water_7
+        - surface_precipitation_rate
+        - surface_upward_longwave_flux
+        - FLUT
+        - FLDS
+        - FSDS
+        - surface_upward_shortwave_flux
+        - top_of_atmos_upward_shortwave_flux
+      next_step_forcing_names:
+      - SOLIN
+      in_names:
+      - land_fraction
+      - ocean_fraction
+      - ocean_sea_ice_fraction
+      - PHIS
+      - SOLIN
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      out_names:
+      - PS
+      - TS
+      - T_0
+      - T_1
+      - T_2
+      - T_3
+      - T_4
+      - T_5
+      - T_6
+      - T_7
+      - specific_total_water_0
+      - specific_total_water_1
+      - specific_total_water_2
+      - specific_total_water_3
+      - specific_total_water_4
+      - specific_total_water_5
+      - specific_total_water_6
+      - specific_total_water_7
+      - U_0
+      - U_1
+      - U_2
+      - U_3
+      - U_4
+      - U_5
+      - U_6
+      - U_7
+      - V_0
+      - V_1
+      - V_2
+      - V_3
+      - V_4
+      - V_5
+      - V_6
+      - V_7
+      - LHFLX
+      - SHFLX
+      - surface_precipitation_rate
+      - surface_upward_longwave_flux
+      - FLUT
+      - FLDS
+      - FSDS
+      - surface_upward_shortwave_flux
+      - top_of_atmos_upward_shortwave_flux
+      - tendency_of_total_water_path_due_to_advection

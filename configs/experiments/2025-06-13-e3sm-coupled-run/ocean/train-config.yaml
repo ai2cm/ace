@@ -1,0 +1,312 @@
+experiment_dir: /results
+save_checkpoint: true
+validate_using_ema: true
+ema:
+  decay: 0.999
+max_epochs: 120
+n_forward_steps: 4
+inference:
+  n_forward_steps: 730
+  forward_steps_in_memory: 20
+  loader:
+    start_indices:
+      times:
+      - '0401-01-06T00:00:00'
+      - '0411-01-06T00:00:00'
+      - '0421-01-06T00:00:00'
+      - '0431-01-06T00:00:00'
+      - '0441-01-06T00:00:00'
+      - '0451-01-06T00:00:00'
+      - '0461-01-06T00:00:00'
+      - '0471-01-06T00:00:00'
+    dataset:
+      merge:
+      - data_path: /climate-default
+        file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
+        engine: zarr
+    num_data_workers: 8
+  aggregator:
+    log_histograms: false
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator-e3sm
+  entity: ai2cm
+train_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
+      engine: zarr
+      subset:
+        stop_time: '0480-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
+      engine: zarr
+      subset:
+        stop_time: '0480-01-01'
+validation_loader:
+  batch_size: 16
+  num_data_workers: 8
+  dataset:
+    merge:
+    - data_path: /climate-default
+      file_pattern: 2025-06-11-E3SM-piControl-ocean-ice-19-levs-fix-mask.zarr
+      engine: zarr
+      subset:
+        start_time: '0480-01-01'
+        stop_time: '0485-01-01'
+    - data_path: /climate-default
+      file_pattern: 2025-06-12-E3SMv3-coupled-piControl-atmosphere-sfc-only-5daily.zarr
+      engine: zarr
+      subset:
+        start_time: '0480-01-01'
+        stop_time: '0485-01-01'
+optimization:
+  use_gradient_accumulation: true
+  enable_automatic_mixed_precision: false
+  lr: 0.0001
+  optimizer_type: FusedAdam
+  kwargs:
+    weight_decay: 0.01
+stepper:
+  loss:
+    type: MSE
+  input_masking:
+    mask_value: 0
+    fill_value: 0.0
+    exclude_names_and_prefixes:
+      - land_fraction
+  step:
+    type: single_module
+    config:
+      builder:
+        type: Samudra
+        config:
+          ch_width:
+          - 200
+          - 250
+          - 300
+          - 400
+          dilation:
+          - 1
+          - 2
+          - 4
+          - 8
+          n_layers:
+          - 1
+          - 1
+          - 1
+          - 1
+          norm: instance
+      normalization:
+        network:
+          global_means_path: /statsdata/centering.nc
+          global_stds_path: /statsdata/scaling-full-field.nc
+      corrector:
+        type: ocean_corrector
+        config:
+          force_positive_names:
+          - so_0
+          - so_1
+          - so_2
+          - so_3
+          - so_4
+          - so_5
+          - so_6
+          - so_7
+          - so_8
+          - so_9
+          - so_10
+          - so_11
+          - so_12
+          - so_13
+          - so_14
+          - so_15
+          - so_16
+          - so_17
+          - so_18
+      next_step_forcing_names:
+      - tauuo
+      - tauvo
+      - surface_precipitation_rate
+      - surface_upward_longwave_flux
+      - surface_upward_shortwave_flux
+      - FLDS
+      - FSDS
+      - LHFLX
+      - SHFLX
+      in_names:
+      - tauuo
+      - tauvo
+      - surface_precipitation_rate
+      - surface_upward_longwave_flux
+      - surface_upward_shortwave_flux
+      - FLDS
+      - FSDS
+      - LHFLX
+      - SHFLX
+      - land_fraction
+      - ocean_sea_ice_fraction
+      - sst
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - thetao_0
+      - thetao_1
+      - thetao_2
+      - thetao_3
+      - thetao_4
+      - thetao_5
+      - thetao_6
+      - thetao_7
+      - thetao_8
+      - thetao_9
+      - thetao_10
+      - thetao_11
+      - thetao_12
+      - thetao_13
+      - thetao_14
+      - thetao_15
+      - thetao_16
+      - thetao_17
+      - thetao_18
+      - uo_0
+      - uo_1
+      - uo_2
+      - uo_3
+      - uo_4
+      - uo_5
+      - uo_6
+      - uo_7
+      - uo_8
+      - uo_9
+      - uo_10
+      - uo_11
+      - uo_12
+      - uo_13
+      - uo_14
+      - uo_15
+      - uo_16
+      - uo_17
+      - uo_18
+      - vo_0
+      - vo_1
+      - vo_2
+      - vo_3
+      - vo_4
+      - vo_5
+      - vo_6
+      - vo_7
+      - vo_8
+      - vo_9
+      - vo_10
+      - vo_11
+      - vo_12
+      - vo_13
+      - vo_14
+      - vo_15
+      - vo_16
+      - vo_17
+      - vo_18
+      out_names:
+      - sst
+      - so_0
+      - so_1
+      - so_2
+      - so_3
+      - so_4
+      - so_5
+      - so_6
+      - so_7
+      - so_8
+      - so_9
+      - so_10
+      - so_11
+      - so_12
+      - so_13
+      - so_14
+      - so_15
+      - so_16
+      - so_17
+      - so_18
+      - thetao_0
+      - thetao_1
+      - thetao_2
+      - thetao_3
+      - thetao_4
+      - thetao_5
+      - thetao_6
+      - thetao_7
+      - thetao_8
+      - thetao_9
+      - thetao_10
+      - thetao_11
+      - thetao_12
+      - thetao_13
+      - thetao_14
+      - thetao_15
+      - thetao_16
+      - thetao_17
+      - thetao_18
+      - uo_0
+      - uo_1
+      - uo_2
+      - uo_3
+      - uo_4
+      - uo_5
+      - uo_6
+      - uo_7
+      - uo_8
+      - uo_9
+      - uo_10
+      - uo_11
+      - uo_12
+      - uo_13
+      - uo_14
+      - uo_15
+      - uo_16
+      - uo_17
+      - uo_18
+      - vo_0
+      - vo_1
+      - vo_2
+      - vo_3
+      - vo_4
+      - vo_5
+      - vo_6
+      - vo_7
+      - vo_8
+      - vo_9
+      - vo_10
+      - vo_11
+      - vo_12
+      - vo_13
+      - vo_14
+      - vo_15
+      - vo_16
+      - vo_17
+      - vo_18
+      - ocean_sea_ice_fraction
