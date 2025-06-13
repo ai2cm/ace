@@ -44,6 +44,25 @@ class CollateFn:
         )
 
 
+def _get_sampler(
+    dataset: torch.utils.data.Dataset,
+    sample_with_replacement_dataset_size: int | None,
+    train: bool,
+) -> torch.utils.data.Sampler:
+    dist = Distributed.get_instance()
+    if sample_with_replacement_dataset_size is not None:
+        sampler = torch.utils.data.RandomSampler(
+            dataset,
+            num_samples=sample_with_replacement_dataset_size,
+            replacement=True,
+        )
+    elif dist.is_distributed():
+        sampler = DistributedSampler(dataset, shuffle=train)
+    else:
+        sampler = RandomSampler(dataset) if train else None
+    return sampler
+
+
 def get_data_loader(
     config: DataLoaderConfig,
     train: bool,
@@ -76,12 +95,8 @@ def get_data_loader(
             requirements.names,
             requirements.n_timesteps,
         )
-    dist = Distributed.get_instance()
 
-    if dist.is_distributed():
-        sampler = DistributedSampler(dataset, shuffle=train)
-    else:
-        sampler = RandomSampler(dataset) if train else None
+    sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
     if config.zarr_engine_used:
         # GCSFS and S3FS are not fork-safe, so we need to use forkserver
@@ -92,6 +107,7 @@ def get_data_loader(
         mp_context = None
         persistent_workers = False
 
+    dist = Distributed.get_instance()
     batch_size = dist.local_batch_size(int(config.batch_size))
 
     if config.prefetch_factor is None:

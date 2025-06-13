@@ -208,6 +208,7 @@ def _get_test_yaml_files(
             ),
             batch_size=2,
             num_data_workers=0,
+            sample_with_replacement=10,
         ),
         validation_loader=DataLoaderConfig(
             dataset=XarrayDataConfig(

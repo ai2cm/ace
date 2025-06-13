@@ -188,6 +188,25 @@ def test_xarray_loader(tmp_path):
     assert data._vertical_coordinate.ak.device == fme.get_device()
 
 
+def test_xarray_loader_sample_with_replacement(tmp_path):
+    _create_dataset_on_disk(tmp_path, n_times=3)
+    config = DataLoaderConfig(
+        dataset=ConcatDatasetConfig(
+            concat=[XarrayDataConfig(data_path=tmp_path, n_repeats=1)]
+        ),
+        batch_size=1,
+        num_data_workers=0,
+        sample_with_replacement=10,
+    )
+    window_timesteps = 2  # 1 initial condition and 1 step forward
+    requirements = DataRequirements(["foo"], window_timesteps)
+    data = get_data_loader(config, True, requirements)  # type: ignore
+    assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
+    assert data._vertical_coordinate.ak.device == fme.get_device()
+    epoch_samples = list(data.loader)
+    assert len(epoch_samples) == 10
+
+
 def test_xarray_loader_using_merged_dataset(tmp_path, tmp_path_factory):
     _create_dataset_on_disk(tmp_path)
     other_path = tmp_path_factory.mktemp("other")
