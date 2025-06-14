@@ -12,7 +12,7 @@ N_GPUS=8
 
 cd $REPO_ROOT  # so config path is valid no matter where we are running this script
 
-JOB_GROUP="Samudra-E3SM-with-atmos-5daily-sfc-fluxes-oic" # should be the same as the evaluator run job group
+JOB_GROUP="Samudra-E3SM-with-atmos-5daily-sfc-fluxes-oic-masked" # should be the same as the evaluator run job group
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
@@ -27,7 +27,7 @@ for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     # don't log validation maps
     OVERRIDE_ARGS="${GROUP_OVERRIDE_ARGS} validation_aggregator.log_snapshots=false validation_aggregator.log_mean_maps=false"
     if [ $RS -gt 1 ]; then
-        PRIORITY="normal"
+        PRIORITY="high"
         ALLOW_DIRTY=--allow-dirty # needed since experiments.txt will be updated
     else
         PRIORITY="normal"
