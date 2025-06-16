@@ -1,4 +1,6 @@
 import dataclasses
+import math
+from collections.abc import Callable
 from typing import Literal
 
 import torch
@@ -10,18 +12,61 @@ from fme.core.models.conditional_sfno.sfnonet import (
 )
 
 
+def isotropic_noise(
+    leading_shape: tuple[int, ...],
+    lmax: int,  # length of the ℓ axis expected by isht
+    mmax: int,  # length of the m axis expected by isht
+    isht: Callable[[torch.Tensor], torch.Tensor],
+) -> torch.Tensor:
+    # --- draw independent N(0,1) parts --------------------------------------
+    coeff_shape = (*leading_shape, lmax, mmax)
+    real = torch.randn(coeff_shape, dtype=torch.float32)
+    imag = torch.randn(coeff_shape, dtype=torch.float32)
+    imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
+
+    # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
+    sqrt2 = math.sqrt(2.0)
+    real[..., :, 1:] /= sqrt2
+    imag[..., :, 1:] /= sqrt2
+
+    # --- global scale that makes Var[T(θ,φ)] = 1 ---------------------------
+    scale = math.sqrt(4.0 * math.pi) / lmax  # (Unsöld theorem ⇒ L = lmax)
+    alm = (real + 1j * imag) * scale
+
+    return isht(alm)
+
+
 class NoiseConditionedSFNO(torch.nn.Module):
-    def __init__(self, conditional_model: ConditionalSFNO, embed_dim: int):
+    def __init__(
+        self,
+        conditional_model: ConditionalSFNO,
+        noise_type: Literal["isotropic", "gaussian"] = "gaussian",
+        embed_dim: int = 256,
+    ):
         super().__init__()
         self.conditional_model = conditional_model
         self.embed_dim = embed_dim
+        self.noise_type = noise_type
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        noise = torch.randn(
-            [*x.shape[:-3], self.embed_dim, *x.shape[-2:]],
-            device=x.device,
-            dtype=x.dtype,
-        )
+        if self.noise_type == "isotropic":
+            lmax = self.conditional_model.itrans_up.lmax
+            mmax = self.conditional_model.itrans_up.mmax
+            noise = isotropic_noise(
+                tuple(x.shape[:-3]) + (self.embed_dim,),
+                lmax,
+                mmax,
+                self.conditional_model.itrans_up,
+            ).to(x.device)
+        elif self.noise_type == "gaussian":
+            noise = torch.randn(
+                [*x.shape[:-3], self.embed_dim, *x.shape[-2:]],
+                device=x.device,
+                dtype=x.dtype,
+            )
+        else:
+            raise ValueError(f"Invalid noise type: {self.noise_type}")
+
         embedding_scalar = torch.zeros(
             [*x.shape[:-3], 0], device=x.device, dtype=x.dtype
         )
@@ -47,6 +92,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
         residual_filter_factor: Factor by which to downsample the residual.
         embed_dim: Dimension of the embedding.
         noise_embed_dim: Dimension of the noise embedding.
+        noise_type: Type of noise to use for conditioning.
         global_layer_norm: Whether to reduce along the spatial domain when applying
             layer normalization.
         num_layers: Number of blocks (SFNO and MLP)in the model.
@@ -81,6 +127,7 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
     residual_filter_factor: int = 1
     embed_dim: int = 256
     noise_embed_dim: int = 256
+    noise_type: Literal["isotropic", "gaussian"] = "gaussian"
     global_layer_norm: bool = False
     num_layers: int = 12
     use_mlp: bool = True
@@ -118,4 +165,6 @@ class NoiseConditionedSFNOBuilder(ModuleConfig):
                 embed_dim_2d=self.noise_embed_dim,
             ),
         )
-        return NoiseConditionedSFNO(sfno_net, self.noise_embed_dim)
+        return NoiseConditionedSFNO(
+            sfno_net, noise_type=self.noise_type, embed_dim=self.noise_embed_dim
+        )

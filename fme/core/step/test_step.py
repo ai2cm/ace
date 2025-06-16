@@ -156,6 +156,7 @@ def get_single_module_noise_conditioned_selector(
                         NoiseConditionedSFNOBuilder(
                             embed_dim=4,
                             noise_embed_dim=4,
+                            noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
                         )
