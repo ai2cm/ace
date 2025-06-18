@@ -62,6 +62,7 @@ from fme.core.optimization import (
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
 from fme.core.testing.regression import validate_tensor_dict
+from fme.core.training_history import TrainingJob
 from fme.core.typing_ import EnsembleTensorDict
 
 DIR = os.path.abspath(os.path.dirname(__file__))
@@ -466,6 +467,44 @@ def test_reloaded_stepper_gives_same_prediction():
     assert torch.allclose(first_result.target_data["b"], second_result.target_data["b"])
 
 
+def test_reloaded_stepper_has_metadata():
+    stepper = _get_stepper(["a", "b"], ["a", "c"])
+    # set the metadata manually for testing
+    training_job_metadata = TrainingJob(
+        git_sha="1234567890abcdef",
+        job_id="some_run_id",
+    )
+    stepper.training_history.append(training_job_metadata)
+    stepper_state = stepper.get_state()
+    new_stepper = Stepper.from_state(stepper_state)
+    assert new_stepper.training_history == stepper.training_history
+
+
+def test_stepper_update_training_history():
+    stepper = _get_stepper(["a"], ["b"], module_name="Linear")
+    assert len(stepper.training_history) == 0
+
+    # first update
+    git_sha = "1234567890abcdef"
+    job_id = "some_run_id_456"
+    training_job = TrainingJob(git_sha=git_sha, job_id=job_id)
+    stepper.update_training_history(training_job)
+    assert len(stepper.training_history) == 1
+    assert stepper.training_history[0].git_sha == git_sha
+    assert stepper.training_history[0].job_id == job_id
+
+    # second update with changed stepper module weights
+    git_sha_2 = "9876543210fedcba"
+    job_id_2 = "some_run_id_789"
+    training_job_2 = TrainingJob(git_sha=git_sha_2, job_id=job_id_2)
+    stepper._step_obj.modules[0].module.linear.weight.data.add_(0.01)
+    stepper.update_training_history(training_job_2)
+    assert len(stepper.training_history) == 2
+    for i, job in enumerate([training_job, training_job_2]):
+        assert stepper.training_history[i].git_sha == job.git_sha
+        assert stepper.training_history[i].job_id == job.job_id
+
+
 class ReturnZerosModule(torch.nn.Module):
     """
     Returns zeros with the correct number of out channels. Creates an unused
@@ -828,7 +867,7 @@ def _get_stepper(
     in_names: list[str],
     out_names: list[str],
     ocean_config: OceanConfig | None = None,
-    module_name: Literal["AddOne", "ChannelSum", "RepeatChannel"] = "AddOne",
+    module_name: Literal["AddOne", "ChannelSum", "RepeatChannel", "Linear"] = "AddOne",
     norm_mean: float = 0.0,
     **kwargs,
 ):
@@ -858,6 +897,18 @@ def _get_stepper(
                 return x.repeat(1, 2, 1, 1)
 
         module_config = {"module": RepeatChannel()}
+
+    elif module_name == "Linear":
+        # convenient for testing a stepper with parameters
+        class Linear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        module_config = {"module": Linear()}
 
     area = torch.ones((5, 5))
     vertical_coordinate = HybridSigmaPressureCoordinate(
