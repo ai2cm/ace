@@ -434,7 +434,9 @@ class CrossFormer(BaseModel):
         # output channels
         output_channels = channels * levels + surface_channels + output_only_channels
         self.output_channels = output_channels
-
+        print(
+            f"Input channels: {input_channels}, Output channels: {output_channels}"
+        )
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)
         global_window_size = cast_tuple(global_window_size, 4)
