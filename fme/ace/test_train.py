@@ -512,6 +512,12 @@ def test_train_and_inference(
         tmp_path / "results" / "training_checkpoints" / "best_inference_ckpt.tar"
     )
     assert best_checkpoint_path.exists()
+    checkpoint_training_history = torch.load(best_checkpoint_path, weights_only=False)[
+        "stepper"
+    ].get("training_history")
+    assert checkpoint_training_history is not None
+    assert len(checkpoint_training_history) == 1
+    assert "git_sha" in checkpoint_training_history[0].keys()
     assert best_inference_checkpoint_path.exists()
     n_ic_timesteps = 1
     n_forward_steps = 6
