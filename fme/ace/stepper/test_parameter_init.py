@@ -9,16 +9,13 @@ import numpy as np
 import pytest
 import torch
 
-from fme.ace.stepper import (
-    SingleModuleStepperConfig,
-    Stepper,
-    _load_weights,
-    parameter_init,
-)
+from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
+from fme.ace.stepper.single_module import _load_weights_and_history
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.gridded_ops import LatLonOperations
+from fme.core.training_history import TrainingHistory
 from fme.core.typing_ import TensorMapping
 from fme.core.wildcard import wildcard_match
 
@@ -79,7 +76,9 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
+    parameter_initializer = parameter_init_config.build(
+        load_weights_and_history=_load_weights_and_history
+    )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
@@ -169,7 +168,9 @@ def test_builder_with_weights_sfno_init(
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
+    parameter_initializer = parameter_init_config.build(
+        load_weights_and_history=_load_weights_and_history
+    )
     if expect_exception:
         with pytest.raises(ValueError):
             with_builder_stepper = SingleModuleStepperConfig.from_state(
@@ -276,7 +277,9 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
         stepper,
         parameter_init_config,
     ) = get_config(loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir)
-    parameter_initializer = parameter_init_config.build(load_weights=_load_weights)
+    parameter_initializer = parameter_init_config.build(
+        load_weights_and_history=_load_weights_and_history
+    )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
@@ -397,7 +400,10 @@ def test_parameter_init_with_regularizer(tmpdir):
         beta=1.0,
     )
     parameter_initializer = config.build(
-        load_weights=lambda _: [saved_module.state_dict()]
+        load_weights_and_history=lambda _: (
+            [saved_module.state_dict()],
+            TrainingHistory(),
+        )
     )
     # new_module = module
     module = ComplexModule(10, 20).to(device)
@@ -439,26 +445,38 @@ def test_parameter_init_weights_loaded_once(tmpdir):
     Test that the parameter initialization config only loads the weights once,
         even if multiple methods are called.
     """
-    mock_load_weights = mock.Mock()
-    mock_load_weights.return_value = [torch.nn.Module().state_dict()]
+    mock_load_weights_and_history = mock.Mock()
+    mock_load_weights_and_history.return_value = (
+        [torch.nn.Module().state_dict()],
+        TrainingHistory(),
+    )
     weights_path = str(tmpdir / "weights.ckpt")
     module = SimpleLinearModule(10, 20).to(get_device())
     config = parameter_init.ParameterInitializationConfig(
         weights_path=weights_path,
         parameters=[],
     )
-    parameter_initializer = config.build(load_weights=mock_load_weights)
-    # initially, the weights should not be loaded
-    mock_load_weights.assert_not_called
-    # now call a method that uss the weights
+    parameter_initializer = config.build(
+        load_weights_and_history=mock_load_weights_and_history
+    )
+    # initially, the weights and history should not be loaded
+    assert parameter_initializer._base_weights is None
+    assert parameter_initializer._training_history is None
+    mock_load_weights_and_history.assert_not_called
+    # now call a method that uses the weights
     parameter_initializer.apply_weights(
         modules=[module],
     )
     # the weights should be loaded
-    mock_load_weights.assert_called_once()
+    mock_load_weights_and_history.assert_called_once()
+    # access the attributes that holds the weights and history
+    assert parameter_initializer.base_weights is not None
+    assert parameter_initializer.training_history is not None
+    # the weights should not be loaded again
+    mock_load_weights_and_history.assert_called_once()
     # call another method that uses the weights
     parameter_initializer.get_l2_sp_tuning_regularizer(
         modules=[module],
     )
     # the weights should not be loaded again
-    mock_load_weights.assert_called_once()
+    mock_load_weights_and_history.assert_called_once()

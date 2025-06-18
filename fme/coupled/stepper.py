@@ -27,6 +27,7 @@ from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization
 from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
+from fme.core.training_history import TrainingHistory, TrainingJob
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.coupled.data_loading.batch_data import (
     CoupledBatchData,
@@ -615,6 +616,12 @@ class CoupledStepperTrainLoss:
         return None
 
 
+@dataclasses.dataclass
+class CoupledTrainingHistory:
+    ocean: TrainingHistory
+    atmosphere: TrainingHistory
+
+
 class CoupledStepper(
     TrainStepperABC[
         CoupledPrognosticState,
@@ -702,6 +709,13 @@ class CoupledStepper(
     def n_inner_steps(self) -> int:
         """Number of atmosphere steps per ocean step."""
         return self._config.n_inner_steps
+
+    @property
+    def training_history(self) -> CoupledTrainingHistory:
+        return CoupledTrainingHistory(
+            ocean=self.ocean.training_history,
+            atmosphere=self.atmosphere.training_history,
+        )
 
     @property
     def _ocean_forcing_exogenous_names(self) -> list[str]:
@@ -1161,6 +1175,16 @@ class CoupledStepper(
             stepped = stepped.compute_derived_variables()
 
         return stepped
+
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to add to the history.
+        """
+        self.ocean.update_training_history(training_job)
+        self.atmosphere.update_training_history(training_job)
 
     @classmethod
     def from_state(cls, state) -> "CoupledStepper":

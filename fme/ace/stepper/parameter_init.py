@@ -6,8 +6,12 @@ import torch
 from torch import nn
 
 from fme.core.device import get_device
+from fme.core.training_history import TrainingHistory
 from fme.core.weight_ops import overwrite_weights
 from fme.core.wildcard import apply_by_wildcard, wildcard_match
+
+Weights = list[Mapping[str, Any]]
+StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
 
 
 @dataclasses.dataclass
@@ -128,16 +132,18 @@ class ParameterInitializationConfig:
 
     def build(
         self,
-        load_weights: Callable[[str], list[Mapping[str, Any]]],
+        load_weights_and_history: Callable[[str], StepperWeightsAndHistory],
     ) -> "ParameterInitializer":
         """
         Build a ParameterInitializer instance with the current configuration.
 
         Args:
-            load_weights: a function which loads weights from a path, specifically the
-                configured weights_path.
+            load_weights_and_history: a function which loads weights and training
+                history from a path, specifically the configured weights_path.
         """
-        return ParameterInitializer(config=self, load_weights=load_weights)
+        return ParameterInitializer(
+            config=self, load_weights_and_history=load_weights_and_history
+        )
 
 
 @dataclasses.dataclass
@@ -145,16 +151,30 @@ class ParameterInitializer:
     config: ParameterInitializationConfig = dataclasses.field(
         default_factory=ParameterInitializationConfig
     )
-    load_weights: Callable[[str], list[Mapping[str, Any]]] = lambda _: []
+    load_weights_and_history: Callable[[str], StepperWeightsAndHistory] = lambda _: (
+        [],
+        TrainingHistory(),
+    )
 
     def __post_init__(self):
-        self._base_weights: list[Mapping[str, Any]] | None = None
+        self._base_weights: Weights | None = None
+        self._training_history: TrainingHistory | None = None
 
     @property
-    def base_weights(self) -> list[Mapping[str, Any]] | None:
+    def base_weights(self) -> Weights | None:
         if self.config.weights_path is not None and self._base_weights is None:
-            self._base_weights = self.load_weights(self.config.weights_path)
+            self._base_weights, self._training_history = self.load_weights_and_history(
+                self.config.weights_path
+            )
         return self._base_weights
+
+    @property
+    def training_history(self) -> TrainingHistory | None:
+        if self.config.weights_path is not None and self._training_history is None:
+            self._base_weights, self._training_history = self.load_weights_and_history(
+                self.config.weights_path
+            )
+        return self._training_history
 
     def _filled_parameters(self, n_modules: int) -> list[ParameterClassification]:
         return self.config.parameters + [
