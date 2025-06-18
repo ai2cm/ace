@@ -2,7 +2,7 @@ import datetime
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from fme.core.metadata import get_job_env
+from fme.core.training_history import get_job_env
 
 
 @dataclass

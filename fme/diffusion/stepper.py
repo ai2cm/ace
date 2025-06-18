@@ -38,6 +38,7 @@ from fme.core.packer import Packer
 from fme.core.rand import randn, randn_like
 from fme.core.tensors import add_ensemble_dim
 from fme.core.timing import GlobalTimer
+from fme.core.training_history import TrainingHistory, TrainingJob
 from fme.core.typing_ import TensorDict, TensorMapping
 from fme.core.weight_ops import strip_leading_module
 from fme.diffusion.loss import WeightedMappingLossConfig
@@ -48,13 +49,16 @@ from fme.downscaling.modules.unets import Linear, PositionalEmbedding, silu
 DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
+Weights = list[Mapping[str, Any]]
+StepperWeightsAndHistory = tuple[Weights, TrainingHistory]
 
-def _load_weights(path: str) -> list[Mapping[str, Any]]:
+
+def _load_weights_and_history(path: str) -> StepperWeightsAndHistory:
     stepper = load_stepper(path)
-    return_weights: list[Mapping[str, Any]] = []
+    return_weights: Weights = []
     for module in stepper.modules:
         return_weights.append(strip_leading_module(module.state_dict()))
-    return return_weights
+    return return_weights, stepper.training_history
 
 
 @dataclasses.dataclass
@@ -163,7 +167,9 @@ class DiffusionStepperConfig:
         """
         Get the parameter initializer for this stepper configuration.
         """
-        return self.parameter_init.build(load_weights=_load_weights)
+        return self.parameter_init.build(
+            load_weights_and_history=_load_weights_and_history
+        )
 
     def get_stepper(
         self,
@@ -468,6 +474,7 @@ class DiffusionStepper(
         derive_func: Callable[[TensorMapping, TensorMapping], TensorDict],
         timestep: datetime.timedelta,
         parameter_initializer: ParameterInitializer,
+        training_history: TrainingHistory | None = None,
     ):
         """
         Args:
@@ -479,6 +486,7 @@ class DiffusionStepper(
             timestep: Timestep of the model.
             parameter_initializer: The parameter initializer to use for loading weights
                 from an external source.
+            training_history: History of the stepper's training jobs.
         """
         self._gridded_operations = gridded_operations  # stored for serializing
         n_in_channels = len(config.in_names)
@@ -564,6 +572,10 @@ class DiffusionStepper(
             PairedData,
         ] = self.predict_paired
 
+        if training_history is None:
+            training_history = TrainingHistory()
+        self._training_history = self._resolve_training_history(training_history)
+
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:
         return self._vertical_coordinates
@@ -598,7 +610,7 @@ class DiffusionStepper(
             for k in self._config.out_names
         }
 
-    def get_base_weights(self) -> list[Mapping[str, Any]] | None:
+    def get_base_weights(self) -> Weights | None:
         return self._parameter_initializer.base_weights
 
     def replace_ocean(self, ocean: Ocean):
@@ -628,6 +640,29 @@ class DiffusionStepper(
     @property
     def n_ic_timesteps(self) -> int:
         return 1
+
+    @property
+    def training_history(self) -> TrainingHistory:
+        return self._training_history
+
+    def _resolve_training_history(
+        self, training_history: TrainingHistory
+    ) -> TrainingHistory:
+        """
+        Resolve the training history: if the stepper receives weights from another base
+        stepper via parameter initialization, the training history of the stepper is
+        extended to include the training history of the base stepper.
+
+        Args:
+            training_history: The training history of the stepper at initialization.
+
+        Returns:
+            An updated training history.
+        """
+        base_training_history = self._parameter_initializer.training_history
+        if base_training_history is not None:
+            training_history.extend(base_training_history)
+        return training_history
 
     @property
     def modules(self) -> nn.ModuleList:
@@ -984,6 +1019,7 @@ class DiffusionStepper(
             "vertical_coordinate": self.vertical_coordinate.as_dict(),
             "encoded_timestep": encode_timestep(self.timestep),
             "loss_normalizer": self.loss_normalizer.get_state(),
+            "training_history": self.training_history.get_state(),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -1058,6 +1094,7 @@ class DiffusionStepper(
                 img_shape = v[-2:]
                 break
         derive_func = AtmosphericDeriveFn(vertical_coordinate, timestep)
+        training_history = TrainingHistory.from_state(state.get("training_history", []))
         stepper = cls(
             config=DiffusionStepperConfig.from_state(config),
             img_shape=img_shape,
@@ -1067,9 +1104,19 @@ class DiffusionStepper(
             derive_func=derive_func,
             # don't need to initialize weights, we're about to load_state
             parameter_initializer=ParameterInitializer(),
+            training_history=training_history,
         )
         stepper.load_state(state)
         return stepper
+
+    def update_training_history(self, training_job: TrainingJob) -> None:
+        """
+        Update the stepper's history of training jobs.
+
+        Args:
+            training_job: The training job to append to the history.
+        """
+        self._training_history.append(training_job)
 
 
 def load_stepper(
