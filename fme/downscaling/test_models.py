@@ -262,7 +262,7 @@ def test_interleaved_samples_round_trip():
     batch = torch.concat([torch.ones(1, 5), torch.ones(1, 5) * 2], dim=0)
     with_combined_samples = _repeat_batch_by_samples(batch, n_samples)
     with_batch_sample_dims = _separate_interleaved_samples(
-        with_combined_samples, batch_size, n_samples
+        with_combined_samples, n_samples
     )
     assert with_batch_sample_dims.shape == (batch_size, n_samples, 5)
     assert torch.equal(batch, with_batch_sample_dims[:, 0])
@@ -390,3 +390,49 @@ def test_model_error_cases(model_config):
     batch.fine.topography = None
     with pytest.raises(ValueError):
         model.generate_on_batch(batch)
+
+
+def test_DiffusionModel_generate_on_batch_no_target():
+    fine_shape = (32, 32)
+    coarse_shape = (16, 16)
+    downscale_factor = 2
+    normalizer = PairedNormalizationConfig(
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+        NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+    )
+    n_steps = 3
+    model = DiffusionModelConfig(
+        module=DiffusionModuleRegistrySelector(
+            "unet_diffusion_song", {"model_channels": 4}
+        ),
+        loss=LossConfig(type="MSE"),
+        in_names=["x"],
+        out_names=["x"],
+        normalization=normalizer,
+        p_mean=-1.0,
+        p_std=1.0,
+        sigma_min=0.1,
+        sigma_max=1.0,
+        churn=0.5,
+        num_diffusion_generation_steps=n_steps,
+        predict_residual=False,
+        use_fine_topography=True,
+    ).build(coarse_shape, downscale_factor)
+
+    batch_size = 2
+    topography = torch.ones(batch_size, *fine_shape, device=get_device())
+
+    n_generated_samples = 2
+
+    coarse_batch = get_mock_batch([batch_size, *coarse_shape])
+    samples = model.generate_on_batch_no_target(
+        coarse_batch.data,
+        fine_topography=topography,
+        n_samples=n_generated_samples,
+    )
+
+    assert samples["x"].shape == (
+        batch_size,
+        n_generated_samples,
+        *fine_shape,
+    )
