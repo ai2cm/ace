@@ -32,7 +32,7 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 1
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
