@@ -498,13 +498,13 @@ class CrossFormer(BaseModel):
 
         # define embedding layer using adjusted sizes
         # if the original sizes were good, adjusted sizes should == original sizes
-        self.cube_embedding = CubeEmbedding(
-            (frames, image_height, image_width),
-            (frames, patch_height, patch_width),
-            input_channels,
-            dim[0],
-            norm_layer=None
-        )
+        if self.patch_width > 1 and self.patch_height > 1 or self.frames > 1:
+            self.cube_embedding = CubeEmbedding(
+                (frames, image_height, image_width),
+                (frames, patch_height, patch_width),
+                input_channels,
+                dim[0],
+            )
 
         # =================================================================================== #
 
