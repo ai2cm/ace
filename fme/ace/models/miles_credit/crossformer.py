@@ -434,9 +434,7 @@ class CrossFormer(BaseModel):
         # output channels
         output_channels = channels * levels + surface_channels + output_only_channels
         self.output_channels = output_channels
-        print(
-            f"Input channels: {input_channels}, Output channels: {output_channels}"
-        )
+
         dim = cast_tuple(dim, 4)
         depth = cast_tuple(depth, 4)
         global_window_size = cast_tuple(global_window_size, 4)
@@ -539,51 +537,36 @@ class CrossFormer(BaseModel):
 
         if self.use_padding:
             x = self.padding_opt.pad(x)
-        print(f"X shape after padding: {x.shape}")
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-            print(f"X shape after embedding: {x.shape}")
         elif self.frames > 1:
             x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
-            print(f"X shape after pooling: {x.shape}")
         else:  # case where only using one time-step as input
             x = x.squeeze(2)
-            print(f"X shape after squeezing: {x.shape}")
 
         encodings = []
         for cel, transformer in self.layers:
 
             x = cel(x)
-            print(f"X shape after cel {cel}: {x.shape}")
             x = transformer(x)
-            print(f"X shape after transformer {transformer}: {x.shape}")
             encodings.append(x)
 
         x = self.up_block1(x)
-        print(f"X shape after up_block1: {x.shape}")
         x = torch.cat([x, encodings[2]], dim=1)
-        print(f"X shape after concatenation with encodings[2]: {x.shape}")
         x = self.up_block2(x)
-        print(f"X shape after up_block2: {x.shape}")
         x = torch.cat([x, encodings[1]], dim=1)
-        print(f"X shape after concatenation with encodings[1]: {x.shape}")
         x = self.up_block3(x)
-        print(f"X shape after up_block3: {x.shape}")
         x = torch.cat([x, encodings[0]], dim=1)
-        print(f"X shape after concatenation with encodings[0]: {x.shape}")
         x = self.up_block4(x)
-        print(f"X shape after up_block4: {x.shape}")
 
         if self.use_padding:
             x = self.padding_opt.unpad(x)
-            print(f"X shape after unpadding: {x.shape}")
 
         if self.use_interp:
             x = F.interpolate(
                 x, size=(self.image_height, self.image_width), mode="bilinear"
             )
-            print(f"X shape after interpolation: {x.shape}")
 
         x = x.unsqueeze(2)
 
