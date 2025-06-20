@@ -90,7 +90,7 @@ class CrossFormerConfig:
     ff_dropout: float = 0.0
     use_spectral_norm: bool = True
     interp: bool = True
-    _padding_conf: CrossFormerPaddingConfig | None = None
+    padding_conf: dict | None = None
     post_conf: dict | None = None
 
     def __post_init__(self):
@@ -99,13 +99,6 @@ class CrossFormerConfig:
         self.global_window_size = to_nested_tuple(self.global_window_size)
         self.cross_embed_kernel_sizes = to_nested_tuple(self.cross_embed_kernel_sizes)
         self.cross_embed_strides = to_nested_tuple(self.cross_embed_strides)
-        if self._padding_conf is not None:
-            self.padding_conf = {
-                "activate": self._padding_conf.activate,
-                "mode": self._padding_conf.mode,
-                "pad_lat": self._padding_conf.pad_lat,
-                "pad_lon": self._padding_conf.pad_lon,
-            }
 
     def build(
         self,

@@ -109,6 +109,7 @@ stepper:
             mode: earth
             pad_lat: [6,6]
             pad_lon: [12,12]
+
       normalization:
         network:
           global_means_path: /statsdata/centering.nc
