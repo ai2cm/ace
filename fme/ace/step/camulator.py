@@ -453,7 +453,6 @@ class CrossFormerStep(StepABC):
 
         def network_call(input_norm: TensorDict) -> TensorDict:
             input_tensor = self.input_packer.pack(input_norm, axis=self.CHANNEL_DIM)
-            print("Input tensor shape:", input_tensor.shape)
             output_tensor = wrapper(self.module)(input_tensor)
             output_tensor = output_tensor.squeeze(2)  # Model adds an extra dimension
             return self.output_packer.unpack(output_tensor, axis=self.CHANNEL_DIM)
