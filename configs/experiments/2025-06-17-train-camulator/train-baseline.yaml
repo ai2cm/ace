@@ -96,6 +96,7 @@ stepper:
       builder:
         type: CrossFormer
         config:
+          frames: 1
           dim: [256, 512, 1024, 2048]
           depth: [2, 2, 18, 2]
           global_window_size: [4, 4, 2, 1]
