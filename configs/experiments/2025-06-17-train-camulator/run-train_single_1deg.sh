@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=1
+N_GPUS=2
 
 cd "$REPO_ROOT"
 
