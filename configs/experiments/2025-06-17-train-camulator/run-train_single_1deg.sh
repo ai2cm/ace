@@ -33,6 +33,7 @@ run_training() {
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
+    --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset "$stats_dataset:/statsdata" \
