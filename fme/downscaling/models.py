@@ -341,12 +341,16 @@ def _repeat_batch_by_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tens
     return tensor.repeat_interleave(dim=0, repeats=n_samples)
 
 
-def _separate_interleaved_samples(
-    tensor: torch.Tensor, n_batch: int, n_samples: int
-) -> torch.Tensor:
+def _separate_interleaved_samples(tensor: torch.Tensor, n_samples: int) -> torch.Tensor:
     """
     Reshape an interleaved tensor to have a leading [batch, sample, ...] dimension.
     """
+    if tensor.shape[0] % n_samples != 0:
+        raise ValueError(
+            "The interleaved batch+sample dimension of the tensor must be divisible "
+            "by n_samples."
+        )
+    n_batch = tensor.shape[0] // n_samples
     return tensor.reshape(n_batch, n_samples, *tensor.shape[1:])
 
 
@@ -432,6 +436,10 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
+        self._fine_shape = (
+            self.coarse_shape[0] * self.downscale_factor,
+            self.coarse_shape[1] * self.downscale_factor,
+        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
@@ -509,23 +517,23 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def generate_on_batch(
+    def _generate_normalized_samples(
         self,
-        batch: PairedBatchData,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
         n_samples: int = 1,
-    ) -> ModelOutputs:
-        coarse, fine = batch.coarse.data, batch.fine.data
-        inputs_ = self._get_input_from_coarse(coarse, batch.fine.topography)
-
-        targets_norm = self.out_packer.pack(
-            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
-        )
-
-        n_batch = targets_norm.shape[0]
-        # expand samples and fold to [batch * n_samples, output_channels, height, width]
+    ):
+        inputs_ = self._get_input_from_coarse(coarse_data, fine_topography)
+        # expand samples and fold to
+        # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
-        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
-        latents = randn_like(targets_norm)
+
+        outputs_shape = (
+            inputs_.shape[0],
+            len(self.out_packer.names),
+            *self._fine_shape,
+        )
+        latents = torch.randn(outputs_shape).to(device=get_device())
 
         logging.info("Running EDM sampler...")
         samples_norm, latent_steps = edm_sampler(
@@ -543,25 +551,55 @@ class DiffusionModel:
             base_prediction = interpolate(
                 self.out_packer.pack(
                     self.normalizer.coarse.normalize(
-                        {k: coarse[k] for k in self.out_packer.names}
+                        {k: coarse_data[k] for k in self.out_packer.names}
                     ),
                     axis=self._channel_axis,
                 ),
                 self.downscale_factor,
             )
             samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
+        return samples_norm, latent_steps
 
-        loss = self.loss(samples_norm, targets_norm)
-
-        samples_norm_reshaped = _separate_interleaved_samples(
-            samples_norm, n_batch, n_samples
+    @torch.no_grad()
+    def generate_on_batch_no_target(
+        self,
+        coarse_data: TensorMapping,
+        fine_topography: torch.Tensor | None,
+        n_samples: int = 1,
+    ) -> TensorDict:
+        samples_norm, _ = self._generate_normalized_samples(
+            coarse_data, fine_topography, n_samples
         )
+        samples_norm_reshaped = _separate_interleaved_samples(samples_norm, n_samples)
         samples = self.normalizer.fine.denormalize(
             self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
         )
+        return samples
+
+    @torch.no_grad()
+    def generate_on_batch(
+        self,
+        batch: PairedBatchData,
+        n_samples: int = 1,
+    ) -> ModelOutputs:
+        coarse, fine = batch.coarse.data, batch.fine.data
+
+        samples_norm, latent_steps = self._generate_normalized_samples(
+            coarse, batch.fine.topography, n_samples
+        )
+        samples_norm_reshaped = _separate_interleaved_samples(samples_norm, n_samples)
+        samples = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
+        )
+        targets_norm = self.out_packer.pack(
+            self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
+        )
+        targets_norm = _repeat_batch_by_samples(targets_norm, n_samples)
+
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
+        loss = self.loss(samples_norm, targets_norm)
         return ModelOutputs(
             prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
         )
