@@ -503,6 +503,7 @@ class CrossFormer(BaseModel):
             (frames, patch_height, patch_width),
             input_channels,
             dim[0],
+            norm_layer=None
         )
 
         # =================================================================================== #
