@@ -28,6 +28,35 @@ DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
+def to_nested_tuple(nested_list):
+    """
+    Recursively converts a nested list into a nested tuple.
+    """
+    if isinstance(nested_list, list):
+        return tuple(to_nested_tuple(item) for item in nested_list)
+    else:
+        return nested_list
+
+
+@dataclasses.dataclass
+class CrossFormerPaddingConfig:
+    """
+    Configuration for padding in the CrossFormer model.
+    """
+
+    activate: bool = True
+    mode: str = "earth"
+    pad_lat: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
+    pad_lon: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
+
+    def __post_init__(self):
+        if self.mode not in ["mirror", "earth"]:
+            raise ValueError(f"Unsupported padding mode: {self.mode}")
+
+        self.pad_lat = to_nested_tuple(self.pad_lat)
+        self.pad_lon = to_nested_tuple(self.pad_lon)
+
+
 @dataclasses.dataclass
 class CrossFormerConfig:
     """
@@ -44,19 +73,32 @@ class CrossFormerConfig:
     input_only_channels: int = 3
     output_only_channels: int = 0
     levels: int = 15
-    dim: tuple = (256, 512, 1024, 2048)
-    depth: tuple = (2, 2, 8, 2)
+    dim: list[int] = dataclasses.field(default_factory=lambda: [256, 512, 1024, 2048])
+    depth: list[int] = dataclasses.field(default_factory=lambda: [2, 2, 8, 2])
     dim_head: int = 32
-    global_window_size: tuple = (4, 4, 2, 1)
+    global_window_size: list[int] = dataclasses.field(
+        default_factory=lambda: [4, 4, 2, 1]
+    )
     local_window_size: int = 3
-    cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4))
-    cross_embed_strides: tuple = (2, 2, 2, 2)
+    cross_embed_kernel_sizes: list[list[int]] = dataclasses.field(
+        default_factory=lambda: [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
+    )
+    cross_embed_strides: list[int] = dataclasses.field(
+        default_factory=lambda: [2, 2, 2, 2]
+    )
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
     use_spectral_norm: bool = True
     interp: bool = True
-    padding_conf: dict | None = None
+    padding_conf: CrossFormerPaddingConfig | None = None
     post_conf: dict | None = None
+
+    def __post_init__(self):
+        self.dim = to_nested_tuple(self.dim)
+        self.depth = to_nested_tuple(self.depth)
+        self.global_window_size = to_nested_tuple(self.global_window_size)
+        self.cross_embed_kernel_sizes = to_nested_tuple(self.cross_embed_kernel_sizes)
+        self.cross_embed_strides = to_nested_tuple(self.cross_embed_strides)
 
     def build(
         self,
@@ -143,10 +185,10 @@ class CrossFormerStepConfig(StepConfigABC):
     builder: CrossFormerSelector
     forcing_names: list[str]
     atmosphere_prognostic_names: list[str]
-    atmosphere_diagnostic_names: list[str]
     atmosphere_levels: int
     surface_prognostic_names: list[str]
     surface_diagnostic_names: list[str]
+    atmosphere_diagnostic_names: list[str]
     normalization: NetworkAndLossNormalizationConfig
     ocean: OceanConfig | None = None
     corrector: AtmosphereCorrectorConfig | CorrectorSelector = dataclasses.field(
@@ -171,9 +213,10 @@ class CrossFormerStepConfig(StepConfigABC):
             for i in range(self.atmosphere_levels):
                 atmosphere_in_names.append(f"{name}_{i}")
                 atmosphere_out_names.append(f"{name}_{i}")
-        for name in self.atmosphere_diagnostic_names:
-            for i in range(self.atmosphere_levels):
-                atmosphere_out_names.append(f"{name}_{i}")
+        if self.atmosphere_diagnostic_names is not None:
+            for name in self.atmosphere_diagnostic_names:
+                for i in range(self.atmosphere_levels):
+                    atmosphere_out_names.append(f"{name}_{i}")
         self.atmosphere_input_names = atmosphere_in_names
         self.atmosphere_output_names = atmosphere_out_names
         self.surface_input_names = self.surface_prognostic_names
