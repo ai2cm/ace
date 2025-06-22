@@ -2,7 +2,7 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 max_epochs: 120
-n_forward_steps: 2
+n_forward_steps: 1
 ema:
   decay: 0.999
 inference:
@@ -32,7 +32,7 @@ logging:
   project: ace
   entity: ai2cm
 train_loader:
-  batch_size: 16
+  batch_size: 32
   num_data_workers: 4
   prefetch_factor: 4
   dataset:
@@ -67,7 +67,11 @@ validation_loader:
         stop: 1456
 optimization:
   enable_automatic_mixed_precision: false
-  lr: 0.0005
+  lr: 0.00001
+  scheduler:
+      type: CosineAnnealingLR
+      kwargs:
+        T_max: 120
   optimizer_type: Adam
   use_gradient_accumulation: true
   kwargs:
@@ -122,8 +126,7 @@ stepper:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
       corrector:
-        conserve_dry_air: true
-        moisture_budget_correction: advection_and_precipitation
+        conserve_dry_air: false
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
