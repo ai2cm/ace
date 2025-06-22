@@ -25,7 +25,6 @@ run_training() {
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
-    #--cluster ai2/saturn-cirrascale \
     --cluster ai2/jupiter-cirrascale-2 \
     --cluster ai2/ceres-cirrascale \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
