@@ -66,10 +66,7 @@ class GriddedData(GriddedDataABC[BatchData]):
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type
-                TensorMapping where keys indicate variable name.
-                Each tensor has shape
-                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            loader: torch DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
@@ -197,10 +194,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type
-                TensorMapping where keys indicate variable name.
-                Each tensor has shape
-                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            loader: torch DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             initial_condition: Initial condition for the inference, or a requirements
                 object specifying how to extract the initial condition from the first
@@ -267,22 +261,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return self.horizontal_coordinates.gridded_operations
 
     @property
-    def _n_samples(self) -> int:
-        return len(self._loader.dataset)  # type: ignore
-
-    @property
-    def _n_batches(self) -> int:
-        return len(self._loader)  # type: ignore
-
-    @property
-    def _first_time(self) -> Any:
-        return self._loader.dataset[0][1].values[0]  # type: ignore
-
-    @property
-    def _last_time(self) -> Any:
-        return self._loader.dataset[-1][1].values[0]  # type: ignore
-
-    @property
     def n_initial_conditions(self) -> int:
         if self._n_initial_conditions is None:
             example_data = next(iter(self.loader)).data
@@ -293,13 +271,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     @property
     def initial_condition(self) -> PrognosticState:
         return self._initial_condition
-
-    def log_info(self, name: str):
-        logging.info(
-            f"{name} data: {self._n_samples} samples, {self._n_batches} batches"
-        )
-        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
-        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
 
 class PSType:

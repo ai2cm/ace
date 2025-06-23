@@ -390,7 +390,6 @@ def test_inference_data_loader(tmp_path):
     assert batch_data.time.sizes["sample"] == batch_size
     assert batch_data.time.sizes["time"] == n_forward_steps_in_memory + 1
     assert batch_data.time.dt.calendar == "proleptic_gregorian"
-    assert data._n_batches == 2
     assert isinstance(data._vertical_coordinate, HybridSigmaPressureCoordinate)
     assert data._vertical_coordinate.ak.device == fme.get_device()
     initial_condition = data.initial_condition.as_batch_data()
@@ -554,7 +553,9 @@ def test_get_forcing_data(tmp_path, n_initial_conditions):
         window_requirements=window_requirements,
         initial_condition=PrognosticState(initial_condition),
     )
-    assert data._n_samples == math.ceil(total_forward_steps / forward_steps_in_memory)
+    assert len(data._loader.dataset) == math.ceil(  # type: ignore
+        total_forward_steps / forward_steps_in_memory
+    )
     batch_data = next(iter(data.loader))
     assert isinstance(batch_data, BatchData)
     assert isinstance(batch_data.data["foo"], torch.Tensor)
