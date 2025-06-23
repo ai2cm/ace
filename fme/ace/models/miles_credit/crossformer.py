@@ -12,6 +12,15 @@ from fme.ace.models.miles_credit.boundary_padding import TensorPadding
 
 # helpers
 
+def to_nested_tuple(nested_list):
+    """
+    Recursively converts a nested list into a nested tuple.
+    """
+    if isinstance(nested_list, list):
+        return tuple(to_nested_tuple(item) for item in nested_list)
+    else:
+        return nested_list
+
 
 def cast_tuple(val, length=1):
     return val if isinstance(val, tuple) else ((val,) * length)
@@ -354,13 +363,13 @@ class CrossFormer(BaseModel):
         input_only_channels: int = 3,
         output_only_channels: int = 0,
         levels: int = 15,
-        dim: tuple = (64, 128, 256, 512),
-        depth: tuple = (2, 2, 8, 2),
+        dim: list[int] = [64, 128, 256, 512],
+        depth: list[int] = [2, 2, 8, 2],
         dim_head: int = 32,
-        global_window_size: tuple = (5, 5, 2, 1),
+        global_window_size: list[int] = [5, 5, 2, 1],
         local_window_size: int = 10,
-        cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides: tuple = (4, 2, 2, 2),
+        cross_embed_kernel_sizes: list[list[int]] = [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]],
+        cross_embed_strides: list[int] = [4, 2, 2, 2],
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,

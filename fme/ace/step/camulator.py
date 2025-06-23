@@ -28,35 +28,6 @@ DEFAULT_TIMESTEP = datetime.timedelta(hours=6)
 DEFAULT_ENCODED_TIMESTEP = encode_timestep(DEFAULT_TIMESTEP)
 
 
-def to_nested_tuple(nested_list):
-    """
-    Recursively converts a nested list into a nested tuple.
-    """
-    if isinstance(nested_list, list):
-        return tuple(to_nested_tuple(item) for item in nested_list)
-    else:
-        return nested_list
-
-
-@dataclasses.dataclass
-class CrossFormerPaddingConfig:
-    """
-    Configuration for padding in the CrossFormer model.
-    """
-
-    activate: bool = True
-    mode: str = "earth"
-    pad_lat: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
-    pad_lon: list[int] = dataclasses.field(default_factory=lambda: [40, 40])
-
-    def __post_init__(self):
-        if self.mode not in ["mirror", "earth"]:
-            raise ValueError(f"Unsupported padding mode: {self.mode}")
-
-        self.pad_lat = to_nested_tuple(self.pad_lat)
-        self.pad_lon = to_nested_tuple(self.pad_lon)
-
-
 @dataclasses.dataclass
 class CrossFormerConfig:
     """
@@ -92,13 +63,6 @@ class CrossFormerConfig:
     interp: bool = True
     padding_conf: dict | None = None
     post_conf: dict | None = None
-
-    def __post_init__(self):
-        self.dim = to_nested_tuple(self.dim)
-        self.depth = to_nested_tuple(self.depth)
-        self.global_window_size = to_nested_tuple(self.global_window_size)
-        self.cross_embed_kernel_sizes = to_nested_tuple(self.cross_embed_kernel_sizes)
-        self.cross_embed_strides = to_nested_tuple(self.cross_embed_strides)
 
     def build(
         self,
