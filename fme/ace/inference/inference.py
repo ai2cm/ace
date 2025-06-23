@@ -284,8 +284,9 @@ def run_inference_from_config(config: InferenceConfig):
             stepper.training_dataset_info.assert_compatible_with(data.dataset_info)
         except IncompatibleDatasetInfo as err:
             raise IncompatibleDatasetInfo(
-                "Inference dataset is not compatible with dataset "
-                "used for stepper training"
+                "Inference dataset is not compatible with dataset used for stepper "
+                "training. Set allow_incompatible_dataset to True to ignore this "
+                f"error. The incompatiblity found was: {str(err)}"
             ) from err
 
     variable_metadata = resolve_variable_metadata(
