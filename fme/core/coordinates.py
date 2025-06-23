@@ -666,17 +666,12 @@ class LatLonCoordinates(HorizontalCoordinates):
     def __eq__(self, other) -> bool:
         if not isinstance(other, LatLonCoordinates):
             return False
-        lat_eq = torch.allclose(self.lat, other.lat)
-        lon_eq = torch.allclose(self.lon, other.lon)
-        mask_eq = self.mask_provider == other.mask_provider
-        return lat_eq and lon_eq and mask_eq
+        return torch.allclose(self.lat, other.lat) and torch.allclose(
+            self.lon, other.lon
+        )
 
     def __repr__(self) -> str:
-        result = (
-            f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon},\n    "
-            f"mask_provider={self.mask_provider}\n)"
-        )
-        return result
+        return f"LatLonCoordinates(\n    lat={self.lat},\n    lon={self.lon},\n)"
 
     def to(self, device: str) -> "LatLonCoordinates":
         return LatLonCoordinates(
