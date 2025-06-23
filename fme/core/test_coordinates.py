@@ -9,7 +9,6 @@ from fme.core.coordinates import (
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
 )
-from fme.core.mask_provider import MaskProvider
 
 
 @pytest.mark.parametrize(
@@ -26,18 +25,6 @@ from fme.core.mask_provider import MaskProvider
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
-        ),
-        (
-            LatLonCoordinates(
-                lat=torch.tensor([1, 2, 3]),
-                lon=torch.tensor([4, 5, 6]),
-                mask_provider=MaskProvider({"mask_0": torch.tensor([1, 1, 0])}),
-            ),
-            LatLonCoordinates(
-                lat=torch.tensor([1, 2, 3]),
-                lon=torch.tensor([4, 5, 6]),
-                mask_provider=MaskProvider({"mask_0": torch.tensor([1, 1, 0])}),
-            ),
         ),
         (
             HEALPixCoordinates(
@@ -75,14 +62,6 @@ def test_equality(first, second):
         (
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
             LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([5, 6, 7])),
-        ),
-        (
-            LatLonCoordinates(lat=torch.tensor([1, 2, 3]), lon=torch.tensor([4, 5, 6])),
-            LatLonCoordinates(
-                lat=torch.tensor([1, 2, 3]),
-                lon=torch.tensor([4, 5, 6]),
-                mask_provider=MaskProvider({"mask_0": torch.tensor([1, 1, 0])}),
-            ),
         ),
         (
             HEALPixCoordinates(
