@@ -436,14 +436,19 @@ class DiffusionModel:
         self.out_packer = Packer(config.out_names)
         self.config = config
         self._channel_axis = -3
-        self._fine_shape = (
-            self.coarse_shape[0] * self.downscale_factor,
-            self.coarse_shape[1] * self.downscale_factor,
-        )
 
     @property
     def modules(self) -> torch.nn.ModuleList:
         return torch.nn.ModuleList([self.module])
+
+    def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
+        """
+        Calculate the fine shape based on the coarse shape and downscale factor.
+        """
+        return (
+            coarse_shape[0] * self.downscale_factor,
+            coarse_shape[1] * self.downscale_factor,
+        )
 
     def _get_input_from_coarse(
         self, coarse: TensorMapping, topography: torch.Tensor | None
@@ -517,26 +522,27 @@ class DiffusionModel:
         )
 
     @torch.no_grad()
-    def _generate_normalized_samples(
+    def _generate(
         self,
         coarse_data: TensorMapping,
         fine_topography: torch.Tensor | None,
         n_samples: int = 1,
-    ):
+    ) -> tuple[TensorDict, torch.Tensor, list[torch.Tensor]]:
         inputs_ = self._get_input_from_coarse(coarse_data, fine_topography)
         # expand samples and fold to
         # [batch * n_samples, output_channels, height, width]
         inputs_ = _repeat_batch_by_samples(inputs_, n_samples)
+        coarse_input_shape = next(iter(coarse_data.values())).shape[-2:]
 
         outputs_shape = (
             inputs_.shape[0],
             len(self.out_packer.names),
-            *self._fine_shape,
+            *self._get_fine_shape(coarse_input_shape),
         )
         latents = torch.randn(outputs_shape).to(device=get_device())
 
         logging.info("Running EDM sampler...")
-        samples_norm, latent_steps = edm_sampler(
+        generated_norm, latent_steps = edm_sampler(
             self.module,
             latents,
             inputs_,
@@ -557,8 +563,17 @@ class DiffusionModel:
                 ),
                 self.downscale_factor,
             )
-            samples_norm += _repeat_batch_by_samples(base_prediction, n_samples)
-        return samples_norm, latent_steps
+            generated_norm = generated_norm + _repeat_batch_by_samples(
+                base_prediction, n_samples
+            )
+
+        generated_norm_reshaped = _separate_interleaved_samples(
+            generated_norm, n_samples
+        )
+        generated = self.normalizer.fine.denormalize(
+            self.out_packer.unpack(generated_norm_reshaped, axis=self._channel_axis)
+        )
+        return generated, generated_norm, latent_steps
 
     @torch.no_grad()
     def generate_on_batch_no_target(
@@ -567,14 +582,8 @@ class DiffusionModel:
         fine_topography: torch.Tensor | None,
         n_samples: int = 1,
     ) -> TensorDict:
-        samples_norm, _ = self._generate_normalized_samples(
-            coarse_data, fine_topography, n_samples
-        )
-        samples_norm_reshaped = _separate_interleaved_samples(samples_norm, n_samples)
-        samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
-        )
-        return samples
+        generated, _, _ = self._generate(coarse_data, fine_topography, n_samples)
+        return generated
 
     @torch.no_grad()
     def generate_on_batch(
@@ -584,13 +593,10 @@ class DiffusionModel:
     ) -> ModelOutputs:
         coarse, fine = batch.coarse.data, batch.fine.data
 
-        samples_norm, latent_steps = self._generate_normalized_samples(
+        generated, generated_norm, latent_steps = self._generate(
             coarse, batch.fine.topography, n_samples
         )
-        samples_norm_reshaped = _separate_interleaved_samples(samples_norm, n_samples)
-        samples = self.normalizer.fine.denormalize(
-            self.out_packer.unpack(samples_norm_reshaped, axis=self._channel_axis)
-        )
+
         targets_norm = self.out_packer.pack(
             self.normalizer.fine.normalize(dict(fine)), axis=self._channel_axis
         )
@@ -599,9 +605,9 @@ class DiffusionModel:
         targets = filter_tensor_mapping(batch.fine.data, set(self.out_packer.names))
         targets = {k: v.unsqueeze(1) for k, v in targets.items()}
 
-        loss = self.loss(samples_norm, targets_norm)
+        loss = self.loss(generated_norm, targets_norm)
         return ModelOutputs(
-            prediction=samples, target=targets, loss=loss, latent_steps=latent_steps
+            prediction=generated, target=targets, loss=loss, latent_steps=latent_steps
         )
 
     def get_state(self) -> Mapping[str, Any]:
