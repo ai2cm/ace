@@ -68,4 +68,4 @@ for perturbation in 0 2; do
     CONFIG_PATH="shield-${perturbation}k-sst-evaluator.yaml"
 
     launch_job $JOB_NAME $SHIELD_PRETRAINED_CAMULATOR $CONFIG_PATH
-
+done
