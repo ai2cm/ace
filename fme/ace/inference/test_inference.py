@@ -35,9 +35,7 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
-from fme.core.metrics import spherical_area_weights
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.testing import mock_wandb
@@ -74,18 +72,15 @@ def save_stepper(
             ocean_fraction_name="ocean_fraction",
         ),
     )
-    area = torch.tensor(
-        spherical_area_weights(
-            lats=horizontal_coords["lat"].values, num_lon=len(horizontal_coords["lon"])
-        ),
-        dtype=torch.float32,
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.tensor(horizontal_coords["lat"].values, dtype=torch.float32),
+        lon=torch.tensor(horizontal_coords["lon"].values, dtype=torch.float32),
     )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
     )
     dataset_info = DatasetInfo(
-        img_shape=(len(horizontal_coords["lat"]), len(horizontal_coords["lon"])),
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
         variable_metadata={

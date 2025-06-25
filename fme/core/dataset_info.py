@@ -4,7 +4,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from fme.core.coordinates import (
+    HorizontalCoordinates,
     NullVerticalCoordinate,
+    SerializableHorizontalCoordinates,
     SerializableVerticalCoordinate,
     VerticalCoordinate,
 )
@@ -40,19 +42,31 @@ class DatasetInfo:
 
     def __init__(
         self,
-        img_shape: tuple[int, int] | None = None,
-        gridded_operations: GriddedOperations | None = None,
+        horizontal_coordinates: HorizontalCoordinates | None = None,
         vertical_coordinate: VerticalCoordinate | None = None,
         mask_provider: MaskProvider | None = None,
         timestep: datetime.timedelta | None = None,
         variable_metadata: Mapping[str, VariableMetadata] | None = None,
+        gridded_operations: GriddedOperations | None = None,
+        img_shape: tuple[int, int] | None = None,
     ):
-        self._img_shape = img_shape
-        self._gridded_operations = gridded_operations
+        self._horizontal_coordinates = horizontal_coordinates
         self._vertical_coordinate = vertical_coordinate
         self._mask_provider = mask_provider
         self._timestep = timestep
         self._variable_metadata = variable_metadata
+
+        # The gridded_operations and img_shape arguments are only provided for backwards
+        # compatibility with older serialized states that have these attributes instead
+        # of horizontal_coordinates.
+        if gridded_operations is not None and horizontal_coordinates is not None:
+            msg = "Cannot provide both gridded_operations and horizontal_coordinates. "
+            raise ValueError(msg)
+        self._gridded_operations = gridded_operations
+        if img_shape is not None and horizontal_coordinates is not None:
+            msg = "Cannot provide both img_shape and horizontal_coordinates. "
+            raise ValueError(msg)
+        self._img_shape = img_shape
 
     def __eq__(self, other) -> bool:
         if not isinstance(other, DatasetInfo):
@@ -60,6 +74,7 @@ class DatasetInfo:
         return (
             self._img_shape == other._img_shape
             and self._gridded_operations == other._gridded_operations
+            and self._horizontal_coordinates == other._horizontal_coordinates
             and self._vertical_coordinate == other._vertical_coordinate
             and self._mask_provider == other._mask_provider
             and self._timestep == other._timestep
@@ -68,8 +83,8 @@ class DatasetInfo:
 
     def __repr__(self) -> str:
         return (
-            f"DatasetInfo(img_shape={self._img_shape}, "
-            f"gridded_operations={self._gridded_operations}, "
+            f"DatasetInfo( "
+            f"horizontal_coordinates={self._horizontal_coordinates}, "
             f"vertical_coordinate={self._vertical_coordinate}, "
             f"timestep={self._timestep}), "
             f"mask_provider={self._mask_provider}, "
@@ -78,15 +93,14 @@ class DatasetInfo:
 
     def assert_compatible_with(self, other: "DatasetInfo"):
         issues = []
-        if self._img_shape != other._img_shape:
-            issues.append(
-                f"img_shape is not compatible, {self._img_shape} != {other._img_shape}"
-            )
-        if self._gridded_operations is not None:
-            if self._gridded_operations != other._gridded_operations:
+        if (
+            self._horizontal_coordinates is not None
+            and other._horizontal_coordinates is not None
+        ):
+            if self._horizontal_coordinates != other._horizontal_coordinates:
                 issues.append(
-                    f"gridded_operations is not compatible, "
-                    f"{self._gridded_operations} != {other._gridded_operations}"
+                    f"horizontal_coordinates is not compatible, "
+                    f"{self._horizontal_coordinates} != {other._horizontal_coordinates}"
                 )
         if (
             self._vertical_coordinate is not None
@@ -127,15 +141,27 @@ class DatasetInfo:
 
     @property
     def img_shape(self) -> tuple[int, int]:
-        if self._img_shape is None:
-            raise MissingDatasetInfo("img_shape")
-        return self._img_shape
+        if self._img_shape is not None:
+            return self._img_shape
+        if self._horizontal_coordinates is None:
+            raise MissingDatasetInfo("horizontal_coordinates")
+        result = self._horizontal_coordinates.shape[-2:]
+        assert len(result) == 2  # for a happy mypy
+        return result
 
     @property
     def gridded_operations(self) -> GriddedOperations:
-        if self._gridded_operations is None:
-            raise MissingDatasetInfo("gridded_operations")
-        return self._gridded_operations
+        if self._gridded_operations is not None:
+            return self._gridded_operations
+        if self._horizontal_coordinates is None:
+            raise MissingDatasetInfo("horizontal_coordinates")
+        return self._horizontal_coordinates.gridded_operations
+
+    @property
+    def horizontal_coordinates(self) -> HorizontalCoordinates:
+        if self._horizontal_coordinates is None:
+            raise MissingDatasetInfo("horizontal_coordinates")
+        return self._horizontal_coordinates
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:
@@ -162,10 +188,18 @@ class DatasetInfo:
         return self._variable_metadata
 
     def to_state(self) -> dict[str, Any]:
-        if self._gridded_operations is None:
-            gridded_operations = None
-        else:
+        if self._gridded_operations is not None:
             gridded_operations = self._gridded_operations.to_state()
+        else:
+            gridded_operations = None
+        if self._img_shape is not None:
+            img_shape = self._img_shape
+        else:
+            img_shape = None
+        if self._horizontal_coordinates is None:
+            horizontal_coordinates = None
+        else:
+            horizontal_coordinates = self._horizontal_coordinates.to_state()
         if self._vertical_coordinate is None:
             vertical_coordinate = None
         else:
@@ -179,26 +213,35 @@ class DatasetInfo:
         else:
             timestep = encode_timestep(self._timestep)
         return {
-            "img_shape": self._img_shape,
-            "gridded_operations": gridded_operations,
+            "horizontal_coordinates": horizontal_coordinates,
             "vertical_coordinate": vertical_coordinate,
             "mask_provider": mask_provider,
             "timestep": timestep,
             "variable_metadata": self._variable_metadata,
+            "gridded_operations": gridded_operations,
+            "img_shape": img_shape,
         }
 
     @classmethod
     def from_state(cls, state: dict[str, Any]) -> "DatasetInfo":
+        if state.get("gridded_operations") is not None:
+            # this is for backwards compatibility with older serialized states
+            assert state.get("horizontal_coordinates") is None
+            gridded_ops = GriddedOperations.from_state(state["gridded_operations"])
+        else:
+            gridded_ops = None
         if state.get("img_shape") is not None:
+            # this is for backwards compatibility with older serialized states
+            assert state.get("horizontal_coordinates") is None
             img_shape = state["img_shape"]
         else:
             img_shape = None
-        if state.get("gridded_operations") is not None:
-            gridded_operations = GriddedOperations.from_state(
-                state["gridded_operations"]
+        if state.get("horizontal_coordinates") is not None:
+            horizontal_coordinates = SerializableHorizontalCoordinates.from_state(
+                state["horizontal_coordinates"]
             )
         else:
-            gridded_operations = None
+            horizontal_coordinates = None
         if state.get("vertical_coordinate") is not None:
             vertical_coordinate = SerializableVerticalCoordinate.from_state(
                 state["vertical_coordinate"]
@@ -215,12 +258,13 @@ class DatasetInfo:
             timestep = None
         variable_metadata = state.get("variable_metadata")
         return cls(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
+            horizontal_coordinates=horizontal_coordinates,
             vertical_coordinate=vertical_coordinate,
             mask_provider=mask_provider,
             timestep=timestep,
             variable_metadata=variable_metadata,
+            gridded_operations=gridded_ops,
+            img_shape=img_shape,
         )
 
 
