@@ -151,9 +151,8 @@ class ParameterInitializer:
     config: ParameterInitializationConfig = dataclasses.field(
         default_factory=ParameterInitializationConfig
     )
-    load_weights_and_history: Callable[[str], StepperWeightsAndHistory] = lambda _: (
-        [],
-        TrainingHistory(),
+    load_weights_and_history: Callable[[str], StepperWeightsAndHistory] = (
+        dataclasses.field(default=lambda _: ([], TrainingHistory()))
     )
 
     def __post_init__(self):
