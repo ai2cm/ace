@@ -10,7 +10,6 @@ import pytest
 import torch
 
 from fme.ace.stepper import SingleModuleStepperConfig, Stepper, parameter_init
-from fme.ace.stepper.single_module import _load_weights_and_history
 from fme.core.coordinates import HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -69,6 +68,7 @@ def test_builder_with_weights_loads_same_state(tmpdir):
             "means": {"x": np.random.randn(1).item()},
             "stds": {"x": np.random.randn(1).item()},
         },
+        "parameter_init": parameter_init_config,
     }
     dataset_info = DatasetInfo(
         img_shape=(16, 32),
@@ -76,15 +76,9 @@ def test_builder_with_weights_loads_same_state(tmpdir):
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    parameter_initializer = parameter_init_config.build(
-        load_weights_and_history=_load_weights_and_history
-    )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
-    ).get_stepper(
-        dataset_info=dataset_info,
-        parameter_initializer=parameter_initializer,
-    )
+    ).get_stepper(dataset_info=dataset_info)
     assert len(with_builder_stepper.modules) == 1
     assert_same_state(
         with_builder_stepper.modules[0].state_dict(),
@@ -160,7 +154,6 @@ def test_builder_with_weights_sfno_init(
         area,
         vertical_coordinate,
         stepper,
-        parameter_init_config,
     ) = get_config(loaded_shape, extra_built_layer, tmpdir)
     dataset_info = DatasetInfo(
         img_shape=built_shape,
@@ -168,23 +161,18 @@ def test_builder_with_weights_sfno_init(
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )
-    parameter_initializer = parameter_init_config.build(
-        load_weights_and_history=_load_weights_and_history
-    )
     if expect_exception:
         with pytest.raises(ValueError):
             with_builder_stepper = SingleModuleStepperConfig.from_state(
                 with_builder_stepper_config_data
             ).get_stepper(
                 dataset_info=dataset_info,
-                parameter_initializer=parameter_initializer,
             )
     else:
         with_builder_stepper = SingleModuleStepperConfig.from_state(
             with_builder_stepper_config_data
         ).get_stepper(
             dataset_info=dataset_info,
-            parameter_initializer=parameter_initializer,
         )
         assert len(with_builder_stepper.modules) == 1
         if extra_built_layer:
@@ -258,13 +246,13 @@ def get_config(
             "means": {"x": np.random.randn(1).item()},
             "stds": {"x": np.random.randn(1).item()},
         },
+        "parameter_init": parameter_init_config,
     }
     return (
         with_builder_stepper_config_data,
         area,
         vertical_coordinate,
         stepper,
-        parameter_init_config,
     )
 
 
@@ -275,11 +263,7 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
         area,
         vertical_coordinate,
         stepper,
-        parameter_init_config,
     ) = get_config(loaded_shape=img_shape, extra_built_layer=False, tmpdir=tmpdir)
-    parameter_initializer = parameter_init_config.build(
-        load_weights_and_history=_load_weights_and_history
-    )
     with_builder_stepper = SingleModuleStepperConfig.from_state(
         with_builder_stepper_config_data
     ).get_stepper(
@@ -289,7 +273,6 @@ def test_with_weights_saved_stepper_does_not_need_untuned_weights(tmpdir):
             vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         ),
-        parameter_initializer=parameter_initializer,
     )
     stepper_state = with_builder_stepper.get_state()
     # should be able to initialize stepper from its state without the untuned weights

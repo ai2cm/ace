@@ -231,10 +231,8 @@ class TrainBuilders:
         self,
         dataset_info: DatasetInfo,
     ) -> Stepper:
-        parameter_initializer = self.config.stepper.get_parameter_initializer()
         return self.config.stepper.get_stepper(
             dataset_info=dataset_info,
-            parameter_initializer=parameter_initializer,
         )
 
     def get_ema(self, modules) -> EMATracker:

@@ -13,6 +13,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -533,7 +534,13 @@ def get_stepper_config(
     ocean_timedelta: str = OCEAN_TIMEDELTA,
     atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_parameter_init: ParameterInitializationConfig | None = None,
+    atmosphere_parameter_init: ParameterInitializationConfig | None = None,
 ):
+    if ocean_parameter_init is None:
+        ocean_parameter_init = ParameterInitializationConfig()
+    if atmosphere_parameter_init is None:
+        atmosphere_parameter_init = ParameterInitializationConfig()
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
@@ -570,6 +577,7 @@ def get_stepper_config(
                     surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                     ocean_fraction_name=ocean_fraction_name,
                 ),
+                parameter_init=atmosphere_parameter_init,
             ),
         ),
         ocean=ComponentConfig(
@@ -585,6 +593,7 @@ def get_stepper_config(
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
                 corrector=CorrectorSelector("ocean_corrector", {}),
+                parameter_init=ocean_parameter_init,
             ),
         ),
         sst_name=sst_name_in_ocean_data,
