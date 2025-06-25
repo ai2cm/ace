@@ -177,11 +177,13 @@ class DiffusionStepperConfig:
         gridded_operations: GriddedOperations,
         vertical_coordinate: VerticalCoordinate,
         timestep: datetime.timedelta,
-        parameter_initializer: ParameterInitializer | None = None,
+        apply_parameter_init: bool = True,
     ):
         logging.info("Initializing stepper from provided config")
         derive_func = vertical_coordinate.build_derive_function(timestep)
-        if parameter_initializer is None:
+        if apply_parameter_init:
+            parameter_initializer = self.get_parameter_initializer()
+        else:
             parameter_initializer = ParameterInitializer()
         return DiffusionStepper(
             config=self,
@@ -510,12 +512,15 @@ class DiffusionStepper(
         self._parameter_initializer.apply_weights(
             [module],
         )
-
         self._l2_sp_tuning_regularizer = (
             self._parameter_initializer.get_l2_sp_tuning_regularizer(
                 [module],
             )
         )
+        self._training_history = (
+            training_history if training_history is not None else TrainingHistory()
+        )
+        self._append_training_history_from(self._parameter_initializer.training_history)
         module = EDMPrecond(
             PositionalEmbeddingWrapper(
                 module,
@@ -571,10 +576,6 @@ class DiffusionStepper(
             BatchData,
             PairedData,
         ] = self.predict_paired
-
-        if training_history is None:
-            training_history = TrainingHistory()
-        self._training_history = self._resolve_training_history(training_history)
 
     @property
     def vertical_coordinate(self) -> VerticalCoordinate:
@@ -645,24 +646,19 @@ class DiffusionStepper(
     def training_history(self) -> TrainingHistory:
         return self._training_history
 
-    def _resolve_training_history(
-        self, training_history: TrainingHistory
-    ) -> TrainingHistory:
+    def _append_training_history_from(
+        self, base_training_history: TrainingHistory | None
+    ):
         """
-        Resolve the training history: if the stepper receives weights from another base
-        stepper via parameter initialization, the training history of the stepper is
-        extended to include the training history of the base stepper.
+        When the stepper receives weights from a base stepper via parameter
+        initialization, this helper is used to extend its training history to include
+        the training history of the base stepper.
 
         Args:
-            training_history: The training history of the stepper at initialization.
-
-        Returns:
-            An updated training history.
+            base_training_history: The training history from a base stepper to append.
         """
-        base_training_history = self._parameter_initializer.training_history
         if base_training_history is not None:
-            training_history.extend(base_training_history)
-        return training_history
+            self._training_history.extend(base_training_history)
 
     @property
     def modules(self) -> nn.ModuleList:
