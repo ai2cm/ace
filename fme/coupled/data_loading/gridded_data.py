@@ -22,22 +22,6 @@ from fme.coupled.requirements import CoupledPrognosticStateDataRequirements
 CoupledImageShapes = namedtuple("CoupledImageShapes", ("ocean", "atmosphere"))
 
 
-def get_img_shape(
-    loader: DataLoader[CoupledBatchData],
-) -> CoupledImageShapes:
-    ocean_img_shape = None
-    atmos_img_shape = None
-    for batch in loader:
-        ocean_img_shape = next(iter(batch.ocean_data.data.values())).shape[-2:]
-        atmos_img_shape = next(iter(batch.atmosphere_data.data.values())).shape[-2:]
-        break
-    if ocean_img_shape is None:
-        raise ValueError("No ocean data found in loader")
-    if atmos_img_shape is None:
-        raise ValueError("No atmosphere data found in loader")
-    return CoupledImageShapes(ocean_img_shape, atmos_img_shape)
-
-
 class GriddedData(GriddedDataABC[CoupledBatchData]):
     def __init__(
         self,
@@ -62,7 +46,6 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
         self._atmosphere = self._properties.atmosphere
         self._sampler = sampler
         self._batch_size: int | None = None
-        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[CoupledBatchData]:
@@ -79,16 +62,14 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
     def dataset_info(self) -> CoupledDatasetInfo:
         return CoupledDatasetInfo(
             ocean=DatasetInfo(
-                img_shape=self._img_shape.ocean,
-                gridded_operations=self._ocean.horizontal_coordinates.gridded_operations,
+                horizontal_coordinates=self._ocean.horizontal_coordinates,
                 vertical_coordinate=self._ocean.vertical_coordinate,
                 mask_provider=self._ocean.mask_provider,
                 timestep=self._ocean.timestep,
                 variable_metadata=self._properties.variable_metadata,
             ),
             atmosphere=DatasetInfo(
-                img_shape=self._img_shape.atmosphere,
-                gridded_operations=self._atmosphere.horizontal_coordinates.gridded_operations,
+                horizontal_coordinates=self._atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._atmosphere.vertical_coordinate,
                 mask_provider=self._atmosphere.mask_provider,
                 timestep=self._atmosphere.timestep,

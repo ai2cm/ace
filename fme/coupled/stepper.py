@@ -416,9 +416,7 @@ class CoupledStepperConfig:
         logging.info("Initializing coupler")
         return CoupledStepper(
             config=self,
-            ocean=self._get_ocean_stepper(
-                dataset_info=dataset_info.ocean,
-            ),
+            ocean=self._get_ocean_stepper(dataset_info=dataset_info.ocean),
             atmosphere=self._get_atmosphere_stepper(
                 dataset_info=dataset_info.atmosphere
             ),

@@ -35,18 +35,16 @@ from fme.ace.stepper.single_module import (
     load_stepper_config,
 )
 from fme.ace.testing import DimSizes
-from fme.core import AtmosphereData, metrics
+from fme.core import AtmosphereData
 from fme.core.coordinates import (
     DimSize,
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
-    NullVerticalCoordinate,
     VerticalCoordinate,
 )
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.mask_provider import MaskProvider
 from fme.core.masking import StaticMaskingConfig
@@ -132,6 +130,29 @@ def get_data(names: Iterable[str], n_samples, n_time) -> SphericalData:
     return SphericalData(data, area_weights, vertical_coord)
 
 
+def get_dataset_info(
+    img_shape=(5, 5),
+    mask_provider=None,
+    vertical_coordinate=None,
+    horizontal_coordinate=None,
+) -> DatasetInfo:
+    if horizontal_coordinate is None:
+        horizontal_coordinate = LatLonCoordinates(
+            lat=torch.zeros(img_shape[-2]),
+            lon=torch.zeros(img_shape[-1]),
+        )
+    if vertical_coordinate is None:
+        vertical_coordinate = HybridSigmaPressureCoordinate(
+            ak=torch.arange(7), bk=torch.arange(7)
+        )
+    return DatasetInfo(
+        horizontal_coordinates=horizontal_coordinate,
+        vertical_coordinate=vertical_coordinate,
+        timestep=TIMESTEP,
+        mask_provider=mask_provider,
+    )
+
+
 def get_scalar_data(names, value):
     return {n: float(value) for n in names}
 
@@ -139,11 +160,6 @@ def get_scalar_data(names, value):
 def test_train_on_batch_normalizer_changes_only_norm_data():
     torch.manual_seed(0)
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
-    area = torch.ones((5, 5), device=DEVICE)
-    gridded_operations = LatLonOperations(area)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
     normalization_config = NormalizationConfig(
         means=get_scalar_data(["a", "b"], 0.0),
         stds=get_scalar_data(["a", "b"], 1.0),
@@ -170,12 +186,7 @@ def test_train_on_batch_normalizer_changes_only_norm_data():
     config = get_stepper_config(
         NetworkAndLossNormalizationConfig(network=normalization_config)
     )
-    dataset_info = DatasetInfo(
-        img_shape=(5, 5),
-        gridded_operations=gridded_operations,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     stepped = stepper.train_on_batch(data=data, optimization=NullOptimization())
     assert torch.allclose(
@@ -224,11 +235,6 @@ def test_train_on_batch_addition_series():
 
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    area = torch.ones((5, 5), device=DEVICE)
-    gridded_operations = LatLonOperations(area)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -250,12 +256,7 @@ def test_train_on_batch_addition_series():
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    dataset_info = DatasetInfo(
-        img_shape=(5, 5),
-        gridded_operations=gridded_operations,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
@@ -295,11 +296,6 @@ def test_train_on_batch_crps_loss():
 
     n_steps = 4
     data_with_ic: BatchData = get_data(["a", "b"], n_samples=5, n_time=n_steps + 1).data
-    area = torch.ones((5, 5), device=DEVICE)
-    gridded_operations = LatLonOperations(area)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
 
     config = StepperConfig(
         step=StepSelector(
@@ -329,12 +325,7 @@ def test_train_on_batch_crps_loss():
             },
         ),
     )
-    dataset_info = DatasetInfo(
-        img_shape=(5, 5),
-        gridded_operations=gridded_operations,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     stepped = stepper.train_on_batch(data=data_with_ic, optimization=NullOptimization())
     # output of train_on_batch does not include the initial condition
@@ -356,11 +347,6 @@ def test_train_on_batch_with_prescribed_ocean():
         "a": 2.0,
         "b": 3.0,
     }
-    area = torch.ones((5, 5), device=DEVICE)
-    gridded_operations = LatLonOperations(area)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -382,12 +368,7 @@ def test_train_on_batch_with_prescribed_ocean():
             ),
         ),
     )
-    dataset_info = DatasetInfo(
-        img_shape=area.shape,
-        gridded_operations=gridded_operations,
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     for i in range(n_steps - 1):
@@ -434,22 +415,8 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    shapes = {
-        "a": (1, 2, 5, 5),
-        "b": (1, 2, 5, 5),
-    }
-    area = torch.ones((5, 5), device=DEVICE)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
-    dataset_info = DatasetInfo(
-        img_shape=shapes["a"][-2:],
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
-    area = torch.ones((5, 5), device=DEVICE)
     new_stepper = Stepper.from_state(stepper.get_state())
     data = get_data(["a", "b"], n_samples=5, n_time=2).data
     first_result = stepper.train_on_batch(
@@ -545,11 +512,6 @@ def _setup_and_train_on_batch(
     else:
         optimization = optimization_config.build(modules=[module], max_epochs=2)
 
-    area = torch.ones((5, 5), device=DEVICE)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
-
     config = StepperConfig(
         step=StepSelector(
             type="single_module",
@@ -572,12 +534,7 @@ def _setup_and_train_on_batch(
         loss=WeightedMappingLossConfig(type="MSE"),
     )
 
-    dataset_info = DatasetInfo(
-        img_shape=area.shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     stepper = config.get_stepper(dataset_info)
     return stepper.train_on_batch(data, optimization=optimization)
 
@@ -735,7 +692,15 @@ def test_stepper_corrector(
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.asarray([3.0, 1.0, 0.0]), bk=torch.asarray([0.0, 0.6, 1.0])
     ).to(device)
-    area_weights = 1.0 + torch.rand(size=(5, 5)).to(device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.linspace(-89.5, 89.5, 5, device=device),
+        lon=torch.linspace(-179.5, 179.5, 5, device=device),
+    )
+    dataset_info = get_dataset_info(
+        vertical_coordinate=vertical_coordinate,
+        horizontal_coordinate=horizontal_coordinate,
+    )
+    gridded_ops = dataset_info.gridded_operations
 
     if force_positive:
         force_positive_names = ["specific_total_water_0"]
@@ -749,10 +714,8 @@ def test_stepper_corrector(
         force_positive_names=force_positive_names,
     )
 
-    mean_advection = metrics.weighted_mean(
-        data["tendency_of_total_water_path_due_to_advection"].to(device),
-        weights=area_weights,
-        dim=[-2, -1],
+    mean_advection = gridded_ops.area_weighted_mean(
+        data["tendency_of_total_water_path_due_to_advection"].to(device)
     )
     assert (mean_advection.abs() > 0.0).all()
 
@@ -779,12 +742,6 @@ def test_stepper_corrector(
                 )
             ),
         ),
-    )
-    dataset_info = DatasetInfo(
-        img_shape=data["PRESsfc"].shape[2:],
-        gridded_operations=LatLonOperations(area_weights),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
     )
     stepper = stepper_config.get_stepper(dataset_info)
     time = xr.DataArray(
@@ -815,9 +772,7 @@ def test_stepper_corrector(
     # check that the budget residual is zero
     budget_residual = stepped.gen_data["total_water_path_budget_residual"]
     if global_only:
-        budget_residual = metrics.weighted_mean(
-            budget_residual, weights=area_weights, dim=[-2, -1]
-        )
+        budget_residual = gridded_ops.area_weighted_mean(budget_residual)
     budget_residual = budget_residual.cpu().numpy()
     if terms_to_modify is not None:
         if global_only:
@@ -832,10 +787,8 @@ def test_stepper_corrector(
 
     # check there is no mean advection
     mean_advection = (
-        metrics.weighted_mean(
-            stepped.gen_data["tendency_of_total_water_path_due_to_advection"],
-            weights=area_weights,
-            dim=[-2, -1],
+        gridded_ops.area_weighted_mean(
+            stepped.gen_data["tendency_of_total_water_path_due_to_advection"]
         )
         .cpu()
         .numpy()
@@ -844,12 +797,10 @@ def test_stepper_corrector(
 
     # check that the dry air is conserved
     dry_air = (
-        metrics.weighted_mean(
+        gridded_ops.area_weighted_mean(
             AtmosphereData(
                 stepped.gen_data, vertical_coordinate
-            ).surface_pressure_due_to_dry_air,
-            weights=area_weights,
-            dim=[-2, -1],
+            ).surface_pressure_due_to_dry_air
         )
         .cpu()
         .numpy()
@@ -897,7 +848,6 @@ def _get_stepper(
                 return x.repeat(1, 2, 1, 1)
 
         module_config = {"module": RepeatChannel()}
-
     elif module_name == "Linear":
         # convenient for testing a stepper with parameters
         class Linear(torch.nn.Module):
@@ -909,11 +859,6 @@ def _get_stepper(
                 return self.linear(x)
 
         module_config = {"module": Linear()}
-
-    area = torch.ones((5, 5))
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
 
     config = StepperConfig(
         step=StepSelector(
@@ -936,12 +881,7 @@ def _get_stepper(
         ),
         loss=WeightedMappingLossConfig(type="MSE"),
     )
-    dataset_info = DatasetInfo(
-        img_shape=(5, 5),
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info()
     return config.get_stepper(dataset_info)
 
 
@@ -1192,23 +1132,7 @@ def test_stepper_from_state_using_resnorm_has_correct_normalizer():
             ),
         )
     )
-    shapes = {
-        "a": (1, 1, 5, 5),
-        "b": (1, 1, 5, 5),
-        "diagnostic": (1, 1, 5, 5),
-    }
-    area = torch.ones((5, 5), device=DEVICE)
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
-    orig_stepper = config.get_stepper(
-        dataset_info=DatasetInfo(
-            img_shape=shapes["a"][-2:],
-            gridded_operations=LatLonOperations(area),
-            vertical_coordinate=vertical_coordinate,
-            timestep=TIMESTEP,
-        ),
-    )
+    orig_stepper = config.get_stepper(dataset_info=get_dataset_info())
     stepper_from_state = Stepper.from_state(orig_stepper.get_state())
 
     for stepper in [orig_stepper, stepper_from_state]:
@@ -1316,10 +1240,6 @@ def get_regression_stepper_and_data(
     device = get_device()
 
     all_names = list(set(in_names + out_names))
-    area = torch.ones((5, 5))
-    vertical_coordinate = HybridSigmaPressureCoordinate(
-        ak=torch.arange(7), bk=torch.arange(7)
-    )
 
     if crps_training:
         loss = WeightedMappingLossConfig(
@@ -1361,12 +1281,7 @@ def get_regression_stepper_and_data(
         n_ensemble=n_ensemble,
     )
 
-    dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
-        vertical_coordinate=vertical_coordinate,
-        timestep=TIMESTEP,
-    )
+    dataset_info = get_dataset_info(img_shape=img_shape)
     stepper = config.get_stepper(dataset_info)
     data = BatchData(
         data={
@@ -1527,22 +1442,10 @@ def _get_stepper_with_input_masking(dataset_info_has_mask_provider: bool = True)
         ),
         input_masking=StaticMaskingConfig(mask_value=0, fill_value=0.0),
     )
-    img_shape = (5, 5)
-    area = torch.ones(img_shape, device=DEVICE)
-    gridded_operations = LatLonOperations(area)
-    timestep = datetime.timedelta(hours=6)
     mask_provider: MaskProvider | None = None
     if dataset_info_has_mask_provider:
         mask_provider = MaskProvider()
-    return config.get_stepper(
-        DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
-            vertical_coordinate=NullVerticalCoordinate(),
-            mask_provider=mask_provider,
-            timestep=timestep,
-        )
-    )
+    return config.get_stepper(get_dataset_info(mask_provider=mask_provider))
 
 
 def test_get_stepper_with_input_masking():

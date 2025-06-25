@@ -25,10 +25,13 @@ from fme.ace.inference.inference import (
 from fme.ace.registry import ModuleSelector
 from fme.ace.stepper import SingleModuleStepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.normalizer import NormalizationConfig
 
@@ -59,14 +62,15 @@ def save_stepper(
             stds={name: std for name in all_names},
         ),
     )
-    area = torch.ones(data_shape[-2:], device=fme.get_device())
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=(data_shape[-2], data_shape[-1]),
-            gridded_operations=LatLonOperations(area),
+            horizontal_coordinates=horizontal_coordinate,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
         ),

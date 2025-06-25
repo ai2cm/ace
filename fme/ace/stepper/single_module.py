@@ -25,13 +25,12 @@ from fme.core.coordinates import (
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.dataset.data_typing import VariableMetadata
-from fme.core.dataset.utils import decode_timestep, encode_timestep
+from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.inference import PredictFunction
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
-from fme.core.gridded_ops import GriddedOperations, LatLonOperations
 from fme.core.loss import WeightedMappingLoss, WeightedMappingLossConfig
 from fme.core.masking import NullMasking, StaticMaskingConfig
 from fme.core.multi_call import MultiCallConfig
@@ -1480,24 +1479,28 @@ class Stepper(
         """
         try:
             legacy_config = SingleModuleStepperConfig.from_state(state["config"])
-            encoded_timestep = state.get("encoded_timestep", DEFAULT_ENCODED_TIMESTEP)
-            timestep = decode_timestep(encoded_timestep)
+            dataset_state = {}
+            dataset_state["timestep"] = state.get(
+                "encoded_timestep", DEFAULT_ENCODED_TIMESTEP
+            )
             if "sigma_coordinates" in state:
                 # for backwards compatibility with old checkpoints
-                state["vertical_coordinate"] = state["sigma_coordinates"]
-            vertical_coordinate = dacite.from_dict(
-                data_class=SerializableVerticalCoordinate,
-                data={"vertical_coordinate": state["vertical_coordinate"]},
-                config=dacite.Config(strict=True),
-            ).vertical_coordinate
+                dataset_state["vertical_coordinate"] = state["sigma_coordinates"]
+            else:
+                dataset_state["vertical_coordinate"] = state["vertical_coordinate"]
 
             if "area" in state:
                 # backwards-compatibility, these older checkpoints are always lat-lon
-                gridded_operations: GriddedOperations = LatLonOperations(state["area"])
+                dataset_state["gridded_operations"] = {
+                    "type": "LatLonOperations",
+                    "state": {"area_weights": state["area"]},
+                }
             else:
-                gridded_operations = GriddedOperations.from_state(
-                    state["gridded_operations"]
-                )
+                dataset_state["gridded_operations"] = state["gridded_operations"]
+
+            if "img_shape" in state:
+                dataset_state["img_shape"] = state["img_shape"]
+
             normalizer = StandardNormalizer.from_state(
                 state.get("normalizer", state.get("normalization"))
             )
@@ -1513,13 +1516,7 @@ class Stepper(
             config = legacy_config.to_stepper_config(
                 normalizer=normalizer, loss_normalizer=loss_normalizer
             )
-            dataset_info = DatasetInfo(
-                img_shape=state["img_shape"],
-                timestep=timestep,
-                vertical_coordinate=vertical_coordinate,
-                mask_provider=None,
-                gridded_operations=gridded_operations,
-            )
+            dataset_info = DatasetInfo.from_state(dataset_state)
             state["step"] = {
                 # SingleModuleStep inside MultiCallStep
                 "wrapped_step": {"module": state["module"]}
