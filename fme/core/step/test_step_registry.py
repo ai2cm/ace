@@ -3,9 +3,8 @@ import datetime
 
 import torch
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.ocean import OceanConfig
 
 from .step import StepABC, StepConfigABC, StepSelector
@@ -113,11 +112,12 @@ def test_register():
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
-    gridded_operations = LatLonOperations(area_weights=torch.ones(img_shape))
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0]), lon=torch.zeros(img_shape[1])
+    )
     timestep = datetime.timedelta(hours=6)
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=gridded_operations,
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=timestep,
     )

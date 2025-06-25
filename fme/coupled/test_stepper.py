@@ -82,7 +82,6 @@ OCEAN_STEPPER_CONFIG = SingleModuleStepperConfig(
 class CoupledDatasetInfoBuilder:
     vcoord: CoupledVerticalCoordinate
     hcoord: CoupledHorizontalCoordinates | None = None
-    img_shape: tuple[int, int] = (N_LAT, N_LON)
     ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
     atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
     ocean_mask_provider: MaskProvider = dataclasses.field(
@@ -94,8 +93,8 @@ class CoupledDatasetInfoBuilder:
 
     def __post_init__(self):
         if self.hcoord is None:
-            lat = torch.arange(self.img_shape[0])
-            lon = torch.arange(self.img_shape[1])
+            lat = torch.arange(N_LAT)
+            lon = torch.arange(N_LON)
             self.hcoord = CoupledHorizontalCoordinates(
                 ocean=LatLonCoordinates(
                     lon=lon,
@@ -114,15 +113,13 @@ class CoupledDatasetInfoBuilder:
         assert self.hcoord is not None
         return CoupledDatasetInfo(
             ocean=DatasetInfo(
-                img_shape=self.img_shape,
-                gridded_operations=self.hcoord.ocean.gridded_operations,
+                horizontal_coordinates=self.hcoord.ocean,
                 vertical_coordinate=self.vcoord.ocean,
                 mask_provider=self.ocean_mask_provider,
                 timestep=self.ocean_timestep,
             ),
             atmosphere=DatasetInfo(
-                img_shape=self.img_shape,
-                gridded_operations=self.hcoord.atmosphere.gridded_operations,
+                horizontal_coordinates=self.hcoord.atmosphere,
                 vertical_coordinate=self.vcoord.atmosphere,
                 mask_provider=self.atmos_mask_provider,
                 timestep=self.atmos_timestep,
@@ -456,6 +453,7 @@ SphericalData = namedtuple(
     "SphericalData",
     [
         "data",
+        "horizontal_coord",
         "vertical_coord",
     ],
 )
@@ -469,6 +467,8 @@ def get_data(
         data_dict[name] = torch.rand(
             n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
         )
+    lats = torch.linspace(-89.5, 89.5, N_LAT)
+    horizontal_coords = LatLonCoordinates(lat=lats, lon=torch.linspace(0, 360, N_LON))
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -484,7 +484,7 @@ def get_data(
             dims=["sample", "time"],
         ),
     )
-    return SphericalData(data, vertical_coord)
+    return SphericalData(data, horizontal_coords, vertical_coord)
 
 
 def get_coupled_data(
@@ -503,6 +503,9 @@ def get_coupled_data(
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
+        CoupledHorizontalCoordinates(
+            ocean_data.horizontal_coord, atmos_data.horizontal_coord
+        ),
         CoupledVerticalCoordinate(
             ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
         ),

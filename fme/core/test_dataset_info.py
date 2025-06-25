@@ -1,14 +1,20 @@
 import datetime
 import logging
+from typing import Any
 
 import pytest
 import torch
 
-from fme.core.coordinates import HybridSigmaPressureCoordinate, NullVerticalCoordinate
+from fme.core.coordinates import (
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import (
     DatasetInfo,
     IncompatibleDatasetInfo,
+    MissingDatasetInfo,
     get_keys_with_conflicts,
 )
 from fme.core.gridded_ops import LatLonOperations
@@ -24,8 +30,9 @@ from fme.core.mask_provider import MaskProvider
         ),
         pytest.param(
             DatasetInfo(
-                img_shape=(10, 10),
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10)),
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                ),
                 vertical_coordinate=HybridSigmaPressureCoordinate(
                     ak=torch.arange(10),
                     bk=torch.arange(10),
@@ -36,8 +43,9 @@ from fme.core.mask_provider import MaskProvider
         ),
         pytest.param(
             DatasetInfo(
-                img_shape=(10, 10),
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10)),
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4), lon=torch.arange(16)
+                ),
                 mask_provider=MaskProvider(masks={"mask_0": torch.ones(10, 10)}),
                 timestep=datetime.timedelta(hours=1),
             ),
@@ -71,26 +79,40 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
             id="empty",
         ),
         pytest.param(
-            DatasetInfo(img_shape=(10, 10)),
-            DatasetInfo(img_shape=(10, 10)),
-            id="img_shape_equal",
-        ),
-        pytest.param(
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10))
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                )
             ),
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10))
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                )
             ),
-            id="gridded_operations_equal",
+            id="horizontal_coordinates_equal",
         ),
         pytest.param(
             DatasetInfo(),
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10))
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                )
             ),
-            id="gridded_operations_missing_from_first",
-        ),  # model trained without GriddedOperations doesn't care what inference uses
+            id="horizontal_coordinates_missing_from_first",
+        ),  # model without HorizontalCoordinates doesn't care what inference uses
+        pytest.param(
+            DatasetInfo(
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                )
+            ),
+            DatasetInfo(),
+            id="horizontal_coordinates_missing_from_second",
+        ),
         pytest.param(
             DatasetInfo(
                 vertical_coordinate=HybridSigmaPressureCoordinate(
@@ -179,40 +201,20 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
     "a, b, msgs",
     [
         pytest.param(
-            DatasetInfo(img_shape=(10, 10)),
-            DatasetInfo(img_shape=(10, 11)),
-            ["img_shape"],
-            id="img_shape",
-        ),
-        pytest.param(
-            DatasetInfo(),
-            DatasetInfo(img_shape=(10, 10)),
-            ["img_shape"],
-            id="img_shape_missing_from_first",
-        ),
-        pytest.param(
-            DatasetInfo(img_shape=(10, 10)),
-            DatasetInfo(),
-            ["img_shape"],
-            id="img_shape_missing_from_second",
-        ),
-        pytest.param(
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10))
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                )
             ),
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.zeros(10, 10))
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-5, 3),
+                    lon=torch.arange(16),
+                )
             ),
-            ["gridded_operations"],
-            id="gridded_operations_values_differ",
-        ),
-        pytest.param(
-            DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10))
-            ),
-            DatasetInfo(),
-            ["gridded_operations"],
-            id="gridded_operations_missing_from_second",
+            ["horizontal_coordinates"],
+            id="horizontal_coordinates_values_differ",
         ),
         pytest.param(
             DatasetInfo(
@@ -252,24 +254,21 @@ def test_assert_compatible_with_compatible_dataset_info(a: DatasetInfo, b: Datas
         ),  # a model trained with a timestep cannot work with arbitrary timesteps
         pytest.param(
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10)),
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-4, 4),
+                    lon=torch.arange(16),
+                ),
                 timestep=datetime.timedelta(hours=1),
             ),
             DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.zeros(10, 10)),
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(-5, 3),
+                    lon=torch.arange(16),
+                ),
                 timestep=datetime.timedelta(hours=2),
             ),
-            ["gridded_operations", "timestep"],
+            ["horizontal_coordinates", "timestep"],
             id="multiple_values_differ",
-        ),
-        pytest.param(
-            DatasetInfo(
-                gridded_operations=LatLonOperations(area_weights=torch.ones(10, 10)),
-                timestep=datetime.timedelta(hours=1),
-            ),
-            DatasetInfo(),
-            ["gridded_operations", "timestep"],
-            id="multiple_values_missing_from_second",
         ),
     ],
 )
@@ -281,7 +280,7 @@ def test_assert_compatible_with_incompatible_dataset_info(
     for msg in msgs:
         assert msg in str(exc_info.value)
     non_messages = set(
-        ["gridded_operations", "vertical_coordinate", "timestep", "img_shape"]
+        ["horizontal_coordinates", "vertical_coordinate", "timestep", "img_shape"]
     ).difference(msgs)
     for msg in non_messages:
         assert msg not in str(exc_info.value)
@@ -336,3 +335,30 @@ def test_compatibility_logs_metadata_keys(caplog):
         "DatasetInfo has different metadata from other DatasetInfo for key var_1"
         in caplog.text
     )
+
+
+def test_backwards_compatibility_with_gridded_ops():
+    """Previously DatasetInfo was initialized with img_shape and
+    gridded_operations. Now we use horizontal_coordinates. This test ensures
+    that old-style DatasetInfo can still be deserialized."""
+    legacy_state: dict[str, Any] = {
+        "img_shape": (4, 4),
+        "gridded_operations": {
+            "type": "LatLonOperations",
+            "state": {"area_weights": torch.ones(4, 4)},
+        },
+    }
+    dataset_info = DatasetInfo.from_state(legacy_state)
+    with pytest.raises(MissingDatasetInfo, match="horizontal_coordinates"):
+        dataset_info.horizontal_coordinates
+    assert isinstance(dataset_info.gridded_operations, LatLonOperations)
+    assert dataset_info.img_shape == (4, 4)
+
+
+def test_dataset_info_raises_error_with_conflicting_inputs():
+    coords = LatLonCoordinates(lat=torch.arange(-4, 4), lon=torch.arange(16))
+    with pytest.raises(ValueError, match="provide both img_shape"):
+        DatasetInfo(horizontal_coordinates=coords, img_shape=(10, 10))
+    with pytest.raises(ValueError, match="provide both gridded_operations"):
+        ops = LatLonOperations(area_weights=torch.ones(10, 10))
+        DatasetInfo(horizontal_coordinates=coords, gridded_operations=ops)

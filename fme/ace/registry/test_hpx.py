@@ -17,10 +17,9 @@ from fme.ace.models.healpix.healpix_layers import HEALPixPadding
 from fme.ace.models.healpix.healpix_recunet import HEALPixRecUNet
 from fme.ace.registry.hpx import UNetDecoderConfig, UNetEncoderConfig
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HEALPixCoordinates, HybridSigmaPressureCoordinate
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NormalizationConfig
 
 TIMESTEP = datetime.timedelta(hours=6)
@@ -146,12 +145,7 @@ def insolation_data():
     return generate_insolation_data
 
 
-@pytest.mark.parametrize(
-    "shape",
-    [
-        pytest.param((8, 16)),
-    ],
-)
+@pytest.mark.parametrize("shape", [pytest.param((8, 16))])
 def test_hpx_init(shape):
     in_channels = 7
     out_channels = 7
@@ -196,15 +190,16 @@ def test_hpx_init(shape):
             )
         ),
     }
-    area = th.ones((1, 16, 32)).to(device)
+    horizontal_coordinates = HEALPixCoordinates(
+        th.arange(12), th.arange(8), th.arange(8)
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=th.arange(7), bk=th.arange(7)
     ).to(device)
     stepper_config = SingleModuleStepperConfig.from_state(stepper_config_data)
     stepper = stepper_config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=shape,
-            gridded_operations=LatLonOperations(area),
+            horizontal_coordinates=horizontal_coordinates,
             vertical_coordinate=vertical_coordinate,
             timestep=TIMESTEP,
         ),
