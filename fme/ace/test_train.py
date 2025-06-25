@@ -33,7 +33,7 @@ from fme.ace.registry.test_hpx import (
     recurrent_block_config,
     up_sampling_block_config,
 )
-from fme.ace.stepper.single_module import SingleModuleStepperConfig
+from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import (
     DimSizes,
     MonthlyReferenceData,
@@ -57,12 +57,14 @@ from fme.core.generics.trainer import (
 )
 from fme.core.logging_utils import LoggingConfig
 from fme.core.loss import WeightedMappingLossConfig
-from fme.core.normalizer import NormalizationConfig
+from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
 from fme.core.scheduler import SchedulerConfig
+from fme.core.step.single_module import SingleModuleStepConfig
+from fme.core.step.step import StepSelector
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.core.typing_ import Slice
@@ -228,28 +230,38 @@ def _get_test_yaml_files(
                 kwargs=dict(T_max=1),
             ),
         ),
-        stepper=SingleModuleStepperConfig(
-            crps_training=crps_training,
-            in_names=in_variable_names,
-            out_names=out_variable_names,
-            normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
-            residual_normalization=NormalizationConfig(
-                global_means_path=str(global_means_path),
-                global_stds_path=str(global_stds_path),
-            ),
+        stepper=StepperConfig(
             loss=WeightedMappingLossConfig(type="MSE"),
-            builder=ModuleSelector(
-                type=nettype,
-                config=net_config,
+            crps_training=crps_training,
+            step=StepSelector(
+                type="single_module",
+                config=dataclasses.asdict(
+                    SingleModuleStepConfig(
+                        crps_training=crps_training,
+                        in_names=in_variable_names,
+                        out_names=out_variable_names,
+                        normalization=NetworkAndLossNormalizationConfig(
+                            network=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                            residual=NormalizationConfig(
+                                global_means_path=str(global_means_path),
+                                global_stds_path=str(global_stds_path),
+                            ),
+                        ),
+                        builder=ModuleSelector(
+                            type=nettype,
+                            config=net_config,
+                        ),
+                        ocean=OceanConfig(
+                            surface_temperature_name=in_variable_names[0],
+                            ocean_fraction_name=mask_name,
+                        ),
+                        corrector=corrector_config,
+                    )
+                ),
             ),
-            ocean=OceanConfig(
-                surface_temperature_name=in_variable_names[0],
-                ocean_fraction_name=mask_name,
-            ),
-            corrector=corrector_config,
         ),
         inference=inline_inference_config,
         n_forward_steps=n_forward_steps,

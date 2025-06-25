@@ -1,5 +1,6 @@
 import dataclasses
 import os
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
@@ -83,7 +84,9 @@ class TrainConfig:
     Arguments:
         train_loader: Configuration for the training data loader.
         validation_loader: Configuration for the validation data loader.
-        stepper: Configuration for the stepper.
+        stepper: Configuration for the stepper. SingleModuleStepperConfig is
+            deprecated and will be removed in a future version. Use StepperConfig
+            instead.
         optimization: Configuration for the optimization.
         logging: Configuration for logging.
         max_epochs: Total number of epochs to train for.
@@ -141,6 +144,13 @@ class TrainConfig:
         default_factory=lambda: OneStepAggregatorConfig()
     )
     evaluate_before_training: bool = False
+
+    def __post_init__(self):
+        if isinstance(self.stepper, SingleModuleStepperConfig):
+            warnings.warn(
+                "SingleModuleStepperConfig is deprecated. Use StepperConfig instead.",
+                DeprecationWarning,
+            )
 
     @property
     def inference_n_forward_steps(self) -> int:
