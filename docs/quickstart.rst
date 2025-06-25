@@ -156,8 +156,8 @@ These are generated using the script located at ``scripts/data_process/get_stats
    )
    # These are referenced in the paragraph just above, if they change then
    # update both the docs and this test!
-   print(config.stepper.normalization.global_means_path)
-   print(config.stepper.normalization.global_stds_path)
+   print(config.stepper.step.config["normalization"]["network"]["global_means_path"])
+   print(config.stepper.step.config["normalization"]["network"]["global_stds_path"])
 
 .. testoutput::
    :hide:
