@@ -1,0 +1,39 @@
+experiment_dir: /results
+n_forward_steps: 45292
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+forcing_loader:
+  dataset:
+    data_path: /climate-default/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset/netCDFs/ic_0002/
+  num_data_workers: 4
+  perturbations:
+    sst:
+      - type: constant
+        config:
+          amplitude: 0.0
+initial_condition:
+  path: /results/spin-up/restart.nc
+  start_indices:
+    times:
+      - "1990-01-01T00:00:00"
+stepper_override:
+  ocean:
+    ocean_fraction_name: ocean_fraction
+    surface_temperature_name: surface_temperature
+  multi_call: null
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: true
+  names:
+    - air_temperature_7
+    - air_temperature_0
+    - PRATEsfc
+    - h500
+    - TMP2m
+    - surface_temperature
