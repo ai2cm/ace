@@ -11,7 +11,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
 from fme.ace.stepper import SingleModuleStepperConfig
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.generics.data import SimpleInferenceData
@@ -21,7 +21,6 @@ from fme.core.generics.inference import (
     get_record_to_wandb,
     run_inference,
 )
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.loss import WeightedMappingLossConfig
 from fme.core.normalizer import NormalizationConfig
 from fme.core.registry.module import ModuleSelector
@@ -116,7 +115,10 @@ def _get_stepper():
     )
 
     img_shape = spherical_data.data[in_names[0]].shape[2:]
-    gridded_operations = LatLonOperations(spherical_data.area_weights)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0]),
+        lon=torch.zeros(img_shape[1]),
+    )
     vertical_coordinate = spherical_data.vertical_coord
     config = SingleModuleStepperConfig(
         builder=ModuleSelector(type="prebuilt", config={"module": ChannelSum()}),
@@ -130,8 +132,7 @@ def _get_stepper():
     )
     stepper = config.get_stepper(
         dataset_info=DatasetInfo(
-            img_shape=img_shape,
-            gridded_operations=gridded_operations,
+            horizontal_coordinates=horizontal_coordinate,
             vertical_coordinate=vertical_coordinate,
             timestep=datetime.timedelta(seconds=1),
         ),

@@ -34,19 +34,6 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
         return map(self._func, self._iterable)
 
 
-def get_img_shape(loader: DataLoader[BatchData]) -> tuple[int, int]:
-    img_shape = None
-    for batch in loader:
-        shapes = {k: v.shape for k, v in batch.data.items()}
-        for value in shapes.values():
-            img_shape = value[-2:]
-            break
-        break
-    if img_shape is None:
-        raise ValueError("No data found in loader")
-    return img_shape
-
-
 class GriddedData(GriddedDataABC[BatchData]):
     """
     Data as required for pytorch training.
@@ -89,7 +76,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._sampler = sampler
         self._modifier = modifier
         self._batch_size: int | None = None
-        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -105,8 +91,7 @@ class GriddedData(GriddedDataABC[BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            img_shape=self._img_shape,
-            gridded_operations=self._gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
             mask_provider=self._mask_provider,
             timestep=self._timestep,
@@ -215,7 +200,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -231,8 +215,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            img_shape=self._img_shape,
-            gridded_operations=self._gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
             timestep=self.timestep,
         )

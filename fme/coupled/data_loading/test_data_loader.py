@@ -16,15 +16,23 @@ from fme.ace.data_loading.test_data_loader import _get_coords
 from fme.ace.requirements import DataRequirements
 from fme.ace.testing import save_scalar_netcdf
 from fme.core.coordinates import (
+    HorizontalCoordinates,
     OptionalDepthCoordinate,
     OptionalHybridSigmaPressureCoordinate,
     VerticalCoordinate,
 )
 from fme.core.dataset.config import XarrayDataConfig
-from fme.core.dataset.xarray import _get_mask_provider, _get_vertical_coordinate
+from fme.core.dataset.xarray import (
+    _get_mask_provider,
+    _get_vertical_coordinate,
+    get_horizontal_coordinates,
+)
 from fme.core.mask_provider import MaskProvider
 from fme.core.typing_ import Slice
-from fme.coupled.data_loading.data_typing import CoupledVerticalCoordinate
+from fme.coupled.data_loading.data_typing import (
+    CoupledHorizontalCoordinates,
+    CoupledVerticalCoordinate,
+)
 from fme.coupled.requirements import CoupledDataRequirements
 
 from .config import CoupledDataLoaderConfig, CoupledDatasetConfig
@@ -121,6 +129,15 @@ class MockComponentData:
     def vcoord(self) -> VerticalCoordinate:
         return _get_vertical_coordinate(self.ds, dtype=None)
 
+    @property
+    def hcoord(self) -> HorizontalCoordinates:
+        return get_horizontal_coordinates(
+            self.ds,
+            spatial_dimensions="latlon",
+            dtype=None,
+            mask_provider=self.mask_provider,
+        )[0]
+
 
 @dataclasses.dataclass
 class MockCoupledData:
@@ -139,6 +156,13 @@ class MockCoupledData:
     def img_shape(self) -> tuple[int, int]:
         # NOTE: assumes atmosphere has same img_shape
         return self.ocean.ds[next(iter(self.ocean.ds.data_vars))].shape[-2:]
+
+    @property
+    def hcoord(self) -> CoupledHorizontalCoordinates:
+        return CoupledHorizontalCoordinates(
+            ocean=self.ocean.hcoord,
+            atmosphere=self.atmosphere.hcoord,
+        )
 
     @property
     def vcoord(self) -> CoupledVerticalCoordinate:
