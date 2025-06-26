@@ -69,7 +69,10 @@ stepper:
       normalization:
         network:
           global_means_path: centering.nc
-          global_stds_path: scaling.nc
+          global_stds_path: scaling-full-field.nc
+        loss:
+          global_means_path: centering.nc
+          global_stds_path: scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
