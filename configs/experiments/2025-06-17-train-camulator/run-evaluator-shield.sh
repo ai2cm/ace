@@ -62,7 +62,7 @@ launch_job () {
 SHIELD_PRETRAINED_CAMULATOR=01JYMGQYSPQWHBXSNVFH63EY12
 
 
-for perturbation in 0 2; do
+for perturbation in 4; do
     JOB_NAME="ace-inference-shield-pretrained-camulator-p${perturbation}k"
 
     CONFIG_PATH="${SCRIPT_PATH}shield-${perturbation}k-sst-evaluator.yaml"
