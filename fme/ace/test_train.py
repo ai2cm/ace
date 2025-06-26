@@ -96,6 +96,7 @@ def _get_test_yaml_files(
     save_per_epoch_diagnostics=False,
     log_validation_maps=False,
     skip_inline_inference=False,
+    time_buffer=1,
 ):
     input_time_size = 1
     output_time_size = 1
@@ -210,6 +211,7 @@ def _get_test_yaml_files(
             ),
             batch_size=2,
             num_data_workers=0,
+            time_buffer=time_buffer,
             sample_with_replacement=10,
         ),
         validation_loader=DataLoaderConfig(
@@ -342,6 +344,7 @@ def _setup(
     crps_training=False,
     log_validation_maps=False,
     skip_inline_inference=False,
+    time_buffer=1,
 ):
     if not path.exists():
         path.mkdir()
@@ -429,6 +432,7 @@ def _setup(
         save_per_epoch_diagnostics=save_per_epoch_diagnostics,
         log_validation_maps=log_validation_maps,
         skip_inline_inference=skip_inline_inference,
+        time_buffer=time_buffer,
     )
     return train_config_filename, inference_config_filename
 
@@ -764,6 +768,7 @@ def test_train_without_inline_inference(tmp_path, very_fast_only: bool):
         save_per_epoch_diagnostics=True,
         log_validation_maps=log_validation_maps,
         skip_inline_inference=True,
+        time_buffer=2,
     )
     with mock_wandb() as wandb:
         train_main(
