@@ -17,11 +17,12 @@ def isotropic_noise(
     lmax: int,  # length of the ℓ axis expected by isht
     mmax: int,  # length of the m axis expected by isht
     isht: Callable[[torch.Tensor], torch.Tensor],
+    device: torch.device,
 ) -> torch.Tensor:
     # --- draw independent N(0,1) parts --------------------------------------
     coeff_shape = (*leading_shape, lmax, mmax)
-    real = torch.randn(coeff_shape, dtype=torch.float32)
-    imag = torch.randn(coeff_shape, dtype=torch.float32)
+    real = torch.randn(coeff_shape, dtype=torch.float32, device=device)
+    imag = torch.randn(coeff_shape, dtype=torch.float32, device=device)
     imag[..., :, 0] = 0.0  # m = 0 ⇒ purely real
 
     # m > 0: make Re and Im each N(0,½)  → |a_{ℓ m}|² has variance 1
@@ -57,7 +58,8 @@ class NoiseConditionedSFNO(torch.nn.Module):
                 lmax,
                 mmax,
                 self.conditional_model.itrans_up,
-            ).to(x.device)
+                device=x.device,
+            )
         elif self.noise_type == "gaussian":
             noise = torch.randn(
                 [*x.shape[:-3], self.embed_dim, *x.shape[-2:]],
