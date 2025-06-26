@@ -3,6 +3,7 @@ import torch
 from torch_harmonics import InverseRealSHT
 
 from fme.ace.registry.stochastic_sfno import isotropic_noise
+from fme.core.device import get_device
 
 
 @pytest.mark.parametrize("nlat, nlon", [(8, 16), (64, 128)])
@@ -14,7 +15,7 @@ def test_isotropic_noise(nlat: int, nlon: int):
     isht = InverseRealSHT(nlat, nlon, grid="legendre-gauss")
     lmax = isht.lmax
     mmax = isht.mmax
-    noise = isotropic_noise(leading_shape, lmax, mmax, isht)
+    noise = isotropic_noise(leading_shape, lmax, mmax, isht, device=get_device())
     assert noise.shape == (n_batch, embed_dim, nlat, nlon)
     assert noise.dtype == torch.float32
     torch.testing.assert_close(
