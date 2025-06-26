@@ -22,6 +22,7 @@ from fme.core.distributed import Distributed
 
 from .batch_data import PrognosticState
 from .config import DataLoaderConfig
+from .dataloader import SlidingWindowDataLoader
 from .gridded_data import GriddedData, InferenceGriddedData
 from .inference import (
     ExplicitIndices,
@@ -75,26 +76,36 @@ def get_data_loader(
             then data will be shuffled.
         requirements: Data requirements for the model.
     """
+    n_timesteps_preloaded = config.time_buffer + requirements.n_timesteps
+    # include requirements.n_timesteps - 1 steps of overlap so that no samples are
+    # skipped at the boundaries of the preloaded timesteps
+    start_every_n = config.time_buffer + 1
     dataset: torch.utils.data.Dataset
     if isinstance(config.dataset, XarrayDataConfig):
         dataset, properties = get_xarray_dataset(
             config.dataset,
             requirements.names,
-            requirements.n_timesteps,
+            n_timesteps_preloaded,
         )
     elif isinstance(config.dataset, ConcatDatasetConfig):
         dataset, properties = get_dataset(
             config.dataset.concat,
             requirements.names,
-            requirements.n_timesteps,
+            n_timesteps_preloaded,
             strict=config.dataset.strict,
         )
     elif isinstance(config.dataset, MergeDatasetConfig):
         dataset, properties = get_merged_datasets(
             config.dataset,
             requirements.names,
-            requirements.n_timesteps,
+            n_timesteps_preloaded,
         )
+
+    if config.time_buffer > 0:
+        indices = range(len(dataset))[::start_every_n]
+        dataset = torch.utils.data.Subset(dataset, indices)
+
+    dist = Distributed.get_instance()
 
     sampler = _get_sampler(dataset, config.sample_with_replacement, train)
 
@@ -128,13 +139,24 @@ def get_data_loader(
         persistent_workers=persistent_workers,
         **kwargs,
     )
+    if config.time_buffer > 0:
+        dataloader = SlidingWindowDataLoader(
+            dataloader,
+            n_timesteps_preloaded,
+            requirements.n_timesteps,
+            train,
+            dataset=dataloader.dataset,
+        )
 
     if len(dataloader) == 0:
-        raise ValueError(
+        msg = (
             "No batches in dataloader: "
-            f"{len(dataloader.dataset)} samples, {len(dataloader)} batches. "
-            f"Batch size is {dataloader.batch_size}"
+            f"{len(dataloader.dataset)} samples, "
+            f"batch size is {dataloader.batch_size}"
         )
+        if config.time_buffer > 0:
+            msg += f", and an outer sample length is {n_timesteps_preloaded}"
+        raise ValueError(msg)
 
     return GriddedData(
         loader=dataloader,

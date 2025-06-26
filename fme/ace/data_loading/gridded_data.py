@@ -8,6 +8,7 @@ import torch
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
@@ -46,7 +47,7 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     def __init__(
         self,
-        loader: DataLoader[BatchData],
+        loader: DataLoader[BatchData] | SlidingWindowDataLoader,
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
         sampler: torch.utils.data.Sampler | None = None,
@@ -115,11 +116,11 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     @property
     def n_samples(self) -> int:
-        return len(self._loader.dataset)  # type: ignore
+        return self.n_batches * self.batch_size
 
     @property
     def n_batches(self) -> int:
-        return len(self._loader)  # type: ignore
+        return len(self._loader)
 
     @property
     def _first_time(self) -> Any:
@@ -138,7 +139,12 @@ class GriddedData(GriddedDataABC[BatchData]):
         return self._batch_size
 
     def log_info(self, name: str):
-        logging.info(f"{name} data: {self.n_samples} samples, {self.n_batches} batches")
+        if isinstance(self._loader, SlidingWindowDataLoader):
+            self._loader.log_info(name)
+        else:
+            logging.info(
+                f"{name} data: {self.n_samples} samples, {self.n_batches} batches"
+            )
         logging.info(f"{name} data: first sample's initial time: {self._first_time}")
         logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
