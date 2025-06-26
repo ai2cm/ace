@@ -6,7 +6,7 @@ Training Config
 
 The following is an example configuration for running training while evaluating against target data.
 While you can use absolute paths in the config yamls (we encourage it!), the example uses paths relative to the directory you run the command.
-The example is based on training with our full dataset (containing data from 10 ensemble runs) and assumes you are running in a directory structure like:
+The example is based on training with separate training and validation datasets, e.g., a directory structure like:
 
 ::
 
@@ -27,10 +27,12 @@ The example is based on training with our full dataset (containing data from 10 
          └── ic_0010
              └── ...
 
-You can modify the example to run on fewer ensemble members by removing entries, or change the data paths as you wish.
-The ``.nc`` files correspond to data files like ``2021010100.nc`` in the `Zenodo repository`_, while ``ckpt.tar`` corresponds to a file like ``ace_ckpt.tar`` in that repository.
+You can flexibly modify the example to run on data organized in a different manner, and change the data paths as you wish.
 
-.. _Zenodo repository: https://zenodo.org/doi/10.5281/zenodo.10791086
+A 1-year (1940) single-ensemble member data subsample available on the in the `ACE2-ERA5 Hugging Face page`_.
+In that example dataset, the  ``.nc`` files would correspond to files like ``training_validation_data/training_validation/1940010100.nc``, and ``ckpt.tar`` corresponds to ``ace2_era5_ckpt.tar``.
+
+.. _ACE2-ERA5 Hugging Face page: https://huggingface.co/allenai/ACE2-ERA5
 
 
 .. literalinclude:: train-config.yaml
