@@ -45,11 +45,11 @@ run_training() {
     -- torchrun --nproc_per_node "$N_GPUS" -m fme.ace.train "$CONFIG_PATH"
 }
 
-base_name="train-climsst-camulator-1deg-amip-shield"
+base_name="train-camulator"
 
 stats_1deg_dataset="andrep/2024-07-24-vertically-resolved-c96-1deg-shield-amip-ensemble-dataset-stats"
 
 # To run a subset of these, comment out the ones you don't want to run
 # and if needed use `--allow-dirty` in the gantry run command above.
 # run_training "train-baseline.yaml" "$base_name-baseline" "$stats_1deg_dataset"
-run_training "train-baseline_amip_shield.yaml" "$base_name-baseline-1deg-camulator-amip-shield" "$stats_1deg_dataset"
+run_training "train-baseline_amip_shield.yaml" "$base_name-baseline-1deg-camulator-amip-shield-no-co2" "$stats_1deg_dataset"
