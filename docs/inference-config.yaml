@@ -7,6 +7,7 @@ logging:
   log_to_wandb: false
   log_to_file: true
   project: ace
+  entity: your_wandb_entity
 initial_condition:
   path: initial_conditions/ic_1940.nc
   start_indices:
