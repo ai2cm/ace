@@ -18,8 +18,8 @@ logging:
   log_to_screen: true
   log_to_wandb: false
   log_to_file: true
-  project: fourcastnet
-  entity: ai2cm
+  project: ace
+  entity: your_wandb_entity
 train_loader:
   batch_size: 4
   num_data_workers: 4
