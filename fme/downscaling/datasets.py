@@ -90,6 +90,33 @@ def get_normalized_topography(
     return topography_normalized
 
 
+def _get_topography_downscale_factor(
+    topography_shape: tuple[int, int], data_coords_shape: tuple[int, int]
+):
+    if len(topography_shape) != 2 or len(data_coords_shape) != 2:
+        raise ValueError(
+            f"Expected 2D shapes for topography {topography_shape} and "
+            f"data coordinates {data_coords_shape}, got {len(topography_shape)}D "
+            f"and {len(data_coords_shape)}D."
+        )
+    if (
+        topography_shape[0] % data_coords_shape[0] != 0
+        or topography_shape[1] % data_coords_shape[1] != 0
+    ):
+        raise ValueError(
+            f"Topography shape {topography_shape} must be evenly "
+            f"divisible by horizontal shape {data_coords_shape}"
+        )
+    topography_downscale_factor = topography_shape[0] // data_coords_shape[0]
+    if topography_downscale_factor != topography_shape[1] // data_coords_shape[1]:
+        raise ValueError(
+            f"Topography shape {topography_shape} must have the same scale factor "
+            "between lat and lon dimensions as data coordinates "
+            f"shape {data_coords_shape}"
+        )
+    return topography_downscale_factor
+
+
 @dataclasses.dataclass
 class ClosedInterval:
     start: float
@@ -310,23 +337,42 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
             lon=coords.lon[self.mask_indices.lon],
         )
         self._area_weights = self._latlon_coordinates.area_weights
-
-        if topography is not None:
-            shape = (
-                coords.lat.numel(),
-                coords.lon.numel(),
+        self._full_topography = topography
+        self._full_shape = (
+            coords.lat.numel(),
+            coords.lon.numel(),
+        )
+        if self._full_topography is not None:
+            self._topography_mask = self._get_topography_mask(
+                self.mask_indices,
+                self._full_topography.shape,
+                self._full_shape,
             )
-            if topography.shape != shape:
-                raise ValueError(
-                    f"Topography shape {topography.shape} does not match "
-                    f"horizontal coordinates shape {shape}"
-                )
-            self._topography = topography[
-                self.mask_indices.lat.unsqueeze(1),
-                self.mask_indices.lon.unsqueeze(0),
-            ]
         else:
-            self._topography = None
+            self._topography_mask = None
+
+    def _get_topography_mask(
+        self, data_mask_indices, topography_shape, data_coords_shape
+    ):
+        """
+        Topography is allowed to be higher resolution than the data,
+        as a common use case is to load fine topography as an input
+        when loading coarse input data.
+        """
+        topography_downscale_factor = _get_topography_downscale_factor(
+            topography_shape, data_coords_shape
+        )
+        lat_mask = torch.arange(
+            (data_mask_indices.lat[0]) * topography_downscale_factor,
+            (data_mask_indices.lat[-1] + 1) * topography_downscale_factor,
+        )
+        lon_mask = torch.arange(
+            (data_mask_indices.lon[0]) * topography_downscale_factor,
+            (data_mask_indices.lon[-1] + 1) * topography_downscale_factor,
+        )
+        mask = (lat_mask.unsqueeze(1), lon_mask.unsqueeze(0))
+
+        return mask
 
     @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
@@ -346,7 +392,10 @@ class HorizontalSubsetDataset(torch.utils.data.Dataset):
 
     @property
     def subset_topography(self) -> torch.Tensor | None:
-        return self._topography
+        if self._full_topography is not None:
+            return self._full_topography[*self._topography_mask]
+        else:
+            return None
 
     def __len__(self):
         return len(self.dataset)
@@ -616,6 +665,12 @@ class BatchData:
         leading_dim = self._validate()
         self._len = leading_dim[0]
         self._horizontal_shape = self[0].horizontal_shape
+        if self.topography is not None:
+            self._topography_downscale_factor = _get_topography_downscale_factor(
+                self.topography.shape[-2:], self._horizontal_shape
+            )
+        else:
+            self._topography_downscale_factor = None
 
     @property
     def horizontal_shape(self) -> tuple[int, int]:
@@ -711,7 +766,9 @@ class BatchData:
             dims=self.latlon_coordinates.dims,
         )
         if self.topography is not None:
-            sliced_topo = self.topography[..., lat_slice, lon_slice]
+            topo_lat_slice = _scale_slice(lat_slice, self._topography_downscale_factor)
+            topo_lon_slice = _scale_slice(lon_slice, self._topography_downscale_factor)
+            sliced_topo = self.topography[..., topo_lat_slice, topo_lon_slice]
         else:
             sliced_topo = None
         return BatchData(
