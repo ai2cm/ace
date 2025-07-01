@@ -5,9 +5,8 @@ import pytest
 import torch
 
 import fme
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
 from fme.core.typing_ import TensorDict
@@ -29,7 +28,7 @@ class AddOne(torch.nn.Module):
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -107,14 +106,14 @@ def get_separate_radiation_step(
     step_config_kwargs: dict | None = None,
 ):
     config = get_separate_radiation_config(module_name, norm_mean, step_config_kwargs)
-    device = fme.get_device()
-    area = torch.ones(IMAGE_SHAPE, device=device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(IMAGE_SHAPE[0]), lon=torch.zeros(IMAGE_SHAPE[1])
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7), bk=torch.arange(7)
     )
     dataset_info = DatasetInfo(
-        img_shape=IMAGE_SHAPE,
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=datetime.timedelta(hours=6),
     )

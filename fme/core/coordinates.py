@@ -23,8 +23,8 @@ from fme.core.corrector.registry import CorrectorABC
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
-from fme.core.mask_provider import NullMaskProvider
-from fme.core.masking import HasGetMaskTensorFor, StaticMasking
+from fme.core.mask_provider import MaskProviderABC, NullMaskProvider
+from fme.core.masking import StaticMasking
 from fme.core.ocean_derived_variables import compute_ocean_derived_quantities
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -643,6 +643,15 @@ class HorizontalCoordinates(abc.ABC):
         """Meshgrids of latitudes and longitudes, respectively."""
         pass
 
+    @property
+    @abc.abstractmethod
+    def shape(self) -> tuple[int, ...]:
+        pass
+
+    @abc.abstractmethod
+    def to_state(self) -> TensorMapping:
+        pass
+
 
 @dataclasses.dataclass
 class LatLonCoordinates(HorizontalCoordinates):
@@ -658,7 +667,7 @@ class LatLonCoordinates(HorizontalCoordinates):
 
     lon: torch.Tensor
     lat: torch.Tensor
-    mask_provider: HasGetMaskTensorFor = NullMaskProvider
+    mask_provider: MaskProviderABC = NullMaskProvider
 
     def __post_init__(self):
         self._area_weights: torch.Tensor | None = None
@@ -728,6 +737,13 @@ class LatLonCoordinates(HorizontalCoordinates):
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
         return torch.meshgrid(self.lat, self.lon, indexing="ij")
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return (len(self.lat), len(self.lon))
+
+    def to_state(self) -> TensorMapping:
+        return {"lat": self.lat, "lon": self.lon}
 
 
 @dataclasses.dataclass
@@ -825,7 +841,29 @@ class HEALPixCoordinates(HorizontalCoordinates):
         level = int(math.log2(len(self.width)))
         hpx = e2ghpx.Grid(level=level, pixel_order=e2ghpx.HEALPIX_PAD_XY)
         lats = hpx.lat
-        lats = lats.reshape(len(self.face), len(self.width), len(self.height))
+        lats = lats.reshape(self.shape)
         lons = hpx.lon
-        lons = lons.reshape(len(self.face), len(self.width), len(self.height))
+        lons = lons.reshape(self.shape)
         return lats, lons
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return (len(self.face), len(self.width), len(self.height))
+
+    def to_state(self) -> TensorMapping:
+        return {"face": self.face, "height": self.height, "width": self.width}
+
+
+@dataclasses.dataclass
+class SerializableHorizontalCoordinates:
+    """Only for use in serializing/deserializing coordinates with dacite."""
+
+    horizontal_coordinates: LatLonCoordinates | HEALPixCoordinates
+
+    @classmethod
+    def from_state(cls, state) -> HorizontalCoordinates:
+        return dacite.from_dict(
+            data_class=cls,
+            data={"horizontal_coordinates": state},
+            config=dacite.Config(strict=True),
+        ).horizontal_coordinates

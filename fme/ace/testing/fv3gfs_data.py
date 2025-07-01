@@ -67,7 +67,8 @@ def save_nd_netcdf(
     timestep_days: float,
     time_varying_values: list[float] | None = None,
     save_vertical_coordinate: bool = True,
-):
+    return_ds: bool = False,
+) -> xr.Dataset | None:
     """
     Save a ND netcdf file with random data for the given variable names and
     dimensions.
@@ -79,6 +80,7 @@ def save_nd_netcdf(
         timestep_days: The number of days between each time step.
         time_varying_values: If not None, the values to use for each time step.
         save_vertical_coordinate: If True, save vertical coordinate variables.
+        return_ds: If True, return the dataset in addition to saving it.
     """
     ds = get_nd_dataset(
         dim_sizes=dim_sizes,
@@ -91,6 +93,9 @@ def save_nd_netcdf(
             for i in range(dim_sizes.n_time):
                 ds[name].isel(time=i).values[:] = time_varying_values[i]
     ds.to_netcdf(filename, unlimited_dims=["time"], format="NETCDF4_CLASSIC")
+    if return_ds:
+        return ds
+    return None
 
 
 def save_scalar_netcdf(
@@ -145,13 +150,14 @@ class FV3GFSData:
                 f"Number of time-varying values ({len(self.time_varying_values)}) "
                 f"must match number of time steps ({self.dim_sizes.n_time})"
             )
-        save_nd_netcdf(
+        self._ds: xr.Dataset = save_nd_netcdf(
             self.data_filename,
             dim_sizes=self.dim_sizes,
             variable_names=self.names,
             timestep_days=self.timestep_days,
             time_varying_values=self.time_varying_values,
             save_vertical_coordinate=self.save_vertical_coordinate,
+            return_ds=True,
         )
 
     @property
@@ -162,6 +168,10 @@ class FV3GFSData:
     @property
     def data_filename(self):
         return self.data_path / "data.nc"
+
+    @property
+    def horizontal_coords(self) -> dict[str, xr.DataArray]:
+        return {dim.name: self._ds[dim.name] for dim in self.dim_sizes.horizontal}
 
     @property
     def inference_data_loader_config(self) -> InferenceDataLoaderConfig:

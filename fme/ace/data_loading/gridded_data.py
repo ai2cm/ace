@@ -8,6 +8,7 @@ import torch
 
 from fme.ace.data_loading.augmentation import BatchModifierABC, NullModifier
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
+from fme.ace.data_loading.dataloader import SlidingWindowDataLoader
 from fme.ace.requirements import PrognosticStateDataRequirements
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
@@ -34,19 +35,6 @@ class SizedMap(Generic[T, U], Sized, Iterable[U]):
         return map(self._func, self._iterable)
 
 
-def get_img_shape(loader: DataLoader[BatchData]) -> tuple[int, int]:
-    img_shape = None
-    for batch in loader:
-        shapes = {k: v.shape for k, v in batch.data.items()}
-        for value in shapes.values():
-            img_shape = value[-2:]
-            break
-        break
-    if img_shape is None:
-        raise ValueError("No data found in loader")
-    return img_shape
-
-
 class GriddedData(GriddedDataABC[BatchData]):
     """
     Data as required for pytorch training.
@@ -59,17 +47,14 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     def __init__(
         self,
-        loader: DataLoader[BatchData],
+        loader: DataLoader[BatchData] | SlidingWindowDataLoader,
         properties: DatasetProperties,
         modifier: BatchModifierABC = NullModifier(),
         sampler: torch.utils.data.Sampler | None = None,
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type
-                TensorMapping where keys indicate variable name.
-                Each tensor has shape
-                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            loader: torch DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             properties: Batch-constant properties for the dataset, such as variable
                 metadata and coordinate information. Data can be on any device.
@@ -92,7 +77,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._sampler = sampler
         self._modifier = modifier
         self._batch_size: int | None = None
-        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -108,8 +92,7 @@ class GriddedData(GriddedDataABC[BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            img_shape=self._img_shape,
-            gridded_operations=self._gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
             mask_provider=self._mask_provider,
             timestep=self._timestep,
@@ -133,11 +116,11 @@ class GriddedData(GriddedDataABC[BatchData]):
 
     @property
     def n_samples(self) -> int:
-        return len(self._loader.dataset)  # type: ignore
+        return self.n_batches * self.batch_size
 
     @property
     def n_batches(self) -> int:
-        return len(self._loader)  # type: ignore
+        return len(self._loader)
 
     @property
     def _first_time(self) -> Any:
@@ -156,7 +139,12 @@ class GriddedData(GriddedDataABC[BatchData]):
         return self._batch_size
 
     def log_info(self, name: str):
-        logging.info(f"{name} data: {self.n_samples} samples, {self.n_batches} batches")
+        if isinstance(self._loader, SlidingWindowDataLoader):
+            self._loader.log_info(name)
+        else:
+            logging.info(
+                f"{name} data: {self.n_samples} samples, {self.n_batches} batches"
+            )
         logging.info(f"{name} data: first sample's initial time: {self._first_time}")
         logging.info(f"{name} data: last sample's initial time: {self._last_time}")
 
@@ -197,10 +185,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     ):
         """
         Args:
-            loader: torch DataLoader, which returns batches of type
-                TensorMapping where keys indicate variable name.
-                Each tensor has shape
-                [batch_size, face, time_window_size, n_channels, n_x_coord, n_y_coord].
+            loader: torch DataLoader, which returns batches of type BatchData.
                 Data can be on any device (but will typically be on CPU).
             initial_condition: Initial condition for the inference, or a requirements
                 object specifying how to extract the initial condition from the first
@@ -221,7 +206,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             )
         else:
             self._initial_condition = initial_condition.to_device()
-        self._img_shape = get_img_shape(self._loader)
 
     @property
     def loader(self) -> DataLoader[BatchData]:
@@ -237,8 +221,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     @property
     def dataset_info(self) -> DatasetInfo:
         return DatasetInfo(
-            img_shape=self._img_shape,
-            gridded_operations=self._gridded_operations,
+            horizontal_coordinates=self.horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
             timestep=self.timestep,
         )
@@ -267,22 +250,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return self.horizontal_coordinates.gridded_operations
 
     @property
-    def _n_samples(self) -> int:
-        return len(self._loader.dataset)  # type: ignore
-
-    @property
-    def _n_batches(self) -> int:
-        return len(self._loader)  # type: ignore
-
-    @property
-    def _first_time(self) -> Any:
-        return self._loader.dataset[0][1].values[0]  # type: ignore
-
-    @property
-    def _last_time(self) -> Any:
-        return self._loader.dataset[-1][1].values[0]  # type: ignore
-
-    @property
     def n_initial_conditions(self) -> int:
         if self._n_initial_conditions is None:
             example_data = next(iter(self.loader)).data
@@ -294,9 +261,28 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
     def initial_condition(self) -> PrognosticState:
         return self._initial_condition
 
-    def log_info(self, name: str):
-        logging.info(
-            f"{name} data: {self._n_samples} samples, {self._n_batches} batches"
-        )
-        logging.info(f"{name} data: first sample's initial time: {self._first_time}")
-        logging.info(f"{name} data: last sample's initial time: {self._last_time}")
+
+class PSType:
+    pass
+
+
+class FDType:
+    pass
+
+
+class NullInferenceData(InferenceDataABC[PSType, FDType]):
+    """
+    A null inference data class that does not provide any data.
+    This is useful for cases where we don't do inference.
+    """
+
+    def __init__(self):
+        pass
+
+    @property
+    def initial_condition(self) -> PSType:
+        return PSType()
+
+    @property
+    def loader(self) -> DataLoader[FDType]:
+        return [FDType()]

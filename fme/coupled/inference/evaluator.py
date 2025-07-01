@@ -12,9 +12,7 @@ import fme.core.logging_utils as logging_utils
 from fme.ace.inference.evaluator import validate_time_coarsen_config
 from fme.ace.stepper import load_stepper as load_single_stepper
 from fme.ace.stepper import load_stepper_config as load_single_stepper_config
-from fme.ace.stepper.single_module import get_serialized_stepper_vertical_coordinate
 from fme.core.cli import prepare_config, prepare_directory
-from fme.core.coordinates import DepthCoordinate
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.dicts import to_flat_dict
 from fme.core.generics.inference import get_record_to_wandb, run_inference
@@ -24,6 +22,7 @@ from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.getters import get_inference_data
 from fme.coupled.data_loading.gridded_data import InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.inference.data_writer import (
     CoupledDataWriterConfig,
     CoupledPairedDataWriter,
@@ -83,23 +82,18 @@ class StandaloneComponentCheckpointsConfig:
             ocean_fraction_prediction=self.ocean_fraction_prediction,
         )
 
-    def _load_sst_mask(self) -> torch.Tensor | None:
-        ocean_ckpt = torch.load(
-            self.ocean.path, map_location=fme.get_device(), weights_only=False
-        )
-        ocean_vertical_coord = get_serialized_stepper_vertical_coordinate(
-            ocean_ckpt["stepper"]
-        )
-        if isinstance(ocean_vertical_coord, DepthCoordinate):
-            return ocean_vertical_coord.get_mask_level(0)
-        return None
-
     def load_stepper(self) -> CoupledStepper:
+        ocean = load_single_stepper(self.ocean.path)
+        atmosphere = load_single_stepper(self.atmosphere.path)
+        dataset_info = CoupledDatasetInfo(
+            ocean=ocean.training_dataset_info,
+            atmosphere=atmosphere.training_dataset_info,
+        )
         return CoupledStepper(
             config=self.load_stepper_config(),
-            ocean=load_single_stepper(self.ocean.path),
-            atmosphere=load_single_stepper(self.atmosphere.path),
-            sst_mask=self._load_sst_mask(),
+            ocean=ocean,
+            atmosphere=atmosphere,
+            dataset_info=dataset_info,
         )
 
 

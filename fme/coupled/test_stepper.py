@@ -1,3 +1,5 @@
+import dataclasses
+import datetime
 from collections import namedtuple
 from collections.abc import Iterable
 from typing import Literal
@@ -11,6 +13,7 @@ import xarray as xr
 import fme
 from fme.ace.data_loading.batch_data import BatchData
 from fme.ace.stepper import SingleModuleStepperConfig
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -18,12 +21,15 @@ from fme.core.coordinates import (
     NullVerticalCoordinate,
     VerticalCoordinate,
 )
+from fme.core.dataset_info import DatasetInfo
 from fme.core.loss import WeightedMappingLossConfig
+from fme.core.mask_provider import MaskProvider
 from fme.core.normalizer import NormalizationConfig
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
+from fme.coupled.dataset_info import CoupledDatasetInfo
 
 from .data_loading.batch_data import (
     CoupledBatchData,
@@ -45,10 +51,11 @@ NZ = 3  # number of vertical interface levels in mock data from get_data
 N_LAT = 5
 N_LON = 5
 LON, LAT = torch.linspace(0, 360, N_LON), torch.linspace(-89.5, 89.5, N_LAT)
-HORIZONTAL_COORDS = CoupledHorizontalCoordinates(
-    ocean=LatLonCoordinates(LON, LAT),
-    atmosphere=LatLonCoordinates(LON, LAT),
-)
+OCEAN_TIMEDELTA = "2D"
+ATMOS_TIMEDELTA = "1D"
+OCEAN_TIMESTEP = datetime.timedelta(days=2)
+ATMOS_TIMESTEP = datetime.timedelta(days=1)
+
 
 ATMOS_STEPPER_CONFIG = SingleModuleStepperConfig(
     builder=Mock(),
@@ -69,6 +76,55 @@ OCEAN_STEPPER_CONFIG = SingleModuleStepperConfig(
     normalization=Mock(),
     loss=Mock(),
 )
+
+
+@dataclasses.dataclass
+class CoupledDatasetInfoBuilder:
+    vcoord: CoupledVerticalCoordinate
+    hcoord: CoupledHorizontalCoordinates | None = None
+    ocean_timestep: datetime.timedelta = OCEAN_TIMESTEP
+    atmos_timestep: datetime.timedelta = ATMOS_TIMESTEP
+    ocean_mask_provider: MaskProvider = dataclasses.field(
+        default_factory=lambda: MaskProvider()
+    )
+    atmos_mask_provider: MaskProvider = dataclasses.field(
+        default_factory=lambda: MaskProvider()
+    )
+
+    def __post_init__(self):
+        if self.hcoord is None:
+            lat = torch.arange(N_LAT)
+            lon = torch.arange(N_LON)
+            self.hcoord = CoupledHorizontalCoordinates(
+                ocean=LatLonCoordinates(
+                    lon=lon,
+                    lat=lat,
+                    mask_provider=self.ocean_mask_provider,
+                ),
+                atmosphere=LatLonCoordinates(
+                    lon=lon,
+                    lat=lat,
+                    mask_provider=self.atmos_mask_provider,
+                ),
+            )
+
+    @property
+    def dataset_info(self) -> CoupledDatasetInfo:
+        assert self.hcoord is not None
+        return CoupledDatasetInfo(
+            ocean=DatasetInfo(
+                horizontal_coordinates=self.hcoord.ocean,
+                vertical_coordinate=self.vcoord.ocean,
+                mask_provider=self.ocean_mask_provider,
+                timestep=self.ocean_timestep,
+            ),
+            atmosphere=DatasetInfo(
+                horizontal_coordinates=self.hcoord.atmosphere,
+                vertical_coordinate=self.vcoord.atmosphere,
+                mask_provider=self.atmos_mask_provider,
+                timestep=self.atmos_timestep,
+            ),
+        )
 
 
 ForcingInputs = namedtuple(
@@ -397,6 +453,7 @@ SphericalData = namedtuple(
     "SphericalData",
     [
         "data",
+        "horizontal_coord",
         "vertical_coord",
     ],
 )
@@ -410,6 +467,8 @@ def get_data(
         data_dict[name] = torch.rand(
             n_samples, n_time, N_LAT, N_LON, device=fme.get_device()
         )
+    lats = torch.linspace(-89.5, 89.5, N_LAT)
+    horizontal_coords = LatLonCoordinates(lat=lats, lon=torch.linspace(0, 360, N_LON))
     vertical_coord: VerticalCoordinate
     if realm == "atmosphere":
         ak, bk = torch.arange(NZ), torch.arange(NZ)
@@ -425,7 +484,7 @@ def get_data(
             dims=["sample", "time"],
         ),
     )
-    return SphericalData(data, vertical_coord)
+    return SphericalData(data, horizontal_coords, vertical_coord)
 
 
 def get_coupled_data(
@@ -444,6 +503,9 @@ def get_coupled_data(
     assert nz == NZ, f"expected 7 interfaces in mock data vertical coord but got {nz}"
     return SphericalData(
         data,
+        CoupledHorizontalCoordinates(
+            ocean_data.horizontal_coord, atmos_data.horizontal_coord
+        ),
         CoupledVerticalCoordinate(
             ocean=ocean_data.vertical_coord, atmosphere=atmos_data.vertical_coord
         ),
@@ -472,10 +534,16 @@ def get_stepper_config(
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: ModuleSelector | None = None,
     atmosphere_builder: ModuleSelector | None = None,
-    ocean_timedelta: str = "2D",
-    atmosphere_timedelta: str = "1D",
+    ocean_timedelta: str = OCEAN_TIMEDELTA,
+    atmosphere_timedelta: str = ATMOS_TIMEDELTA,
     ocean_fraction_prediction: CoupledOceanFractionConfig | None = None,
+    ocean_parameter_init: ParameterInitializationConfig | None = None,
+    atmosphere_parameter_init: ParameterInitializationConfig | None = None,
 ):
+    if ocean_parameter_init is None:
+        ocean_parameter_init = ParameterInitializationConfig()
+    if atmosphere_parameter_init is None:
+        atmosphere_parameter_init = ParameterInitializationConfig()
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
@@ -512,6 +580,7 @@ def get_stepper_config(
                     surface_temperature_name=sfc_temp_name_in_atmosphere_data,
                     ocean_fraction_name=ocean_fraction_name,
                 ),
+                parameter_init=atmosphere_parameter_init,
             ),
         ),
         ocean=ComponentConfig(
@@ -527,6 +596,7 @@ def get_stepper_config(
                 ),
                 loss=WeightedMappingLossConfig(type="MSE"),
                 corrector=CorrectorSelector("ocean_corrector", {}),
+                parameter_init=ocean_parameter_init,
             ),
         ),
         sst_name=sst_name_in_ocean_data,
@@ -548,6 +618,8 @@ def get_stepper_and_batch(
     ocean_fraction_name: str = "ocean_fraction",
     ocean_builder: ModuleSelector | None = None,
     atmosphere_builder: ModuleSelector | None = None,
+    ocean_timedelta: str = OCEAN_TIMEDELTA,
+    atmosphere_timedelta: str = ATMOS_TIMEDELTA,
 ):
     all_ocean_names = set(ocean_in_names + ocean_out_names)
     all_atmos_names = set(atmosphere_in_names + atmosphere_out_names)
@@ -580,15 +652,13 @@ def get_stepper_and_batch(
         # when stepping the batch forward... if you need consistency between the
         # timedeltas and batch time dims then you should use
         # n_forward_times_atmosphere = 2 * n_forward_times_ocean
-        ocean_timedelta="2D",
-        atmosphere_timedelta="1D",
+        ocean_timedelta=ocean_timedelta,
+        atmosphere_timedelta=atmosphere_timedelta,
     )
-
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
-        vertical_coordinate=coupled_data.vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=coupled_data.vertical_coord
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
     return coupler, coupled_data
 
 
@@ -633,16 +703,15 @@ def test__get_atmosphere_forcings(
         ocean_fraction_prediction=ocean_fraction_prediction,
     )
     vertical_coord = Mock(spec=CoupledVerticalCoordinate)
-    vertical_coord.atmosphere = Mock(spec=HybridSigmaPressureCoordinate)
-    vertical_coord.ocean = Mock(spec=DepthCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
     sst_mask = torch.ones(N_LAT, N_LON).to(fme.get_device())
     sst_mask[0, 0] = 0
-    vertical_coord.ocean.get_mask_level.return_value = sst_mask
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
-        vertical_coordinate=vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=vertical_coord,
+        ocean_mask_provider=MaskProvider({"mask_2d": sst_mask}),
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
     shape_ocean = (1, 1, N_LAT, N_LON)
     shape_atmos = (1, coupler.n_inner_steps + 1, N_LAT, N_LON)
     forcings_from_ocean = {
@@ -715,11 +784,8 @@ def test__get_ocean_forcings():
     vertical_coord = Mock(spec=CoupledVerticalCoordinate)
     vertical_coord.atmosphere = NullVerticalCoordinate()
     vertical_coord.ocean = NullVerticalCoordinate()
-    coupler = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
-        vertical_coordinate=vertical_coord,
-    )
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    coupler = config.get_stepper(dataset_info)
     ocean_shape = (1, 2, N_LAT, N_LON)
     atmos_shape = (1, 2, N_LAT, N_LON)
     ocean_data = {
@@ -1013,19 +1079,11 @@ def test_reloaded_stepper_gives_same_prediction():
         ),
         sst_name="o_sfc",
     )
-    vertical_coordinate = CoupledVerticalCoordinate(
-        ocean=DepthCoordinate(torch.arange(2), torch.ones(N_LAT, N_LON, 1)).to(
-            fme.get_device()
-        ),
-        atmosphere=HybridSigmaPressureCoordinate(
-            ak=torch.arange(7), bk=torch.arange(7)
-        ).to(fme.get_device()),
-    )
-    stepper = config.get_stepper(
-        img_shape=(N_LAT, N_LON),
-        horizontal_coordinates=HORIZONTAL_COORDS.to(fme.get_device()),
-        vertical_coordinate=vertical_coordinate,
-    )
+    vertical_coord = Mock(spec=CoupledVerticalCoordinate)
+    vertical_coord.atmosphere = NullVerticalCoordinate()
+    vertical_coord.ocean = NullVerticalCoordinate()
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vertical_coord).dataset_info
+    stepper = config.get_stepper(dataset_info)
     new_stepper = CoupledStepper.from_state(stepper.get_state())
     data = get_coupled_data(
         ["o", "o_sfc", "o_mask"],
@@ -1034,7 +1092,6 @@ def test_reloaded_stepper_gives_same_prediction():
         n_forward_times_atmosphere=4,
         n_samples=1,
     )
-
     first_result = stepper.train_on_batch(
         data=data.data,
         optimization=NullOptimization(),

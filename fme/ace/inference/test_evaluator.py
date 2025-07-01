@@ -32,13 +32,16 @@ from fme.ace.stepper import SingleModuleStepperConfig, Stepper, TrainOutput
 from fme.ace.stepper.single_module import StepperConfig
 from fme.ace.testing import DimSizes, FV3GFSData, MonthlyReferenceData
 from fme.core import metrics
-from fme.core.coordinates import DimSize, HybridSigmaPressureCoordinate
+from fme.core.coordinates import (
+    DimSize,
+    HybridSigmaPressureCoordinate,
+    LatLonCoordinates,
+)
 from fme.core.dataset.config import XarrayDataConfig
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
 from fme.core.device import get_device
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.logging_utils import LoggingConfig
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NormalizationConfig
@@ -101,7 +104,9 @@ def save_plus_one_stepper(
             ocean=ocean,
             multi_call=multi_call,
         )
-        area = torch.ones(data_shape[-2:], device=get_device())
+        horizontal_coordinate = LatLonCoordinates(
+            lat=torch.zeros(data_shape[-2]), lon=torch.zeros(data_shape[-1])
+        )
         vertical_coordinate = HybridSigmaPressureCoordinate(
             ak=torch.arange(nz_interface), bk=torch.arange(nz_interface)
         )
@@ -112,8 +117,7 @@ def save_plus_one_stepper(
             ),
         }  # attach metadata to this output var to validate that persists in stepper
         dataset_info = DatasetInfo(
-            img_shape=(data_shape[-2], data_shape[-1]),
-            gridded_operations=LatLonOperations(area),
+            horizontal_coordinates=horizontal_coordinate,
             vertical_coordinate=vertical_coordinate,
             timestep=timestep,
             variable_metadata=variable_metadata,

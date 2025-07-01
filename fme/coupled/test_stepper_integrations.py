@@ -1,12 +1,20 @@
+import pathlib
 from unittest.mock import Mock
 
 import torch
 
 import fme
+from fme.ace.stepper.parameter_init import ParameterInitializationConfig
+from fme.core.coordinates import NullVerticalCoordinate
 from fme.core.optimization import OptimizationConfig
 from fme.core.registry.module import ModuleSelector
 
-from .test_stepper import get_stepper_and_batch
+from .data_loading.data_typing import CoupledVerticalCoordinate
+from .test_stepper import (
+    CoupledDatasetInfoBuilder,
+    get_stepper_and_batch,
+    get_stepper_config,
+)
 
 DEVICE = fme.get_device()
 
@@ -116,3 +124,70 @@ def test_stepper_gradient_accumulation_integration():
 
     assert atmos_module.mock_caller.call_count == 4
     assert ocean_module.mock_caller.call_count == 2
+
+
+def test_stepper_parameter_init_integration(tmp_path: pathlib.Path):
+    ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag1"]
+    ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag1", "o_diag2"]
+    atmos_in_names = ["a_prog1", "a_prog2", "a_sfc_temp", "ocean_frac", "o_prog"]
+    atmos_out_names = ["a_prog1", "a_prog2", "a_sfc_temp", "a_diag1", "a_diag2"]
+    vcoord = CoupledVerticalCoordinate(
+        ocean=NullVerticalCoordinate(),
+        atmosphere=NullVerticalCoordinate(),
+    )
+    dataset_info = CoupledDatasetInfoBuilder(vcoord=vcoord).dataset_info
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="o_sfc_temp",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_timedelta="2D",
+        atmosphere_timedelta="1D",
+        ocean_builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+    )
+    ocean_stepper = config.ocean.stepper.get_stepper(dataset_info.ocean)
+    atmos_stepper = config.atmosphere.stepper.get_stepper(dataset_info.atmosphere)
+    ocean_path = tmp_path / "ocean.pt"
+    atmos_path = tmp_path / "atmos.pt"
+    torch.save({"stepper": ocean_stepper.get_state()}, ocean_path)
+    torch.save({"stepper": atmos_stepper.get_state()}, atmos_path)
+    config = get_stepper_config(
+        ocean_in_names=ocean_in_names,
+        ocean_out_names=ocean_out_names,
+        atmosphere_in_names=atmos_in_names,
+        atmosphere_out_names=atmos_out_names,
+        sst_name_in_ocean_data="o_sfc_temp",
+        sfc_temp_name_in_atmosphere_data="a_sfc_temp",
+        ocean_fraction_name="ocean_frac",
+        ocean_timedelta="2D",
+        atmosphere_timedelta="1D",
+        ocean_builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="SphericalFourierNeuralOperatorNet", config={"scale_factor": 1}
+        ),
+        ocean_parameter_init=ParameterInitializationConfig(
+            weights_path=str(ocean_path)
+        ),
+        atmosphere_parameter_init=ParameterInitializationConfig(
+            weights_path=str(atmos_path)
+        ),
+    )
+    coupled_stepper = config.get_stepper(dataset_info)
+    ocean_state = ocean_stepper.modules.state_dict()
+    atmos_state = atmos_stepper.modules.state_dict()
+    coupled_ocean_state = coupled_stepper.ocean.modules.state_dict()
+    coupled_atmos_state = coupled_stepper.atmosphere.modules.state_dict()
+    for name, param in ocean_state.items():
+        torch.testing.assert_close(param, coupled_ocean_state[name])
+    for name, param in atmos_state.items():
+        torch.testing.assert_close(param, coupled_atmos_state[name])

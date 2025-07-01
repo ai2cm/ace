@@ -69,6 +69,7 @@ from fme.core.generics.inference import run_inference
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import NullOptimization, Optimization
 from fme.core.timing import GlobalTimer
+from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice
 from fme.core.wandb import WandB
 
@@ -212,6 +213,8 @@ class Trainer:
         self._best_inference_error = torch.inf
 
         self.stepper = stepper
+        self.stepper.update_training_history(TrainingJob.from_env())
+
         self.optimization = build_optimization(stepper.modules)
         self._end_of_batch_ops = end_of_batch_callback
         self._end_of_epoch_ops = end_of_epoch_callback

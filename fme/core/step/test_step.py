@@ -20,10 +20,9 @@ from fme.ace.step.camulator import (
 )
 from fme.ace.step.fcn2 import FCN2Config, FCN2Selector, FCN2StepConfig
 from fme.ace.testing.fv3gfs_data import get_scalar_dataset
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudgetConfig
 from fme.core.dataset_info import DatasetInfo
-from fme.core.gridded_ops import LatLonOperations
 from fme.core.multi_call import MultiCallConfig
 from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
 from fme.core.registry import ModuleSelector
@@ -162,6 +161,7 @@ def get_single_module_noise_conditioned_selector(
                         NoiseConditionedSFNOBuilder(
                             embed_dim=4,
                             noise_embed_dim=4,
+                            noise_type="isotropic",
                             num_layers=2,
                             local_blocks=[0],
                         )
@@ -483,7 +483,7 @@ TIMESTEP = datetime.timedelta(hours=6)
 
 
 def get_tensor_dict(
-    names: list[str], img_shape: tuple[int, ...], n_samples: int
+    names: list[str], img_shape: tuple[int, int], n_samples: int
 ) -> TensorDict:
     data_dict = {}
     device = fme.get_device()
@@ -498,13 +498,15 @@ def get_tensor_dict(
 
 def get_step(selector: StepSelector, img_shape: tuple[int, int]) -> StepABC:
     device = fme.get_device()
-    area = torch.ones(img_shape, device=device)
+    horizontal_coordinate = LatLonCoordinates(
+        lat=torch.zeros(img_shape[0], device=device),
+        lon=torch.zeros(img_shape[1], device=device),
+    )
     vertical_coordinate = HybridSigmaPressureCoordinate(
         ak=torch.arange(7, device=device), bk=torch.arange(7, device=device)
     )
     dataset_info = DatasetInfo(
-        img_shape=img_shape,
-        gridded_operations=LatLonOperations(area),
+        horizontal_coordinates=horizontal_coordinate,
         vertical_coordinate=vertical_coordinate,
         timestep=TIMESTEP,
     )

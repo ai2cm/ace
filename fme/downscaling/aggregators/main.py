@@ -48,6 +48,42 @@ def _tensor_mapping_to_numpy(data: TensorMapping) -> TensorMapping:
     return {k: v.cpu().numpy() for k, v in data.items()}
 
 
+def _get_spectrum_metrics(
+    gen_spectrum: Mapping[str, np.ndarray],
+    target_spectrum: Mapping[str, np.ndarray],
+    prefix: str = "",
+) -> Mapping[str, float]:
+    """
+    Compute metrics for the spectrum.
+
+    Args:
+        gen_spectrum: Dictionary of 1-dimensional generated mean power spectra.
+        target_spectrum: Dictionary of 1-dimensional target mean power spectra.
+        prefix: Prefix to use for the metric names.
+
+    Returns:
+        Dictionary of metrics.
+    """
+    prefix = ensure_trailing_slash(prefix)
+    metrics = {}
+    for name in gen_spectrum:
+        if len(gen_spectrum[name].shape) != 1:
+            raise ValueError(
+                f"Expected 1-dimensional power spectrum for {name}, "
+                f"got {gen_spectrum[name].shape}"
+            )
+        ratio = gen_spectrum[name] / target_spectrum[name] - 1
+        positive_bias = float(ratio[ratio > 0].sum() / target_spectrum[name].shape[0])
+        negative_bias = float(ratio[ratio < 0].sum() / target_spectrum[name].shape[0])
+
+        metrics[f"{prefix}positive_norm_bias/{name}"] = positive_bias
+        metrics[f"{prefix}negative_norm_bias/{name}"] = negative_bias
+        metrics[f"{prefix}mean_abs_norm_bias/{name}"] = abs(positive_bias) + abs(
+            negative_bias
+        )
+    return metrics
+
+
 class Mean:
     """
     Tracks a running average of a metric over multiple batches.
@@ -432,6 +468,10 @@ class ZonalPowerSpectrumComparison:
             ret[f"{prefix}{self._name}{name}"] = self._plot_spectrum_all(
                 values, prediction[name], coarse[name]
             )
+        scalar_metrics = _get_spectrum_metrics(
+            prediction, target, prefix=f"{prefix}{self._name}"
+        )
+        ret.update(scalar_metrics)
         return ret
 
     def get_dataset(self) -> xr.Dataset:
@@ -592,11 +632,18 @@ class MeanMapAggregator:
             error = prediction[var_name] - target[var_name]
             maps[f"maps/{self._name}error/{var_name}"] = error
             metrics[f"metrics/{self._name}bias/{var_name}"] = error.mean()
-            spectra[f"power_spectrum_of_time_mean/{self._name}{var_name}"] = (
-                self._plot_spectrum(
-                    prediction_power_spectrum[var_name], target_power_spectrum[var_name]
-                )
+
+            spectra_prefix = ensure_trailing_slash(f"power_spectrum_of_{self._name}")
+            spectra[f"{spectra_prefix}{var_name}"] = self._plot_spectrum(
+                prediction_power_spectrum[var_name], target_power_spectrum[var_name]
             )
+            spectrum_metrics = _get_spectrum_metrics(
+                gen_spectrum=prediction_power_spectrum,
+                target_spectrum=target_power_spectrum,
+                prefix=spectra_prefix,
+            )
+            spectra.update(spectrum_metrics)
+            print(spectra.keys())
         return metrics, maps, spectra
 
     _captions = {
@@ -641,7 +688,8 @@ class MeanMapAggregator:
             fig = plot_imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
             ret[f"{prefix}{key}"] = wandb.Image(fig, caption=caption)
             plt.close(fig)
-        ret.update(spectra)
+        for key, value in spectra.items():
+            ret[f"{prefix}{key}"] = value
         return ret
 
     def get_dataset(self) -> xr.Dataset:
@@ -755,7 +803,9 @@ class Aggregator:
             SnapshotAggregator(dims, variable_metadata, name="snapshot"),
             ComparedDynamicHistogramsAdapter(
                 histograms=ComparedDynamicHistograms(
-                    n_bins=n_histogram_bins, percentiles=percentiles
+                    n_bins=n_histogram_bins,
+                    percentiles=percentiles,
+                    compute_percentile_frac=True,
                 ),
                 name="histogram",
             ),

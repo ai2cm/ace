@@ -1,0 +1,24 @@
+experiment_dir: /results
+n_forward_steps: 2920
+forward_steps_in_memory: 40
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ocean-emulator
+  entity: ai2cm
+loader:
+  start_indices:
+    times:
+    - '0311-01-01T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2025-05-14-cm4-piControl-200yr-ocean.zarr
+    engine: zarr
+  num_data_workers: 1
+data_writer:
+  save_prediction_files: true
+  save_monthly_files: true
+aggregator:
+  log_histograms: true

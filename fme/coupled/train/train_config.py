@@ -13,13 +13,10 @@ from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.weight_ops import CopyWeightsConfig
 from fme.coupled.aggregator import InferenceEvaluatorAggregatorConfig
 from fme.coupled.data_loading.config import CoupledDataLoaderConfig
-from fme.coupled.data_loading.data_typing import (
-    CoupledHorizontalCoordinates,
-    CoupledVerticalCoordinate,
-)
 from fme.coupled.data_loading.getters import get_data_loader, get_inference_data
 from fme.coupled.data_loading.gridded_data import GriddedData, InferenceGriddedData
 from fme.coupled.data_loading.inference import InferenceDataLoaderConfig
+from fme.coupled.dataset_info import CoupledDatasetInfo
 from fme.coupled.requirements import (
     CoupledDataRequirements,
     CoupledPrognosticStateDataRequirements,
@@ -211,23 +208,8 @@ class TrainBuilders:
     def ocean_timestep(self) -> datetime.timedelta:
         return self.config.stepper.ocean_timestep
 
-    def get_stepper(
-        self,
-        img_shape: tuple[int, int],
-        horizontal_coordinates: CoupledHorizontalCoordinates,
-        vertical_coordinate: CoupledVerticalCoordinate,
-        timestep: datetime.timedelta,
-    ) -> CoupledStepper:
-        if timestep != self.config.stepper.timestep:
-            raise ValueError(
-                f"The ocean stepper config timedelta {self.config.stepper.timestep} "
-                f"doesn't match the data's timedelta of {timestep}."
-            )
-        return self.config.stepper.get_stepper(
-            img_shape=img_shape,
-            horizontal_coordinates=horizontal_coordinates,
-            vertical_coordinate=vertical_coordinate,
-        )
+    def get_stepper(self, dataset_info: CoupledDatasetInfo) -> CoupledStepper:
+        return self.config.stepper.get_stepper(dataset_info)
 
     def get_ema(self, modules) -> EMATracker:
         return self.config.ema.build(modules)

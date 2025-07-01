@@ -175,7 +175,12 @@ class ComparedDynamicHistograms:
     variable plotted on the same axis.
     """
 
-    def __init__(self, n_bins: int, percentiles: list[float] | None = None) -> None:
+    def __init__(
+        self,
+        n_bins: int,
+        percentiles: list[float] | None = None,
+        compute_percentile_frac: bool = False,
+    ) -> None:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
@@ -184,6 +189,7 @@ class ComparedDynamicHistograms:
         self._nan_masks: Mapping[str, torch.Tensor] | None = None
         self._time_dim = -2
         self._variables: set[str] = set()
+        self._compute_percentile_frac = compute_percentile_frac
 
     def _check_overlapping_keys(self, target: TensorMapping, prediction: TensorMapping):
         if not self._variables:
@@ -322,6 +328,14 @@ class ComparedDynamicHistograms:
                     return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
                         prediction.bin_edges, prediction.counts, p / 100.0
                     )
+                    if self._compute_percentile_frac and target is not None:
+                        return_dict[
+                            f"prediction_frac_of_target/{p}th-percentile/{field_name}"
+                        ] = (
+                            return_dict[f"prediction/{p}th-percentile/{field_name}"]
+                            / return_dict[f"target/{p}th-percentile/{field_name}"]
+                        )
+
         return return_dict
 
     def _get_single_dataset(

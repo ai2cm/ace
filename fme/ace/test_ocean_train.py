@@ -160,6 +160,7 @@ stepper:
           sea_ice_fraction_correction:
             sea_ice_fraction_name: sea_ice_fraction
             land_fraction_name: land_fraction
+          ocean_heat_content_correction: true
 inference:
   aggregator:
     monthly_reference_data: {monthly_data_filename}
@@ -289,6 +290,9 @@ def _setup(
         "thetao_0",
         "thetao_1",
         "sst",
+        "hfds",
+        "hfgeou",
+        "sea_surface_fraction",
         "sea_ice_fraction",
         "land_fraction",
     ]

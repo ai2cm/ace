@@ -328,7 +328,9 @@ def _get_mask_provider(ds: xr.Dataset, dtype: torch.dtype | None) -> MaskProvide
     for name in masks:
         if "time" in ds[name].dims:
             raise ValueError("Masks must be time-independent.")
-    return MaskProvider(masks)
+    mask_provider = MaskProvider(masks)
+    logging.info(f"Initialized {mask_provider}.")
+    return mask_provider
 
 
 class XarrayDataset(torch.utils.data.Dataset):

@@ -70,7 +70,6 @@ def get_data_loaders(
             config.dataset,
             requirements.names,
             requirements.n_timesteps,
-            strict=config.strict_ensemble,
         )
 
     data_loaders = []

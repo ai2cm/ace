@@ -102,6 +102,7 @@ The result is a user-configurable instance we can use to optimize model weights.
         amsgrad: False
         betas: [0.9, 0.999]
         capturable: False
+        decoupled_weight_decay: False
         differentiable: False
         eps: 1e-08
         foreach: None

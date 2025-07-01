@@ -205,10 +205,10 @@ def _write_test_yaml_files(
         experiment_dir=exper_dir,
         max_epochs=max_epochs,
         n_coupled_steps=n_coupled_steps,
-        ocean_data_path=mock_coupled_data.ocean_dir,
-        atmosphere_data_path=mock_coupled_data.atmosphere_dir,
-        global_means_path=os.path.join(mock_coupled_data.means_path),
-        global_stds_path=os.path.join(mock_coupled_data.stds_path),
+        ocean_data_path=mock_coupled_data.ocean.data_dir,
+        atmosphere_data_path=mock_coupled_data.atmosphere.data_dir,
+        global_means_path=os.path.join(mock_coupled_data.ocean.means_path),
+        global_stds_path=os.path.join(mock_coupled_data.ocean.stds_path),
         inference_n_coupled_steps=inline_inference_n_coupled_steps,
         ocean_in_names=ocean_in_names,
         ocean_out_names=ocean_out_names,
@@ -233,8 +233,8 @@ def _write_test_yaml_files(
         checkpoint_path=exper_dir / "training_checkpoints/best_ckpt.tar",
         n_coupled_steps=inference_n_coupled_steps,
         coupled_steps_in_memory=coupled_steps_in_memory,
-        ocean_data_path=mock_coupled_data.ocean_dir,
-        atmosphere_data_path=mock_coupled_data.atmosphere_dir,
+        ocean_data_path=mock_coupled_data.ocean.data_dir,
+        atmosphere_data_path=mock_coupled_data.atmosphere.data_dir,
     )
     with tempfile.NamedTemporaryFile(
         mode="w", delete=False, suffix=".yaml"

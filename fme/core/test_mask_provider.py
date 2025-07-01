@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from fme.core.mask_provider import MaskProvider
+from fme.core.mask_provider import MaskProvider, NullMaskProvider
 
 
 def test_mask_provider_init_error():
@@ -193,3 +193,9 @@ def test_mask_provider_round_trip(mask_provider: MaskProvider):
     state = mask_provider.to_state()
     reloaded_provider = MaskProvider.from_state(state)
     assert mask_provider == reloaded_provider
+
+
+def test_null_mask_provider_update_err():
+    mask_provider = MaskProvider(masks={"mask_2d": torch.rand(2, 2)})
+    with pytest.raises(ValueError, match="mask_2d"):
+        NullMaskProvider.update(mask_provider)
