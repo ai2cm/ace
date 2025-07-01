@@ -143,7 +143,7 @@ stepper:
       - sea_ice_fraction
       - DSWRFtoa
       - HGTsfc
-      #- global_mean_co2
+      - global_mean_co2
       atmosphere_prognostic_names:
       - air_temperature
       - specific_total_water

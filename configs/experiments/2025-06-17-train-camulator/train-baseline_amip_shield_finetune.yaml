@@ -1,8 +1,8 @@
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
-max_epochs: 120
-n_forward_steps: 1
+max_epochs: 77
+n_forward_steps: 2
 ema:
   decay: 0.999
 inference:
@@ -62,7 +62,7 @@ optimization:
   scheduler:
     type: CosineAnnealingLR
     kwargs:
-      T_max: 120
+      T_max: 77
   optimizer_type: FusedAdam
   kwargs:
     weight_decay: 0.01
@@ -117,7 +117,10 @@ stepper:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction
       corrector:
-        conserve_dry_air: false
+        conserve_dry_air: true
+        moisture_budget_correction: advection_and_precipitation
+        total_energy_budget_correction:
+          method: constant_temperature
         force_positive_names:
         - specific_total_water_0
         - specific_total_water_1
