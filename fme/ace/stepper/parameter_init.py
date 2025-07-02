@@ -202,6 +202,19 @@ class ParameterInitializer:
                         module,
                         exclude_parameters=classification.exclude,
                     )
+
+    def freeze_weights(self, modules: list[nn.Module]):
+        """
+        Freeze the weights of the modules.
+
+        Note this must be called before wrapping the modules in a DDP layer,
+        otherwise the DistributedDataParallel will expect frozen
+        weights to have gradients, and will raise an exception.
+
+        Args:
+            modules: a list of nn.Modules to freeze if configured to do so.
+        """
+        filled_parameters = self._filled_parameters(len(modules))
         for module, classification in zip(modules, filled_parameters):
             classification.frozen.apply(module)
 
