@@ -21,26 +21,24 @@ run_training() {
 
   gantry run \
     --name "$job_name" \
+    --task-name $JOB_NAME \
     --description 'Run ACE training' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
     --priority low \
     --preemptible \
-    --cluster ai2/jupiter-cirrascale-2 \
     --cluster ai2/augusta-google-1 \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
     --env WANDB_RUN_GROUP= \
     --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
-    --env TORCH_DISTRIBUTED_DEBUG=DETAIL \
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset "$stats_dataset:/statsdata" \
     --dataset $PRETRAIN_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus "$N_GPUS" \
     --shared-memory 400GiB \
-    --weka climate-default:/climate-default \
     --budget ai2/climate \
     --no-conda \
     --install "pip install --no-deps ." \
