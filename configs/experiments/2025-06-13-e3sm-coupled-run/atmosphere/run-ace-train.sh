@@ -16,11 +16,11 @@ JOB_GROUP="BK-E3SMv3-atmosphere-with-sfc-wind-stress-interpolate-true"
 JOB_STEM="${JOB_GROUP}-train"  # update when training a new baseline
 
 GROUP_OVERRIDE_ARGS= # add group-specific overrides here, e.g. lr, max_epochs, etc.
-STATS_DATA=elynn/2025-06-13-E3SMv3-coupled-piControl-atmosphere-stats
+STATS_DATA=elynn/2025-06-27-E3SMv3-coupled-piControl-atmosphere-stats-with-wind-stress
 
 python -m fme.ace.validate_config --config_type train $CONFIG_PATH
 
-N_RANDOM_SEED_RUNS=4
+N_RANDOM_SEED_RUNS=1
 
 for RS in $(seq 1 $N_RANDOM_SEED_RUNS); do
     JOB_NAME="${JOB_STEM}-rs${RS}"  # job name for the current random seed
