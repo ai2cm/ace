@@ -9,8 +9,8 @@ import torch
 import xarray as xr
 
 from fme.ace.data_loading.batch_data import PairedData, PrognosticState
-from fme.core.coordinates import HorizontalCoordinates, LatLonCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.coordinates import LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.diagnostics import get_reduced_diagnostics, write_reduced_diagnostics
 from fme.core.generics.aggregator import (
     InferenceAggregatorABC,
@@ -139,14 +139,12 @@ class InferenceEvaluatorAggregatorConfig:
 
     def build(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
         output_dir: str | None = None,
         record_step_20: bool = False,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         channel_mean_names: Sequence[str] | None = None,
         save_diagnostics: bool = True,
     ) -> "InferenceEvaluatorAggregator":
@@ -178,8 +176,7 @@ class InferenceEvaluatorAggregatorConfig:
             log_zonal_mean_images = self.log_zonal_mean_images
 
         return InferenceEvaluatorAggregator(
-            horizontal_coordinates=horizontal_coordinates,
-            timestep=timestep,
+            dataset_info=dataset_info,
             n_timesteps=n_timesteps,
             initial_time=initial_time,
             output_dir=output_dir,
@@ -193,7 +190,6 @@ class InferenceEvaluatorAggregatorConfig:
             monthly_reference_data=monthly_reference_data,
             time_mean_reference_data=time_mean,
             record_step_20=record_step_20,
-            variable_metadata=variable_metadata,
             channel_mean_names=channel_mean_names,
             normalize=normalize,
             save_diagnostics=save_diagnostics,
@@ -212,8 +208,7 @@ class InferenceEvaluatorAggregator(
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
-        timestep: datetime.timedelta,
+        dataset_info: DatasetInfo,
         n_timesteps: int,
         initial_time: xr.DataArray,
         normalize: Callable[[TensorMapping], TensorDict],
@@ -225,7 +220,6 @@ class InferenceEvaluatorAggregator(
         log_seasonal_means: bool = False,
         log_global_mean_time_series: bool = True,
         log_global_mean_norm_time_series: bool = True,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         monthly_reference_data: xr.Dataset | None = None,
         log_histograms: bool = False,
         time_mean_reference_data: xr.Dataset | None = None,
@@ -235,8 +229,7 @@ class InferenceEvaluatorAggregator(
     ):
         """
         Args:
-            horizontal_coordinates: Data horizontal coordinates
-            timestep: Timestep of the model.
+            dataset_info: Dataset coordinates and metadata.
             n_timesteps: Number of timesteps of inference that will be run.
             initial_time: Initial time for each sample.
             output_dir: Directory to save diagnostic output.
@@ -251,8 +244,6 @@ class InferenceEvaluatorAggregator(
             log_global_mean_time_series: Whether to log global mean time series metrics.
             log_global_mean_norm_time_series: Whether to log the normalized global mean
                 time series metrics.
-            variable_metadata: Mapping of variable names their metadata that will
-                used in generating logged image captions.
             monthly_reference_data: Reference monthly data for computing target stats.
             log_histograms: Whether to aggregate histograms.
             data_grid: The grid type of the data, used for spherical power spectrum.
@@ -271,8 +262,10 @@ class InferenceEvaluatorAggregator(
         ] = {}
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
+        timestep = dataset_info.timestep
+        horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
-        ops = horizontal_coordinates.gridded_operations
+        ops = dataset_info.gridded_operations
         self._log_time_series = (
             log_global_mean_time_series or log_global_mean_norm_time_series
         )
@@ -281,14 +274,14 @@ class InferenceEvaluatorAggregator(
                 ops,
                 target="denorm",
                 n_timesteps=n_timesteps,
-                variable_metadata=variable_metadata,
+                variable_metadata=dataset_info.variable_metadata,
             )
         if log_global_mean_norm_time_series:
             self._aggregators["mean_norm"] = MeanAggregator(
                 ops,
                 target="norm",
                 n_timesteps=n_timesteps,
-                variable_metadata=variable_metadata,
+                variable_metadata=dataset_info.variable_metadata,
             )
         if record_step_20:
             self._aggregators["mean_step_20"] = OneStepMeanAggregator(
@@ -298,7 +291,7 @@ class InferenceEvaluatorAggregator(
             if log_zonal_mean_images:
                 self._aggregators["zonal_mean"] = ZonalMeanAggregator(
                     n_timesteps=n_timesteps,
-                    variable_metadata=variable_metadata,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
             self._aggregators["power_spectrum"] = (
                 PairedSphericalPowerSpectrumAggregator(
@@ -312,33 +305,33 @@ class InferenceEvaluatorAggregator(
                 self._aggregators["video"] = VideoAggregator(
                     n_timesteps=n_timesteps,
                     enable_extended_videos=enable_extended_videos,
-                    variable_metadata=variable_metadata,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
         self._aggregators["time_mean"] = TimeMeanEvaluatorAggregator(
             ops,
             horizontal_dims=horizontal_coordinates.dims,
-            variable_metadata=variable_metadata,
+            variable_metadata=dataset_info.variable_metadata,
             reference_means=time_mean_reference_data,
         )
         self._aggregators["time_mean_norm"] = TimeMeanEvaluatorAggregator(
             ops,
             horizontal_dims=horizontal_coordinates.dims,
             target="norm",
-            variable_metadata=variable_metadata,
+            variable_metadata=dataset_info.variable_metadata,
         )
         if log_histograms:
             self._aggregators["histogram"] = HistogramAggregator()
         if log_seasonal_means:
             self._time_dependent_aggregators["seasonal"] = SeasonalAggregator(
                 ops=ops,
-                variable_metadata=variable_metadata,
+                variable_metadata=dataset_info.variable_metadata,
             )
         if n_timesteps * timestep > APPROXIMATELY_TWO_YEARS:
             self._time_dependent_aggregators["annual"] = (
                 PairedGlobalMeanAnnualAggregator(
                     ops=ops,
                     timestep=timestep,
-                    variable_metadata=variable_metadata,
+                    variable_metadata=dataset_info.variable_metadata,
                     monthly_reference_data=monthly_reference_data,
                 )
             )
@@ -372,7 +365,7 @@ class InferenceEvaluatorAggregator(
                     n_timesteps - 1,
                     timestep,
                     gridded_operations=ops,
-                    variable_metadata=variable_metadata,
+                    variable_metadata=dataset_info.variable_metadata,
                 )
             )
         self._summary_aggregators = {
@@ -563,11 +556,9 @@ class InferenceAggregatorConfig:
 
     def build(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         n_timesteps: int,
-        timestep: datetime.timedelta,
         output_dir: str,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
     ) -> "InferenceAggregator":
         if self.time_mean_reference_data is not None:
             time_means = xr.open_dataset(
@@ -577,11 +568,9 @@ class InferenceAggregatorConfig:
         else:
             time_means = None
         return InferenceAggregator(
-            horizontal_coordinates=horizontal_coordinates,
+            dataset_info=dataset_info,
             n_timesteps=n_timesteps,
-            timestep=timestep,
             output_dir=output_dir,
-            variable_metadata=variable_metadata,
             time_mean_reference_data=time_means,
             log_global_mean_time_series=self.log_global_mean_time_series,
         )
@@ -602,35 +591,31 @@ class InferenceAggregator(
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         n_timesteps: int,
-        timestep: datetime.timedelta,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         time_mean_reference_data: xr.Dataset | None = None,
         log_global_mean_time_series: bool = True,
     ):
         """
         Args:
-            horizontal_coordinates: Data horizontal coordinates.
+            dataset_info: The coordinates of the dataset.
             n_timesteps: Number of timesteps in the model.
-            timestep: Timestep of the model.
             save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to save diagnostic output.
-            variable_metadata: Mapping of variable names their metadata that will
-                used in generating logged image captions.
             time_mean_reference_data: Reference time means for computing bias stats.
             log_global_mean_time_series: Whether to log global mean time series metrics.
         """
         if save_diagnostics and output_dir is None:
             raise ValueError("Output directory must be set to save diagnostics")
         self._log_time_series = log_global_mean_time_series
+        horizontal_coordinates = dataset_info.horizontal_coordinates
         self._coords = horizontal_coordinates.coords
         self._save_diagnostics = save_diagnostics
         self._output_dir = output_dir
         aggregators: dict[str, _Aggregator] = {}
-        gridded_operations = horizontal_coordinates.gridded_operations
+        gridded_operations = dataset_info.gridded_operations
         if log_global_mean_time_series:
             aggregators["mean"] = SingleTargetMeanAggregator(
                 gridded_operations,
@@ -638,18 +623,18 @@ class InferenceAggregator(
             )
         aggregators["time_mean"] = TimeMeanAggregator(
             gridded_operations=gridded_operations,
-            variable_metadata=variable_metadata,
+            variable_metadata=dataset_info.variable_metadata,
             reference_means=time_mean_reference_data,
         )
         aggregators["annual"] = GlobalMeanAnnualAggregator(
             gridded_operations,
-            timestep,
-            variable_metadata,
+            dataset_info.timestep,
+            dataset_info.variable_metadata,
         )
         if (
             isinstance(horizontal_coordinates, LatLonCoordinates)
             and isinstance(gridded_operations, LatLonOperations)
-            and n_timesteps * timestep > APPROXIMATELY_TWO_YEARS
+            and n_timesteps * dataset_info.timestep > APPROXIMATELY_TWO_YEARS
         ):
             nino34_region = LatLonRegion(
                 lat_bounds=NINO34_LAT,

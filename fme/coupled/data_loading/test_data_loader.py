@@ -135,7 +135,6 @@ class MockComponentData:
             self.ds,
             spatial_dimensions="latlon",
             dtype=None,
-            mask_provider=self.mask_provider,
         )[0]
 
 

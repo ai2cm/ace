@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from fme.core.dataset_info import DatasetInfo, MissingDatasetInfo
 from fme.core.masking import HasGetMaskTensorFor
+from fme.coupled.data_loading.data_typing import CoupledHorizontalCoordinates
 
 
 class MissingCoupledDatasetInfo(ValueError):
@@ -38,6 +39,13 @@ class CoupledDatasetInfo:
             "atmosphere": self.atmosphere.to_state(),
         }
 
+    @property
+    def horizontal_coordinates(self) -> CoupledHorizontalCoordinates:
+        return CoupledHorizontalCoordinates(
+            ocean=self.ocean.horizontal_coordinates,
+            atmosphere=self.atmosphere.horizontal_coordinates,
+        )
+
     @classmethod
     def from_state(
         cls, state: dict[Literal["ocean", "atmosphere"], dict[str, Any]]
@@ -45,4 +53,15 @@ class CoupledDatasetInfo:
         return cls(
             ocean=DatasetInfo.from_state(state["ocean"]),
             atmosphere=DatasetInfo.from_state(state["atmosphere"]),
+        )
+
+    def update_variable_metadata(
+        self, variable_metadata: dict[str, Any]
+    ) -> "CoupledDatasetInfo":
+        """
+        Update the variable metadata for both ocean and atmosphere datasets.
+        """
+        return CoupledDatasetInfo(
+            ocean=self.ocean.update_variable_metadata(variable_metadata),
+            atmosphere=self.atmosphere.update_variable_metadata(variable_metadata),
         )

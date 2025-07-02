@@ -177,6 +177,22 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
         return SizedMap(on_device, self._loader)
 
     @property
+    def dataset_info(self) -> CoupledDatasetInfo:
+        ocean = DatasetInfo(
+            horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
+            vertical_coordinate=self._properties.ocean.vertical_coordinate,
+            mask_provider=self._properties.ocean.mask_provider,
+            timestep=self.ocean_timestep,
+        )
+        atmosphere = DatasetInfo(
+            horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
+            vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
+            mask_provider=self._properties.atmosphere.mask_provider,
+            timestep=self.atmosphere_timestep,
+        )
+        return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere)
+
+    @property
     def variable_metadata(self) -> dict[str, VariableMetadata]:
         return self._properties.variable_metadata
 

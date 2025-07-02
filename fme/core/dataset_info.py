@@ -13,7 +13,7 @@ from fme.core.coordinates import (
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.utils import decode_timestep, encode_timestep
 from fme.core.gridded_ops import GriddedOperations
-from fme.core.mask_provider import MaskProvider
+from fme.core.mask_provider import MaskProvider, MaskProviderABC, NullMaskProvider
 
 
 class MissingDatasetInfo(ValueError):
@@ -155,7 +155,11 @@ class DatasetInfo:
             return self._gridded_operations
         if self._horizontal_coordinates is None:
             raise MissingDatasetInfo("horizontal_coordinates")
-        return self._horizontal_coordinates.gridded_operations
+        if self._mask_provider is None:
+            mp: MaskProviderABC = NullMaskProvider
+        else:
+            mp = self._mask_provider
+        return self._horizontal_coordinates.get_gridded_operations(mask_provider=mp)
 
     @property
     def horizontal_coordinates(self) -> HorizontalCoordinates:
@@ -186,6 +190,22 @@ class DatasetInfo:
         if self._variable_metadata is None:
             return {}
         return self._variable_metadata
+
+    def update_variable_metadata(
+        self, new_metadata: Mapping[str, VariableMetadata] | None
+    ) -> "DatasetInfo":
+        """
+        Return a new DatasetInfo with the variable metadata updated.
+        """
+        return DatasetInfo(
+            horizontal_coordinates=self._horizontal_coordinates,
+            vertical_coordinate=self._vertical_coordinate,
+            mask_provider=self._mask_provider,
+            timestep=self._timestep,
+            variable_metadata=new_metadata,
+            gridded_operations=self._gridded_operations,
+            img_shape=self._img_shape,
+        )
 
     def to_state(self) -> dict[str, Any]:
         if self._gridded_operations is not None:

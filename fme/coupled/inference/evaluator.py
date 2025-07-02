@@ -308,21 +308,19 @@ def run_evaluator_from_config(config: InferenceEvaluatorConfig):
     batch = next(iter(data.loader))
     initial_time = batch.ocean_data.time.isel(time=0)
     variable_metadata = get_derived_variable_metadata() | data.variable_metadata
+    dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
     n_timesteps_ocean = config.n_coupled_steps + stepper.ocean.n_ic_timesteps
     n_timesteps_atmosphere = (
         config.n_coupled_steps * stepper.n_inner_steps
         + stepper.atmosphere.n_ic_timesteps
     )
     aggregator = aggregator_config.build(
-        horizontal_coordinates=data.horizontal_coordinates,
-        ocean_timestep=data.ocean_timestep,
-        atmosphere_timestep=data.atmosphere_timestep,
+        dataset_info=dataset_info,
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         initial_time=initial_time,
         ocean_normalize=stepper.ocean.normalizer.normalize,
         atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
-        variable_metadata=variable_metadata,
         output_dir=config.experiment_dir,
     )
 

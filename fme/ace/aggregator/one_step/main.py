@@ -1,5 +1,4 @@
 import dataclasses
-from collections.abc import Mapping
 
 import torch
 
@@ -9,8 +8,7 @@ from fme.ace.aggregator.one_step.deterministic import (
 )
 from fme.ace.aggregator.one_step.ensemble import get_one_step_ensemble_aggregator
 from fme.ace.stepper import TrainOutput
-from fme.core.coordinates import HorizontalCoordinates
-from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.aggregator import AggregatorABC
 from fme.core.tensors import fold_ensemble_dim, fold_sized_ensemble_dim
 from fme.core.typing_ import TensorMapping
@@ -26,39 +24,36 @@ class OneStepAggregator(AggregatorABC[TrainOutput]):
 
     def __init__(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         loss_scaling: TensorMapping | None = None,
         log_snapshots: bool = True,
         log_mean_maps: bool = True,
     ):
         """
         Args:
-            horizontal_coordinates: Horizontal coordinates of the data.
+            dataset_info: Dataset coordinates and metadata.
             save_diagnostics: Whether to save diagnostics.
             output_dir: Directory to write diagnostics to.
-            variable_metadata: Metadata for each variable.
             loss_scaling: Dictionary of variables and their scaling factors
                 used in loss computation.
             log_snapshots: Whether to include snapshots in diagnostics.
             log_mean_maps: Whether to include mean maps in diagnostics.
         """
         self._deterministic_aggregator = OneStepDeterministicAggregator(
-            horizontal_coordinates=horizontal_coordinates,
+            dataset_info=dataset_info,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
-            variable_metadata=variable_metadata,
             loss_scaling=loss_scaling,
             log_snapshots=log_snapshots,
             log_mean_maps=log_mean_maps,
         )
         self._ensemble_aggregator = get_one_step_ensemble_aggregator(
-            gridded_operations=horizontal_coordinates.gridded_operations,
+            gridded_operations=dataset_info.gridded_operations,
             log_mean_maps=log_mean_maps,
             target_time=1,
-            metadata=variable_metadata,
+            metadata=dataset_info.variable_metadata,
         )
         self._ensemble_recorded = False
 
@@ -126,17 +121,15 @@ class OneStepAggregatorConfig:
 
     def build(
         self,
-        horizontal_coordinates: HorizontalCoordinates,
+        dataset_info: DatasetInfo,
         save_diagnostics: bool = True,
         output_dir: str | None = None,
-        variable_metadata: Mapping[str, VariableMetadata] | None = None,
         loss_scaling: TensorMapping | None = None,
     ):
         return OneStepAggregator(
-            horizontal_coordinates=horizontal_coordinates,
+            dataset_info=dataset_info,
             save_diagnostics=save_diagnostics,
             output_dir=output_dir,
-            variable_metadata=variable_metadata,
             loss_scaling=loss_scaling,
             log_snapshots=self.log_snapshots,
             log_mean_maps=self.log_mean_maps,
