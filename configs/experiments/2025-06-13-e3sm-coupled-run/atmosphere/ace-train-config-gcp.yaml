@@ -21,13 +21,13 @@ inference:
       - '0471-01-01T06:00:00'
     dataset:
       merge:
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-07-01-e3smv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
         engine: zarr
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
         engine: zarr
-      - data_path: /climate-default
+      - data_path: gs://vcm-ml-intermediate
         file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
         engine: zarr
     num_data_workers: 8
@@ -44,17 +44,17 @@ train_loader:
   num_data_workers: 8
   dataset:
     merge:
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-07-01-e3smv3-piControl-100yr-coupled-interpolate_sst-atmosphere.zarr
       engine: zarr
       subset:
         stop_time: '0481-01-01T06:00:00'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-13-E3SMv3-coupled-piControl-atmosphere-data.zarr
       engine: zarr
       subset:
         stop_time: '0481-01-01T06:00:00'
-    - data_path: /climate-default
+    - data_path: gs://vcm-ml-intermediate
       file_pattern: 2025-06-27-E3SMv3-coupled-piControl-atmosphere-sfc-wind-stress.zarr
       engine: zarr
       subset:
