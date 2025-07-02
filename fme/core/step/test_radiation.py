@@ -117,7 +117,7 @@ def get_separate_radiation_step(
         vertical_coordinate=vertical_coordinate,
         timestep=datetime.timedelta(hours=6),
     )
-    return config.get_step(dataset_info)
+    return config.get_step(dataset_info, lambda x: None)
 
 
 @pytest.mark.parametrize("detach_radiation", [True, False])

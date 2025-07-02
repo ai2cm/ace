@@ -4,6 +4,7 @@ from copy import copy
 from typing import Any, TypeVar
 
 import torch
+from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
 from fme.core.multi_call import MultiCall, MultiCallConfig, StepMethod
@@ -90,8 +91,9 @@ class MultiCallStepConfig(StepConfigABC):
     def get_step(
         self,
         dataset_info: DatasetInfo,
+        init_weights: Callable[[list[nn.Module]], None],
     ) -> "MultiCallStep":
-        wrapped = self.wrapped_step.get_step(dataset_info)
+        wrapped = self.wrapped_step.get_step(dataset_info, init_weights)
         if self.config is not None:
             self.config.validate(wrapped.input_names, wrapped.output_names)
         return MultiCallStep(

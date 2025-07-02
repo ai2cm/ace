@@ -731,7 +731,13 @@ class StepperConfig:
             training_history: History of the stepper's training jobs.
         """
         logging.info("Initializing stepper from provided config")
-        step = self.step.get_step(dataset_info)
+        if apply_parameter_init:
+            parameter_initializer = self.get_parameter_initializer()
+        else:
+            parameter_initializer = ParameterInitializer()
+        step = self.step.get_step(
+            dataset_info, init_weights=parameter_initializer.freeze_weights
+        )
         derive_func = dataset_info.vertical_coordinate.build_derive_function(
             dataset_info.timestep
         )
@@ -746,10 +752,6 @@ class StepperConfig:
             output_process_func = dataset_info.mask_provider.build_output_masker()
         except MissingDatasetInfo:
             output_process_func = NullPostProcessFn()
-        if apply_parameter_init:
-            parameter_initializer = self.get_parameter_initializer()
-        else:
-            parameter_initializer = ParameterInitializer()
         return Stepper(
             config=self,
             step=step,
@@ -952,6 +954,7 @@ class Stepper(
         self._parameter_initializer.apply_weights(
             step.modules,
         )
+
         self._l2_sp_tuning_regularizer = (
             self._parameter_initializer.get_l2_sp_tuning_regularizer(
                 step.modules,
