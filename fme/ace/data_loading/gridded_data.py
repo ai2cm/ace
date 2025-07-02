@@ -15,7 +15,6 @@ from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset_info import DatasetInfo
 from fme.core.generics.data import DataLoader, GriddedDataABC, InferenceDataABC
-from fme.core.gridded_ops import GriddedOperations
 
 T = TypeVar("T", covariant=True)
 
@@ -70,9 +69,6 @@ class GriddedData(GriddedDataABC[BatchData]):
         self._properties = properties.to_device()
         self._timestep = self._properties.timestep
         self._vertical_coordinate = self._properties.vertical_coordinate
-        self._gridded_operations = (
-            self._properties.horizontal_coordinates.gridded_operations
-        )
         self._mask_provider = self._properties.mask_provider
         self._sampler = sampler
         self._modifier = modifier
@@ -223,6 +219,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
         return DatasetInfo(
             horizontal_coordinates=self.horizontal_coordinates,
             vertical_coordinate=self._vertical_coordinate,
+            mask_provider=self._properties.mask_provider,
             timestep=self.timestep,
         )
 
@@ -244,10 +241,6 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             **self.horizontal_coordinates.coords,
             **self._vertical_coordinate.coords,
         }
-
-    @property
-    def _gridded_operations(self) -> GriddedOperations:
-        return self.horizontal_coordinates.gridded_operations
 
     @property
     def n_initial_conditions(self) -> int:
