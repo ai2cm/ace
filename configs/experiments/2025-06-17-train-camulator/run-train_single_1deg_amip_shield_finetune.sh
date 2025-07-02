@@ -7,6 +7,7 @@ BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
 N_GPUS=8
+PRETRAIN_DATASET="01JVQYZB8N5C37RN564Q8P24AP"
 
 cd "$REPO_ROOT"
 
@@ -26,6 +27,7 @@ run_training() {
     --priority normal \
     --preemptible \
     --cluster ai2/ceres-cirrascale \
+    --cluster ai2/ai2/titan-cirrascale \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
@@ -35,6 +37,7 @@ run_training() {
     --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
     --dataset-secret google-credentials:/tmp/google_application_credentials.json \
     --dataset "$stats_dataset:/statsdata" \
+    --dataset $PRETRAIN_DATASET:training_checkpoints/best_inference_ckpt.tar:/ckpt.tar \
     --gpus "$N_GPUS" \
     --shared-memory 400GiB \
     --weka climate-default:/climate-default \

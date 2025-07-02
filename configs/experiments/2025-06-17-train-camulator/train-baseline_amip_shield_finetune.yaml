@@ -67,6 +67,9 @@ optimization:
   kwargs:
     weight_decay: 0.01
 stepper:
+  parameter_init:
+    weights_path: /ckpt.tar
+
   loss:
     type: MSE
     weights:
