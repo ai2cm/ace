@@ -6,7 +6,7 @@ SCRIPT_PATH=$(git rev-parse --show-prefix)  # relative to the root of the reposi
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 WANDB_USERNAME=${WANDB_USERNAME:-${BEAKER_USERNAME}}
 REPO_ROOT=$(git rev-parse --show-toplevel)
-N_GPUS=8
+N_GPUS=4
 PRETRAIN_DATASET="01JVQYZB8N5C37RN564Q8P24AP"
 
 cd "$REPO_ROOT"
@@ -26,7 +26,6 @@ run_training() {
     --workspace ai2/ace \
     --priority normal \
     --preemptible \
-    --cluster ai2/ceres-cirrascale \
     --cluster ai2/titan-cirrascale \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
