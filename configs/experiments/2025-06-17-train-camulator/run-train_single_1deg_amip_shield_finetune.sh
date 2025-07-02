@@ -27,7 +27,7 @@ run_training() {
     --priority normal \
     --preemptible \
     --cluster ai2/ceres-cirrascale \
-    --cluster ai2/ai2/titan-cirrascale \
+    --cluster ai2/titan-cirrascale \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
