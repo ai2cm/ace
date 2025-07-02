@@ -233,7 +233,7 @@ def test_inference_entrypoint(tmp_path: pathlib.Path):
     ops = LatLonCoordinates(
         lat=torch.as_tensor(saved_data["lat"].values.astype(np.float32)),
         lon=torch.as_tensor(saved_data["lon"].values.astype(np.float32)),
-    ).gridded_operations
+    ).get_gridded_operations()
     # check that inference logs match raw output
     for i in range(1, config.n_forward_steps + 1):
         for log_name in wandb_logs[i]:

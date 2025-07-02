@@ -610,7 +610,8 @@ def test_train_on_batch_one_step_aggregator(n_forward_steps):
     lat_lon_coordinates = LatLonCoordinates(torch.arange(nx), torch.arange(ny))
     # keep area weights ones for simplicity
     lat_lon_coordinates._area_weights = torch.ones(nx, ny)
-    aggregator = OneStepAggregator(lat_lon_coordinates, save_diagnostics=False)
+    ds_info = DatasetInfo(horizontal_coordinates=lat_lon_coordinates)
+    aggregator = OneStepAggregator(ds_info, save_diagnostics=False)
 
     stepped = stepper.train_on_batch(data, optimization=NullOptimization())
     assert stepped.gen_data["a"].shape[2] == n_forward_steps + 1

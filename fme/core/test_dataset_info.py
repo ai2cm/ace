@@ -19,6 +19,7 @@ from fme.core.dataset_info import (
 )
 from fme.core.gridded_ops import LatLonOperations
 from fme.core.mask_provider import MaskProvider
+from fme.core.metrics import spherical_area_weights
 
 
 @pytest.mark.parametrize(
@@ -362,3 +363,21 @@ def test_dataset_info_raises_error_with_conflicting_inputs():
     with pytest.raises(ValueError, match="provide both gridded_operations"):
         ops = LatLonOperations(area_weights=torch.ones(10, 10))
         DatasetInfo(horizontal_coordinates=coords, gridded_operations=ops)
+
+
+def test_masked_gridded_ops():
+    lon = torch.arange(4)
+    lat = torch.arange(2)
+    coords = LatLonCoordinates(lat=lat, lon=lon)
+    mask_provider = MaskProvider(masks={"mask_0": torch.ones(10, 10)})
+    dataset_info = DatasetInfo(
+        horizontal_coordinates=coords,
+        mask_provider=mask_provider,
+    )
+    assert dataset_info.horizontal_coordinates == coords
+    assert dataset_info.mask_provider == mask_provider
+    expected_gridded_ops = LatLonOperations(
+        area_weights=spherical_area_weights(lat, len(lon)),
+        mask_provider=mask_provider,
+    )
+    assert dataset_info.gridded_operations == expected_gridded_ops
