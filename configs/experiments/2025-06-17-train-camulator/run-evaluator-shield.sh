@@ -34,8 +34,6 @@ launch_job () {
         --priority normal \
         --not-preemptible \
         --cluster ai2/saturn-cirrascale \
-        --cluster ai2/jupiter-cirrascale-2 \
-        --cluster ai2/ceres-cirrascale \
         --env WANDB_USERNAME=$BEAKER_USERNAME \
         --env WANDB_NAME=$JOB_NAME \
         --env WANDB_JOB_TYPE=inference \
@@ -59,13 +57,14 @@ launch_job () {
 }
 
 # checkpoint datasets
-SHIELD_PRETRAINED_CAMULATOR=01JYMGQYSPQWHBXSNVFH63EY12
+SHIELD_PRETRAINED_CAMULATOR=01JZ53HKJSVGZDHK3MDCFJJHZ8
 
 
-for perturbation in 4; do
-    JOB_NAME="ace-inference-shield-pretrained-camulator-p${perturbation}k"
+for perturbation in 0 2 4; do
+    JOB_NAME="ace-inference-shield-pretrained-no-co2-camulator-p${perturbation}k"
 
     CONFIG_PATH="${SCRIPT_PATH}shield-${perturbation}k-sst-evaluator.yaml"
 
+    #echo $CONFIG_PATH
     launch_job $JOB_NAME $SHIELD_PRETRAINED_CAMULATOR $CONFIG_PATH
 done
